@@ -1,0 +1,78 @@
+# Dockerfile.premium - VNIBB Backend with VNStock Premium Packages
+#
+# Installs vnstock Golden Sponsor packages via CLI installer.
+# Requirements: VNSTOCK_API_KEY build arg or environment variable
+#
+# Build:
+#   docker build -f Dockerfile.premium --build-arg VNSTOCK_API_KEY=your_api_key -t vnibb-premium .
+#
+# Run:
+#   docker run -e DATABASE_URL=your_db_url -p 8000:8000 vnibb-premium
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    wget \
+    curl \
+    ca-certificates \
+    git \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Environment for non-interactive vnstock installation
+ENV VNSTOCK_LANGUAGE=2 \
+    VNSTOCK_INTERACTIVE=0 \
+    PYTHONUNBUFFERED=1
+
+# Create directories
+RUN mkdir -p /root/.vnstock /app/data /app/logs
+
+# Download vnstock CLI installer
+RUN wget -q https://vnstocks.com/files/vnstock-cli-installer.run \
+    -O /app/vnstock-cli-installer.run && \
+    chmod +x /app/vnstock-cli-installer.run
+
+# Copy and install Python dependencies first (for caching)
+COPY pyproject.toml .
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir .
+
+# Install vnstock premium packages via CLI installer
+# The API key is passed as build arg for installation
+ARG VNSTOCK_API_KEY
+RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
+    echo "Installing vnstock premium packages with API key..."; \
+    /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY"; \
+    else \
+    echo "WARNING: VNSTOCK_API_KEY not provided. Premium packages not installed."; \
+    fi
+
+# Verify vnstock installation
+RUN python3 -c "import vnstock; print(f'vnstock {vnstock.__version__} installed')" || true
+
+# Copy application code
+COPY vnibb/ ./vnibb/
+COPY migrations/ ./migrations/
+COPY alembic.ini .
+
+# Create non-root user for security
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app /opt/venv
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+EXPOSE 8000
+
+# Default command
+CMD ["uvicorn", "vnibb.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

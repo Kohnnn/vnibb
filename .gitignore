@@ -1,0 +1,80 @@
+# Dependencies
+node_modules/
+.venv/
+.venv*/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Environment variables (NEVER COMMIT)
+.env
+.env.*
+.env.local
+.env.production
+.env.development
+backend/.env
+frontend/.env
+apps/api/.env
+apps/api/.env.*
+apps/web/.env
+apps/web/.env.*
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build outputs
+frontend/dist/
+frontend/build/
+backend/dist/
+.next/
+out/
+dist/
+build/
+
+# Test outputs
+coverage/
+.pytest_cache/
+.nyc_output/
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache
+.cache/
+*.cache
+
+# Python
+*.pyc
+*.pyo
+*.egg-info/
+pip-wheel-metadata/
+
+# Local development only
+.agent/
+.kiro/
+.opencode/
+temp_vnstock_installer/
+server.log
+
+# Test files (not for production)
+test.db
+test_*.py
+test_*.sh
+api_test_results.json
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx

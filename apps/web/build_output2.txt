@@ -1,0 +1,26 @@
+ΓÜá Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of C:\Users\Admin\package-lock.json as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * C:\Users\Admin\Desktop\PersonalWebsite\stockscreen\VNIBB\apps\web\package-lock.json
+
+Γû▓ Next.js 16.1.1 (Turbopack)
+- Environments: .env.local, .env.production
+
+  Creating an optimized production build ...
+Γ£ô Compiled successfully in 9.1s
+  Running TypeScript ...
+Failed to compile.
+
+./src/components/widgets/FinancialsWidget.tsx:98:46
+Type error: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type 'FinancialRatioData | BalanceSheetData | IncomeStatementData | CashFlowData'.
+
+   96 |             // Find previous period for growth
+   97 |             const prevIndex = sortedData.findIndex((sd: any) => sd.period === d.period) - 1;
+>  98 |             const prevVal = prevIndex >= 0 ? sortedData[prevIndex][m.key] : null;
+      |                                              ^
+   99 |             
+  100 |             let growth = null;
+  101 |             if (prevVal && prevVal !== 0 && currentVal !== null) {
+Next.js build worker exited with code: 1 and signal: null

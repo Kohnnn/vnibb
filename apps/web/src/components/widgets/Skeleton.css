@@ -1,0 +1,120 @@
+/**
+ * Skeleton Loader Styles
+ * Shimmer animation for loading states
+ */
+
+.skeleton {
+    background: linear-gradient(90deg,
+            var(--bg-secondary) 0%,
+            var(--bg-tertiary) 50%,
+            var(--bg-secondary) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+}
+
+.skeleton-text {
+    height: 1em;
+    width: 100%;
+    margin-bottom: var(--space-2);
+}
+
+.skeleton-rect {
+    width: 100%;
+    height: 100px;
+}
+
+.skeleton-circle {
+    border-radius: var(--radius-full);
+    width: 40px;
+    height: 40px;
+}
+
+@keyframes shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+/* === Table Skeleton === */
+
+.skeleton-table {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4);
+}
+
+.skeleton-table__header {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: var(--space-3);
+    padding-bottom: var(--space-3);
+    border-bottom: var(--border-width) solid var(--border-primary);
+}
+
+.skeleton-table__row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: var(--space-3);
+    padding: var(--space-2) 0;
+}
+
+/* === Chart Skeleton === */
+
+.skeleton-chart {
+    padding: var(--space-4);
+    height: 300px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: var(--space-3);
+}
+
+.skeleton-chart__bars {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    height: 100%;
+    gap: var(--space-2);
+}
+
+.skeleton-chart__bar {
+    flex: 1;
+    background: linear-gradient(180deg,
+            var(--bg-tertiary) 0%,
+            var(--bg-secondary) 100%);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.skeleton-chart__x-axis {
+    display: flex;
+    justify-content: space-between;
+    padding-top: var(--space-2);
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 0.6;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+/* === Card Skeleton === */
+
+.skeleton-card {
+    padding: var(--space-4);
+    background: var(--bg-widget);
+    border: var(--border-width) solid var(--border-primary);
+    border-radius: var(--radius-md);
+}
