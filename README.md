@@ -37,8 +37,6 @@ VNIBB follows a **modular multi-repo** design:
 | [vnibb-web](https://github.com/Kohnnn/vnibb-web) | Frontend application | Next.js 16, React, Tailwind |
 | [vnibb-api](https://github.com/Kohnnn/vnibb-api) | Backend API | FastAPI, SQLAlchemy, PostgreSQL |
 | [vnibb-widgets](https://github.com/Kohnnn/vnibb-widgets) | Widget library | React 18, TypeScript |
-| [vnibb-providers](https://github.com/Kohnnn/vnibb-providers) | Data providers | vnstock, Python |
-| [vnibb-docs](https://github.com/Kohnnn/vnibb-docs) | Documentation | Docusaurus |
 
 ---
 
@@ -107,18 +105,6 @@ pip install vnibb-providers
 ## 🤝 Contributing
 
 We welcome contributions! Please see:
-- [Contributing Guide](CONTRIBUTING.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Development Setup](https://github.com/Kohnnn/vnibb-docs)
-
----
-
-## 📊 Status
-
-**Total Phases:** 73 across 17 sprints ✅  
-**Production:** Ready for deployment  
-**License:** MIT  
-**Maintained:** Actively developed
 
 ---
 
