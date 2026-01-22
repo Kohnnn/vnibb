@@ -4,7 +4,8 @@ import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } fro
 import { Responsive } from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
-import 'react-resizable/css/styles.css';
+// Note: react-resizable styles are bundled with react-grid-layout, no separate import needed
+
 
 // Define our own layout item type compatible with react-grid-layout
 export interface LayoutItem {
@@ -73,7 +74,7 @@ export function DashboardGrid({
         };
 
         updateWidth();
-        
+
         const resizeObserver = new ResizeObserver(debouncedUpdate);
         if (containerRef.current) {
             resizeObserver.observe(containerRef.current);

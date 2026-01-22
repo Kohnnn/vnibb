@@ -1,3 +1,4 @@
 {
-    "root": "apps/api"
+    "build_type": "docker",
+    "root_directory": "apps/api"
 }
