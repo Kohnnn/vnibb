@@ -1,0 +1,331 @@
+# VNIBB Production Deployment Guide
+
+> **Quick Start**: Backend to Zeabur + Frontend to Vercel  
+> **Estimated Time**: 15-20 minutes
+
+> ⚠️ **IMPORTANT**: Copy this file to `DEPLOYMENT.md` and fill in your credentials.  
+> **Never commit `DEPLOYMENT.md` with real credentials!**
+
+---
+
+## 🚀 Deployment Steps
+
+### Step 1: Deploy Backend to Zeabur
+
+#### 1.1 Create Zeabur Project
+
+1. Go to https://zeabur.com/dashboard
+2. Click "Create Project"
+3. Name: `vnibb-backend`
+4. Region: **Singapore** or **Tokyo** (closest to Vietnam)
+5. Billing: **Shared Cluster** (Free tier with pay-as-you-go)
+
+#### 1.2 Deploy from GitHub
+
+1. Click "Deploy Service" → "Git"
+2. Authorize GitHub if needed
+3. Select repository: **`Kohnnn/vnibb`**
+4. **Root Directory**: `apps/api`
+5. Framework: **Auto-detected** (Python/Docker)
+6. Click "Deploy"
+
+#### 1.3 Configure Environment Variables
+
+Go to your Zeabur project → **Variables** tab, and add:
+
+```env
+# Application
+APP_NAME=VNIBB
+APP_VERSION=1.0.0
+ENVIRONMENT=production
+DEBUG=false
+
+# API
+API_HOST=0.0.0.0
+API_PORT=8000
+API_PREFIX=/api/v1
+CORS_ORIGINS=["https://vnibb.vercel.app"]
+
+# Database (Supabase PostgreSQL)
+DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD@db.YOUR_PROJECT.supabase.co:5432/postgres
+DATABASE_URL_SYNC=postgresql://postgres:YOUR_PASSWORD@db.YOUR_PROJECT.supabase.co:5432/postgres
+
+# Supabase
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_ANON_KEY=YOUR_ANON_KEY
+SUPABASE_SERVICE_KEY=YOUR_SERVICE_ROLE_KEY
+
+# Redis (Upstash)
+REDIS_URL=rediss://default:YOUR_REDIS_PASSWORD@YOUR_REDIS_HOST.upstash.io:6379
+REDIS_CACHE_TTL=300
+
+# VNStock
+VNSTOCK_API_KEY=YOUR_VNSTOCK_API_KEY
+VNSTOCK_SOURCE=KBS
+VNSTOCK_TIMEOUT=30
+
+# Features
+DATA_SYNC_ENABLED=true
+REALTIME_ENABLED=true
+SCRAPER_ENABLED=true
+LOG_LEVEL=INFO
+```
+
+#### 1.4 Generate Domain
+
+1. Go to **Networking** tab
+2. Click "Generate Domain"
+3. **Copy the URL** (e.g., `https://vnibb-api-abc123.zeabur.app`)
+4. Save it - you'll need this for the frontend!
+
+#### 1.5 Verify Backend
+
+Test the health endpoint:
+```bash
+curl https://YOUR-ZEABUR-URL/health
+```
+
+Expected response:
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "redis": "connected"
+}
+```
+
+---
+
+### Step 2: Deploy Frontend to Vercel
+
+#### 2.1 Install Vercel CLI
+
+```bash
+pnpm add -g vercel
+```
+
+#### 2.2 Deploy
+
+```bash
+cd apps/web
+vercel --prod
+```
+
+Follow the prompts:
+- Set up and deploy? **Yes**
+- Which scope? **Your account**
+- Link to existing project? **No**
+- Project name: **vnibb**
+- Directory: **`./`** (already in apps/web)
+- Override settings? **No**
+
+#### 2.3 Configure Environment Variables
+
+After first deployment, go to **Vercel Dashboard** → Your Project → **Settings** → **Environment Variables**:
+
+```env
+NEXT_PUBLIC_API_URL=https://YOUR-ZEABUR-URL
+NEXT_PUBLIC_WS_URL=wss://YOUR-ZEABUR-URL/ws
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY
+NEXT_PUBLIC_ENABLE_AI_ANALYSIS=true
+NEXT_PUBLIC_ENABLE_REALTIME=true
+```
+
+> ⚠️ Replace all `YOUR_*` placeholders with your actual credentials
+
+#### 2.4 Redeploy
+
+```bash
+vercel --prod
+```
+
+Your frontend will be live at: **`https://vnibb.vercel.app`**
+
+---
+
+### Step 3: Initialize Database
+
+#### 3.1 Access Supabase SQL Editor
+
+1. Go to your Supabase project dashboard
+2. Click **SQL Editor**
+3. Create a new query
+
+#### 3.2 Create Tables
+
+Run this SQL:
+
+```sql
+-- Stock metadata
+CREATE TABLE IF NOT EXISTS stocks (
+    id SERIAL PRIMARY KEY,
+    symbol VARCHAR(10) UNIQUE NOT NULL,
+    name VARCHAR(255),
+    exchange VARCHAR(10),
+    industry VARCHAR(100),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- User watchlists
+CREATE TABLE IF NOT EXISTS watchlists (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    symbols TEXT[],
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Price alerts
+CREATE TABLE IF NOT EXISTS price_alerts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    symbol VARCHAR(10) NOT NULL,
+    condition VARCHAR(20),
+    target_price DECIMAL(10,2),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create indexes
+CREATE INDEX IF NOT EXISTS idx_stocks_symbol ON stocks(symbol);
+CREATE INDEX IF NOT EXISTS idx_watchlists_user_id ON watchlists(user_id);
+CREATE INDEX IF NOT EXISTS idx_price_alerts_user_id ON price_alerts(user_id);
+```
+
+#### 3.3 Seed Stock Data
+
+1. Go to your backend API docs: `https://YOUR-ZEABUR-URL/docs`
+2. Find `POST /api/v1/data/seed/stocks`
+3. Click "Try it out" → "Execute"
+4. Wait for seeding to complete
+
+---
+
+### Step 4: Verify Deployment
+
+#### ✅ Backend Health Check
+```bash
+curl https://YOUR-ZEABUR-URL/health
+```
+
+#### ✅ Frontend Check
+1. Visit `https://vnibb.vercel.app/dashboard`
+2. Look for **"Backend Online"** indicator (green dot in top bar)
+3. Check that widgets load data
+4. Open browser console - should have no errors
+
+#### ✅ Integration Check
+- Search for a stock (e.g., "VNM")
+- Add to watchlist
+- Check real-time price updates
+
+---
+
+## ⚠️ Important Notes
+
+### Free Tier Limitations
+
+**Zeabur Shared Cluster:**
+- ✅ Free tier available
+- ⚠️ May pause after 30min inactivity
+- ⚠️ First request after pause may take 10-20 seconds (cold start)
+- ✅ Perfect for testing and MVP
+
+**Vercel:**
+- ✅ Free tier: 100GB bandwidth/month
+- ✅ Unlimited deployments
+- ✅ Always-on (no cold starts)
+
+### CORS Configuration
+
+The backend CORS_ORIGINS **must** include your Vercel domain:
+```env
+CORS_ORIGINS=["https://vnibb.vercel.app"]
+```
+
+If you use a custom domain, add it too:
+```env
+CORS_ORIGINS=["https://vnibb.vercel.app","https://yourdomain.com"]
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### "Backend Offline" Error
+
+1. Check backend health: `curl https://YOUR-ZEABUR-URL/health`
+2. Verify `NEXT_PUBLIC_API_URL` in Vercel env vars
+3. Check CORS_ORIGINS in Zeabur env vars includes your Vercel domain
+
+### "Request Timed Out"
+
+- Zeabur shared cluster may have paused
+- Make a few requests to wake it up
+- Wait 10-20 seconds for cold start
+
+### Widgets Show "Failed to Load"
+
+1. Open browser console (F12)
+2. Check for API errors
+3. Verify `NEXT_PUBLIC_API_URL` is correct (no trailing `/api/v1`)
+4. Check backend logs in Zeabur dashboard
+
+### Database Connection Errors
+
+1. Verify DATABASE_URL password
+2. Check Supabase database is not paused
+3. Verify network access in Supabase settings (allow all IPs for Zeabur)
+
+---
+
+## 📊 Production URLs
+
+| Service | URL | Configured |
+|---------|-----|------------|
+| Frontend | https://vnibb.vercel.app | After Step 2 |
+| Backend | https://YOUR-ZEABUR-URL | After Step 1 |
+| API Docs | https://YOUR-ZEABUR-URL/docs | After Step 1 |
+| Database | Your Supabase project | ✅ Ready |
+| Redis | Your Upstash instance | ✅ Ready |
+
+---
+
+## 🎯 Next Steps
+
+After successful deployment:
+
+1. **Update README.md** with live URLs
+2. **Monitor performance** in Vercel and Zeabur dashboards
+3. **Test all features**: search, watchlists, alerts, widgets
+4. **Share with users** and gather feedback
+5. **Plan v2 features** based on usage
+
+---
+
+## 💾 Backup & Maintenance
+
+### Database Backups
+
+Supabase automatically backs up your database daily (free tier).
+
+### Monitoring
+
+- **Vercel**: Built-in analytics and logs
+- **Zeabur**: Resource usage and logs in dashboard
+- **Supabase**: Database metrics and query performance
+
+### Updates
+
+```bash
+# Push code updates
+git push origin master
+
+# Zeabur will auto-deploy
+# Vercel will auto-deploy (if linked to GitHub)
+
+# Or manual redeploy
+cd apps/web
+vercel --prod
+```

@@ -78,3 +78,6 @@ api_test_results.json
 *.test.tsx
 *.spec.ts
 *.spec.tsx
+
+DEPLOYMENT.md
+
