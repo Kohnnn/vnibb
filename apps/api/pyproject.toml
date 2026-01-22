@@ -68,6 +68,7 @@ dependencies = [
     # Utilities
     "python-dotenv>=1.0.0",
     "orjson>=3.9.0",  # Fast JSON serialization
+    "pytz>=2023.3",  # Timezone support
     
     # Scheduler (for automated syncs)
     "apscheduler>=3.10.0",
