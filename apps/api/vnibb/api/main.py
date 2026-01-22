@@ -241,13 +241,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Checking database connection...")
     db_ok = await check_database_connection()
     if not db_ok:
-        if settings.is_production:
-            logger.critical("Database connection failed - cannot start in production")
-            raise RuntimeError("Database connection failed")
-        else:
-            logger.warning("Database connection failed - continuing in development mode")
+        # Log critical but don't crash - allows health endpoints to work for debugging
+        logger.critical("Database connection failed - running in degraded mode")
+        logger.warning("Some features requiring database will not work until DB connection is restored")
     else:
         logger.info("Database connection verified")
+
     
     # Check database status and warn if empty
     if db_ok:

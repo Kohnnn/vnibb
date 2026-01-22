@@ -17,14 +17,15 @@ def get_vnstock():
             if _vnstock_instance is None:
                 def _init():
                     from vnstock import Vnstock
-                    # Use Golden Sponsor API key from settings if available
+                    # Note: vnstock reads VNSTOCK_API_KEY from environment automatically
+                    # No need to pass api_key to constructor in vnstock >= 3.4.0
                     api_key = getattr(settings, 'vnstock_api_key', None)
                     if api_key:
-                        logger.info("Initializing vnstock with Golden Sponsor API key")
-                        return Vnstock(api_key=api_key)
+                        logger.info("Initializing vnstock with Golden Sponsor API key (from env)")
                     else:
                         logger.warning("No vnstock API key found, using default rate limits")
-                        return Vnstock()
+                    return Vnstock()
+
                 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                     future = executor.submit(_init)
