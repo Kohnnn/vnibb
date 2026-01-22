@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![VNIBB Logo](https://via.placeholder.com/150)
+![VNIBB Logo](https://raw.githubusercontent.com/Kohnnn/vnibb/085295eca4ea948e7d0fcb258b3716bdb274230a/logo.svg)
 
 **Financial data platform for Vietnamese market analysts, quants and AI agents**
 
@@ -95,16 +95,11 @@ uvicorn vnibb.api.main:app --reload
 npm install @vnibb/widgets
 ```
 
-### Python Packages
-```bash
-pip install vnibb-providers
-```
-
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see:
+We welcome contributions!
 
 ---
 
@@ -126,6 +121,6 @@ MIT License - see [LICENSE](LICENSE) file
 
 **[⭐ Star this repo](https://github.com/Kohnnn/vnibb)** if you find it useful!
 
-Made with 🇻🇳 by [Kohnnn](https://github.com/Kohnnn)
+Made with 🇻🇳stock by [Kohnnn](https://github.com/Kohnnn)
 
 </div>
