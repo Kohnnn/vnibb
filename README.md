@@ -65,7 +65,7 @@ VNIBB follows a **modular multi-repo** design:
 ## 🎯 Quick Start
 
 ### Option 1: Use Hosted Version
-Visit [vnibb.vercel.app](https://vnibb.vercel.app)
+Visit [vnibb-web.vercel.app](https://vnibb-web.vercel.app/)
 
 ### Option 2: Run Locally
 
