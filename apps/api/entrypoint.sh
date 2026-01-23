@@ -1,5 +1,7 @@
 #!/bin/bash
 set -e
+export PYTHONUNBUFFERED=1
+echo "ENTRYPOINT STARTED: User $(whoami)"
 
 # 1. Database Migrations
 echo "Running database migrations..."
