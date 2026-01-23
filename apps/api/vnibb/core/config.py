@@ -207,6 +207,12 @@ class Settings(BaseSettings):
                 )
             # Remove trailing slash for consistency
             validated.append(origin.rstrip("/"))
+        
+        # Log the validated origins for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Allowed CORS Origins: {validated}")
+        
         return validated
     
     @field_validator("log_level")

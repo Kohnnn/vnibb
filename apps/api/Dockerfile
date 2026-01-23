@@ -56,9 +56,12 @@ USER appuser
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
+# Copy entrypoint script
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
 # Expose port
 EXPOSE 8000
 
-# Run application
-# Run migrations and start application
-CMD ["sh", "-c", "alembic upgrade head && uvicorn vnibb.api.main:app --host 0.0.0.0 --port 8000"]
+# Run application via entrypoint
+ENTRYPOINT ["./entrypoint.sh"]
