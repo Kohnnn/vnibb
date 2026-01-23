@@ -6,6 +6,9 @@ echo "Running database migrations..."
 alembic upgrade head
 
 # 2. Check for VnStock Premium Packages
+# Fix: Ensure installer can find vnai
+export PYTHONPATH=/usr/local/lib/python3.12/site-packages
+
 # If key is provided but packages are missing (e.g. build arg was missed), install them now.
 if [ -n "$VNSTOCK_API_KEY" ]; then
     if ! python3 -c "import vnstock_data" 2>/dev/null; then
