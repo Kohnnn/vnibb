@@ -49,8 +49,7 @@ ARG VNSTOCK_API_KEY
 #     echo "WARNING: VNSTOCK_API_KEY not provided. Premium packages not installed."; \
 #     fi
 
-# Verify vnstock installation
-RUN python3 -c "import vnstock; print(f'vnstock {vnstock.__version__} installed')" || true
+
 
 # Copy application code
 # Copy application code
