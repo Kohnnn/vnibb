@@ -60,4 +60,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 EXPOSE 8000
 
 # Run application
-CMD ["uvicorn", "vnibb.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run migrations and start application
+CMD ["sh", "-c", "alembic upgrade head && uvicorn vnibb.api.main:app --host 0.0.0.0 --port 8000"]

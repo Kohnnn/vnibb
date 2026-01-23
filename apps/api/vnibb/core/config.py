@@ -161,13 +161,28 @@ class Settings(BaseSettings):
     def parse_cors_origins(cls, v: Any) -> List[str]:
         """Parse CORS origins from string or list."""
         if isinstance(v, str):
+            v_clean = v.strip()
             # Handle JSON array string: '["http://localhost:3000"]'
-            if v.startswith("["):
+            if v_clean.startswith("[") and v_clean.endswith("]"):
                 import json
                 try:
-                    return json.loads(v)
+                    return json.loads(v_clean)
                 except json.JSONDecodeError:
-                    pass
+                    # Fallback: manually parse pseudo-JSON list
+                    # Remove brackets and split by comma
+                    inner = v_clean[1:-1]
+                    # Split by comma, then strip quotes from each item
+                    items = []
+                    for item in inner.split(","):
+                        item = item.strip()
+                        # Strip single or double quotes
+                        if (item.startswith('"') and item.endswith('"')) or \
+                           (item.startswith("'") and item.endswith("'")):
+                            item = item[1:-1]
+                        if item:
+                            items.append(item)
+                    return items
+            
             # Handle comma-separated string: "http://localhost:3000,http://example.com"
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v or []
