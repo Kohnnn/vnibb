@@ -89,8 +89,8 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
 
     const headerActions = (
         <div className="flex items-center gap-2 mr-2">
-            <select 
-                value={groupBy} 
+            <select
+                value={groupBy}
                 onChange={(e) => setGroupBy(e.target.value as any)}
                 className="bg-gray-900 text-[9px] font-black uppercase text-gray-400 border border-gray-800 rounded px-1.5 py-0.5 outline-none hover:text-white transition-colors"
             >
@@ -136,18 +136,20 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
             <div className="h-full flex flex-col bg-black">
                 <div className="flex-1 overflow-hidden relative">
                     {isLoading ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-2">
-                            <RefreshCw className="animate-spin" size={24} />
-                            <span className="text-[10px] font-bold uppercase tracking-widest">Rendering Treemap...</span>
+                        <div className="flex flex-col items-center justify-center h-full gap-3 bg-black/50 backdrop-blur-sm">
+                            <RefreshCw className="animate-spin text-blue-500" size={32} />
+                            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 animate-pulse">Computing Market Data...</span>
                         </div>
                     ) : !treemapLayout ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-600 opacity-50 uppercase font-black text-[10px] tracking-widest">
-                            <LayoutGrid size={32} strokeWidth={1} />
-                            No Map Data
+                        <div className="flex flex-col items-center justify-center h-full text-gray-700 gap-3 opacity-60">
+                            <div className="p-4 bg-gray-900/50 rounded-full border border-gray-800 shadow-inner">
+                                <LayoutGrid size={32} strokeWidth={1} />
+                            </div>
+                            <span className="uppercase font-black text-[10px] tracking-widest">Market Data Unavailable</span>
                         </div>
                     ) : (
                         <div ref={heatmapRef} className="w-full h-full p-2">
-                            <svg width="100%" height="100%" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet">
+                            <svg width="100%" height="100%" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet" className="drop-shadow-2xl">
                                 {treemapLayout.leaves().map((node: any, i: number) => {
                                     const width = node.x1 - node.x0;
                                     const height = node.y1 - node.y0;
@@ -155,16 +157,16 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                     const color = getHeatmapColor(changePct);
 
                                     return (
-                                        <g key={i}>
+                                        <g key={i} className="group transition-opacity hover:opacity-100">
                                             <rect
                                                 x={node.x0}
                                                 y={node.y0}
                                                 width={width}
                                                 height={height}
                                                 fill={color}
-                                                className="hover:brightness-125 transition-all cursor-pointer"
+                                                className="hover:brightness-110 transition-all cursor-pointer hover:stroke-white/20 hover:stroke-2"
                                                 stroke="#000"
-                                                strokeWidth={0.5}
+                                                strokeWidth={1}
                                             >
                                                 <title>
                                                     {node.data.name}
@@ -177,8 +179,8 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                     x={node.x0 + width / 2}
                                                     y={node.y0 + height / 2 + 4}
                                                     textAnchor="middle"
-                                                    className="fill-white font-black pointer-events-none select-none"
-                                                    style={{ fontSize: Math.min(width / 6, height / 2, 10) }}
+                                                    className="fill-white/90 font-black pointer-events-none select-none drop-shadow-md"
+                                                    style={{ fontSize: Math.min(width / 6, height / 2, 11) }}
                                                 >
                                                     {node.data.name.split('-')[0].substring(0, 8)}
                                                 </text>
@@ -192,21 +194,23 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                 </div>
 
                 {/* Legend bar */}
-                <div className="px-3 py-1.5 border-t border-gray-800 bg-gray-900/20 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <div className="flex h-1.5 w-24 rounded-full overflow-hidden border border-gray-800">
-                            <div className="flex-1 bg-blue-500" />
+                <div className="px-3 py-2 border-t border-gray-800 bg-gray-950 flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.3)] z-10">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-1.5 w-32 rounded-full overflow-hidden border border-gray-800/50 shadow-inner">
+                            <div className="flex-1 bg-blue-500" title="Floor" />
                             <div className="flex-1 bg-red-600" />
                             <div className="flex-1 bg-yellow-600" />
                             <div className="flex-1 bg-green-700" />
                             <div className="flex-1 bg-green-500" />
-                            <div className="flex-1 bg-purple-500" />
+                            <div className="flex-1 bg-purple-500" title="Ceiling" />
                         </div>
-                        <span className="text-[8px] font-black text-gray-600 uppercase tracking-tighter">-7% to +7%</span>
+                        <span className="text-[8px] font-black text-gray-500 uppercase tracking-tighter">-7% to +7%</span>
                     </div>
                     {data && (
-                        <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">
-                            {data.count} Stocks • {data.sectors.length} Groups
+                        <div className="flex items-center gap-2 text-[9px] font-bold text-gray-600 uppercase tracking-widest">
+                            <span className="text-gray-400">{data.count}</span> Stocks
+                            <span className="text-gray-700">•</span>
+                            <span className="text-gray-400">{data.sectors.length}</span> Groups
                         </div>
                     )}
                 </div>

@@ -125,8 +125,8 @@ export function WidgetWrapper({
     // 1. Specific group symbol (A, B, C, D) if not global
     // 2. Legacy sync symbol (if provided via prop)
     // 3. Global group symbol
-    const displaySymbol = (widgetGroup !== 'global') 
-        ? effectiveSymbol 
+    const displaySymbol = (widgetGroup !== 'global')
+        ? effectiveSymbol
         : (symbol || effectiveSymbol);
 
 
@@ -146,7 +146,7 @@ export function WidgetWrapper({
         setWidgetGroup(newGroup);
         // Persist to dashboard state
         updateWidget(dashboardId, tabId, id, { widgetGroup: newGroup });
-        
+
         // If joining a new group, update local symbol if needed
         const newSymbol = getSymbolForGroup(newGroup);
         if (newSymbol && onSymbolChange) onSymbolChange(newSymbol);
@@ -188,15 +188,15 @@ export function WidgetWrapper({
             {/* Normal widget - dim when maximized */}
             <div
                 className={cn(
-                    "h-full flex flex-col rounded-md overflow-hidden",
-                    "bg-secondary border transition-all duration-200",
-                    isEditing ? 'ring-1 ring-blue-500/20' : '',
-                    isMaximized ? 'opacity-30 pointer-events-none' : ''
+                    "h-full flex flex-col rounded-xl overflow-hidden shadow-xl",
+                    "bg-gray-900/40 backdrop-blur-xl border transition-all duration-300",
+                    isEditing ? 'ring-2 ring-blue-500/50 scale-[0.99]' : 'hover:shadow-2xl hover:border-white/20',
+                    isMaximized ? 'opacity-0 pointer-events-none' : ''
                 )}
                 style={{
                     borderColor: widgetGroup !== 'global'
                         ? getColorForGroup(widgetGroup)
-                        : 'var(--color-border-default)'
+                        : 'rgba(255,255,255,0.08)'
                 }}
             >
                 <WidgetToolbar
@@ -320,14 +320,14 @@ export function WidgetWrapper({
                     <WidgetErrorBoundary
                         onError={(error) => console.error(`Widget ${id} (${title}) crashed:`, error)}
                     >
-                        {React.isValidElement(children) 
-                            ? React.cloneElement(children as React.ReactElement<any>, { 
+                        {React.isValidElement(children)
+                            ? React.cloneElement(children as React.ReactElement<any>, {
                                 id: id,
                                 symbol: displaySymbol,
                                 widgetGroup,
                                 onDataChange: setInternalData,
                                 hideHeader: true
-                              }) 
+                            })
                             : children}
                     </WidgetErrorBoundary>
                 </div>
@@ -343,12 +343,12 @@ export function WidgetWrapper({
                 <WidgetErrorBoundary
                     onError={(error) => console.error(`Maximized Widget ${id} (${title}) crashed:`, error)}
                 >
-                    {React.isValidElement(children) 
-                        ? React.cloneElement(children as React.ReactElement<any>, { 
+                    {React.isValidElement(children)
+                        ? React.cloneElement(children as React.ReactElement<any>, {
                             symbol: displaySymbol,
                             widgetGroup,
                             onDataChange: setInternalData
-                          }) 
+                        })
                         : children}
                 </WidgetErrorBoundary>
             </MaximizedWidgetPortal>

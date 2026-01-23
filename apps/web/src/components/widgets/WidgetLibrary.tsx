@@ -5,7 +5,7 @@ import { useDashboard } from '@/contexts/DashboardContext';
 import { widgetCategories, widgetDefinitions } from '@/data/widgetDefinitions';
 import {
     Search, X, Grid3X3, ChevronRight, Check,
-    Box, Star, BarChart3, DollarSign, TrendingUp, 
+    Box, Star, BarChart3, DollarSign, TrendingUp,
     Newspaper, PieChart, Info, LayoutGrid, Layers,
     Plus, Clock
 } from 'lucide-react';
@@ -18,14 +18,14 @@ interface WidgetLibraryProps {
 }
 
 const CATEGORY_ICONS: Record<string, any> = {
-  'core_data': BarChart3,
-  'financials': DollarSign,
-  'charting': TrendingUp,
-  'calendar': Newspaper,
-  'screener': Search,
-  'analysis': PieChart,
-  'ownership': Box,
-  'estimates': Star,
+    'core_data': BarChart3,
+    'financials': DollarSign,
+    'charting': TrendingUp,
+    'calendar': Newspaper,
+    'screener': Search,
+    'analysis': PieChart,
+    'ownership': Box,
+    'estimates': Star,
 };
 
 function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
@@ -43,7 +43,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
     const filteredCategories = useMemo(() => {
         return widgetCategories.map(cat => ({
             ...cat,
-            widgets: widgetDefinitions.filter(w => 
+            widgets: widgetDefinitions.filter(w =>
                 w.category === cat.id && (
                     searchQuery === '' ||
                     w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -80,21 +80,21 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
             {isOpen && (
                 <>
                     {/* Backdrop */}
-                    <motion.div 
+                    <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         onClick={onClose}
                         className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[40]"
                     />
-                    
+
                     {/* Sidebar */}
-                    <motion.div 
-                        initial={{ x: -320 }}
-                        animate={{ x: 0 }}
-                        exit={{ x: -320 }}
-                        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                        className="fixed left-52 top-0 bottom-0 w-80 bg-secondary border-r border-gray-800 z-[45] flex flex-col shadow-2xl overflow-hidden"
+                    <motion.div
+                        initial={{ x: -350, opacity: 0 }}
+                        animate={{ x: 0, opacity: 1 }}
+                        exit={{ x: -350, opacity: 0 }}
+                        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+                        className="fixed left-[72px] top-4 bottom-4 w-96 bg-gray-900/90 backdrop-blur-2xl border border-white/10 rounded-2xl z-[45] flex flex-col shadow-2xl overflow-hidden ml-2"
                     >
                         {/* Header */}
                         <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-900/30">
@@ -111,7 +111,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         <div className="p-3 border-b border-gray-800 bg-black/20">
                             <div className="relative">
                                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600" />
-                                <input 
+                                <input
                                     type="text"
                                     autoFocus
                                     value={searchQuery}
@@ -158,7 +158,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
 
                                 return (
                                     <div key={cat.id} className="border-b border-gray-800/50 last:border-0">
-                                        <button 
+                                        <button
                                             onClick={() => setActiveCategory(isExpanded && searchQuery === '' ? null : cat.id)}
                                             className={cn(
                                                 "w-full flex items-center justify-between px-4 py-3 text-left transition-colors",
@@ -180,7 +180,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                         {isExpanded && (
                                             <div className="p-1 space-y-1 bg-black/10">
                                                 {cat.widgets.map((widget) => (
-                                                    <div 
+                                                    <div
                                                         key={widget.type}
                                                         className="p-3 rounded-xl border border-transparent hover:border-gray-800 hover:bg-gray-900/50 transition-all group cursor-default"
                                                     >
@@ -188,7 +188,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                             <div className="text-[11px] font-black text-gray-200 group-hover:text-blue-400 transition-colors uppercase tracking-tight">
                                                                 {widget.name}
                                                             </div>
-                                                            <button 
+                                                            <button
                                                                 onClick={() => handleAddWidget(widget)}
                                                                 className="p-1 rounded bg-blue-600 text-white opacity-0 group-hover:opacity-100 transition-all hover:scale-110 active:scale-95 shadow-lg shadow-blue-600/20"
                                                             >
@@ -198,7 +198,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                         <div className="text-[10px] text-gray-600 line-clamp-2 leading-tight font-medium">
                                                             {widget.description}
                                                         </div>
-                                                        
+
                                                         {/* Preview Thumbnail */}
                                                         <div className="mt-3 h-16 bg-gray-950 rounded-lg border border-gray-900 flex items-center justify-center relative overflow-hidden group-hover:border-gray-800 transition-colors">
                                                             <Icon size={24} className="text-gray-900 absolute" />

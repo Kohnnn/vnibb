@@ -120,16 +120,16 @@ export function PriceChartWidget({
         clearAllAnnotations,
     } = useChartAnnotations(symbol);
 
-    const activeOverlays = useMemo(() => 
+    const activeOverlays = useMemo(() =>
         indicatorConfigs.filter(c => c.type === 'overlay' && c.enabled).map(c => c.id),
-    [indicatorConfigs]);
+        [indicatorConfigs]);
 
-    const activeIndicators = useMemo(() => 
+    const activeIndicators = useMemo(() =>
         indicatorConfigs.filter(c => c.type === 'oscillator' && c.enabled).map(c => c.id),
-    [indicatorConfigs]);
+        [indicatorConfigs]);
 
     const toggleIndicatorConfig = useCallback((id: string) => {
-        setIndicatorConfigs(prev => prev.map(c => 
+        setIndicatorConfigs(prev => prev.map(c =>
             c.id === id ? { ...c, enabled: !c.enabled } : c
         ));
     }, []);
@@ -517,7 +517,7 @@ export function PriceChartWidget({
 
         const series = mainSeriesRef.current;
         const lines = annotations.filter(a => a.type === 'horizontal_line');
-        
+
         // Lightweight charts doesn't have an easy "clear all price lines"
         // Usually we'd store refs. For simplicity here:
         const priceLines = lines.map(line => {
@@ -579,21 +579,21 @@ export function PriceChartWidget({
                                 </button>
                             ))}
                         </div>
-                        <button 
-                            onClick={() => setIsIndicatorPanelOpen(!isIndicatorPanelOpen)} 
+                        <button
+                            onClick={() => setIsIndicatorPanelOpen(!isIndicatorPanelOpen)}
                             className={cn("p-1 transition-colors", isIndicatorPanelOpen ? "text-blue-400" : "text-gray-500 hover:text-white")}
                             title="Technical Indicators"
                         >
-                             <Layers size={14} />
+                            <Layers size={14} />
                         </button>
                         <div className="h-4 w-[1px] bg-gray-700" />
                         <button onClick={() => setChartType(chartType === 'candlestick' ? 'line' : 'candlestick')} className="p-1 text-gray-500 hover:text-white">
-                             {chartType === 'candlestick' ? <LineChart size={14} /> : <BarChart3 size={14} />}
+                            {chartType === 'candlestick' ? <LineChart size={14} /> : <BarChart3 size={14} />}
                         </button>
                     </div>
-                    
+
                     <div className="flex items-center gap-1">
-                         {enableRealtime && currentTimeframe === '1D' && (
+                        {enableRealtime && currentTimeframe === '1D' && (
                             <div className="flex items-center gap-1 px-1.5 py-0.5 bg-gray-800/50 rounded text-[9px]">
                                 {isConnected ? <span className="text-green-500 font-bold">LIVE</span> : <span className="text-gray-500">OFFLINE</span>}
                             </div>
@@ -611,27 +611,38 @@ export function PriceChartWidget({
                 {/* Chart Container */}
                 <div className="relative flex-1 w-full overflow-hidden" onClick={handleChartClick}>
                     <div ref={chartContainerRef} className="w-full h-full min-h-[200px]" />
-                    
+
                     {isLoading && !timedOut && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-[1px] z-10">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] z-10">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mb-2" />
+                            <span className="text-[10px] text-blue-400 font-medium tracking-wider animate-pulse">LOADING DATA...</span>
                         </div>
                     )}
 
                     {error || timedOut ? (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-10 p-4 text-center">
-                            <p className="text-red-400 text-xs mb-2">{timedOut ? 'Request timed out' : 'Failed to load chart'}</p>
-                            <Button variant="outline" size="sm" onClick={handleRetry} className="h-7 text-[10px]">Retry</Button>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-950/80 backdrop-blur-sm z-10 p-6 text-center border border-white/5 m-4 rounded-xl">
+                            <AlertCircle className="h-8 w-8 text-red-500 mb-3 opacity-80" />
+                            <h3 className="text-sm font-bold text-gray-200 mb-1">Chart Data Unavailable</h3>
+                            <p className="text-red-400/80 text-[10px] mb-4 max-w-[200px]">
+                                {timedOut ? 'Request timed out' : 'Unable to fetch historical prices'}
+                            </p>
+                            <Button variant="outline" size="sm" onClick={handleRetry} className="h-7 text-[10px] gap-2 border-gray-700 bg-black/20 hover:bg-white/10">
+                                <RefreshCw size={10} /> Retry Connection
+                            </Button>
                         </div>
                     ) : chartData.length === 0 && !isLoading ? (
-                         <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs">No data</div>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-950/50 backdrop-blur-[1px] z-10">
+                            <Activity className="h-10 w-10 text-gray-800 mb-2" />
+                            <span className="text-xs font-bold text-gray-600 uppercase tracking-widest">No Data Available</span>
+                            <span className="text-[10px] text-gray-700 mt-1">Check symbol or network status</span>
+                        </div>
                     ) : null}
 
-                    <IndicatorPanel 
-                        configs={indicatorConfigs} 
-                        onToggle={toggleIndicatorConfig} 
-                        isOpen={isIndicatorPanelOpen} 
-                        onClose={() => setIsIndicatorPanelOpen(false)} 
+                    <IndicatorPanel
+                        configs={indicatorConfigs}
+                        onToggle={toggleIndicatorConfig}
+                        isOpen={isIndicatorPanelOpen}
+                        onClose={() => setIsIndicatorPanelOpen(false)}
                     />
                 </div>
             </div>

@@ -309,27 +309,27 @@ export function ScreenerWidget({
                 </div>
 
                 {/* Status Bar Footer */}
-                <div className="px-4 py-2 border-t border-gray-800 bg-[#0a0a0a] flex items-center justify-between text-[10px] font-bold text-gray-600 uppercase tracking-widest">
+                <div className="px-3 py-2 border-t border-gray-800 bg-[#050505] flex items-center justify-between text-[10px] font-bold text-gray-600 uppercase tracking-widest shadow-[0_-5px_15px_rgba(0,0,0,0.5)] z-20">
                     <div className="flex items-center gap-6">
                         <div className="flex items-center gap-2">
-                            <span className="text-blue-500 font-black">{filteredData.length.toLocaleString()}</span>
-                            <span className="opacity-50">Matches Found</span>
+                            <span className="text-blue-400 font-black text-xs drop-shadow-md">{filteredData.length.toLocaleString()}</span>
+                            <span className="opacity-40 font-semibold tracking-tight">Matches</span>
                         </div>
                         {market !== 'ALL' && (
                             <div className="hidden sm:flex items-center gap-2">
-                                <span className="w-1 h-1 rounded-full bg-gray-700" />
-                                <span className="text-gray-500">{market} Exchange</span>
+                                <span className="w-1 h-1 rounded-full bg-gray-600" />
+                                <span className="text-gray-500">{market}</span>
                             </div>
                         )}
                         <div className="hidden md:flex items-center gap-2">
-                            <span className="w-1 h-1 rounded-full bg-gray-700" />
-                            <span className="text-gray-500">Source: TCBS/VCI</span>
+                            <span className="w-1 h-1 rounded-full bg-gray-600" />
+                            <span className="text-gray-500">Source: KBS</span>
                         </div>
                     </div>
                     <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)] animate-pulse" />
-                            <span className="text-gray-400">Live</span>
+                        <div className="flex items-center gap-2 bg-green-900/10 px-2 py-0.5 rounded-full border border-green-900/20">
+                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse" />
+                            <span className="text-green-500/80 font-black tracking-tighter text-[9px]">REALTIME</span>
                         </div>
                     </div>
                 </div>

@@ -61,20 +61,25 @@ async def get_historical_prices(
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         logger.warning(f"Live API failed for historical {symbol}, trying database fallback: {e}")
-        # Database Fallback
-        stmt = select(StockPrice).where(
-            StockPrice.symbol == symbol.upper(),
-            StockPrice.time >= start_date,
-            StockPrice.time <= end_date
-        ).order_by(StockPrice.time.asc())
-        res = await db.execute(stmt)
-        rows = res.scalars().all()
-        if rows:
-            data = [EquityHistoricalData(
-                symbol=r.symbol, time=r.time, open=r.open, high=r.high, low=r.low, close=r.close, volume=r.volume
-            ) for r in rows]
-            return StandardResponse(data=data, meta=MetaData(count=len(data)))
-        raise HTTPException(status_code=502, detail=f"Data unavailable: {str(e)}")
+        try:
+            # Database Fallback
+            stmt = select(StockPrice).where(
+                StockPrice.symbol == symbol.upper(),
+                StockPrice.time >= start_date,
+                StockPrice.time <= end_date
+            ).order_by(StockPrice.time.asc())
+            res = await db.execute(stmt)
+            rows = res.scalars().all()
+            if rows:
+                data = [EquityHistoricalData(
+                    symbol=r.symbol, time=r.time, open=r.open, high=r.high, low=r.low, close=r.close, volume=r.volume
+                ) for r in rows]
+                return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        except Exception as db_err:
+            logger.error(f"Database fallback failed: {db_err}")
+        
+        # Return empty list instead of 502 to prevent frontend crash
+        return StandardResponse(data=[], error=f"Data unavailable: {str(e)}")
 
 @router.get("/{symbol}/quote", response_model=StandardResponse[StockQuoteData])
 @cached(ttl=30, key_prefix="quote")
@@ -83,16 +88,25 @@ async def get_quote(symbol: str, source: str = Query(default="VCI")):
         data, _ = await VnstockStockQuoteFetcher.fetch(symbol=symbol.upper(), source=source)
         return StandardResponse(data=data, meta=MetaData(count=1))
     except Exception as e:
-        return StandardResponse(data=StockQuoteData(symbol=symbol.upper(), updated_at=datetime.utcnow()), error=str(e))
+        # Return mock/empty quote structure to keep UI alive
+        return StandardResponse(
+            data=StockQuoteData(
+                symbol=symbol.upper(), 
+                price=0, change=0, change_pct=0, 
+                high=0, low=0, open=0, volume=0,
+                updated_at=datetime.utcnow()
+            ), 
+            error=str(e)
+        )
 
-@router.get("/{symbol}/profile", response_model=StandardResponse[EquityProfileData])
+@router.get("/{symbol}/profile", response_model=StandardResponse[Optional[EquityProfileData]])
 @cached(ttl=3600, key_prefix="profile")
 async def get_profile(symbol: str, db: AsyncSession = Depends(get_db)):
     symbol_upper = symbol.upper()
     cache_manager = CacheManager(db=db)
     try:
         cache_result = await cache_manager.get_profile_data(symbol_upper)
-        if cache_result.hit: # Return even if stale if we want maximum availability
+        if cache_result.hit: 
             company = cache_result.data
             return StandardResponse(data=EquityProfileData(
                 symbol=company.symbol, company_name=company.company_name, short_name=company.short_name,
@@ -107,10 +121,11 @@ async def get_profile(symbol: str, db: AsyncSession = Depends(get_db)):
         if profile_data:
             await cache_manager.store_profile_data(symbol_upper, profile_data.model_dump(mode="json"))
             return StandardResponse(data=profile_data, meta=MetaData(count=1))
-        raise HTTPException(status_code=404, detail="Profile not found")
+        
+        # Return None data instead of 404
+        return StandardResponse(data=None, error="Profile not found")
     except Exception as e:
-        if isinstance(e, HTTPException): raise e
-        raise HTTPException(status_code=502, detail=str(e))
+        return StandardResponse(data=None, error=str(e))
 
 @router.get("/{symbol}/financials", response_model=StandardResponse[List[FinancialStatementData]])
 async def get_financials(
@@ -128,19 +143,22 @@ async def get_financials(
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         logger.warning(f"Live API failed for financials {symbol}, trying database fallback: {e}")
-        # Database Fallback
-        model = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow}.get(statement_type)
-        stmt = select(model).where(model.symbol == symbol.upper(), model.period_type == period).order_by(model.fiscal_year.desc()).limit(limit)
-        res = await db.execute(stmt)
-        rows = res.scalars().all()
-        if rows:
-            data = [FinancialStatementData(
-                symbol=r.symbol, period=r.period, fiscal_year=r.fiscal_year, fiscal_quarter=r.fiscal_quarter,
-                revenue=getattr(r, 'revenue', None), net_income=getattr(r, 'net_income', None)
-                # ... mapping more fields would be better but this is a start
-            ) for r in rows]
-            return StandardResponse(data=data, meta=MetaData(count=len(data)))
-        raise HTTPException(status_code=502, detail=str(e))
+        try:
+            # Database Fallback
+            model = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow}.get(statement_type)
+            stmt = select(model).where(model.symbol == symbol.upper(), model.period_type == period).order_by(model.fiscal_year.desc()).limit(limit)
+            res = await db.execute(stmt)
+            rows = res.scalars().all()
+            if rows:
+                data = [FinancialStatementData(
+                    symbol=r.symbol, period=r.period, fiscal_year=r.fiscal_year, fiscal_quarter=r.fiscal_quarter,
+                    revenue=getattr(r, 'revenue', None), net_income=getattr(r, 'net_income', None)
+                ) for r in rows]
+                return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        except Exception:
+            pass
+            
+        return StandardResponse(data=[], error=f"Data unavailable: {str(e)}")
 
 # ... existing endpoints remain same or with similar try/except logic ...
 import logging

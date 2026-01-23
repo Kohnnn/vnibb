@@ -164,32 +164,43 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                 </div>
 
                 {/* Table Area with Horizontal Scroll */}
-                <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-800">
+                <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-800 p-1">
                     {activeQuery?.isLoading ? (
-                        <div className="flex flex-col items-center justify-center h-full gap-3">
-                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500" />
-                            <span className="text-[10px] font-black uppercase tracking-widest opacity-30">Analyzing Data</span>
+                        <div className="space-y-3 p-2 animate-pulse opacity-50">
+                            {[1, 2, 3, 4, 5, 6].map(i => (
+                                <div key={i} className="flex gap-4">
+                                    <div className="h-4 bg-gray-800 rounded w-1/3" />
+                                    <div className="h-4 bg-gray-800 rounded w-1/6" />
+                                    <div className="h-4 bg-gray-800 rounded w-1/6" />
+                                    <div className="h-4 bg-gray-800 rounded w-1/6" />
+                                </div>
+                            ))}
                         </div>
                     ) : !tableData || tableData.periods.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2 opacity-30">
-                            <Minus size={32} />
-                            <span className="text-[10px] uppercase font-black tracking-tighter">No Data for {symbol}</span>
+                        <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3 opacity-60">
+                            <div className="h-12 w-12 rounded-xl bg-gray-800/50 flex items-center justify-center border border-white/5 shadow-inner">
+                                <Minus size={20} className="text-gray-500" />
+                            </div>
+                            <div className="text-center">
+                                <span className="block text-[10px] uppercase font-black tracking-widest mb-1 text-gray-400">No Statements Found</span>
+                                <span className="text-[9px] text-gray-600 block">Try switching period or source</span>
+                            </div>
                         </div>
                     ) : (
                         <div className="min-w-max">
                             <table className="w-full text-[11px] border-collapse table-fixed">
-                                <thead className="sticky top-0 bg-secondary z-20">
+                                <thead className="sticky top-0 bg-secondary/95 backdrop-blur-sm z-20">
                                     <tr className="border-b border-white/10 shadow-sm">
-                                        <th className="text-left p-3 text-muted-foreground font-black uppercase tracking-widest w-[180px] bg-secondary sticky left-0 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">Metric</th>
+                                        <th className="text-left p-2.5 pl-3 text-muted-foreground font-black uppercase tracking-widest w-[160px] bg-secondary/95 backdrop-blur-sm sticky left-0 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">Metric</th>
                                         {tableData.periods.map(p => (
-                                            <th key={p} className="text-right p-3 text-muted-foreground font-black min-w-[120px]">{p}</th>
+                                            <th key={p} className="text-right p-2.5 text-muted-foreground font-black min-w-[100px]">{p}</th>
                                         ))}
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-white/5">
+                                <tbody className="divide-y divide-white/[0.03]">
                                     {tableData.rows.map((row, i) => (
                                         <tr key={i} className="group hover:bg-white/[0.02] transition-colors">
-                                            <td className="p-3 font-bold text-muted-foreground group-hover:text-primary transition-colors border-r border-white/5 bg-secondary sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.2)]">
+                                            <td className="p-2.5 pl-3 font-medium text-gray-400 group-hover:text-blue-300 transition-colors border-r border-white/5 bg-secondary/95 backdrop-blur-sm sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.2)]">
                                                 {row.label}
                                             </td>
                                             {tableData.periods.map(p => {
@@ -198,17 +209,20 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                                 const growth = data?.growth;
 
                                                 return (
-                                                    <td key={p} className="p-3 text-right group-hover:bg-white/[0.01]">
+                                                    <td key={p} className="p-2.5 text-right font-mono group-hover:bg-white/[0.01]">
                                                         <div className="flex flex-col items-end">
-                                                            <span className="font-mono font-medium text-primary">
+                                                            <span className={cn(
+                                                                "font-medium",
+                                                                val < 0 ? "text-red-400" : "text-gray-200"
+                                                            )}>
                                                                 {row.isPct ? formatPct(val) : formatValue(val)}
                                                             </span>
-                                                            {growth !== null && (
+                                                            {growth !== null && Math.abs(growth) > 1 && (
                                                                 <span className={cn(
-                                                                    "text-[9px] font-bold flex items-center gap-0.5 mt-0.5",
-                                                                    growth > 0 ? "text-green-500/80" : "text-red-500/80"
+                                                                    "text-[9px] font-bold flex items-center gap-0.5 mt-0.5 opacity-60 group-hover:opacity-100 transition-opacity",
+                                                                    growth > 0 ? "text-green-500" : "text-red-500"
                                                                 )}>
-                                                                    {growth > 0 ? '+' : ''}{growth.toFixed(1)}%
+                                                                    {growth > 0 ? '+' : ''}{growth.toFixed(0)}%
                                                                     {growth > 0 ? <TrendingUp size={8} /> : <TrendingDown size={8} />}
                                                                 </span>
                                                             )}

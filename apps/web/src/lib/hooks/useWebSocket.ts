@@ -70,12 +70,16 @@ export function useWebSocket({
     const connect = useCallback(() => {
         if (!enabled || symbols.length === 0) return;
 
+        // Prevent multiple connections
+        if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
+
         try {
             const ws = new WebSocket(WS_URL);
             wsRef.current = ws;
 
             ws.onopen = () => {
                 setIsConnected(true);
+                reconnectTimeoutRef.current = null; // Reset backoff on successful connection
                 // Subscribe to symbols
                 ws.send(JSON.stringify({
                     action: 'subscribe',
@@ -133,18 +137,32 @@ export function useWebSocket({
 
             ws.onclose = () => {
                 setIsConnected(false);
-                // Reconnect after 5 seconds
-                reconnectTimeoutRef.current = setTimeout(() => {
+                wsRef.current = null;
+
+                // Exponential backoff for reconnection
+                const attempt = (reconnectTimeoutRef.current as any)?.attempt || 0;
+                const delay = Math.min(1000 * Math.pow(2, attempt), 30000); // Max 30s
+
+                const timeoutId = setTimeout(() => {
                     if (enabled) connect();
-                }, 5000);
+                }, delay);
+
+                // Store attempt count in timeout object for persistence (hacky but works in refs)
+                (timeoutId as any).attempt = attempt + 1;
+                reconnectTimeoutRef.current = timeoutId;
             };
 
-            ws.onerror = () => {
-                ws.close();
+            ws.onerror = (err) => {
+                console.warn('WebSocket encountered error:', err);
+                ws.close(); // Ensure close is called to trigger onclose for reconnection
             };
 
         } catch (error) {
-            console.error('WebSocket connection failed:', error);
+            console.error('WebSocket connection initialization failed:', error);
+            // Retry after delay even if init failed
+            reconnectTimeoutRef.current = setTimeout(() => {
+                if (enabled) connect();
+            }, 5000);
         }
     }, [enabled, symbols, onUpdate]);
 
