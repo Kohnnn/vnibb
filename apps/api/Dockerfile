@@ -31,6 +31,10 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir .
 
+# Explicitly install vnai to ensure it's available for the installer
+RUN pip install --no-cache-dir "vnai>=2.3.9" && \
+    python3 -c "import vnai; print(f'vnai installed at {vnai.__file__}')"
+
 # Install vnstock premium packages via CLI installer
 # The API key is passed as build arg for installation
 ARG VNSTOCK_API_KEY
