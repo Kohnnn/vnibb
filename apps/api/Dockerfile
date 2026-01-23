@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Fix: Ensure installed packages are importable by scripts
+ENV PYTHONPATH=/usr/local/lib/python3.12/site-packages
+
 # Environment for non-interactive vnstock installation
 ENV VNSTOCK_LANGUAGE=2 \
     VNSTOCK_INTERACTIVE=0 \
