@@ -53,20 +53,23 @@ ARG VNSTOCK_API_KEY
 RUN python3 -c "import vnstock; print(f'vnstock {vnstock.__version__} installed')" || true
 
 # Copy application code
+# Copy application code
 COPY . .
 
-# Create non-root user for security
+# Copy entrypoint script and set permissions (as root)
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
+# Create non-root user and set ownership
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
-USER appuser
 
-# Health check
+# Health check (will run as the user defined in USER instruction, but defined here)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Copy entrypoint script
-COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
+# Switch to non-root user
+USER appuser
 
 # Expose port
 EXPOSE 8000
