@@ -39,14 +39,15 @@ RUN pip install --no-cache-dir "vnai>=2.3.9" && \
     python3 -c "import vnai; print(f'vnai installed at {vnai.__file__}')"
 
 # Install vnstock premium packages via CLI installer
+# MOVED TO RUNTIME (entrypoint.sh) to avoid build timeouts/failures
 # The API key is passed as build arg for installation
 ARG VNSTOCK_API_KEY
-RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
-    echo "Installing vnstock premium packages with API key..."; \
-    /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY"; \
-    else \
-    echo "WARNING: VNSTOCK_API_KEY not provided. Premium packages not installed."; \
-    fi
+# RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
+#     echo "Installing vnstock premium packages with API key..."; \
+#     /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY"; \
+#     else \
+#     echo "WARNING: VNSTOCK_API_KEY not provided. Premium packages not installed."; \
+#     fi
 
 # Verify vnstock installation
 RUN python3 -c "import vnstock; print(f'vnstock {vnstock.__version__} installed')" || true
