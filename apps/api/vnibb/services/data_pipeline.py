@@ -347,4 +347,21 @@ class DataPipeline:
             logger.error(f"Full seeding failed: {e}")
             raise
 
-data_pipeline = DataPipeline()
+
+# Standalone functions for scheduler
+async def run_daily_sync():
+    """Wrapper for scheduler to run daily sync."""
+    await data_pipeline.run_full_seeding(days=1)
+
+async def run_hourly_news_sync():
+    """Wrapper for scheduler to run hourly news sync."""
+    # TODO: Implement news sync in DataPipeline class
+    logger.info("Hourly news sync placeholder")
+    pass
+
+async def run_intraday_sync():
+    """Wrapper for scheduler to run intraday sync."""
+    # TODO: Implement intraday sync in DataPipeline class
+    logger.info("Intraday sync placeholder")
+    pass
+
