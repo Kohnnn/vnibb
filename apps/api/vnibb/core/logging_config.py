@@ -188,6 +188,10 @@ def setup_logging(
         logging.INFO if settings.should_echo_sql else logging.WARNING
     )
     
+    # Silence vnstock noise
+    logging.getLogger("vnstock").setLevel(logging.WARNING)
+    logging.getLogger("vnibb.providers.vnstock").setLevel(logging.WARNING)
+    
     # Log startup message
     logger = logging.getLogger(__name__)
     logger.info(
