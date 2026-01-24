@@ -7,10 +7,11 @@ import {
     Search, X, Grid3X3, ChevronRight, Check,
     Box, Star, BarChart3, DollarSign, TrendingUp,
     Newspaper, PieChart, Info, LayoutGrid, Layers,
-    Plus, Clock
+    Plus, Clock, Maximize2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import { WidgetPreview } from './WidgetPreview';
 
 interface WidgetLibraryProps {
     isOpen: boolean;
@@ -199,11 +200,16 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                             {widget.description}
                                                         </div>
 
-                                                        {/* Preview Thumbnail */}
-                                                        <div className="mt-3 h-16 bg-gray-950 rounded-lg border border-gray-900 flex items-center justify-center relative overflow-hidden group-hover:border-gray-800 transition-colors">
-                                                            <Icon size={24} className="text-gray-900 absolute" />
-                                                            <div className="text-[8px] font-black text-gray-800 uppercase tracking-[0.2em] z-10">Preview</div>
-                                                            <div className="absolute inset-0 bg-gradient-to-t from-gray-950/80 to-transparent" />
+                                                        {/* Enhanced Preview Thumbnail */}
+                                                        <div className="mt-3 h-20 bg-gradient-to-b from-gray-950 to-gray-900 rounded-xl border border-gray-800/50 relative overflow-hidden group-hover:border-blue-500/30 transition-all">
+                                                            <WidgetPreview type={widget.type} />
+                                                            <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                                                            <div className="absolute bottom-1.5 left-2 right-2 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                <span className="text-[7px] font-bold text-gray-600 bg-gray-900/80 px-1 rounded">
+                                                                    {widget.defaultLayout.w}×{widget.defaultLayout.h}
+                                                                </span>
+                                                                <Maximize2 size={10} className="text-blue-400/60" />
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 ))}

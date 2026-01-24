@@ -188,15 +188,14 @@ export function WidgetWrapper({
             {/* Normal widget - dim when maximized */}
             <div
                 className={cn(
-                    "h-full flex flex-col rounded-xl overflow-hidden shadow-xl",
-                    "bg-gray-900/40 backdrop-blur-xl border transition-all duration-300",
-                    isEditing ? 'ring-2 ring-blue-500/50 scale-[0.99]' : 'hover:shadow-2xl hover:border-white/20',
+                    "widget-card-premium h-full flex flex-col overflow-hidden",
+                    isEditing ? 'ring-2 ring-blue-500/40' : '',
                     isMaximized ? 'opacity-0 pointer-events-none' : ''
                 )}
                 style={{
                     borderColor: widgetGroup !== 'global'
                         ? getColorForGroup(widgetGroup)
-                        : 'rgba(255,255,255,0.08)'
+                        : undefined
                 }}
             >
                 <WidgetToolbar

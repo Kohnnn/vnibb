@@ -63,7 +63,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Basic stock information including price, change, and volume',
         category: 'core_data',
         defaultConfig: {},
-        defaultLayout: { w: 6, h: 3, minW: 3, minH: 2 }
+        defaultLayout: { w: 4, h: 3, minW: 3, minH: 2 }
     },
     {
         type: 'ticker_profile',
@@ -105,7 +105,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Interactive price chart with candlestick/line options',
         category: 'charting',
         defaultConfig: { timeframe: '1Y', chartType: 'candle' },
-        defaultLayout: { w: 12, h: 7, minW: 6, minH: 4 }
+        defaultLayout: { w: 8, h: 6, minW: 6, minH: 4 }
     },
 
     // Calendar
@@ -271,7 +271,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Vietnam market indices (VN-INDEX, VN30, HNX, UPCOM)',
         category: 'core_data',
         defaultConfig: {},
-        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
+        defaultLayout: { w: 4, h: 4, minW: 3, minH: 3 }
     },
 
     // Advanced & Market Widgets
@@ -281,7 +281,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Custom stock watchlist with live prices',
         category: 'core_data',
         defaultConfig: {},
-        defaultLayout: { w: 4, h: 7, minW: 2, minH: 4 }
+        defaultLayout: { w: 3, h: 5, minW: 2, minH: 4 }
     },
     {
         type: 'peer_comparison',

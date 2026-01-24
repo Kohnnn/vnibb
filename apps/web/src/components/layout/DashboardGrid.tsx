@@ -52,7 +52,7 @@ export function DashboardGrid({
     children,
     layouts,
     onLayoutChange,
-    isEditing = true,
+    isEditing = false,
 }: DashboardGridProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(1200);
