@@ -74,8 +74,11 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
             """Fetch a single market index with timeout handling."""
             try:
                 stock_manager = get_vnstock()
-                # stock_manager.stock is the way to get a specific stock instance in vnstock 3.x
-                stock = stock_manager.stock(symbol=idx, source=settings.vnstock_source)
+                # For Market Indices, we MUST use VCI source as KBS/TCBS treat them as invalid stocks
+                # VNINDEX, VN30, HNX, UPCOM are indices.
+                source = 'VCI'
+                
+                stock = stock_manager.stock(symbol=idx, source=source)
                 # Fetch last 5 days to ensure we get some data
                 from datetime import datetime, timedelta
                 end_date = datetime.now()
@@ -91,7 +94,8 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                     latest["index_name"] = idx
                     return latest
             except Exception as e:
-                logger.warning(f"Failed to fetch {idx}: {e}")
+                # Downgrade to debug log to reduce noise if fetching fails
+                logger.debug(f"Failed to fetch {idx}: {str(e)}")
             return None
         
         async def _fetch_index_async(pool, idx: str, timeout: int = 8) -> Optional[dict[str, Any]]:
