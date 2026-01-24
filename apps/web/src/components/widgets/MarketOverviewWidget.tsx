@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { BarChart2, RefreshCw, TrendingUp, TrendingDown, ArrowUp, ArrowDown, Minus, Clock, AlertCircle } from 'lucide-react';
+import { BarChart2, RefreshCw, TrendingUp, TrendingDown, ArrowUp, ArrowDown, Minus, Clock, AlertCircle, Activity } from 'lucide-react';
 import { useMarketOverview } from '@/lib/queries';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 
@@ -61,26 +61,32 @@ export function MarketOverviewWidget({ id, isEditing, onRemove, lastRefresh }: M
             isLoading={isLoading || isRefetching}
             noPadding
         >
-            <div className="h-full flex flex-col p-1">
-                <div className="flex-1 overflow-auto p-2">
+            <div className="h-full flex flex-col">
+                <div className="flex-1 overflow-auto p-3">
                     {isLoading ? (
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="index-cards-grid">
                             {[...Array(4)].map((_, i) => (
-                                <div key={i} className="animate-pulse h-20 bg-gray-800/30 rounded-lg" />
+                                <div key={i} className="skeleton-premium h-24 rounded-xl" />
                             ))}
                         </div>
                     ) : isError ? (
-                        <div className="flex flex-col items-center justify-center h-32 text-red-500">
-                            <AlertCircle size={24} className="mb-2" />
-                            <p className="text-xs text-center text-gray-400">Failed to load market data</p>
+                        <div className="empty-state-premium">
+                            <div className="empty-state-premium__icon">
+                                <AlertCircle />
+                            </div>
+                            <div className="empty-state-premium__title">Connection Failed</div>
+                            <div className="empty-state-premium__description">Unable to fetch market data. Check backend status.</div>
                         </div>
                     ) : indices.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-32 text-gray-500">
-                            <BarChart2 size={24} className="mb-2 opacity-30" />
-                            <p className="text-xs">No market data</p>
+                        <div className="empty-state-premium">
+                            <div className="empty-state-premium__icon">
+                                <Activity />
+                            </div>
+                            <div className="empty-state-premium__title">No Market Data</div>
+                            <div className="empty-state-premium__description">Market data will appear when available.</div>
                         </div>
                     ) : (
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="index-cards-grid">
                             {indices.map((idx, i) => {
                                 const isUp = (idx.change_pct || 0) >= 0;
                                 const stats = MOCK_STATS[idx.index_name] || { up: 0, down: 0, flat: 0 };
@@ -88,13 +94,10 @@ export function MarketOverviewWidget({ id, isEditing, onRemove, lastRefresh }: M
                                 return (
                                     <div
                                         key={i}
-                                        className={`p-3 rounded-lg border transition-all hover:scale-[1.02] ${isUp
-                                            ? 'bg-green-500/5 border-green-500/20 hover:border-green-500/40'
-                                            : 'bg-red-500/5 border-red-500/20 hover:border-red-500/40'
-                                            }`}
+                                        className={`index-card ${isUp ? 'up' : 'down'}`}
                                     >
-                                        <div className="flex items-center justify-between mb-1">
-                                            <span className="text-xs font-bold text-gray-300 uppercase">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="index-card__name">
                                                 {idx.index_name}
                                             </span>
                                             {isUp ? (
@@ -104,23 +107,23 @@ export function MarketOverviewWidget({ id, isEditing, onRemove, lastRefresh }: M
                                             )}
                                         </div>
 
-                                        <div className={`text-xl font-bold mb-0.5 ${isUp ? 'text-green-400' : 'text-red-400'}`}>
+                                        <div className={`index-card__value ${isUp ? 'data-value-up' : 'data-value-down'}`}>
                                             {formatValue(idx.current_value)}
                                         </div>
 
-                                        <div className={`text-sm font-medium mb-2 ${isUp ? 'text-green-500' : 'text-red-500'}`}>
+                                        <div className={`index-card__change ${isUp ? 'data-value-up' : 'data-value-down'}`}>
                                             {formatPct(idx.change_pct)}
                                         </div>
 
-                                        <div className="flex items-center gap-1.5 text-[10px]">
-                                            <span className="flex items-center gap-0.5 text-green-400">
-                                                <ArrowUp size={10} />{stats.up}
+                                        <div className="flex items-center gap-2 mt-2 text-[9px]">
+                                            <span className="flex items-center gap-0.5 text-green-400/80">
+                                                <ArrowUp size={8} />{stats.up}
                                             </span>
-                                            <span className="flex items-center gap-0.5 text-gray-400">
-                                                <Minus size={10} />{stats.flat}
+                                            <span className="flex items-center gap-0.5 text-gray-500">
+                                                <Minus size={8} />{stats.flat}
                                             </span>
-                                            <span className="flex items-center gap-0.5 text-red-400">
-                                                <ArrowDown size={10} />{stats.down}
+                                            <span className="flex items-center gap-0.5 text-red-400/80">
+                                                <ArrowDown size={8} />{stats.down}
                                             </span>
                                         </div>
                                     </div>
@@ -130,8 +133,8 @@ export function MarketOverviewWidget({ id, isEditing, onRemove, lastRefresh }: M
                     )}
                 </div>
 
-                <div className="flex items-center gap-1 px-2 py-1 border-t border-gray-800 text-[10px] text-gray-500">
-                    <Clock size={10} />
+                <div className="flex items-center gap-1.5 px-3 py-2 border-t border-gray-800/50 bg-gray-900/30 text-[9px] text-gray-500">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                     <span suppressHydrationWarning>Updated {lastUpdated?.toLocaleTimeString() ?? '--:--:--'}</span>
                 </div>
             </div>

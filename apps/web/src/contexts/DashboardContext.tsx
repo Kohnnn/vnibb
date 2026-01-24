@@ -42,7 +42,7 @@ const CURRENT_MIGRATION_VERSION = 2; // Increment when adding new migrations
 // ============================================================================
 
 // Helper to generate unique widget ID
-const generateWidgetId = (prefix: string): string => 
+const generateWidgetId = (prefix: string): string =>
     `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
 // Template widget definitions (without tabId - will be set on creation)
@@ -218,14 +218,14 @@ const migrateEmptyTabs = (dashboards: Dashboard[]): Dashboard[] => {
         tabs: dashboard.tabs.map(tab => {
             // Skip tabs that already have widgets
             if (tab.widgets.length > 0) return tab;
-            
+
             // Find matching template by tab name (case-insensitive)
             const templateName = TAB_NAME_TO_TEMPLATE[tab.name.toLowerCase()];
             if (!templateName) return tab;
-            
+
             const template = DASHBOARD_TEMPLATES[templateName];
             if (!template) return tab;
-            
+
             // Apply template to empty tab
             const widgets = createWidgetsFromTemplate(template, tab.id);
             return { ...tab, widgets };
@@ -253,14 +253,14 @@ const createWidgetsFromTemplate = (template: TemplateWidget[], tabId: string): W
 
 // Create a tab with pre-populated widgets from template
 const createTabWithTemplate = (
-    name: string, 
-    order: number, 
+    name: string,
+    order: number,
     templateName: string
 ): DashboardTab => {
     const tabId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const template = DASHBOARD_TEMPLATES[templateName] || [];
     const widgets = createWidgetsFromTemplate(template, tabId);
-    
+
     return {
         id: tabId,
         name,
@@ -279,14 +279,14 @@ const createDefaultTab = (name: string, order: number): DashboardTab => ({
 const createDefaultDashboard = (): Dashboard => {
     // Stagger tab creation to ensure unique timestamps
     const tabs: DashboardTab[] = [];
-    
+
     // Create tabs with templates - small delay between each to ensure unique IDs
     tabs.push(createTabWithTemplate('Overview', 0, 'overview'));
     tabs.push(createTabWithTemplate('Financials', 1, 'financials'));
     tabs.push(createTabWithTemplate('Technical Analysis', 2, 'technical'));
     tabs.push(createTabWithTemplate('Ownership', 3, 'ownership'));
     tabs.push(createTabWithTemplate('Calendar', 4, 'calendar'));
-    
+
     return {
         id: `dash-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
         name: 'Stock Research',
@@ -683,6 +683,7 @@ interface DashboardContextValue {
     addWidget: (dashboardId: string, tabId: string, widget: WidgetCreate) => WidgetInstance;
     updateWidget: (dashboardId: string, tabId: string, widgetId: string, updates: Partial<WidgetInstance>) => void;
     deleteWidget: (dashboardId: string, tabId: string, widgetId: string) => void;
+    cloneWidget: (dashboardId: string, tabId: string, widgetId: string) => WidgetInstance | null;
     updateTabLayout: (dashboardId: string, tabId: string, widgets: WidgetInstance[]) => void;
     resetTabLayout: (dashboardId: string, tabId: string) => void;
     // Sync group actions
@@ -743,7 +744,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 // Apply migrations for existing dashboards
                 // Migration v2: Apply templates to empty tabs
                 dashboards = migrateEmptyTabs(dashboards);
-                
+
                 // Final safety validation for all widgets
                 dashboards = dashboards.map(d => ({
                     ...d,
@@ -912,7 +913,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             console.warn(`Template "${templateName}" not found. Available: ${Object.keys(DASHBOARD_TEMPLATES).join(', ')}`);
             return;
         }
-        
+
         const widgets = createWidgetsFromTemplate(template, tabId);
         dispatch({ type: 'UPDATE_TAB_LAYOUT', payload: { dashboardId, tabId, widgets } });
     }, []);
@@ -925,7 +926,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         // Get default layout constraints from WidgetRegistry
         const defaults = defaultWidgetLayouts[data.type as keyof typeof defaultWidgetLayouts];
         const widgetId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        
+
         const widget: WidgetInstance = {
             id: widgetId,
             type: data.type,
@@ -967,6 +968,29 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const resetTabLayout = useCallback((dashboardId: string, tabId: string) => {
         dispatch({ type: 'RESET_TAB_LAYOUT', payload: { dashboardId, tabId } });
     }, []);
+
+    const cloneWidget = useCallback((dashboardId: string, tabId: string, widgetId: string): WidgetInstance | null => {
+        const dashboard = state.dashboards.find(d => d.id === dashboardId);
+        const tab = dashboard?.tabs.find(t => t.id === tabId);
+        const widget = tab?.widgets.find(w => w.id === widgetId);
+
+        if (!widget) return null;
+
+        const newWidgetId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const clonedWidget: WidgetInstance = {
+            ...widget,
+            id: newWidgetId,
+            layout: {
+                ...widget.layout,
+                i: newWidgetId,
+                x: widget.layout.x,
+                y: widget.layout.y + widget.layout.h, // Place below original
+            },
+        };
+
+        dispatch({ type: 'ADD_WIDGET', payload: { dashboardId, tabId, widget: clonedWidget } });
+        return clonedWidget;
+    }, [state.dashboards]);
 
     // ========================================================================
     // Sync Group Actions
@@ -1032,6 +1056,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         addWidget,
         updateWidget,
         deleteWidget,
+        cloneWidget,
         updateTabLayout,
         resetTabLayout,
         updateSyncGroupSymbol,
