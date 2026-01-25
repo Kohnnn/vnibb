@@ -81,7 +81,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 from vnstock import Vnstock
                 stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
                 finance = stock.finance
-                df = finance.ratio(period=query.get("period", "year"), lang="en")
+                df = finance.ratio(period=query.get("period", "year"))
                 
                 if df is None or df.empty:
                     return []
