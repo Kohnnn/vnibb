@@ -63,7 +63,7 @@ coverage/
 pip-wheel-metadata/
 
 # Local development only
-.agent/
+#.agent/
 .kiro/
 .opencode/
 temp_vnstock_installer/
