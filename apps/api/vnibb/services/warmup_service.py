@@ -64,10 +64,15 @@ async def warmup_cache():
             await asyncio.sleep(1)  # Reduced from 3 to 1 second
         except asyncio.TimeoutError:
             logger.warning(f"Warmup timeout for {exchange}")
-        except Exception as e:
+        except BaseException as e:
+            if isinstance(e, asyncio.CancelledError):
+                raise
             error_str = str(e).lower()
             if any(x in error_str for x in ["quá nhiều", "rate limit", "429", "too many"]):
                 logger.warning(f"Rate limit hit on {exchange}, stopping warmup early")
+                break
+            if isinstance(e, SystemExit):
+                logger.warning(f"Warmup aborted by provider for {exchange}: {e}")
                 break
             logger.error(f"Warmup error for {exchange}: {e}")
 
