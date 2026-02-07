@@ -8,16 +8,33 @@ echo "Running database migrations..."
 alembic upgrade head
 
 # 2. Check for VnStock Premium Packages
-# Fix: Ensure installer can find vnai
-export PYTHONPATH=/usr/local/lib/python3.12/site-packages
+VENV_PATH="/root/.venv"
+SYSTEM_SITE_PACKAGES="/usr/local/lib/python3.12/site-packages"
+VENV_SITE_PACKAGES="$VENV_PATH/lib/python3.12/site-packages"
+PYTHON_BIN="python3"
+SITE_PACKAGES="$SYSTEM_SITE_PACKAGES"
 
-# If key is provided but packages are missing (e.g. build arg was missed), install them now.
+set_python_env() {
+    if [ -x "$VENV_PATH/bin/python" ]; then
+        PYTHON_BIN="$VENV_PATH/bin/python"
+        SITE_PACKAGES="$VENV_SITE_PACKAGES"
+        export VIRTUAL_ENV="$VENV_PATH"
+        export PATH="$VENV_PATH/bin:$PATH"
+        export PYTHONPATH="$SITE_PACKAGES"
+    else
+        PYTHON_BIN="python3"
+        SITE_PACKAGES="$SYSTEM_SITE_PACKAGES"
+        export PYTHONPATH="$SITE_PACKAGES"
+    fi
+}
+
+set_python_env
+
 # If key is provided but packages are missing (e.g. build arg was missed), install them now.
 if [ -n "$VNSTOCK_API_KEY" ]; then
     # PERSISTENCE LOGIC: Define backup path in the mounted volume
     PERSISTENT_BACKUP="/root/.vnstock/backup_packages"
-    SITE_PACKAGES="/usr/local/lib/python3.12/site-packages"
-    
+
     # 2a. Restore Code: If we have a backup, restore it first
     if [ -d "$PERSISTENT_BACKUP" ] && [ "$(ls -A $PERSISTENT_BACKUP)" ]; then
         echo "VnStock Premium: Restoring packages from persistent volume..."
@@ -25,28 +42,29 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
     fi
 
     # 2b. Check Execution: Now check if it works
-    if ! python3 -c "import vnstock_data" 2>/dev/null; then
+    if ! "$PYTHON_BIN" -c "import vnstock_data" 2>/dev/null; then
         echo "----------------------------------------------------------------"
         echo "VnStock Premium: Key found but packages missing."
         echo "Installing premium packages at runtime..."
         echo "----------------------------------------------------------------"
-        
+
         # Ensure installer exists
         if [ ! -f /app/vnstock-cli-installer.run ]; then
             wget -q https://vnstocks.com/files/vnstock-cli-installer.run -O /app/vnstock-cli-installer.run
             chmod +x /app/vnstock-cli-installer.run
         fi
-        
+
         # Run installer
         /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY"
-        
+        set_python_env
+
         # 2c. Backup Code: Save the newly installed packages to volume
         echo "VnStock Premium: Backing up packages to persistent volume..."
         mkdir -p "$PERSISTENT_BACKUP"
         # Copy vnstock related packages AND vnii to avoid bloating
         cp -r "$SITE_PACKAGES"/vnstock* "$PERSISTENT_BACKUP/" 2>/dev/null || true
         cp -r "$SITE_PACKAGES"/vnii* "$PERSISTENT_BACKUP/" 2>/dev/null || true
-        
+
         echo "VnStock Premium: Installation and backup complete."
     else
         echo "VnStock Premium: Packages checked and ready."
@@ -57,4 +75,4 @@ fi
 
 # 3. Start Application
 echo "Starting VNIBB API..."
-exec uvicorn vnibb.api.main:app --host 0.0.0.0 --port 8000
+exec "$PYTHON_BIN" -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port 8000
