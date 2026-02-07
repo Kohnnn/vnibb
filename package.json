@@ -17,6 +17,7 @@
         "build:api": "pnpm --filter api build"
     },
     "devDependencies": {
+        "@typescript-eslint/parser": "^8.54.0",
         "turbo": "^2.0.0"
     },
     "engines": {

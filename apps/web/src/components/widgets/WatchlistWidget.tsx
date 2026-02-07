@@ -1,16 +1,16 @@
 'use client';
 
-import { useState, useCallback, useMemo, useRef, useEffect, memo } from 'react';
-import { useQuery, useQueries } from '@tanstack/react-query';
-import {
-    Plus, X, TrendingUp, TrendingDown, Minus, RefreshCw, Star,
-    Upload, Trash2, GripVertical, AlertCircle, Check
-} from 'lucide-react';
+import { useState, useCallback, useMemo, useEffect, memo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Plus, TrendingUp, TrendingDown, Minus, Star, Trash2 } from 'lucide-react';
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
-import { getQuote, getSymbols } from '@/lib/api';
+import { getSymbols } from '@/lib/api';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { WidgetEmpty } from '@/components/ui/widget-states';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
-import { cn } from '@/lib/utils';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import type { WidgetGroupId } from '@/types/widget';
 
 const STORAGE_KEY = 'vnibb-watchlist-v1';
 const SORT_STORAGE_KEY = 'vnibb-watchlist-sort-v1';
@@ -38,9 +38,10 @@ interface WatchlistWidgetProps {
     id: string;
     symbol?: string;
     isEditing?: boolean;
+    widgetGroup?: WidgetGroupId;
 }
 
-function WatchlistWidgetComponent({ id, isEditing, onRemove }: WatchlistWidgetProps & { onRemove?: () => void }) {
+function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: WatchlistWidgetProps & { onRemove?: () => void }) {
     const [symbols, setSymbols, clearSymbols] = useLocalStorage<string[]>(STORAGE_KEY, []);
     const [sortConfig, setSortConfig] = useLocalStorage<SortConfig>(SORT_STORAGE_KEY, {
         field: 'symbol',
@@ -50,6 +51,7 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove }: WatchlistWidgetPr
     const [newSymbol, setNewSymbol] = useState('');
     const [showAddInput, setShowAddInput] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const [lastTick, setLastTick] = useState<number | null>(null);
 
     const { data: validSymbolsData } = useQuery({
         queryKey: ['symbols'],
@@ -63,6 +65,13 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove }: WatchlistWidgetPr
     }, [validSymbolsData]);
 
     const { prices: livePrices, isConnected } = useWebSocket({ symbols });
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+
+    useEffect(() => {
+        if (livePrices.size > 0) {
+            setLastTick(Date.now());
+        }
+    }, [livePrices]);
 
     const watchlist = useMemo<WatchlistItem[]>(() => {
         return symbols.map((sym) => {
@@ -104,6 +113,10 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove }: WatchlistWidgetPr
         return sorted;
     }, [watchlist, sortConfig]);
 
+    const hasSymbols = symbols.length > 0;
+    const connectionNote = hasSymbols ? (isConnected ? 'Live feed' : 'Disconnected') : 'Add symbols to begin';
+    const showCached = hasSymbols && !isConnected;
+
     const handleAddSymbol = useCallback(() => {
         if (!newSymbol.trim()) return;
         const symbolUpper = newSymbol.toUpperCase().trim();
@@ -133,6 +146,10 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove }: WatchlistWidgetPr
         }));
     }, [setSortConfig]);
 
+    const handleSymbolSelect = useCallback((symbol: string) => {
+        setLinkedSymbol(symbol);
+    }, [setLinkedSymbol]);
+
     const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price);
     const formatChange = (change: number, percent: number) => {
         const sign = change >= 0 ? '+' : '';
@@ -157,7 +174,6 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove }: WatchlistWidgetPr
         <WidgetContainer
             title="Watchlist"
             onClose={onRemove}
-            isLoading={!isConnected && symbols.length > 0}
             noPadding
             widgetId={id}
         >
@@ -177,6 +193,16 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove }: WatchlistWidgetPr
                             </button>
                         )}
                     </div>
+                </div>
+
+                <div className="px-3 py-1.5 border-b border-gray-800/50 bg-[#0a0a0a]">
+                    <WidgetMeta
+                        updatedAt={lastTick}
+                        isCached={showCached}
+                        note={connectionNote}
+                        sourceLabel="WebSocket"
+                        align="right"
+                    />
                 </div>
 
                 {showClearConfirm && (
@@ -209,44 +235,58 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove }: WatchlistWidgetPr
                 )}
 
                 <div className="flex-1 overflow-y-auto scrollbar-hide">
-                    <table className="w-full text-[11px] text-left border-collapse">
-                        <thead className="sticky top-0 bg-[#0a0a0a] text-gray-500 z-10">
-                            <tr className="border-b border-gray-800">
-                                <th className="px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('symbol')}>
-                                    Symbol {getSortIcon('symbol')}
-                                </th>
-                                <th className="text-right px-2 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('price')}>
-                                    Price {getSortIcon('price')}
-                                </th>
-                                <th className="text-right px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('changePercent')}>
-                                    Chg% {getSortIcon('changePercent')}
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody className="text-left">
-                            {sortedWatchlist.map((item) => (
-                                <tr key={item.symbol} className="border-b border-gray-800/50 hover:bg-white/5 transition-colors cursor-pointer group">
-                                    <td className="px-3 py-2">
-                                        <div className="flex items-center gap-2">
-                                            {getChangeIcon(item.change)}
-                                            <span className="font-black text-blue-400 group-hover:text-blue-300 transition-colors">{item.symbol}</span>
-                                        </div>
-                                    </td>
-                                    <td className="text-right px-2 py-2 font-mono text-white">
-                                        {formatPrice(item.price)}
-                                    </td>
-                                    <td className={`text-right px-3 py-2 font-mono ${getChangeColor(item.change)}`}>
-                                        {formatChange(item.change, item.changePercent)}
-                                    </td>
+                    {!hasSymbols ? (
+                        <WidgetEmpty
+                            message="Your watchlist is empty."
+                            action={{ label: 'Add symbol', onClick: () => setShowAddInput(true) }}
+                        />
+                    ) : (
+                        <table className="w-full text-[11px] text-left border-collapse">
+                            <thead className="sticky top-0 bg-[#0a0a0a] text-gray-500 z-10">
+                                <tr className="border-b border-gray-800">
+                                    <th className="px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('symbol')}>
+                                        Symbol {getSortIcon('symbol')}
+                                    </th>
+                                    <th className="text-right px-2 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('price')}>
+                                        Price {getSortIcon('price')}
+                                    </th>
+                                    <th className="text-right px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('changePercent')}>
+                                        Chg% {getSortIcon('changePercent')}
+                                    </th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                    {symbols.length === 0 && (
-                        <div className="flex flex-col items-center justify-center py-20 text-gray-600 opacity-20 uppercase font-black tracking-widest gap-2">
-                            <Star size={48} strokeWidth={1} />
-                            <p className="text-xs">Watchlist Empty</p>
-                        </div>
+                            </thead>
+                            <tbody className="text-left">
+                                {sortedWatchlist.map((item, index) => (
+                                    <tr
+                                        key={`${item.symbol}-${index}`}
+                                        onClick={() => handleSymbolSelect(item.symbol)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                event.preventDefault();
+                                                handleSymbolSelect(item.symbol);
+                                            }
+                                        }}
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-label={`View ${item.symbol}`}
+                                        className="border-b border-gray-800/50 hover:bg-white/5 transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                                    >
+                                        <td className="px-3 py-2">
+                                            <div className="flex items-center gap-2">
+                                                {getChangeIcon(item.change)}
+                                                <span className="font-black text-blue-400 group-hover:text-blue-300 transition-colors">{item.symbol}</span>
+                                            </div>
+                                        </td>
+                                        <td className="text-right px-2 py-2 font-mono text-white">
+                                            {formatPrice(item.price)}
+                                        </td>
+                                        <td className={`text-right px-3 py-2 font-mono ${getChangeColor(item.change)}`}>
+                                            {formatChange(item.change, item.changePercent)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     )}
                 </div>
             </div>

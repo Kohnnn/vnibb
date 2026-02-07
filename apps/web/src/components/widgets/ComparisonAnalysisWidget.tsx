@@ -2,17 +2,24 @@
 
 import { memo, useState, useMemo } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { useQuery } from '@tanstack/react-query';
 import { compareStocks } from '@/lib/api';
-import { Plus, X, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
+import { Plus, X, TrendingUp, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const CATEGORIES = [
-  { id: 'valuation', name: 'Valuation Multiples' },
-  { id: 'profitability', name: 'Profitability' },
-  { id: 'liquidity', name: 'Liquidity' },
-  { id: 'efficiency', name: 'Efficiency' },
-  { id: 'leverage', name: 'Leverage' },
+const CATEGORY_DEFINITIONS = [
+  { id: 'valuation', name: 'Valuation Multiples', metricIds: ['pe_ratio', 'pb_ratio', 'ps_ratio', 'ev_ebitda', 'market_cap'] },
+  { id: 'financial_ratios', name: 'Financial Ratios', metricIds: ['pe_ratio', 'pb_ratio', 'roe', 'roa', 'current_ratio', 'quick_ratio', 'debt_equity'] },
+  { id: 'liquidity', name: 'Liquidity', metricIds: ['current_ratio', 'quick_ratio'] },
+  { id: 'efficiency', name: 'Efficiency', metricIds: ['asset_turnover', 'inventory_turnover'] },
+  { id: 'profitability', name: 'Profitability', metricIds: ['roe', 'roa', 'gross_margin', 'net_margin', 'operating_margin'] },
+  { id: 'leverage', name: 'Leverage', metricIds: ['debt_equity', 'debt_assets'] },
+  { id: 'coverage', name: 'Coverage', metricIds: ['interest_coverage', 'debt_service_coverage'] },
+  { id: 'cashflow', name: 'Operating Cash Flow', metricIds: ['ocf_to_debt', 'fcf_yield'] },
 ];
 
 interface ComparisonAnalysisWidgetProps {
@@ -28,21 +35,29 @@ function ComparisonAnalysisWidgetComponent({
   initialSymbols = ['VNM', 'FPT'],
   onRemove,
 }: ComparisonAnalysisWidgetProps) {
-  const [symbols, setSymbols] = useState<string[]>(initialSymbols);
+  const [symbols, setSymbols] = useState<string[]>(() => Array.from(
+    new Set(initialSymbols.map((s) => s.trim().toUpperCase()).filter(Boolean))
+  ));
   const [period, setPeriod] = useState('FY');
   const [activeCategory, setActiveCategory] = useState('valuation');
   const [newSymbol, setNewSymbol] = useState('');
+  const [showAddInput, setShowAddInput] = useState(false);
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, error, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: ['comparison', symbols.join(','), period],
     queryFn: () => compareStocks(symbols, period),
     enabled: symbols.length >= 2,
   });
 
+  const hasData = Boolean(data?.stocks?.length);
+  const isFallback = Boolean(error && hasData);
+
   const addSymbol = () => {
-    if (newSymbol && symbols.length < 5 && !symbols.includes(newSymbol.toUpperCase())) {
-      setSymbols([...symbols, newSymbol.toUpperCase()]);
+    const cleaned = newSymbol.trim().toUpperCase();
+    if (cleaned && symbols.length < 5 && !symbols.includes(cleaned)) {
+      setSymbols([...symbols, cleaned]);
       setNewSymbol('');
+      setShowAddInput(false);
     }
   };
 
@@ -52,8 +67,14 @@ function ComparisonAnalysisWidgetComponent({
     }
   };
 
+  const metricId = (metric: any) => metric?.id ?? metric?.key;
+  const metricName = (metric: any) => metric?.name ?? metric?.label ?? metricId(metric);
+  const metricFormat = (metric: any) => metric?.format ?? 'number';
+
   const filteredMetrics = useMemo(() => {
-    return data?.metrics?.filter((m: any) => m.category === activeCategory) || [];
+    const config = CATEGORY_DEFINITIONS.find((c) => c.id === activeCategory);
+    if (!config) return [];
+    return data?.metrics?.filter((metric: any) => config.metricIds.includes(metricId(metric))) || [];
   }, [data, activeCategory]);
 
   const getBestWorst = (metricId: string) => {
@@ -71,62 +92,93 @@ function ComparisonAnalysisWidgetComponent({
       widgetId={id}
       onRefresh={() => refetch()}
       onClose={onRemove}
-      isLoading={isLoading}
+      isLoading={isLoading && !hasData}
       exportData={data}
       exportFilename="comparison_analysis"
     >
       <div className="h-full flex flex-col bg-black">
         {/* Ticker Selector */}
         <div className="flex flex-wrap items-center gap-2 p-3 border-b border-gray-800">
-          {symbols.map(s => (
-            <div 
+          {symbols.map((s) => (
+            <div
               key={s}
-              className="flex items-center gap-1 px-2 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded text-xs font-bold"
+              className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-500/10 text-blue-300 border border-blue-500/20 rounded text-xs font-bold"
             >
+              <CompanyLogo symbol={s} size={14} />
               {s}
               {symbols.length > 2 && (
-                <button onClick={() => removeSymbol(s)} className="hover:text-red-400 transition-colors">
+                <button
+                  onClick={() => removeSymbol(s)}
+                  className="hover:text-red-400 transition-colors rounded-full p-0.5 hover:bg-red-500/10"
+                  aria-label={`Remove ${s}`}
+                >
                   <X size={12} />
                 </button>
               )}
             </div>
           ))}
-          
+
           {symbols.length < 5 && (
             <div className="flex items-center gap-1 ml-1">
-              <input
-                value={newSymbol}
-                onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
-                onKeyDown={(e) => e.key === 'Enter' && addSymbol()}
-                placeholder="Add ticker..."
-                className="w-20 px-2 py-1 bg-gray-900 border border-gray-800 rounded text-[10px] text-white focus:border-blue-500 outline-none transition-all"
-              />
-              <button onClick={addSymbol} className="p-1 text-gray-500 hover:text-blue-400 transition-colors">
-                <Plus size={14} />
-              </button>
+              {showAddInput ? (
+                <>
+                  <input
+                    value={newSymbol}
+                    onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === 'Enter' && addSymbol()}
+                    placeholder="Ticker"
+                    className="w-20 px-2 py-1 bg-gray-900 border border-gray-800 rounded text-[10px] text-white focus:border-blue-500 outline-none transition-all"
+                    autoFocus
+                  />
+                  <button
+                    onClick={addSymbol}
+                    className="p-1 text-gray-500 hover:text-blue-400 transition-colors"
+                    aria-label="Confirm add symbol"
+                  >
+                    <Plus size={14} />
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setShowAddInput(true)}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wide rounded border border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 transition-colors"
+                >
+                  <Plus size={12} /> Add Additional Ticker
+                </button>
+              )}
             </div>
           )}
-          
-          {/* Period Toggle */}
-          <div className="ml-auto flex bg-gray-900 rounded p-0.5 border border-gray-800">
-            {['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'].map(p => (
-              <button
-                key={p}
-                onClick={() => setPeriod(p)}
-                className={cn(
+
+          <div className="flex items-center gap-2 ml-auto">
+            {/* Period Toggle */}
+            <div className="flex bg-gray-900 rounded p-0.5 border border-gray-800">
+              {['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'].map(p => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={cn(
                     "px-2 py-0.5 text-[9px] font-bold rounded transition-all",
                     period === p ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-300"
-                )}
-              >
-                {p}
-              </button>
-            ))}
+                  )}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+            <WidgetMeta
+              updatedAt={dataUpdatedAt}
+              isFetching={isFetching && hasData}
+              isCached={isFallback}
+              note={period}
+              align="right"
+              className="ml-2"
+            />
           </div>
         </div>
 
         {/* Category Tabs */}
         <div className="flex gap-1 p-2 border-b border-gray-800 overflow-x-auto scrollbar-hide">
-          {CATEGORIES.map(cat => (
+          {CATEGORY_DEFINITIONS.map(cat => (
             <button
               key={cat.id}
               onClick={() => setActiveCategory(cat.id)}
@@ -144,56 +196,61 @@ function ComparisonAnalysisWidgetComponent({
 
         {/* Comparison Table */}
         <div className="flex-1 overflow-auto scrollbar-hide">
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-2">
-                <RefreshCw size={24} className="animate-spin" />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Comparing Data...</span>
-            </div>
-          ) : isError ? (
-            <div className="flex items-center justify-center h-full text-red-500/50 text-xs font-bold uppercase">
-                Error Loading Comparison
-            </div>
+          {symbols.length < 2 ? (
+            <WidgetEmpty
+              message="Comparison needs at least two tickers."
+              action={{ label: 'Add VCI', onClick: () => setSymbols([...symbols, 'VCI']) }}
+            />
+          ) : isLoading && !hasData ? (
+            <WidgetSkeleton variant="table" lines={6} />
+          ) : error && !hasData ? (
+            <WidgetError error={error as Error} onRetry={() => refetch()} />
+          ) : !hasData ? (
+            <WidgetEmpty message="No comparison data available." />
           ) : (
             <table className="w-full text-[11px] text-left border-collapse">
               <thead className="sticky top-0 bg-[#0a0a0a] z-10">
                 <tr className="border-b border-gray-800">
                   <th className="p-3 text-gray-500 font-bold uppercase tracking-tighter">Metric</th>
-                  {data?.stocks?.map((stock: any) => (
-                    <th key={stock.symbol} className="text-right p-3 text-white font-black uppercase">
-                      {stock.symbol}
+                  {data?.stocks?.map((stock: any, index: number) => (
+                    <th key={`${stock.symbol}-${index}`} className="text-right p-3 text-white font-black uppercase">
+                      <div className="flex items-center justify-end gap-2">
+                         <CompanyLogo symbol={stock.symbol} name={stock.company_name || stock.name || stock.symbol} size={18} />
+                        <span>{stock.symbol}</span>
+                      </div>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filteredMetrics.map((metric: any) => {
-                  const { best, worst } = getBestWorst(metric.id);
+                  const id = metricId(metric);
+                  const { best, worst } = getBestWorst(id);
                   return (
-                    <tr key={metric.id} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors group">
-                      <td className="p-3 text-gray-400 font-medium group-hover:text-gray-200">{metric.name}</td>
-                      {data?.stocks?.map((stock: any) => {
-                        const value = stock.metrics[metric.id];
+                    <tr key={id} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors group">
+                      <td className="p-3 text-gray-400 font-medium group-hover:text-gray-200">{metricName(metric)}</td>
+                      {data?.stocks?.map((stock: any, index: number) => {
+                        const value = stock.metrics[id];
                         const isBest = value !== null && value === best && data.stocks.length > 1;
                         const isWorst = value !== null && value === worst && data.stocks.length > 1;
-                        
-                        // Inverse logic for some metrics (P/E, Debt/Equity, etc.)
-                        const isLowerBetter = metric.id.includes('ratio') || metric.id.includes('debt');
-                        const highlightColor = isLowerBetter 
-                            ? (isWorst ? 'text-green-400' : isBest ? 'text-red-400' : 'text-white')
-                            : (isBest ? 'text-green-400' : isWorst ? 'text-red-400' : 'text-white');
+
+                        const isLowerBetter = id.includes('ratio') || id.includes('debt');
+                        const highlightColor = isLowerBetter
+                          ? (isWorst ? 'text-green-400' : isBest ? 'text-red-400' : 'text-white')
+                          : (isBest ? 'text-green-400' : isWorst ? 'text-red-400' : 'text-white');
 
                         return (
-                          <td 
-                            key={stock.symbol} 
+                          <td
+                            key={`${stock.symbol}-${index}`}
                             className={cn(
-                                "text-right p-3 font-mono",
-                                highlightColor
+                              "text-right p-3 font-mono",
+                              highlightColor
                             )}
                           >
                             <div className="flex items-center justify-end gap-1">
-                                {value !== null && value !== undefined ? formatValue(value, metric.format) : '—'}
-                                {isBest && !isLowerBetter && <TrendingUp size={10} className="opacity-50" />}
-                                {isWorst && isLowerBetter && <TrendingDown size={10} className="opacity-50 text-green-400" />}
+                              {value !== null && value !== undefined ? formatValue(value, metricFormat(metric)) : '—'}
+                              {isBest && !isLowerBetter && <TrendingUp size={10} className="opacity-50" />}
+                              {isWorst && isLowerBetter && <TrendingDown size={10} className="opacity-50 text-green-400" />}
                             </div>
                           </td>
                         );
@@ -201,6 +258,13 @@ function ComparisonAnalysisWidgetComponent({
                     </tr>
                   );
                 })}
+                {filteredMetrics.length === 0 && (
+                  <tr>
+                    <td colSpan={(data?.stocks?.length || 0) + 1} className="p-4">
+                      <WidgetEmpty message="No metrics available in this category for selected symbols." />
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           )}

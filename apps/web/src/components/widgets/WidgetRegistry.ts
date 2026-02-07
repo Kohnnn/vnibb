@@ -1,6 +1,7 @@
 // Widget Registry - maps widget types to components
 
 import type { WidgetType } from '@/types/dashboard';
+import type { WidgetGroupId } from '@/types/widget';
 import { TickerInfoWidget } from './TickerInfoWidget';
 import { TickerProfileWidget } from './TickerProfileWidget';
 import { PriceChartWidget } from './PriceChartWidget';
@@ -53,11 +54,20 @@ import { OrderbookWidget } from './OrderbookWidget';
 import { IndexComparisonWidget } from './IndexComparisonWidget';
 import { MarketNewsWidget } from './MarketNewsWidget';
 import { SectorBreakdownWidget } from './SectorBreakdownWidget';
+import { MarketMoversSectorsWidget } from './MarketMoversSectorsWidget';
 import { ComparisonAnalysisWidget } from './ComparisonAnalysisWidget';
 import { NewsFlowWidget } from './NewsFlowWidget';
 import { AIAnalysisWidget } from './AIAnalysisWidget';
 import { DatabaseBrowserWidget } from './DatabaseBrowserWidget';
 import { FinancialsWidget } from './FinancialsWidget';
+import { NewsCorporateActionsWidget } from './NewsCorporateActionsWidget';
+import { ResearchBrowserWidget } from './ResearchBrowserWidget';
+import { DividendLadderWidget } from './DividendLadderWidget';
+import { InsiderDealTimelineWidget } from './InsiderDealTimelineWidget';
+import { SectorRotationRadarWidget } from './SectorRotationRadarWidget';
+import { MarketBreadthWidget } from './MarketBreadthWidget';
+import { TechnicalSnapshotWidget } from './TechnicalSnapshotWidget';
+import { OwnershipChangesWidget } from './OwnershipChangesWidget';
 import type { ComponentType } from 'react';
 
 export interface WidgetProps {
@@ -66,6 +76,7 @@ export interface WidgetProps {
     onSymbolClick?: (symbol: string) => void;
     hideHeader?: boolean;
     onRemove?: () => void;
+    widgetGroup?: WidgetGroupId;
 }
 
 // Main widget registry
@@ -113,6 +124,8 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     news_feed: NewsFeedWidget as ComponentType<WidgetProps>,
     market_news: MarketNewsWidget as ComponentType<WidgetProps>,
     news_flow: NewsFlowWidget as ComponentType<WidgetProps>,
+    news_corporate_actions: NewsCorporateActionsWidget as ComponentType<WidgetProps>,
+    dividend_ladder: DividendLadderWidget as ComponentType<WidgetProps>,
     events_calendar: EventsCalendarWidget as ComponentType<WidgetProps>,
 
     // Special widgets
@@ -123,6 +136,9 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     world_indices: WorldIndicesWidget as ComponentType<WidgetProps>,
     sector_performance: SectorPerformanceWidget as ComponentType<WidgetProps>,
     sector_breakdown: SectorBreakdownWidget as ComponentType<WidgetProps>,
+    market_movers_sectors: MarketMoversSectorsWidget as ComponentType<WidgetProps>,
+    sector_rotation_radar: SectorRotationRadarWidget as ComponentType<WidgetProps>,
+    market_breadth: MarketBreadthWidget as ComponentType<WidgetProps>,
 
     // Portfolio & Alerts
     portfolio_tracker: PortfolioTrackerWidget as ComponentType<WidgetProps>,
@@ -132,6 +148,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     // Analytics widgets
     volume_analysis: VolumeAnalysisWidget as ComponentType<WidgetProps>,
     technical_summary: TechnicalSummaryWidget as ComponentType<WidgetProps>,
+    technical_snapshot: TechnicalSnapshotWidget as ComponentType<WidgetProps>,
     similar_stocks: SimilarStocksWidget as ComponentType<WidgetProps>,
     quick_stats: QuickStatsWidget as ComponentType<WidgetProps>,
 
@@ -142,9 +159,12 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
 
     // Additional widgets
     notes: NotesWidget as ComponentType<WidgetProps>,
+    research_browser: ResearchBrowserWidget as ComponentType<WidgetProps>,
     rs_ranking: RSRankingWidget as ComponentType<WidgetProps>,
     insider_trading: InsiderTradingWidget as ComponentType<WidgetProps>,
+    insider_deal_timeline: InsiderDealTimelineWidget as ComponentType<WidgetProps>,
     block_trade: BlockTradeWidget as ComponentType<WidgetProps>,
+    ownership_changes: OwnershipChangesWidget as ComponentType<WidgetProps>,
     market_heatmap: MarketHeatmapWidget as ComponentType<WidgetProps>,
     orderbook: OrderbookWidget as ComponentType<WidgetProps>,
     database_inspector: DatabaseInspectorWidget as ComponentType<WidgetProps>,
@@ -188,20 +208,27 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     top_movers: { w: 5, h: 7, minW: 4, minH: 5 },
     world_indices: { w: 5, h: 7, minW: 4, minH: 5 },
     sector_performance: { w: 5, h: 7, minW: 4, minH: 5 },
+    sector_rotation_radar: { w: 6, h: 7, minW: 4, minH: 5 },
+    market_breadth: { w: 5, h: 6, minW: 4, minH: 5 },
     portfolio_tracker: { w: 6, h: 8, minW: 4, minH: 6 },
     price_alerts: { w: 4, h: 7, minW: 3, minH: 5 },
     economic_calendar: { w: 5, h: 7, minW: 4, minH: 5 },
     volume_analysis: { w: 5, h: 7, minW: 4, minH: 5 },
     technical_summary: { w: 5, h: 7, minW: 4, minH: 5 },
+    technical_snapshot: { w: 5, h: 6, minW: 4, minH: 5 },
     forex_rates: { w: 5, h: 7, minW: 4, minH: 5 },
     commodities: { w: 5, h: 7, minW: 4, minH: 5 },
     similar_stocks: { w: 4, h: 6, minW: 3, minH: 5 },
     quick_stats: { w: 5, h: 7, minW: 4, minH: 5 },
     notes: { w: 4, h: 6, minW: 3, minH: 5 },
+    research_browser: { w: 8, h: 8, minW: 6, minH: 6 },
     sector_top_movers: { w: 10, h: 7, minW: 8, minH: 6 },
+    dividend_ladder: { w: 5, h: 7, minW: 4, minH: 5 },
     ai_copilot: { w: 5, h: 8, minW: 4, minH: 6 },
     rs_ranking: { w: 5, h: 8, minW: 4, minH: 6 },
+    insider_deal_timeline: { w: 6, h: 7, minW: 4, minH: 5 },
     block_trade: { w: 6, h: 7, minW: 4, minH: 5 },
+    ownership_changes: { w: 5, h: 6, minW: 4, minH: 5 },
     alert_settings: { w: 4, h: 7, minW: 3, minH: 6 },
     market_heatmap: { w: 8, h: 8, minW: 6, minH: 6 },
     database_inspector: { w: 6, h: 8, minW: 4, minH: 6 },
@@ -209,8 +236,10 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     index_comparison: { w: 4, h: 4, minW: 3, minH: 3 },
     market_news: { w: 4, h: 6, minW: 3, minH: 4 },
     sector_breakdown: { w: 4, h: 6, minW: 3, minH: 4 },
+    market_movers_sectors: { w: 8, h: 7, minW: 6, minH: 5 },
     comparison_analysis: { w: 8, h: 10, minW: 6, minH: 8 },
     news_flow: { w: 4, h: 8, minW: 3, minH: 6 },
+    news_corporate_actions: { w: 8, h: 7, minW: 6, minH: 5 },
     ai_analysis: { w: 6, h: 10, minW: 4, minH: 8 },
     unified_financials: { w: 8, h: 10, minW: 6, minH: 8 },
     database_browser: { w: 6, h: 8, minW: 4, minH: 6 },
@@ -253,20 +282,27 @@ export const widgetNames: Record<WidgetType, string> = {
     top_movers: 'Top Gainers/Losers',
     world_indices: 'World Indices',
     sector_performance: 'Sector Performance',
+    sector_rotation_radar: 'Sector Rotation Radar',
+    market_breadth: 'Market Breadth',
     portfolio_tracker: 'Portfolio Tracker',
     price_alerts: 'Price Alerts',
     economic_calendar: 'Economic Calendar',
     volume_analysis: 'Volume Analysis',
     technical_summary: 'Technical Summary',
+    technical_snapshot: 'Technical Snapshot',
     forex_rates: 'Forex Rates',
     commodities: 'Commodities',
     similar_stocks: 'Similar Stocks',
     quick_stats: 'Quick Stats',
     notes: 'Notes',
+    research_browser: 'Research Browser',
     sector_top_movers: 'Sector Top Movers',
+    dividend_ladder: 'Dividend Ladder',
     ai_copilot: 'AI Copilot',
     rs_ranking: 'RS Rankings',
+    insider_deal_timeline: 'Insider Deal Timeline',
     block_trade: 'Block Trade Alerts',
+    ownership_changes: 'Ownership Changes',
     alert_settings: 'Alert Settings',
     market_heatmap: 'Market Heatmap',
     database_inspector: 'Data Browser',
@@ -274,8 +310,10 @@ export const widgetNames: Record<WidgetType, string> = {
     index_comparison: 'Index Comparison',
     market_news: 'Market News',
     sector_breakdown: 'Sector Breakdown',
+    market_movers_sectors: 'Market Movers & Sectors',
     comparison_analysis: 'Comparison Analysis',
     news_flow: 'News Flow',
+    news_corporate_actions: 'News + Corporate Actions',
     ai_analysis: 'AI Analysis',
     unified_financials: 'Financial Statements (Unified)',
     database_browser: 'Database Browser',
@@ -315,20 +353,27 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     top_movers: 'Gainers, losers, and volume spikes',
     world_indices: 'Global market performance',
     sector_performance: 'Industry-wide returns',
+    sector_rotation_radar: 'Leadership shift by sector',
+    market_breadth: 'Advancers vs decliners by exchange',
     portfolio_tracker: 'Personal holdings P&L',
     price_alerts: 'Target price notifications',
     economic_calendar: 'Macroeconomic events',
     volume_analysis: 'Historical volume distribution',
     technical_summary: 'Indicator-based signals',
+    technical_snapshot: 'Daily technical indicator snapshot',
     forex_rates: 'Currency exchange (VND pairs)',
     commodities: 'Gold, oil, and metals',
     similar_stocks: 'Stocks with high correlation',
     quick_stats: 'Market at a glance',
     notes: 'Symbol-specific research notes',
+    research_browser: 'Embedded research websites',
     sector_top_movers: 'Best stocks in each sector',
+    dividend_ladder: 'Upcoming dividend events',
     ai_copilot: 'Natural language analysis',
     rs_ranking: 'Relative Strength Leaders',
+    insider_deal_timeline: 'Recent insider activity timeline',
     block_trade: 'Large order tracking',
+    ownership_changes: 'Major shareholder snapshot',
     alert_settings: 'Notification preferences',
     market_heatmap: 'Interactive market treemap',
     database_inspector: 'Raw data explorer',
@@ -336,11 +381,11 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     index_comparison: 'Major indices performance',
     market_news: 'Broad market news stream',
     sector_breakdown: 'Market cap by industry',
+    market_movers_sectors: 'Sector performance with top movers',
     comparison_analysis: 'Side-by-side fundamentals',
     news_flow: 'Unified chronological flow',
+    news_corporate_actions: 'Company news with dividends and insider deals',
     ai_analysis: 'Automated deep-dive research',
     unified_financials: 'Balance Sheet, Income, Cash Flow with tabs',
     database_browser: 'Inspect database tables and sync status',
 };
-
-

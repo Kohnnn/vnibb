@@ -36,7 +36,7 @@ export function DataSourcesTab() {
         if (dataSources.length > 0) {
             checkAllConnections();
         }
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    }, []);
 
     const handleConnect = (endpoint: string, name?: string) => {
         const newSource = addDataSource({ endpoint, name });

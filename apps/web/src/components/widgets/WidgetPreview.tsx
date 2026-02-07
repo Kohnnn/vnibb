@@ -16,6 +16,7 @@ interface WidgetPreviewProps {
  * Shows a visual representation of what each widget looks like
  */
 export function WidgetPreview({ type }: WidgetPreviewProps) {
+    const normalizedType = normalizeWidgetType(type);
     const previews: Record<string, React.ReactNode> = {
         price_chart: <ChartPreview />,
         screener: <TablePreview rows={4} />,
@@ -30,13 +31,45 @@ export function WidgetPreview({ type }: WidgetPreviewProps) {
         portfolio_tracker: <PortfolioPreview />,
         top_movers: <TopMoversPreview />,
         sector_performance: <SectorPreview />,
+        market_movers_sectors: <TopMoversPreview />,
+        sector_rotation_radar: <SectorPreview />,
+        market_breadth: <IndexCardsPreview />,
         world_indices: <IndexCardsPreview />,
         technical_summary: <TechnicalPreview />,
+        technical_snapshot: <TechnicalPreview />,
         ai_analysis: <AIPreview />,
         peer_comparison: <ComparisonPreview />,
+        news_corporate_actions: <NewsPreview />,
+        dividend_ladder: <NewsPreview />,
+        insider_deal_timeline: <TablePreview rows={4} />,
+        ownership_changes: <TablePreview rows={4} />,
+        research_browser: <DefaultPreview />,
     };
 
-    return previews[type] || <DefaultPreview />;
+    return previews[normalizedType] || <DefaultPreview />;
+}
+
+function normalizeWidgetType(type: string) {
+    const map: Record<string, string> = {
+        ticker_profile: 'ticker_info',
+        ticker_details: 'ticker_info',
+        company_profile: 'ticker_info',
+        share_statistics: 'key_metrics',
+        key_statistics: 'key_metrics',
+        earnings_history: 'news_feed',
+        company_filings: 'news_feed',
+        dividend_payment: 'news_feed',
+        stock_splits: 'news_feed',
+        news_flow: 'news_feed',
+        unified_financials: 'balance_sheet',
+        balance_sheet_statement: 'balance_sheet',
+        income_statement_quarterly: 'income_statement',
+        income_statement_yearly: 'income_statement',
+        cash_flow_statement: 'cash_flow',
+        sector_heatmap: 'sector_performance',
+    };
+
+    return map[type] || type;
 }
 
 // Mini chart preview with bars

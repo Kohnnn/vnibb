@@ -125,6 +125,9 @@ export function useProfile(symbol: string, enabled = true) {
             try {
                 return await api.getProfile(symbol, signal);
             } catch (error) {
+                if ((error as Error)?.name === 'AbortError') {
+                    throw error;
+                }
                 console.error(`[useProfile] Failed to fetch profile for ${symbol}:`, error);
                 throw error;
             }
@@ -335,6 +338,9 @@ export function useScreenerData(options?: {
             try {
                 return await api.getScreenerData({ ...options, source }, signal);
             } catch (error) {
+                if ((error as Error)?.name === 'AbortError') {
+                    throw error;
+                }
                 console.error(`[useScreenerData] Failed to fetch screener data:`, error);
                 throw error;
             }
@@ -693,7 +699,7 @@ export function useStockQuote(symbol: string, enabled = true) {
                 const response = await api.getQuote(symbol, signal);
                 // Transform to consistent interface
                 return {
-                    symbol: response.symbol,
+                    symbol: response.symbol || response.data?.symbol || symbol,
                     price: response.data.price,
                     change: response.data.change,
                     changePct: response.data.changePct,
@@ -704,6 +710,9 @@ export function useStockQuote(symbol: string, enabled = true) {
                     cached: response.cached,
                 };
             } catch (error) {
+                if ((error as Error)?.name === 'AbortError') {
+                    throw error;
+                }
                 console.error(`[useStockQuote] Failed to fetch quote for ${symbol}:`, error);
                 throw error;
             }

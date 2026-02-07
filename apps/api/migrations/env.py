@@ -50,6 +50,7 @@ from vnibb.models import (
     MarketSector, SectorPerformance, Subsidiary,
     TechnicalIndicator, MarketNews,
     BlockTrade, InsiderAlert, AlertSettings,
+    AppKeyValue,
     SyncStatus,
 )
 

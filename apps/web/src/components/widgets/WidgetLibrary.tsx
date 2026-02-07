@@ -95,7 +95,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: -350, opacity: 0 }}
                         transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-                        className="fixed left-[72px] top-4 bottom-4 w-96 bg-gray-900/90 backdrop-blur-2xl border border-white/10 rounded-2xl z-[45] flex flex-col shadow-2xl overflow-hidden ml-2"
+                        className="fixed left-16 md:left-[220px] top-4 bottom-4 w-[calc(100vw-5rem)] md:w-96 max-w-[28rem] bg-gray-900/90 backdrop-blur-2xl border border-white/10 rounded-2xl z-[65] flex flex-col shadow-2xl overflow-hidden"
                     >
                         {/* Header */}
                         <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-900/30">

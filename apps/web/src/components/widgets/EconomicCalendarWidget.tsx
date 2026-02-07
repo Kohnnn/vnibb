@@ -3,7 +3,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, TrendingUp, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar } from 'lucide-react';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { WidgetEmpty } from '@/components/ui/widget-states';
 
 interface EconomicEvent {
     id: string;
@@ -22,7 +24,6 @@ interface EconomicCalendarWidgetProps {
     onRemove?: () => void;
 }
 
-// Mock economic events
 const ECONOMIC_EVENTS: EconomicEvent[] = [
     { id: '1', date: '2026-01-10', time: '09:00', country: 'VN', event: 'CPI YoY', impact: 'high', forecast: '3.2%', previous: '3.0%' },
     { id: '2', date: '2026-01-10', time: '14:00', country: 'VN', event: 'Trade Balance', impact: 'medium', forecast: '$2.1B', previous: '$1.8B' },
@@ -55,22 +56,20 @@ function formatDate(dateStr: string): string {
     return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-export function EconomicCalendarWidget({ isEditing, onRemove }: EconomicCalendarWidgetProps) {
+export function EconomicCalendarWidget({}: EconomicCalendarWidgetProps) {
     const [filter, setFilter] = useState<'all' | 'high' | 'vn'>('all');
     const [today, setToday] = useState<string>('');
 
-    // Set today's date on client-side only to avoid hydration mismatch
     useEffect(() => {
         setToday(new Date().toISOString().split('T')[0]);
     }, []);
 
-    const filteredEvents = ECONOMIC_EVENTS.filter(e => {
+    const filteredEvents = ECONOMIC_EVENTS.filter((e) => {
         if (filter === 'high') return e.impact === 'high';
         if (filter === 'vn') return e.country === 'VN';
         return true;
     });
 
-    // Group events by date
     const groupedEvents = filteredEvents.reduce((acc, event) => {
         if (!acc[event.date]) acc[event.date] = [];
         acc[event.date].push(event);
@@ -79,7 +78,6 @@ export function EconomicCalendarWidget({ isEditing, onRemove }: EconomicCalendar
 
     return (
         <div className="h-full flex flex-col">
-            {/* Header */}
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2">
                     <Calendar size={12} className="text-blue-400" />
@@ -87,18 +85,21 @@ export function EconomicCalendarWidget({ isEditing, onRemove }: EconomicCalendar
                         <button
                             onClick={() => setFilter('all')}
                             className={`px-2 py-0.5 rounded ${filter === 'all' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
+                            type="button"
                         >
                             All
                         </button>
                         <button
                             onClick={() => setFilter('high')}
                             className={`px-2 py-0.5 rounded ${filter === 'high' ? 'bg-red-600 text-white' : 'text-gray-400'}`}
+                            type="button"
                         >
                             High
                         </button>
                         <button
                             onClick={() => setFilter('vn')}
                             className={`px-2 py-0.5 rounded ${filter === 'vn' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
+                            type="button"
                         >
                             🇻🇳
                         </button>
@@ -106,37 +107,45 @@ export function EconomicCalendarWidget({ isEditing, onRemove }: EconomicCalendar
                 </div>
             </div>
 
-            {/* Events List */}
-            <div className="flex-1 overflow-auto space-y-2">
-                {Object.entries(groupedEvents).map(([date, events]) => (
-                    <div key={date}>
-                        <div className={`text-[10px] px-1 py-0.5 rounded mb-1 ${date === today ? 'bg-blue-500/20 text-blue-400' : 'text-gray-500'
-                            }`}>
-                            {formatDate(date)} {date === today && '(Today)'}
-                        </div>
-                        <div className="space-y-1">
-                            {events.map((event) => (
-                                <div
-                                    key={event.id}
-                                    className="flex items-start gap-2 p-2 rounded bg-gray-800/30 hover:bg-gray-800/50"
-                                >
-                                    <div className={`w-1 h-full min-h-[24px] rounded ${getImpactColor(event.impact)}`} />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-1.5">
-                                            <span className="text-sm">{COUNTRY_FLAGS[event.country] || '🌍'}</span>
-                                            <span className="text-xs text-gray-400">{event.time}</span>
-                                        </div>
-                                        <div className="text-sm text-white font-medium truncate">{event.event}</div>
-                                        <div className="flex gap-2 text-[10px] text-gray-400 mt-0.5">
-                                            {event.forecast && <span>F: {event.forecast}</span>}
-                                            {event.previous && <span>P: {event.previous}</span>}
+            <div className="pb-2 border-b border-gray-800/50">
+                <WidgetMeta note="Sample data" align="right" />
+            </div>
+
+            <div className="flex-1 overflow-auto space-y-2 pt-2">
+                {filteredEvents.length === 0 ? (
+                    <WidgetEmpty message="No events for this filter" icon={<Calendar size={18} />} />
+                ) : (
+                    Object.entries(groupedEvents).map(([date, events]) => (
+                        <div key={date}>
+                            <div
+                                className={`text-[10px] px-1 py-0.5 rounded mb-1 ${date === today ? 'bg-blue-500/20 text-blue-400' : 'text-gray-500'}`}
+                            >
+                                {formatDate(date)} {date === today && '(Today)'}
+                            </div>
+                            <div className="space-y-1">
+                                {events.map((event) => (
+                                    <div
+                                        key={event.id}
+                                        className="flex items-start gap-2 p-2 rounded bg-gray-800/30 hover:bg-gray-800/50"
+                                    >
+                                        <div className={`w-1 h-full min-h-[24px] rounded ${getImpactColor(event.impact)}`} />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-sm">{COUNTRY_FLAGS[event.country] || '🌍'}</span>
+                                                <span className="text-xs text-gray-400">{event.time}</span>
+                                            </div>
+                                            <div className="text-sm text-white font-medium truncate">{event.event}</div>
+                                            <div className="flex gap-2 text-[10px] text-gray-400 mt-0.5">
+                                                {event.forecast && <span>F: {event.forecast}</span>}
+                                                {event.previous && <span>P: {event.previous}</span>}
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            ))}
+                                ))}
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    ))
+                )}
             </div>
         </div>
     );

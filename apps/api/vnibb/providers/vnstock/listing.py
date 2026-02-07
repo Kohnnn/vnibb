@@ -183,11 +183,14 @@ class VnstockListingFetcher:
                 df = listing.symbols_by_group(group=group)
                 if df is None or len(df) == 0:
                     return []
-                records = df.to_dict(orient="records")
-                # Add group to each record
-                for r in records:
-                    r["group"] = group
-                return records
+                try:
+                    records = df.to_dict(orient="records")
+                    for r in records:
+                        r["group"] = group
+                    return records
+                except TypeError:
+                    symbols = df.tolist() if hasattr(df, "tolist") else list(df)
+                    return [{"symbol": symbol, "group": group} for symbol in symbols]
             
             loop = asyncio.get_event_loop()
             records = await loop.run_in_executor(None, _fetch)

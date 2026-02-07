@@ -3,11 +3,12 @@
 import { useState, memo, useCallback } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { useProfile, useStockQuote, useFinancialRatios } from '@/lib/queries';
-import { Sparkles, RefreshCw, BrainCircuit, AlertTriangle, FileText } from 'lucide-react';
+import { Sparkles, RefreshCw, BrainCircuit, AlertTriangle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/lib/api';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface AIAnalysisWidgetProps {
   id: string;
@@ -100,26 +101,29 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
       widgetId={id}
       showLinkToggle
     >
-      <div className="h-full flex flex-col bg-black overflow-hidden">
+        <div className="h-full flex flex-col bg-black overflow-hidden">
         {/* Actions bar */}
         <div className="flex items-center justify-between p-3 border-b border-gray-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-2">
             <BrainCircuit size={16} className="text-purple-400" />
             <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Gemini Intelligence</span>
           </div>
-          <button
-            onClick={runAnalysis}
-            disabled={isLoading || !profile}
-            className={cn(
-                "flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all",
-                isLoading 
-                    ? "bg-gray-800 text-gray-500 cursor-not-allowed" 
-                    : "bg-purple-600 text-white hover:bg-purple-500 shadow-lg shadow-purple-900/20"
-            )}
-          >
-            {isLoading ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
-            {analysis ? 'Re-Analyze' : 'Analyze Stock'}
-          </button>
+          <div className="flex items-center gap-2">
+            <WidgetMeta note="AI analysis" isFetching={isLoading} align="right" />
+            <button
+              onClick={runAnalysis}
+              disabled={isLoading || !profile}
+              className={cn(
+                  "flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all",
+                  isLoading 
+                      ? "bg-gray-800 text-gray-500 cursor-not-allowed" 
+                      : "bg-purple-600 text-white hover:bg-purple-500 shadow-lg shadow-purple-900/20"
+              )}
+            >
+              {isLoading ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+              {analysis ? 'Re-Analyze' : 'Analyze Stock'}
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-auto p-4 scrollbar-hide">

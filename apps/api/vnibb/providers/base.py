@@ -143,6 +143,11 @@ class BaseFetcher(ABC, Generic[QueryT, DataT]):
                 
             # Step 3: Transform to standardized models
             return cls.transform_data(params, raw_data)
+        except SystemExit as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Graceful degradation: {cls.__name__} aborted: {e}")
+            return []
         except Exception as e:
             # Phase 50: Graceful degradation - log and return empty instead of 502/500
             import logging

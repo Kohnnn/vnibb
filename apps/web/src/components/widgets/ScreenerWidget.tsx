@@ -2,29 +2,28 @@
 'use client';
 
 import { useState, useMemo, useCallback, useEffect, memo } from 'react';
-import {
-    Search, Filter, RefreshCw, Grid3X3, Table, LayoutGrid,
-    ChevronDown, Plus, Star, BarChart3, Settings2, Bookmark,
-    ArrowUpRight, ListFilter, LayoutPanelLeft, LineChart
-} from 'lucide-react';
+import { Search, Table, LayoutGrid, ListFilter, LineChart } from 'lucide-react';
 import type { ScreenerData } from '@/types/screener';
-import { useScreenerData, useHistoricalPrices } from '@/lib/queries';
+import { useScreenerData, useVnstockSource } from '@/lib/queries';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/VirtualizedTable';
 import { useColumnPresets } from '@/hooks/useColumnPresets';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import type { WidgetGroupId } from '@/types/widget';
 import { ALL_COLUMNS, type ScreenerColumn } from '@/types/screener';
 import { formatScreenerValue } from '@/utils/formatters';
 import { MarketToggle, type Market } from './screener/MarketToggle';
 import { cn } from '@/lib/utils';
 
-// New Components
 import { FilterBar, type ActiveFilter } from './screener/FilterBar';
 import { FilterBuilderPanel, type FilterGroup } from './screener/FilterBuilderPanel';
 import { ColumnCustomizer } from './screener/ColumnCustomizer';
 import { SavedScreensDropdown, type SavedScreen } from './screener/SavedScreensDropdown';
 import { PerformanceTable } from './screener/PerformanceTable';
 import { ChartGridCard } from './screener/ChartGridCard';
-import { CompanyLogo } from '@/components/ui/CompanyLogo';
 
 interface ScreenerWidgetProps {
     id: string;
@@ -33,6 +32,7 @@ interface ScreenerWidgetProps {
     hideHeader?: boolean;
     onRemove?: () => void;
     onSymbolClick?: (symbol: string) => void;
+    widgetGroup?: WidgetGroupId;
 }
 
 type ViewMode = 'table' | 'chart' | 'performance';
@@ -44,11 +44,12 @@ export function ScreenerWidget({
     hideHeader,
     onRemove,
     onSymbolClick,
+    widgetGroup,
 }: ScreenerWidgetProps) {
     // UI State
     const [viewMode, setViewMode] = useState<ViewMode>('table');
     const [search, setSearch] = useState('');
-    const [market, setMarket] = useState<Market>('ALL');
+    const [market, setMarket] = useState<Market>(initialExchange as Market);
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
     const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
     const [advancedFilterGroup, setAdvancedFilterGroup] = useState<FilterGroup | null>(null);
@@ -65,8 +66,18 @@ export function ScreenerWidget({
         [activeColumnIds]
     );
 
+    const source = useVnstockSource();
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+
     // Data fetching
-    const { data: screenerData, isLoading, isRefetching, refetch } = useScreenerData({
+    const {
+        data: screenerData,
+        isLoading,
+        isFetching,
+        error,
+        dataUpdatedAt,
+        refetch,
+    } = useScreenerData({
         limit,
         exchange: market === 'ALL' ? undefined : market
     });
@@ -108,6 +119,9 @@ export function ScreenerWidget({
         return result;
     }, [screenerData, search, activeFilters, sortField, sortOrder]);
 
+    const hasData = filteredData.length > 0;
+    const isFallback = Boolean(error && hasData);
+
     // Handlers
     const handleSort = useCallback((field: string) => {
         if (sortField === field) {
@@ -117,6 +131,12 @@ export function ScreenerWidget({
             setSortOrder('desc');
         }
     }, [sortField]);
+
+    const handleSymbolSelect = useCallback((symbol: string) => {
+        if (!symbol) return;
+        onSymbolClick?.(symbol);
+        setLinkedSymbol(symbol);
+    }, [onSymbolClick, setLinkedSymbol]);
 
     const handleSelectScreen = useCallback((screen: SavedScreen) => {
         setActiveScreenId(screen.id);
@@ -139,6 +159,11 @@ export function ScreenerWidget({
         setCustomScreens(prev => prev.filter(s => s.id !== id));
     }, []);
 
+    const handleResetFilters = useCallback(() => {
+        setActiveFilters([]);
+        setSearch('');
+    }, []);
+
     // Table columns configuration
     const tableColumns = useMemo(() => {
         return visibleColumns.map(col => ({
@@ -155,10 +180,11 @@ export function ScreenerWidget({
             title="Screener Pro"
             onRefresh={() => refetch()}
             onClose={onRemove}
-            isLoading={isLoading || isRefetching}
+            isLoading={isLoading && !hasData}
             noPadding
             widgetId={id}
             exportData={filteredData}
+            hideHeader={hideHeader}
         >
             <div className="flex flex-col h-full overflow-hidden bg-black font-sans">
                 {/* Primary Toolbar */}
@@ -255,33 +281,21 @@ export function ScreenerWidget({
 
                 {/* Main Content Area */}
                 <div className="flex-1 overflow-hidden relative">
-                    {isLoading ? (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 z-50">
-                            <RefreshCw size={32} className="animate-spin text-blue-500 mb-4" />
-                            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-500 animate-pulse">Scanning Vietnam Markets</span>
-                        </div>
+                    {isLoading && !hasData ? (
+                        <WidgetSkeleton variant="table" lines={8} />
+                    ) : error && !hasData ? (
+                        <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : filteredData.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-700 gap-4">
-                            <div className="p-4 bg-gray-900/50 rounded-full border border-gray-800">
-                                <Search size={40} strokeWidth={1} />
-                            </div>
-                            <div className="text-center">
-                                <p className="text-sm font-bold text-gray-400">No stocks found</p>
-                                <p className="text-xs text-gray-600 mt-1 uppercase tracking-tighter">Try adjusting your filters or search terms</p>
-                            </div>
-                            <button
-                                onClick={() => { setActiveFilters([]); setSearch(''); }}
-                                className="mt-2 text-[10px] font-black text-blue-500 hover:text-blue-400 uppercase tracking-widest px-4 py-2 border border-blue-500/20 rounded-lg hover:bg-blue-500/5"
-                            >
-                                Reset All Filters
-                            </button>
-                        </div>
+                        <WidgetEmpty
+                            message="No stocks match your filters."
+                            action={{ label: 'Reset filters', onClick: handleResetFilters }}
+                        />
                     ) : viewMode === 'table' ? (
                         <VirtualizedTable
                             data={filteredData}
                             columns={tableColumns}
                             rowHeight={38}
-                            onRowClick={(row) => onSymbolClick?.(row.ticker)}
+                            onRowClick={(row) => handleSymbolSelect(row.ticker)}
                             sortField={sortField}
                             sortOrder={sortOrder}
                             onSort={handleSort}
@@ -295,12 +309,12 @@ export function ScreenerWidget({
                                     <ChartGridCard
                                         key={stock.ticker}
                                         symbol={stock.ticker}
+                                        exchange={stock.exchange}
                                         name={stock.organ_name}
                                         price={stock.price}
                                         change={stock.change_1d}
                                         changePercent={stock.change_1d}
-                                        priceHistory={stock.priceHistory}
-                                        onClick={() => onSymbolClick?.(stock.ticker)}
+                                        onClick={() => handleSymbolSelect(stock.ticker)}
                                     />
                                 ))}
                             </div>
@@ -321,17 +335,16 @@ export function ScreenerWidget({
                                 <span className="text-gray-500">{market}</span>
                             </div>
                         )}
-                        <div className="hidden md:flex items-center gap-2">
-                            <span className="w-1 h-1 rounded-full bg-gray-600" />
-                            <span className="text-gray-500">Source: KBS</span>
-                        </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2 bg-green-900/10 px-2 py-0.5 rounded-full border border-green-900/20">
-                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse" />
-                            <span className="text-green-500/80 font-black tracking-tighter text-[9px]">REALTIME</span>
-                        </div>
-                    </div>
+                    <WidgetMeta
+                        updatedAt={dataUpdatedAt}
+                        isFetching={isFetching && hasData}
+                        isCached={isFallback}
+                        sourceLabel={source}
+                        note="Snapshot"
+                        align="right"
+                        className="text-[9px]"
+                    />
                 </div>
             </div>
         </WidgetContainer>

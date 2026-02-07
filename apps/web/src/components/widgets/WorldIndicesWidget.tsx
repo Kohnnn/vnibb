@@ -2,8 +2,10 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Globe, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { WidgetEmpty } from '@/components/ui/widget-states';
 
 interface WorldIndexData {
     name: string;
@@ -19,7 +21,6 @@ interface WorldIndicesWidgetProps {
     onRemove?: () => void;
 }
 
-// Mock global indices data
 const WORLD_INDICES: WorldIndexData[] = [
     { name: 'S&P 500', symbol: 'SPX', value: 5234.18, change: 32.45, changePct: 0.62, region: 'americas' },
     { name: 'Dow Jones', symbol: 'DJI', value: 39127.14, change: -45.23, changePct: -0.12, region: 'americas' },
@@ -33,9 +34,10 @@ const WORLD_INDICES: WorldIndexData[] = [
 
 type RegionFilter = 'all' | 'asia' | 'europe' | 'americas';
 
-export function WorldIndicesWidget({ isEditing, onRemove }: WorldIndicesWidgetProps) {
+export function WorldIndicesWidget({}: WorldIndicesWidgetProps) {
     const [filter, setFilter] = useState<RegionFilter>('all');
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(new Date());
 
     const filteredIndices = filter === 'all'
         ? WORLD_INDICES
@@ -43,22 +45,24 @@ export function WorldIndicesWidget({ isEditing, onRemove }: WorldIndicesWidgetPr
 
     const handleRefresh = () => {
         setIsRefreshing(true);
-        setTimeout(() => setIsRefreshing(false), 500);
+        setTimeout(() => {
+            setIsRefreshing(false);
+            setLastUpdated(new Date());
+        }, 500);
     };
 
     return (
         <div className="h-full flex flex-col">
-            {/* Header */}
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2">
                     <Globe size={12} className="text-blue-400" />
                     <div className="flex bg-gray-800 rounded text-[10px]">
-                        {(['all', 'asia', 'europe', 'americas'] as RegionFilter[]).map(r => (
+                        {(['all', 'asia', 'europe', 'americas'] as RegionFilter[]).map((r) => (
                             <button
                                 key={r}
                                 onClick={() => setFilter(r)}
-                                className={`px-2 py-0.5 rounded capitalize ${filter === r ? 'bg-blue-600 text-white' : 'text-gray-400'
-                                    }`}
+                                className={`px-2 py-0.5 rounded capitalize ${filter === r ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
+                                type="button"
                             >
                                 {r === 'all' ? 'All' : r.slice(0, 2).toUpperCase()}
                             </button>
@@ -68,38 +72,46 @@ export function WorldIndicesWidget({ isEditing, onRemove }: WorldIndicesWidgetPr
                 <button
                     onClick={handleRefresh}
                     className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded"
+                    type="button"
                 >
                     <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
                 </button>
             </div>
 
-            {/* Indices List */}
-            <div className="flex-1 overflow-auto space-y-1">
-                {filteredIndices.map((index) => {
-                    const isUp = index.changePct >= 0;
-                    return (
-                        <div
-                            key={index.symbol}
-                            className={`p-2 rounded-lg border ${isUp
-                                    ? 'bg-green-500/5 border-green-500/20'
-                                    : 'bg-red-500/5 border-red-500/20'
-                                }`}
-                        >
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <div className="text-xs text-gray-400">{index.name}</div>
-                                    <div className={`text-sm font-bold ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                                        {index.value.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            <div className="pb-2 border-b border-gray-800/50">
+                <WidgetMeta updatedAt={lastUpdated} isFetching={isRefreshing} note="Sample data" align="right" />
+            </div>
+
+            <div className="flex-1 overflow-auto space-y-1 pt-2">
+                {filteredIndices.length === 0 ? (
+                    <WidgetEmpty message="No indices available" icon={<Globe size={18} />} />
+                ) : (
+                    filteredIndices.map((index, idx) => {
+                        const isUp = index.changePct >= 0;
+                        return (
+                            <div
+                                key={`${index.symbol}-${idx}`}
+                                className={`p-2 rounded-lg border ${isUp
+                                        ? 'bg-green-500/5 border-green-500/20'
+                                        : 'bg-red-500/5 border-red-500/20'
+                                    }`}
+                            >
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <div className="text-xs text-gray-400">{index.name}</div>
+                                        <div className={`text-sm font-bold ${isUp ? 'text-green-400' : 'text-red-400'}`}>
+                                            {index.value.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                        </div>
+                                    </div>
+                                    <div className={`flex items-center gap-1 text-xs ${isUp ? 'text-green-400' : 'text-red-400'}`}>
+                                        {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                                        <span>{isUp ? '+' : ''}{index.changePct.toFixed(2)}%</span>
                                     </div>
                                 </div>
-                                <div className={`flex items-center gap-1 text-xs ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                                    {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                                    <span>{isUp ? '+' : ''}{index.changePct.toFixed(2)}%</span>
-                                </div>
                             </div>
-                        </div>
-                    );
-                })}
+                        );
+                    })
+                )}
             </div>
         </div>
     );

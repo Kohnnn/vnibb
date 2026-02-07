@@ -402,7 +402,7 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
 
                 {/* Library Section */}
                 {!collapsed && (
-                    <div className="px-2 py-1 border-b border-[#1e2a3b]">
+                    <div className="px-2 py-1 border-b border-[#1e2a3b] shrink-0">
                         <h3 className="px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                             Library
                         </h3>

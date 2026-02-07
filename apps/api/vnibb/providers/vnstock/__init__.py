@@ -54,7 +54,7 @@ def get_stock(symbol: str, source: str = None):
     
     Args:
         symbol: Stock ticker symbol (e.g., 'VNM', 'FPT')
-        source: Data source (KBS, VCI, TCBS, DNSE). Defaults to settings.vnstock_source
+        source: Data source (KBS, VCI, DNSE). Defaults to settings.vnstock_source
     
     Returns:
         Stock object for data retrieval

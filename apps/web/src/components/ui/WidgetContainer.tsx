@@ -1,9 +1,25 @@
 'use client';
 
-import React, { ReactNode, useState, useCallback } from 'react';
+import React, { ReactNode, useState, useCallback, useContext } from 'react';
 import { WidgetHeader } from './WidgetHeader';
 import { cn } from '@/lib/utils';
 import { ExportButton } from './ExportButton';
+
+const WidgetHeaderVisibilityContext = React.createContext(false);
+
+export function WidgetHeaderVisibilityProvider({
+  hideHeader,
+  children,
+}: {
+  hideHeader: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <WidgetHeaderVisibilityContext.Provider value={hideHeader}>
+      {children}
+    </WidgetHeaderVisibilityContext.Provider>
+  );
+}
 
 interface WidgetContainerProps {
   title: string;
@@ -47,6 +63,8 @@ export function WidgetContainer({
   hideHeader = false,
 }: WidgetContainerProps) {
   const [isMaximized, setIsMaximized] = useState(false);
+  const inheritedHideHeader = useContext(WidgetHeaderVisibilityContext);
+  const shouldHideHeader = hideHeader || inheritedHideHeader;
 
   const handleExpand = useCallback(() => {
     setIsMaximized(true);
@@ -60,7 +78,7 @@ export function WidgetContainer({
       "overflow-hidden",
       className
     )}>
-      {!hideHeader && (
+      {!shouldHideHeader && (
         <WidgetHeader
           title={title}
           symbol={symbol}

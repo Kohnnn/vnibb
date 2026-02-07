@@ -11,7 +11,6 @@
 
 // Track if Sentry is initialized
 let sentryInitialized = false;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let SentryModule: any = null;
 
 /**
@@ -32,7 +31,6 @@ export async function initMonitoring(): Promise<void> {
   try {
     // Dynamic import - will fail gracefully if @sentry/nextjs not installed
     // Using eval to prevent TypeScript from type-checking the module
-    // eslint-disable-next-line no-eval
     SentryModule = await (eval('import("@sentry/nextjs")') as Promise<unknown>);
 
     if (!SentryModule?.init) {

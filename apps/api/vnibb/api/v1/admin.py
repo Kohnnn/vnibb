@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks, B
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.core.database import get_db
+from vnibb.core.database import get_db, engine
 
 router = APIRouter(tags=["Admin"])
 
@@ -16,6 +16,7 @@ ALL_TABLES = [
     "income_statements", "balance_sheets", "cash_flows", "financial_ratios",
     "company_news", "company_events", "dividends", "insider_deals", "market_news",
     "intraday_trades", "orderbook_snapshots", "foreign_trading",
+    "order_flow_daily", "derivative_prices",
     "market_sectors", "sector_performances", "screener_snapshots",
     "technical_indicators", "sync_status",
     "user_dashboards", "dashboard_widgets",
@@ -55,6 +56,7 @@ async def list_all_tables(db: AsyncSession = Depends(get_db)):
                 "freshness": freshness,
             })
         except Exception as e:
+            await db.rollback()
             tables_info.append({"name": table_name, "count": 0, "freshness": "unknown", "error": str(e)})
     
     tables_info.sort(key=lambda x: x["count"], reverse=True)
@@ -70,11 +72,70 @@ async def get_table_schema(table_name: str, db: AsyncSession = Depends(get_db)):
     """Get column metadata for a table."""
     if table_name not in ALL_TABLES: raise HTTPException(status_code=404, detail="Table not found")
     try:
+        if engine.dialect.name == "postgresql":
+            columns_result = await db.execute(
+                text(
+                    """
+                    SELECT
+                        column_name,
+                        data_type,
+                        is_nullable,
+                        column_default
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = :table_name
+                    ORDER BY ordinal_position
+                    """
+                ),
+                {"table_name": table_name},
+            )
+            columns = columns_result.mappings().all()
+
+            pk_result = await db.execute(
+                text(
+                    """
+                    SELECT kcu.column_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu
+                      ON tc.constraint_name = kcu.constraint_name
+                     AND tc.table_schema = kcu.table_schema
+                    WHERE tc.constraint_type = 'PRIMARY KEY'
+                      AND tc.table_schema = 'public'
+                      AND tc.table_name = :table_name
+                    """
+                ),
+                {"table_name": table_name},
+            )
+            pk_columns = {row["column_name"] for row in pk_result.mappings().all()}
+
+            return {
+                "table": table_name,
+                "columns": [
+                    {
+                        "name": col["column_name"],
+                        "type": col["data_type"],
+                        "nullable": col["is_nullable"] == "YES",
+                        "default": col["column_default"],
+                        "primary_key": col["column_name"] in pk_columns,
+                    }
+                    for col in columns
+                ],
+            }
+
         result = await db.execute(text(f"PRAGMA table_info({table_name})"))
         columns = result.fetchall()
         return {
             "table": table_name,
-            "columns": [{"name": col[1], "type": col[2], "nullable": not col[3], "primary_key": bool(col[5])} for col in columns]
+            "columns": [
+                {
+                    "name": col[1],
+                    "type": col[2],
+                    "nullable": not col[3],
+                    "default": col[4],
+                    "primary_key": bool(col[5]),
+                }
+                for col in columns
+            ],
         }
     except Exception as e: return {"error": str(e)}
 

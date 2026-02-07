@@ -1,45 +1,61 @@
 'use client';
 
-import { useState } from 'react';
-import { cn } from '@/lib/utils';
+import { useMemo, useState } from 'react';
 
 interface CompanyLogoProps {
   symbol: string;
+  name?: string;
+  website?: string | null;
   size?: number;
   className?: string;
 }
 
-export function CompanyLogo({ symbol, size = 24, className = '' }: CompanyLogoProps) {
-  const [hasError, setHasError] = useState(false);
-  
-  // Use a fallback-friendly logo service
-  // Clearbit often works for major tickers, or we can use a generic stock logo service
-  const logoUrl = `https://logo.clearbit.com/${symbol.toLowerCase()}.com.vn`;
-  
+function normalizeDomain(website?: string | null): string | null {
+  if (!website) return null;
+  try {
+    const withProtocol = /^https?:\/\//i.test(website) ? website : `https://${website}`;
+    const url = new URL(withProtocol);
+    return url.hostname.replace(/^www\./i, '');
+  } catch {
+    return null;
+  }
+}
+
+export function CompanyLogo({ symbol, name, website, size = 20, className }: CompanyLogoProps) {
+  const [broken, setBroken] = useState(false);
+
+  const domain = useMemo(() => {
+    return normalizeDomain(website);
+  }, [website]);
+
+  const initials = (name || symbol || '?').trim().charAt(0).toUpperCase();
+
+  if (broken || !domain) {
+    return (
+      <div
+        className={`inline-flex items-center justify-center rounded-full border border-white/10 bg-blue-600/20 text-[10px] font-black text-blue-200 ${className ?? ''}`.trim()}
+        style={{ width: size, height: size }}
+        title={name || symbol}
+      >
+        {initials}
+      </div>
+    );
+  }
+
   return (
-    <div 
-      className={cn(
-          "flex items-center justify-center bg-gray-800 rounded-md overflow-hidden flex-shrink-0 border border-gray-700/50",
-          className
-      )}
-      style={{ width: size, height: size }}
-    >
-      {!hasError ? (
-        <img
-          src={logoUrl}
-          alt={symbol}
-          width={size}
-          height={size}
-          className="object-contain"
-          onError={() => setHasError(true)}
-        />
-      ) : (
-        <div 
-          className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-700 to-gray-900"
-        >
-            <span className="text-[10px] font-black text-white/40">{symbol.slice(0, 2).toUpperCase()}</span>
-        </div>
-      )}
-    </div>
+    <img
+      src={`https://logo.clearbit.com/${domain}`}
+      alt={name || symbol}
+      width={size}
+      height={size}
+      className={`rounded-full border border-white/10 bg-[#0b1221] object-cover ${className ?? ''}`.trim()}
+      onError={() => setBroken(true)}
+      loading="lazy"
+      decoding="async"
+      referrerPolicy="no-referrer"
+      title={name || symbol}
+    />
   );
 }
+
+export default CompanyLogo;

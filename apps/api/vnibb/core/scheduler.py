@@ -38,6 +38,7 @@ def configure_scheduler():
     
     from vnibb.services.data_pipeline import (
         run_daily_sync,
+        run_daily_trading_sync,
         run_hourly_news_sync,
         run_intraday_sync,
     )
@@ -58,6 +59,20 @@ def configure_scheduler():
         max_instances=1,
     )
     logger.info("Scheduled: daily_sync at 9:00 UTC (4:00 PM VNT)")
+
+    # =========================================================================
+    # Daily Trading Flow Sync - 4:20 PM VNT (9:20 AM UTC)
+    # Order flow, foreign trading, block trades, derivatives
+    # =========================================================================
+    scheduler.add_job(
+        run_daily_trading_sync,
+        trigger=CronTrigger(hour=9, minute=20, timezone="UTC"),
+        id="daily_trading_sync",
+        name="Daily Trading Flow Sync",
+        replace_existing=True,
+        max_instances=1,
+    )
+    logger.info("Scheduled: daily_trading_sync at 9:20 UTC (4:20 PM VNT)")
     
     # =========================================================================
     # RS Rating Calculation - 4:10 PM VNT (9:10 AM UTC)

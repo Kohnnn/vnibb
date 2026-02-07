@@ -2,8 +2,11 @@
 
 'use client';
 
-import { UserCircle, RefreshCw, Briefcase } from 'lucide-react';
+import { UserCircle, Briefcase } from 'lucide-react';
 import { useOfficers } from '@/lib/queries';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface OfficersManagementWidgetProps {
     symbol: string;
@@ -18,44 +21,39 @@ function formatShares(shares: number | null | undefined): string {
     return shares.toLocaleString();
 }
 
-export function OfficersManagementWidget({ symbol, isEditing, onRemove }: OfficersManagementWidgetProps) {
-    const { data, isLoading, refetch, isRefetching } = useOfficers(symbol);
+export function OfficersManagementWidget({ symbol }: OfficersManagementWidgetProps) {
+    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useOfficers(symbol, !!symbol);
 
     const officers = data?.data || [];
+    const hasData = officers.length > 0;
+    const isFallback = Boolean(error && hasData);
+
+    if (!symbol) {
+        return <WidgetEmpty message="Select a symbol to view officers" icon={<Briefcase size={18} />} />;
+    }
 
     return (
         <div className="h-full flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between px-1 py-1 mb-2">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-800/50">
                 <div className="flex items-center gap-2 text-xs text-gray-500">
                     <Briefcase size={12} />
                     <span>{officers.length} executives</span>
                 </div>
-                <button
-                    onClick={() => refetch()}
-                    disabled={isRefetching}
-                    className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
-                >
-                    <RefreshCw size={12} className={isRefetching ? 'animate-spin' : ''} />
-                </button>
+                <WidgetMeta
+                    updatedAt={dataUpdatedAt}
+                    isFetching={isFetching && hasData}
+                    isCached={isFallback}
+                    align="right"
+                />
             </div>
 
-            {/* Officers List */}
-            <div className="flex-1 overflow-y-auto space-y-1">
-                {isLoading ? (
-                    <div className="space-y-2">
-                        {[...Array(5)].map((_, i) => (
-                            <div key={i} className="animate-pulse p-2 bg-gray-800/30 rounded">
-                                <div className="h-4 bg-gray-800 rounded w-3/4 mb-1" />
-                                <div className="h-3 bg-gray-800 rounded w-1/2" />
-                            </div>
-                        ))}
-                    </div>
-                ) : officers.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-32 text-gray-500">
-                        <Briefcase size={24} className="mb-2 opacity-30" />
-                        <p className="text-xs">No officers data</p>
-                    </div>
+            <div className="flex-1 overflow-y-auto space-y-1 pt-2">
+                {isLoading && !hasData ? (
+                    <WidgetSkeleton lines={5} />
+                ) : error && !hasData ? (
+                    <WidgetError error={error as Error} onRetry={() => refetch()} />
+                ) : !hasData ? (
+                    <WidgetEmpty message="No officers data" icon={<Briefcase size={18} />} />
                 ) : (
                     officers.map((officer, index) => (
                         <div

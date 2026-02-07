@@ -69,8 +69,8 @@ async def get_price_board(
 
     source: str = Query(
         default="KBS",
-        pattern=r"^(KBS|VCI|TCBS|DNSE)$",
-        description="Data source: KBS (default), VCI, TCBS, or DNSE",
+        pattern=r"^(KBS|VCI|DNSE)$",
+        description="Data source: KBS (default), VCI, or DNSE",
     ),
 
 ) -> PriceBoardResponse:
@@ -202,8 +202,8 @@ async def get_sector_top_movers(
     ),
     source: str = Query(
         default="KBS",
-        pattern=r"^(KBS|VCI|TCBS|DNSE)$",
-        description="Data source: KBS (default), VCI, TCBS, or DNSE",
+        pattern=r"^(KBS|VCI|DNSE)$",
+        description="Data source: KBS (default), VCI, or DNSE",
     ),
 
 ) -> SectorTopMoversResponse:
@@ -341,8 +341,8 @@ class SectorPerformanceResponse(BaseModel):
 async def get_all_sector_performance(
     source: str = Query(
         default="KBS",
-        pattern=r"^(KBS|VCI|TCBS|DNSE)$",
-        description="Data source: KBS (default), VCI, TCBS, or DNSE",
+        pattern=r"^(KBS|VCI|DNSE)$",
+        description="Data source: KBS (default), VCI, or DNSE",
     ),
 
 ) -> SectorPerformanceResponse:

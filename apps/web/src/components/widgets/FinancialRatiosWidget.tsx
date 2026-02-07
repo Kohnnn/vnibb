@@ -2,11 +2,14 @@
 'use client';
 
 import { useState, useMemo, memo } from 'react';
-import { BarChart3, RefreshCw } from 'lucide-react';
+import { BarChart3 } from 'lucide-react';
 import { useFinancialRatios } from '@/lib/queries';
 import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { cn } from '@/lib/utils';
 
 interface FinancialRatiosWidgetProps {
@@ -52,12 +55,28 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
         return period;
     }, [period]);
 
-    const { data, isLoading, refetch, isRefetching } = useFinancialRatios(symbol, { period: apiPeriod });
+    const {
+        data,
+        isLoading,
+        error,
+        refetch,
+        isFetching,
+        dataUpdatedAt,
+    } = useFinancialRatios(symbol, { period: apiPeriod });
 
     const ratios = data?.data || [];
+    const hasData = ratios.length > 0;
+    const isFallback = Boolean(error && hasData);
+    const [activeCategory, setActiveCategory] = useState<'valuation' | 'profitability' | 'health'>('valuation');
+
+    const categoryMetrics: Record<'valuation' | 'profitability' | 'health', string[]> = {
+        valuation: ['pe', 'pb', 'ps', 'eps', 'bvps'],
+        profitability: ['roe', 'roa', 'gross_margin', 'net_margin'],
+        health: ['debt_equity', 'current_ratio'],
+    };
 
     const headerActions = (
-        <div className="mr-2">
+        <div className="mr-1">
             <PeriodToggle value={period} onChange={setPeriod} compact />
         </div>
     );
@@ -68,7 +87,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
             symbol={symbol}
             onRefresh={() => refetch()}
             onClose={onRemove}
-            isLoading={isLoading || isRefetching}
+            isLoading={isLoading && !hasData}
             headerActions={headerActions}
             noPadding
             widgetId={id}
@@ -77,19 +96,42 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
             exportFilename={`ratios_${symbol}_${period}`}
         >
             <div className="h-full flex flex-col">
-                {/* Ratios Table */}
+                <div className="px-2 py-1.5 border-b border-gray-800/50">
+                    <WidgetMeta
+                        updatedAt={dataUpdatedAt}
+                        isFetching={isFetching && hasData}
+                        isCached={isFallback}
+                        note={period === 'FY' ? 'Annual' : 'Quarterly'}
+                        align="right"
+                    />
+                    <div className="mt-1 flex gap-1">
+                        {[
+                            { id: 'valuation', label: 'Valuation' },
+                            { id: 'profitability', label: 'Profitability' },
+                            { id: 'health', label: 'Health' },
+                        ].map((cat) => (
+                            <button
+                                key={cat.id}
+                                onClick={() => setActiveCategory(cat.id as typeof activeCategory)}
+                                className={cn(
+                                    'px-2 py-0.5 text-[10px] font-bold rounded transition-colors',
+                                    activeCategory === cat.id
+                                        ? 'bg-blue-600/15 text-blue-300 border border-blue-500/30'
+                                        : 'text-gray-500 hover:text-gray-300 border border-transparent'
+                                )}
+                            >
+                                {cat.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
                 <div className="flex-1 overflow-auto px-2 pt-1 scrollbar-hide">
-                    {isLoading ? (
-                        <div className="space-y-2 p-1">
-                            {[...Array(6)].map((_, i) => (
-                                <div key={i} className="animate-pulse h-8 bg-gray-800/30 rounded" />
-                            ))}
-                        </div>
-                    ) : ratios.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-48 text-gray-600 gap-2 opacity-50 uppercase font-black text-[10px] tracking-widest">
-                            <BarChart3 size={32} strokeWidth={1} />
-                            No Ratio Data
-                        </div>
+                    {isLoading && !hasData ? (
+                        <WidgetSkeleton variant="table" lines={6} />
+                    ) : error && !hasData ? (
+                        <WidgetError error={error as Error} onRetry={() => refetch()} />
+                    ) : !hasData ? (
+                        <WidgetEmpty message={`No ratio data for ${symbol}`} icon={<BarChart3 size={18} />} />
                     ) : (
                         <table className="w-full text-[11px] text-left">
                             <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
@@ -103,7 +145,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                                 </tr>
                             </thead>
                             <tbody>
-                                {['pe', 'pb', 'roe', 'roa', 'eps', 'debt_equity', 'gross_margin', 'net_margin'].map((key) => (
+                                {categoryMetrics[activeCategory].map((key) => (
                                     <tr key={key} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors group">
                                         <td className="py-2 px-1 text-gray-400 font-medium group-hover:text-gray-200">
                                             {ratioLabels[key] || key}

@@ -97,6 +97,12 @@ api_router.include_router(
     tags=["Market News"],
 )
 
+api_router.include_router(
+    news_router,
+    prefix="/news",
+    tags=["News"],
+)
+
 # New Phase 1 endpoints - Listing, Trading, Derivatives
 api_router.include_router(
     listing_router,
@@ -123,6 +129,12 @@ api_router.include_router(
     analysis_router,
     prefix="/analysis",
     tags=["Comparison Analysis"],
+)
+
+api_router.include_router(
+    analysis_router,
+    prefix="/compare",
+    tags=["Comparison Alias"],
 )
 
 

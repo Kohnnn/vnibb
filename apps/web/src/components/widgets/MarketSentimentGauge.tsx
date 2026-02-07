@@ -4,6 +4,7 @@
 
 import { TrendingUp, TrendingDown, Minus, Activity } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { API_BASE_URL } from '@/lib/api';
 
 interface MarketSentiment {
     overall: string;
@@ -20,7 +21,7 @@ export function MarketSentimentGauge() {
     const { data, isLoading } = useQuery<MarketSentiment>({
         queryKey: ['market-sentiment'],
         queryFn: async () => {
-            const response = await fetch('/api/v1/news/sentiment');
+            const response = await fetch(`${API_BASE_URL}/news/sentiment`);
             if (!response.ok) throw new Error('Failed to fetch sentiment');
             return response.json();
         },

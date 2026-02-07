@@ -99,6 +99,7 @@ class VnstockDerivativesFetcher:
         """
         try:
             def _fetch():
+                from vnstock import Vnstock
                 stock = Vnstock().stock(symbol=symbol.upper(), source=settings.vnstock_source)
                 df = stock.quote.history(
                     start=start_date.strftime("%Y-%m-%d"),

@@ -1,7 +1,7 @@
 """
 VnStock Company Events Fetcher
 
-Fetches corporate events (dividends, stock splits, AGMs, etc.) 
+Fetches corporate events (dividends, stock splits, AGMs, etc.)
 for Vietnam-listed companies via vnstock library.
 """
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class CompanyEventsQueryParams(BaseModel):
     """Query parameters for company events."""
-    
+
     symbol: str = Field(
         ...,
         min_length=1,
@@ -34,7 +34,7 @@ class CompanyEventsQueryParams(BaseModel):
         le=100,
         description="Maximum number of events to return",
     )
-    
+
     @field_validator("symbol")
     @classmethod
     def uppercase_symbol(cls, v: str) -> str:
@@ -44,10 +44,10 @@ class CompanyEventsQueryParams(BaseModel):
 class CompanyEventData(BaseModel):
     """
     Standardized company event data.
-    
+
     Each item represents a corporate event like dividend, AGM, stock split, etc.
     """
-    
+
     symbol: str = Field(..., description="Stock ticker symbol")
     event_type: Optional[str] = Field(None, description="Type of event")
     event_name: Optional[str] = Field(None, description="Event name/title")
@@ -57,7 +57,7 @@ class CompanyEventData(BaseModel):
     payment_date: Optional[str] = Field(None, description="Payment date")
     description: Optional[str] = Field(None, description="Event description")
     value: Optional[str] = Field(None, description="Event value (dividend amount, ratio, etc.)")
-    
+
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -74,13 +74,13 @@ class CompanyEventData(BaseModel):
 class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyEventData]):
     """
     Fetcher for company events via vnstock library.
-    
+
     Returns corporate events like dividends, AGMs, stock splits, etc.
     """
-    
+
     provider_name = "vnstock"
     requires_credentials = False
-    
+
     @staticmethod
     def transform_query(params: CompanyEventsQueryParams) -> dict[str, Any]:
         """Transform query params to vnstock-compatible format."""
@@ -88,7 +88,7 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
             "symbol": params.symbol.upper(),
             "limit": params.limit,
         }
-    
+
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
@@ -96,24 +96,62 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
     ) -> List[dict[str, Any]]:
         """Fetch company events from vnstock."""
         loop = asyncio.get_event_loop()
-        
+
         def _fetch_sync() -> List[dict]:
             try:
                 from vnstock import Vnstock
+
                 stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
-                
+
                 # Get company events
-                events_df = stock.company.events()
-                
+                events_df = None
+                try:
+                    events_callable = getattr(stock.company, "events", None)
+                    if callable(events_callable):
+                        events_df = events_callable()
+                except Exception:
+                    events_df = None
+
                 if events_df is None or events_df.empty:
+                    # Fallback: synthesize event-like records from dividends
+                    dividends_df = None
+                    try:
+                        dividends_callable = getattr(stock.company, "dividends", None)
+                        if callable(dividends_callable):
+                            dividends_df = dividends_callable()
+                    except Exception:
+                        dividends_df = None
+                    if dividends_df is not None and not dividends_df.empty:
+                        records = dividends_df.head(query.get("limit", 30)).to_dict("records")
+                        fallback_events: List[dict[str, Any]] = []
+                        for row in records:
+                            fallback_events.append(
+                                {
+                                    "eventType": "DIVIDEND",
+                                    "eventName": row.get("type") or "Dividend",
+                                    "eventDate": row.get("exDate")
+                                    or row.get("recordDate")
+                                    or row.get("paymentDate"),
+                                    "exDate": row.get("exDate") or row.get("exRightDate"),
+                                    "recordDate": row.get("recordDate"),
+                                    "paymentDate": row.get("paymentDate"),
+                                    "description": row.get("description"),
+                                    "value": row.get("cashDividend")
+                                    or row.get("ratio")
+                                    or row.get("stockDividend"),
+                                }
+                            )
+                        if fallback_events:
+                            return fallback_events
+
                     logger.info(f"No events data for {query['symbol']}")
                     return []
-                
+
                 # Limit results
                 events_df = events_df.head(query.get("limit", 30))
-                
+
                 return events_df.to_dict("records")
-                
+
             except Exception as e:
                 logger.error(f"vnstock events fetch error: {e}")
                 raise ProviderError(
@@ -121,18 +159,48 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                     provider="vnstock",
                     details={"symbol": query["symbol"]},
                 )
-        
+
         try:
-            return await asyncio.wait_for(
+            data = await asyncio.wait_for(
                 loop.run_in_executor(None, _fetch_sync),
                 timeout=settings.vnstock_timeout,
             )
+
+            if data:
+                return data
+
+            # Async fallback: map dividend history to event records
+            try:
+                from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
+
+                dividends = await VnstockDividendsFetcher.fetch(query["symbol"])
+                mapped: List[dict[str, Any]] = []
+                for dividend in dividends[: query.get("limit", 30)]:
+                    mapped.append(
+                        {
+                            "eventType": "DIVIDEND",
+                            "eventName": dividend.dividend_type or "Dividend",
+                            "eventDate": dividend.ex_date
+                            or dividend.record_date
+                            or dividend.payment_date,
+                            "exDate": dividend.ex_date,
+                            "recordDate": dividend.record_date,
+                            "paymentDate": dividend.payment_date,
+                            "description": dividend.description,
+                            "value": dividend.cash_dividend
+                            or dividend.dividend_ratio
+                            or dividend.stock_dividend,
+                        }
+                    )
+                return mapped
+            except Exception:
+                return []
         except asyncio.TimeoutError:
             raise ProviderTimeoutError(
                 provider="vnstock",
                 timeout=settings.vnstock_timeout,
             )
-    
+
     @staticmethod
     def transform_data(
         params: CompanyEventsQueryParams,
@@ -140,33 +208,48 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
     ) -> List[CompanyEventData]:
         """Transform raw events data to standardized format."""
         results: List[CompanyEventData] = []
-        
+
         for row in data:
             try:
+
+                def _clean(value: Any) -> Optional[str]:
+                    if value is None:
+                        return None
+                    text = str(value).strip()
+                    if text.lower() in {"", "none", "nan", "nat"}:
+                        return None
+                    return text
+
                 # Handle various column name variations from vnstock
                 event_date = row.get("eventDate") or row.get("date") or row.get("ngayGDKHQ")
                 if event_date and not isinstance(event_date, str):
                     event_date = str(event_date)
-                
+
                 ex_date = row.get("exDate") or row.get("exRightDate") or row.get("ngayDKCC")
                 if ex_date and not isinstance(ex_date, str):
                     ex_date = str(ex_date)
-                
+
                 event_item = CompanyEventData(
                     symbol=params.symbol.upper(),
-                    event_type=row.get("eventType") or row.get("type") or row.get("loaiSuKien"),
-                    event_name=row.get("eventName") or row.get("title") or row.get("noiDung"),
-                    event_date=event_date,
-                    ex_date=ex_date,
-                    record_date=str(row.get("recordDate") or row.get("ngayDKCC") or ""),
-                    payment_date=str(row.get("paymentDate") or row.get("ngayThanhToan") or ""),
-                    description=row.get("description") or row.get("content") or row.get("ghiChu"),
-                    value=str(row.get("value") or row.get("ratio") or row.get("tyLe") or ""),
+                    event_type=_clean(
+                        row.get("eventType") or row.get("type") or row.get("loaiSuKien")
+                    ),
+                    event_name=_clean(
+                        row.get("eventName") or row.get("title") or row.get("noiDung")
+                    ),
+                    event_date=_clean(event_date),
+                    ex_date=_clean(ex_date),
+                    record_date=_clean(row.get("recordDate") or row.get("ngayDKCC")),
+                    payment_date=_clean(row.get("paymentDate") or row.get("ngayThanhToan")),
+                    description=_clean(
+                        row.get("description") or row.get("content") or row.get("ghiChu")
+                    ),
+                    value=_clean(row.get("value") or row.get("ratio") or row.get("tyLe")),
                 )
                 results.append(event_item)
-                
+
             except Exception as e:
                 logger.warning(f"Skipping invalid event row: {e}")
                 continue
-        
+
         return results

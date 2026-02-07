@@ -19,6 +19,7 @@ interface WidgetToolbarProps {
   showPeriodToggle?: boolean;
   showSymbolSelector?: boolean;
   showGroupSelector?: boolean;
+  isEditing?: boolean;
   
   // Slots for complex components
   groupSelector?: React.ReactNode;
@@ -40,6 +41,7 @@ export function WidgetToolbar({
   onCopilot,
   showSymbolSelector = false,
   showGroupSelector = false,
+  isEditing = false,
   groupSelector,
   tickerSelector,
   parameters,
@@ -76,9 +78,11 @@ export function WidgetToolbar({
 
       {/* Right: Controls */}
       <div className="flex items-center gap-1">
-        <div className="widget-drag-handle p-1 text-gray-600 hover:text-gray-300 cursor-grab active:cursor-grabbing">
-          <Move size={12} />
-        </div>
+        {isEditing && (
+          <div className="widget-drag-handle p-1 text-gray-600 hover:text-gray-300 cursor-grab active:cursor-grabbing">
+            <Move size={12} />
+          </div>
+        )}
 
         {onRefresh && (
           <button

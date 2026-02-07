@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
 import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
+import { API_BASE_URL } from '@/lib/api';
 
 export interface MetricDefinition {
     key: string;
@@ -49,7 +50,7 @@ export const useComparison = (symbols: string[], period = '1Y', enabled = true) 
     return useQuery<ComparisonResponse>({
         queryKey: ['comparison', symbols.sort().join(','), period],
         queryFn: async () => {
-            const { data } = await axios.get('/api/v1/analysis/', {
+            const { data } = await axios.get(`${API_BASE_URL}/analysis/`, {
                 params: {
                     symbols: symbols.join(','),
                     period,
@@ -66,7 +67,7 @@ export const usePeers = (symbol: string, limit = 5, enabled = true) => {
     return useQuery<PeersResponse>({
         queryKey: ['peers', symbol, limit],
         queryFn: async () => {
-            const { data } = await axios.get(`/api/v1/analysis/peers/${symbol}`, {
+            const { data } = await axios.get(`${API_BASE_URL}/analysis/peers/${symbol}`, {
                 params: { limit },
             });
             return data;

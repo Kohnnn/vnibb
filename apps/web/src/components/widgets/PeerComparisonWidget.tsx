@@ -4,13 +4,10 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 
 import {
-    Users,
     Plus,
     X,
     RefreshCw,
     Search,
-    ArrowUpRight,
-    ArrowDownRight,
     LayoutGrid,
     Table as TableIcon,
     LineChart as LineChartIcon,
@@ -23,14 +20,16 @@ import {
 import { useComparison, usePeers, usePeerStorage } from '@/hooks/useComparison';
 import { ExportButton } from '@/components/common/ExportButton';
 import { exportPeers } from '@/lib/api';
-import { useHeatmapColors } from '@/hooks/useHeatmapColors';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import {
 
     Radar as ReRadar,
     RadarChart,
     PolarGrid,
     PolarAngleAxis,
-    ResponsiveContainer,
     LineChart,
     Line,
     XAxis,
@@ -39,7 +38,6 @@ import {
     Legend,
     CartesianGrid
 } from 'recharts';
-import { chartColors, formatAxisValue } from '@/lib/financialCharts';
 
 interface PeerComparisonWidgetProps {
     symbol: string;
@@ -115,10 +113,20 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
     const [period, setPeriod] = useState('1Y');
     const [heatmapEnabled, setHeatmapEnabled] = useState(false);
 
-    const { data: compData, isLoading, refetch } = useComparison(peers, period);
+    const {
+        data: compData,
+        isLoading,
+        error,
+        refetch,
+        isFetching,
+        dataUpdatedAt,
+    } = useComparison(peers, period);
 
     const { data: peerSuggestions } = usePeers(symbol, 5, !!symbol);
     const { sets, saveSet, deleteSet } = useComparisonSets();
+
+    const hasData = Boolean(compData?.metrics?.length);
+    const isFallback = Boolean(error && hasData);
 
     const allMetricValues = useMemo(() => {
         if (!compData?.data) return {};
@@ -213,8 +221,8 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                     <thead className="text-gray-500 sticky top-0 bg-gray-900 border-b border-gray-800">
                         <tr>
                             <th className="text-left py-2 px-2 font-medium bg-gray-900 z-10 w-32 border-r border-gray-800/50">Metric</th>
-                            {peers.map(sym => (
-                                <th key={sym} className="text-right py-2 px-2 font-medium min-w-[80px]">
+                            {peers.map((sym, index) => (
+                                <th key={`${sym}-${index}`} className="text-right py-2 px-2 font-medium min-w-[80px]">
                                     <div className="flex flex-col">
                                         <span className="text-white font-bold">{sym}</span>
                                         <span className="text-[8px] font-normal truncate opacity-60">
@@ -239,7 +247,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                     <td className="py-1.5 px-2 text-gray-400 border-r border-gray-800/50 sticky left-0 bg-gray-900/80 backdrop-blur-sm">
                                         {metric.label}
                                     </td>
-                                    {peers.map(sym => {
+                                    {peers.map((sym, index) => {
                                         const value = compData.data[sym]?.metrics?.[metric.key];
                                         const isNumeric = typeof value === 'number';
 
@@ -261,7 +269,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                         }
 
                                         return (
-                                            <td key={sym} className={cellClass} style={cellStyle}>
+                                            <td key={`${sym}-${index}`} className={cellClass} style={cellStyle}>
                                                 {formatCellValue(value, metric.format)}
                                             </td>
                                         );
@@ -295,27 +303,29 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                 <h3 className="text-xs font-medium text-gray-400 mb-4 flex items-center gap-2">
                     <Radar size={14} /> Key Metrics Comparison
                 </h3>
-                <ResponsiveContainer width="100%" height="85%">
-                    <RadarChart data={radarData}>
-                        <PolarGrid stroke="#374151" />
-                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#9CA3AF', fontSize: 10 }} />
-                        {peers.map((sym, i) => (
-                            <ReRadar
-                                key={sym}
-                                name={sym}
-                                dataKey={sym}
-                                stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                                fill={CHART_COLORS[i % CHART_COLORS.length]}
-                                fillOpacity={0.4}
+                <ChartSizeBox className="h-[85%]" minHeight={180}>
+                    {({ width, height }) => (
+                        <RadarChart width={width} height={height} data={radarData}>
+                            <PolarGrid stroke="#374151" />
+                            <PolarAngleAxis dataKey="subject" tick={{ fill: '#9CA3AF', fontSize: 10 }} />
+                            {peers.map((sym, i) => (
+                                <ReRadar
+                                    key={`${sym}-${i}`}
+                                    name={sym}
+                                    dataKey={sym}
+                                    stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                                    fill={CHART_COLORS[i % CHART_COLORS.length]}
+                                    fillOpacity={0.4}
+                                />
+                            ))}
+                            <Legend wrapperStyle={{ fontSize: '10px' }} />
+                            <Tooltip
+                                contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', fontSize: '11px' }}
+                                itemStyle={{ padding: '2px 0' }}
                             />
-                        ))}
-                        <Legend wrapperStyle={{ fontSize: '10px' }} />
-                        <Tooltip
-                            contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', fontSize: '11px' }}
-                            itemStyle={{ padding: '2px 0' }}
-                        />
-                    </RadarChart>
-                </ResponsiveContainer>
+                        </RadarChart>
+                    )}
+                </ChartSizeBox>
             </div>
 
             {/* Price Performance */}
@@ -325,9 +335,9 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                         <LineChartIcon size={14} /> Normalized Price Performance (Base 100)
                     </h3>
                     <div className="flex bg-gray-800 rounded text-[10px]">
-                        {['3M', '6M', '1Y', 'YTD'].map(p => (
+                        {['3M', '6M', '1Y', 'YTD'].map((p, index) => (
                             <button
-                                key={p}
+                                key={`${p}-${index}`}
                                 onClick={() => setPeriod(p)}
                                 className={`px-2 py-0.5 rounded ${period === p ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
                             >
@@ -336,38 +346,40 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                         ))}
                     </div>
                 </div>
-                <ResponsiveContainer width="100%" height="80%">
-                    <LineChart data={chartPriceData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                        <XAxis
-                            dataKey="date"
-                            tick={{ fill: '#9CA3AF', fontSize: 9 }}
-                            axisLine={false}
-                            tickLine={false}
-                        />
-                        <YAxis
-                            domain={['auto', 'auto']}
-                            tick={{ fill: '#9CA3AF', fontSize: 9 }}
-                            axisLine={false}
-                            tickLine={false}
-                        />
-                        <Tooltip
-                            contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', fontSize: '11px' }}
-                        />
-                        <Legend wrapperStyle={{ fontSize: '10px' }} />
-                        {peers.map((sym, i) => (
-                            <Line
-                                key={sym}
-                                type="monotone"
-                                dataKey={sym}
-                                stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                                strokeWidth={2}
-                                dot={false}
-                                name={sym}
+                <ChartSizeBox className="h-[80%]" minHeight={180}>
+                    {({ width, height }) => (
+                        <LineChart width={width} height={height} data={chartPriceData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                            <XAxis
+                                dataKey="date"
+                                tick={{ fill: '#9CA3AF', fontSize: 9 }}
+                                axisLine={false}
+                                tickLine={false}
                             />
-                        ))}
-                    </LineChart>
-                </ResponsiveContainer>
+                            <YAxis
+                                domain={['auto', 'auto']}
+                                tick={{ fill: '#9CA3AF', fontSize: 9 }}
+                                axisLine={false}
+                                tickLine={false}
+                            />
+                            <Tooltip
+                                contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', fontSize: '11px' }}
+                            />
+                            <Legend wrapperStyle={{ fontSize: '10px' }} />
+                            {peers.map((sym, i) => (
+                                <Line
+                                    key={`${sym}-${i}`}
+                                    type="monotone"
+                                    dataKey={sym}
+                                    stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                                    strokeWidth={2}
+                                    dot={false}
+                                    name={sym}
+                                />
+                            ))}
+                        </LineChart>
+                    )}
+                </ChartSizeBox>
             </div>
         </div>
     );
@@ -378,8 +390,8 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
             <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1 bg-gray-800/50 p-1 rounded border border-gray-700/50">
-                        {peers.map(sym => (
-                            <div key={sym} className="flex items-center gap-1 bg-gray-700 px-2 py-0.5 rounded text-[10px] font-medium group">
+                        {peers.map((sym, index) => (
+                            <div key={`${sym}-${index}`} className="flex items-center gap-1 bg-gray-700 px-2 py-0.5 rounded text-[10px] font-medium group">
                                 {sym}
                                 {peers.length > 2 && (
                                     <button onClick={() => removePeer(sym)} className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity">
@@ -399,7 +411,14 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                     </div>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2">
+                    <WidgetMeta
+                        updatedAt={dataUpdatedAt}
+                        isFetching={isFetching && hasData}
+                        isCached={isFallback}
+                        note={`Period ${period}`}
+                        align="right"
+                    />
                     {/* Saved Sets Menu */}
                     <div className="relative">
                         <button
@@ -508,9 +527,9 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                         <div>
                             <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2 block">Suggestions</span>
                             <div className="space-y-1">
-                                {peerSuggestions.peers.map(p => (
+                                {peerSuggestions.peers.map((p, index) => (
                                     <button
-                                        key={p.symbol}
+                                        key={`${p.symbol}-${index}`}
                                         onClick={() => addPeer(p.symbol)}
                                         className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-gray-700 rounded text-xs transition-colors group"
                                     >
@@ -526,11 +545,14 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
 
             {/* Main Content */}
             <div className="flex-1 flex flex-col min-h-0">
-                {isLoading ? (
-                    <div className="flex-1 flex flex-col items-center justify-center gap-4 py-12">
-                        <RefreshCw className="animate-spin text-blue-500" size={32} />
-                        <p className="text-sm text-gray-500 animate-pulse">Analyzing peers...</p>
-                    </div>
+                {peers.length === 0 ? (
+                    <WidgetEmpty message="Add peers to compare" />
+                ) : isLoading && !hasData ? (
+                    <WidgetSkeleton variant="table" lines={6} />
+                ) : error && !hasData ? (
+                    <WidgetError error={error as Error} onRetry={() => refetch()} />
+                ) : !hasData ? (
+                    <WidgetEmpty message="No comparison data available" />
                 ) : activeTab === 'table' ? renderTable() : renderCharts()}
             </div>
         </div>

@@ -2,12 +2,15 @@
 'use client';
 
 import { useState, useMemo, useRef, memo } from 'react';
-import { LayoutGrid, RefreshCw, Download, Maximize2 } from 'lucide-react';
+import { LayoutGrid, Download } from 'lucide-react';
 import { hierarchy, treemap } from 'd3-hierarchy';
 import html2canvas from 'html2canvas';
 import { useMarketHeatmap } from '@/lib/queries';
-import type { HeatmapStock, SectorGroup } from '@/lib/api';
+import type { SectorGroup } from '@/lib/api';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { cn } from '@/lib/utils';
 
 interface MarketHeatmapWidgetProps {
@@ -34,7 +37,14 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
     const [exchange, setExchange] = useState<'HOSE' | 'HNX' | 'UPCOM' | 'ALL'>('HOSE');
     const heatmapRef = useRef<HTMLDivElement>(null);
 
-    const { data, isLoading, refetch, isRefetching } = useMarketHeatmap({
+    const {
+        data,
+        isLoading,
+        error,
+        refetch,
+        isFetching,
+        dataUpdatedAt,
+    } = useMarketHeatmap({
         group_by: groupBy,
         exchange,
         limit: 500,
@@ -123,30 +133,27 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
         </div>
     );
 
+    const hasData = Boolean(treemapLayout && data?.sectors?.length);
+    const isFallback = Boolean(error && hasData);
+
     return (
         <WidgetContainer
             title="Market Heatmap"
             onRefresh={() => refetch()}
             onClose={onRemove}
-            isLoading={isLoading || isRefetching}
+            isLoading={isLoading && !hasData}
             headerActions={headerActions}
             noPadding
             widgetId={id}
         >
             <div className="h-full flex flex-col bg-black">
                 <div className="flex-1 overflow-hidden relative">
-                    {isLoading ? (
-                        <div className="flex flex-col items-center justify-center h-full gap-3 bg-black/50 backdrop-blur-sm">
-                            <RefreshCw className="animate-spin text-blue-500" size={32} />
-                            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 animate-pulse">Computing Market Data...</span>
-                        </div>
+                    {isLoading && !hasData ? (
+                        <WidgetSkeleton variant="chart" />
+                    ) : error && !hasData ? (
+                        <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !treemapLayout ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-700 gap-3 opacity-60">
-                            <div className="p-4 bg-gray-900/50 rounded-full border border-gray-800 shadow-inner">
-                                <LayoutGrid size={32} strokeWidth={1} />
-                            </div>
-                            <span className="uppercase font-black text-[10px] tracking-widest">Market Data Unavailable</span>
-                        </div>
+                        <WidgetEmpty message="Market data unavailable" icon={<LayoutGrid size={18} />} />
                     ) : (
                         <div ref={heatmapRef} className="w-full h-full p-2">
                             <svg width="100%" height="100%" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet" className="drop-shadow-2xl">
@@ -206,13 +213,21 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                         </div>
                         <span className="text-[8px] font-black text-gray-500 uppercase tracking-tighter">-7% to +7%</span>
                     </div>
-                    {data && (
-                        <div className="flex items-center gap-2 text-[9px] font-bold text-gray-600 uppercase tracking-widest">
-                            <span className="text-gray-400">{data.count}</span> Stocks
-                            <span className="text-gray-700">•</span>
-                            <span className="text-gray-400">{data.sectors.length}</span> Groups
-                        </div>
-                    )}
+                    <div className="flex items-center gap-3">
+                        {data && (
+                            <div className="flex items-center gap-2 text-[9px] font-bold text-gray-600 uppercase tracking-widest">
+                                <span className="text-gray-400">{data.count}</span> Stocks
+                                <span className="text-gray-700">•</span>
+                                <span className="text-gray-400">{data.sectors.length}</span> Groups
+                            </div>
+                        )}
+                        <WidgetMeta
+                            updatedAt={dataUpdatedAt}
+                            isFetching={isFetching && hasData}
+                            isCached={isFallback}
+                            align="right"
+                        />
+                    </div>
                 </div>
             </div>
         </WidgetContainer>

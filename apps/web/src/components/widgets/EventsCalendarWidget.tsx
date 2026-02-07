@@ -3,8 +3,11 @@
 'use client';
 
 import { useState } from 'react';
-import { Calendar, DollarSign, Split, Users, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Calendar, DollarSign, Split, Users, RefreshCw } from 'lucide-react';
 import { useCompanyEvents } from '@/lib/queries';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface EventsCalendarWidgetProps {
     symbol: string;
@@ -50,15 +53,27 @@ function getEventTypeKey(type: string | null | undefined): string {
     return 'DEFAULT';
 }
 
-export function EventsCalendarWidget({ symbol, isEditing, onRemove }: EventsCalendarWidgetProps) {
-    const { data, isLoading, refetch, isRefetching } = useCompanyEvents(symbol, { limit: 20 });
-    const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
+    const {
+        data,
+        isLoading,
+        error,
+        refetch,
+        isFetching,
+        dataUpdatedAt,
+    } = useCompanyEvents(symbol, { limit: 20, enabled: !!symbol });
 
+    const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
     const events = data?.data || [];
+    const hasData = events.length > 0;
+    const isFallback = Boolean(error && hasData);
+
+    if (!symbol) {
+        return <WidgetEmpty message="Select a symbol to view events" icon={<Calendar size={18} />} />;
+    }
 
     return (
         <div className="h-full flex flex-col">
-            {/* Header */}
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2 text-xs text-gray-500">
                     <Calendar size={12} />
@@ -66,30 +81,32 @@ export function EventsCalendarWidget({ symbol, isEditing, onRemove }: EventsCale
                 </div>
                 <button
                     onClick={() => refetch()}
-                    disabled={isRefetching}
+                    disabled={isFetching}
                     className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
                     title="Refresh events"
+                    type="button"
                 >
-                    <RefreshCw size={12} className={isRefetching ? 'animate-spin' : ''} />
+                    <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
                 </button>
             </div>
 
-            {/* Events List */}
-            <div className="flex-1 overflow-y-auto space-y-1">
-                {isLoading ? (
-                    <div className="space-y-3">
-                        {[...Array(5)].map((_, i) => (
-                            <div key={i} className="animate-pulse p-2 bg-gray-800/30 rounded">
-                                <div className="h-4 bg-gray-800 rounded w-3/4 mb-2" />
-                                <div className="h-3 bg-gray-800 rounded w-1/2" />
-                            </div>
-                        ))}
-                    </div>
-                ) : events.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-32 text-gray-500">
-                        <Calendar size={24} className="mb-2 opacity-30" />
-                        <p className="text-xs">No events for {symbol}</p>
-                    </div>
+            <div className="pb-2 border-b border-gray-800/50">
+                <WidgetMeta
+                    updatedAt={dataUpdatedAt}
+                    isFetching={isFetching && hasData}
+                    isCached={isFallback}
+                    note="Company events"
+                    align="right"
+                />
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-1 pt-2">
+                {isLoading && !hasData ? (
+                    <WidgetSkeleton lines={5} />
+                ) : error && !hasData ? (
+                    <WidgetError error={error as Error} onRetry={() => refetch()} />
+                ) : !hasData ? (
+                    <WidgetEmpty message={`No events for ${symbol}`} icon={<Calendar size={18} />} />
                 ) : (
                     events.map((event, index) => {
                         const typeKey = getEventTypeKey(event.event_type);
@@ -102,8 +119,15 @@ export function EventsCalendarWidget({ symbol, isEditing, onRemove }: EventsCale
                                 key={index}
                                 className="p-2 rounded bg-gray-800/20 hover:bg-gray-800/40 cursor-pointer transition-colors border-l-2 border-transparent hover:border-blue-500"
                                 onClick={() => setExpandedIndex(isExpanded ? null : index)}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(eventKey) => {
+                                    if (eventKey.key === 'Enter' || eventKey.key === ' ') {
+                                        eventKey.preventDefault();
+                                        setExpandedIndex(isExpanded ? null : index);
+                                    }
+                                }}
                             >
-                                {/* Event Header */}
                                 <div className="flex items-start gap-2">
                                     <div className={`p-1.5 rounded ${colorClass}`}>
                                         <Icon size={12} />
@@ -113,11 +137,6 @@ export function EventsCalendarWidget({ symbol, isEditing, onRemove }: EventsCale
                                             <span className={`text-[10px] font-medium uppercase ${colorClass.split(' ')[0]}`}>
                                                 {event.event_type || 'Event'}
                                             </span>
-                                            {isExpanded ? (
-                                                <ChevronUp size={12} className="text-gray-500" />
-                                            ) : (
-                                                <ChevronDown size={12} className="text-gray-500" />
-                                            )}
                                         </div>
                                         <p className={`text-sm text-gray-200 mt-0.5 ${isExpanded ? '' : 'line-clamp-1'}`}>
                                             {event.event_name || event.description || 'Unnamed event'}
@@ -125,17 +144,11 @@ export function EventsCalendarWidget({ symbol, isEditing, onRemove }: EventsCale
                                     </div>
                                 </div>
 
-                                {/* Dates Row */}
                                 <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-500">
-                                    {event.event_date && (
-                                        <span>📅 {formatDate(event.event_date)}</span>
-                                    )}
-                                    {event.ex_date && (
-                                        <span>Ex: {formatDate(event.ex_date)}</span>
-                                    )}
+                                    {event.event_date && <span>📅 {formatDate(event.event_date)}</span>}
+                                    {event.ex_date && <span>Ex: {formatDate(event.ex_date)}</span>}
                                 </div>
 
-                                {/* Expanded Details */}
                                 {isExpanded && (
                                     <div className="mt-2 pt-2 border-t border-gray-700/50 space-y-1 text-xs">
                                         {event.value && (

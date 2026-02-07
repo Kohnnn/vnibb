@@ -3,11 +3,13 @@
 'use client';
 
 import { useState } from 'react';
-import { Activity, RefreshCw, TrendingUp, TrendingDown, Minus, Info } from 'lucide-react';
+import { TrendingUp, TrendingDown, Info } from 'lucide-react';
 import { useFullTechnicalAnalysis } from '@/lib/queries';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Signal, Timeframe } from '@/types/technical';
 
@@ -51,9 +53,11 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 
 export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: TechnicalSummaryWidgetProps) {
     const [timeframe, setTimeframe] = useState<Timeframe>('D');
-    const { data, isLoading, refetch, isRefetching } = useFullTechnicalAnalysis(symbol, { timeframe });
+    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFullTechnicalAnalysis(symbol, { timeframe });
 
     const ta = data;
+    const hasData = Boolean(ta);
+    const isFallback = Boolean(error && hasData);
     const signals = ta?.signals;
     const overallSignal = signals?.overall_signal || 'neutral';
 
@@ -87,18 +91,26 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
             subtitle={timeframeLabel}
             onRefresh={() => refetch()}
             onClose={onRemove}
-            isLoading={isLoading || isRefetching}
+            isLoading={isLoading && !hasData}
             headerActions={headerActions}
             noPadding
         >
-            {isLoading ? (
-                <div className="space-y-4 p-4">
-                    <Skeleton className="h-16 w-full rounded-lg bg-gray-800/50" />
-                    <Skeleton className="h-32 w-full rounded-lg bg-gray-800/50" />
-                    <Skeleton className="h-32 w-full rounded-lg bg-gray-800/50" />
-                </div>
+            {isLoading && !hasData ? (
+                <WidgetSkeleton lines={6} />
+            ) : error && !hasData ? (
+                <WidgetError error={error as Error} onRetry={() => refetch()} />
+            ) : !hasData ? (
+                <WidgetEmpty message="No technical data available." />
             ) : (
                 <div className="flex-1 overflow-y-auto px-3 py-2 space-y-4 scrollbar-hide text-left">
+                    <WidgetMeta
+                        updatedAt={dataUpdatedAt}
+                        isFetching={isFetching && hasData}
+                        isCached={isFallback}
+                        note={timeframeLabel}
+                        align="right"
+                    />
+
                     {/* Signal Indicator */}
                     <Card className="bg-gray-900/40 border-gray-800 p-3 flex flex-col items-center justify-center relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-purple-500/50 to-transparent opacity-30" />

@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { StickyNote, Save, Trash2 } from 'lucide-react';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface NotesWidgetProps {
     symbol: string;
@@ -57,7 +58,8 @@ export function NotesWidget({ symbol, isEditing, onRemove }: NotesWidgetProps) {
                     <span>Notes - {symbol}</span>
                     {!isSaved && <span className="text-orange-400">•</span>}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2">
+                    <WidgetMeta note="Local notes" align="right" />
                     <button
                         onClick={saveNote}
                         className="p-1 text-gray-500 hover:text-green-400 hover:bg-gray-800 rounded"
