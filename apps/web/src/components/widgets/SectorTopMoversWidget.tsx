@@ -2,9 +2,15 @@
 
 import { memo, useState, useRef, useMemo } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Layers, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { API_BASE_URL } from '@/lib/api';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import type { WidgetGroupId } from '@/types/widget';
 
 interface StockPerformance {
   symbol: string;
@@ -19,16 +25,23 @@ interface SectorData {
   stocks: StockPerformance[];
 }
 
-function SectorTopMoversWidgetComponent({ id, onRemove }: { id: string, onRemove?: () => void }) {
+interface SectorTopMoversWidgetProps {
+  id: string;
+  onRemove?: () => void;
+  widgetGroup?: WidgetGroupId;
+}
+
+function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTopMoversWidgetProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewType, setViewType] = useState<'gainers' | 'losers'>('gainers');
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
 
-  const { data, isLoading, refetch, isRefetching } = useQuery({
+  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['sector-top-movers-v2', viewType],
     queryFn: async () => {
-        const res = await fetch(`/api/v1/sectors/top-movers?type=${viewType}`);
-        if (!res.ok) throw new Error('Sector data failed');
-        return res.json();
+      const res = await fetch(`${API_BASE_URL}/sectors/top-movers?type=${viewType}`);
+      if (!res.ok) throw new Error('Sector data failed');
+      return res.json();
     },
     refetchInterval: 60000,
   });
@@ -44,15 +57,17 @@ function SectorTopMoversWidgetComponent({ id, onRemove }: { id: string, onRemove
 
   const headerActions = (
     <div className="flex bg-gray-900 rounded p-0.5 border border-gray-800 mr-2">
-      {(['gainers', 'losers'] as const).map(type => (
+      {(['gainers', 'losers'] as const).map((type) => (
         <button
           key={type}
           onClick={() => setViewType(type)}
           className={cn(
-            "px-2 py-0.5 text-[9px] font-black uppercase rounded transition-all",
-            viewType === type 
-                ? (type === 'gainers' ? "bg-green-600 text-white" : "bg-red-600 text-white") 
-                : "text-gray-500 hover:text-gray-300"
+            'px-2 py-0.5 text-[9px] font-black uppercase rounded transition-all',
+            viewType === type
+              ? type === 'gainers'
+                ? 'bg-green-600 text-white'
+                : 'bg-red-600 text-white'
+              : 'text-gray-500 hover:text-gray-300'
           )}
         >
           {type}
@@ -62,53 +77,60 @@ function SectorTopMoversWidgetComponent({ id, onRemove }: { id: string, onRemove
   );
 
   const sectors = data?.sectors || [];
+  const hasData = sectors.length > 0;
+  const isFallback = Boolean(error && hasData);
+  const updatedAt = data?.updated_at || dataUpdatedAt;
 
   return (
-    <WidgetContainer 
+    <WidgetContainer
       title="Sector Movers"
       widgetId={id}
       onRefresh={() => refetch()}
       onClose={onRemove}
-      isLoading={isLoading || isRefetching}
+      isLoading={isLoading && !hasData}
       headerActions={headerActions}
       noPadding
     >
       <div className="h-full flex flex-col relative group/widget">
-        {/* Scroll buttons */}
-        <button 
+        <div className="px-3 py-2 border-b border-gray-800/50">
+          <WidgetMeta
+            updatedAt={updatedAt}
+            isFetching={isFetching && hasData}
+            isCached={isFallback}
+            note={viewType === 'gainers' ? 'Top gainers by sector' : 'Top losers by sector'}
+            align="right"
+          />
+        </div>
+        <button
           onClick={() => scroll('left')}
           className="absolute left-0 top-1/2 -translate-y-1/2 z-20 p-1.5 bg-black/80 text-white rounded-r-lg border-r border-y border-gray-800 opacity-0 group-hover/widget:opacity-100 transition-opacity"
+          type="button"
         >
           <ChevronLeft size={16} />
         </button>
-        <button 
+        <button
           onClick={() => scroll('right')}
           className="absolute right-0 top-1/2 -translate-y-1/2 z-20 p-1.5 bg-black/80 text-white rounded-l-lg border-l border-y border-gray-800 opacity-0 group-hover/widget:opacity-100 transition-opacity"
+          type="button"
         >
           <ChevronRight size={16} />
         </button>
 
-        {/* Sector columns */}
-        <div 
-          ref={scrollRef}
-          className="flex-1 flex overflow-x-auto scrollbar-hide select-none bg-black"
-        >
-          {isLoading ? (
+        <div ref={scrollRef} className="flex-1 flex overflow-x-auto scrollbar-hide select-none bg-black">
+          {isLoading && !hasData ? (
             <div className="flex flex-col items-center justify-center w-full text-gray-600 gap-2">
-                <RefreshCw className="animate-spin" size={24} />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Scanning Sectors...</span>
+              <WidgetSkeleton lines={4} />
             </div>
-          ) : sectors.length === 0 ? (
-            <div className="flex flex-col items-center justify-center w-full text-gray-600 gap-2 opacity-50 uppercase font-black text-[10px] tracking-widest">
-                <Layers size={32} strokeWidth={1} />
-                No Sector Data
-            </div>
+          ) : error && !hasData ? (
+            <WidgetError error={error as Error} onRetry={() => refetch()} />
+          ) : !hasData ? (
+            <WidgetEmpty message="No sector data available" icon={<Layers size={18} />} />
           ) : (
             sectors.map((sector: SectorData, idx: number) => (
-              <SectorColumn 
-                key={`${sector.sector}-${idx}`} 
-                sector={sector} 
-                viewType={viewType}
+              <SectorColumn
+                key={`${sector.sector}-${idx}`}
+                sector={sector}
+                onSelectSymbol={setLinkedSymbol}
               />
             ))
           )}
@@ -118,72 +140,100 @@ function SectorTopMoversWidgetComponent({ id, onRemove }: { id: string, onRemove
   );
 }
 
-function SectorColumn({ sector, viewType }: { sector: SectorData; viewType: string }) {
+function SectorColumn({
+  sector,
+  onSelectSymbol,
+}: {
+  sector: SectorData;
+  onSelectSymbol: (symbol: string) => void;
+}) {
   const stocks = sector.stocks || [];
   const avgChange = useMemo(() => {
-      if (stocks.length === 0) return 0;
-      return stocks.reduce((acc, s) => acc + (s.change_pct || 0), 0) / stocks.length;
+    if (stocks.length === 0) return 0;
+    return stocks.reduce((acc, s) => acc + (s.change_pct || 0), 0) / stocks.length;
   }, [stocks]);
-  
+
   const isPositive = avgChange >= 0;
 
   return (
     <div className="min-w-[150px] border-r border-gray-800/50 last:border-r-0 flex flex-col bg-[#050505]">
-      {/* Sector header */}
-      <div className={cn(
-          "px-3 py-2 border-b border-gray-800 transition-colors sticky top-0 bg-[#0d0d0d] z-10",
-          isPositive ? "border-b-green-900/30" : "border-b-red-900/30"
-      )}>
-        <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest truncate mb-0.5">{sector.sector_vi || sector.sector}</div>
-        <div className={cn(
-            "text-[11px] font-black flex items-center justify-between",
-            isPositive ? "text-green-500" : "text-red-500"
-        )}>
+      <div
+        className={cn(
+          'px-3 py-2 border-b border-gray-800 transition-colors sticky top-0 bg-[#0d0d0d] z-10',
+          isPositive ? 'border-b-green-900/30' : 'border-b-red-900/30'
+        )}
+      >
+        <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest truncate mb-0.5">
+          {sector.sector_vi || sector.sector}
+        </div>
+        <div
+          className={cn(
+            'text-[11px] font-black flex items-center justify-between',
+            isPositive ? 'text-green-500' : 'text-red-500'
+          )}
+        >
           <span>{isPositive ? '+' : ''}{avgChange.toFixed(2)}%</span>
           <span className="text-[8px] text-gray-600">{stocks.length}</span>
         </div>
       </div>
-      
-      {/* Stock rows */}
+
       <div className="flex-1 overflow-y-auto scrollbar-hide divide-y divide-gray-800/20">
-        {stocks.map(stock => (
-          <StockRow key={stock.symbol} stock={stock} />
+        {stocks.map((stock, index) => (
+          <StockRow key={`${stock.symbol}-${index}`} stock={stock} onSelect={onSelectSymbol} />
         ))}
       </div>
     </div>
   );
 }
 
-function StockRow({ stock }: { stock: StockPerformance }) {
+function StockRow({ stock, onSelect }: { stock: StockPerformance; onSelect: (symbol: string) => void }) {
   const isPositive = (stock.change_pct || 0) >= 0;
-  
+
   return (
-    <div className={cn(
-        "flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-all cursor-pointer group",
-        isPositive 
-            ? (stock.change_pct || 0) > 4 ? "bg-green-500/10" : "bg-transparent"
-            : (stock.change_pct || 0) < -4 ? "bg-red-500/10" : "bg-transparent"
-    )}>
+    <button
+      type="button"
+      onClick={() => onSelect(stock.symbol)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect(stock.symbol);
+        }
+      }}
+      className={cn(
+        'w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30',
+        isPositive
+          ? (stock.change_pct || 0) > 4
+            ? 'bg-green-500/10'
+            : 'bg-transparent'
+          : (stock.change_pct || 0) < -4
+            ? 'bg-red-500/10'
+            : 'bg-transparent'
+      )}
+    >
       <div className="flex flex-col">
-        <span className="text-xs font-black text-blue-400 group-hover:text-blue-300 transition-colors">{stock.symbol}</span>
+        <span className="text-xs font-black text-blue-400 group-hover:text-blue-300 transition-colors">
+          {stock.symbol}
+        </span>
         {stock.volume && (
-            <span className="text-[8px] font-bold text-gray-600">
-                {(stock.volume / 1000).toFixed(0)}K
-            </span>
+          <span className="text-[8px] font-bold text-gray-600">
+            {(stock.volume / 1000).toFixed(0)}K
+          </span>
         )}
       </div>
       <div className="text-right">
-        <div className={cn(
-            "text-[11px] font-black font-mono",
-            isPositive ? "text-green-500" : "text-red-500"
-        )}>
+        <div
+          className={cn(
+            'text-[11px] font-black font-mono',
+            isPositive ? 'text-green-500' : 'text-red-500'
+          )}
+        >
           {isPositive ? '+' : ''}{(stock.change_pct || 0).toFixed(1)}%
         </div>
         <div className="text-[9px] font-bold text-gray-300 font-mono">
-            {stock.price.toLocaleString()}
+          {stock.price.toLocaleString()}
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 

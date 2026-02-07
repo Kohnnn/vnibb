@@ -75,8 +75,8 @@ export function PerformanceTable({ data }: PerformanceTableProps) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800/30">
-          {sortedData.map((row) => (
-            <tr key={row.symbol} className="hover:bg-white/5 transition-colors group">
+          {sortedData.map((row, index) => (
+            <tr key={`${row.symbol}-${index}`} className="hover:bg-white/5 transition-colors group">
               <td className="px-4 py-2 border-r border-gray-800/10">
                 <div className="flex items-center gap-2">
                   <CompanyLogo symbol={row.symbol} size={20} />

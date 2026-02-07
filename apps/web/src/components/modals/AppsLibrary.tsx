@@ -30,6 +30,7 @@ const APP_TEMPLATES: AppTemplate[] = [
             { type: 'price_chart' },
             { type: 'ticker_profile' },
             { type: 'key_metrics' },
+            { type: 'market_movers_sectors' },
         ],
     },
     {
@@ -57,6 +58,40 @@ const APP_TEMPLATES: AppTemplate[] = [
             { type: 'key_metrics' },
             { type: 'earnings_history' },
             { type: 'company_filings' },
+            { type: 'news_corporate_actions' },
+        ],
+    },
+    {
+        id: 'fundamental-deep-dive',
+        name: 'Fundamental Deep Dive',
+        description: 'Long-term research setup with statements, ratios, and side-by-side comparison',
+        icon: <Briefcase size={24} />,
+        category: 'research',
+        color: '#14B8A6',
+        widgets: [
+            { type: 'ticker_profile' },
+            { type: 'key_metrics' },
+            { type: 'income_statement' },
+            { type: 'balance_sheet' },
+            { type: 'cash_flow' },
+            { type: 'financial_ratios' },
+            { type: 'comparison_analysis' },
+        ],
+    },
+    {
+        id: 'dividend-value',
+        name: 'Dividend & Value',
+        description: 'Yield-focused workflow with dividend ladder, valuation, and corporate action tracking',
+        icon: <TrendingUp size={24} />,
+        category: 'research',
+        color: '#22C55E',
+        widgets: [
+            { type: 'key_metrics' },
+            { type: 'dividend_ladder' },
+            { type: 'dividend_payment' },
+            { type: 'financial_ratios' },
+            { type: 'events_calendar' },
+            { type: 'news_corporate_actions' },
         ],
     },
     {
@@ -124,95 +159,95 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
             {/* Backdrop */}
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
-            {/* Modal */}
-            <div className="relative w-full max-w-3xl max-h-[80vh] bg-[#0b1021] border border-[#1e2a3b] rounded-lg shadow-2xl overflow-hidden">
-                {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e2a3b]">
-                    <div>
-                        <h2 className="text-base font-semibold text-white">Apps Library</h2>
-                        <p className="text-xs text-gray-500 mt-0.5">Pre-configured dashboard templates</p>
-                    </div>
-                    <button
-                        onClick={onClose}
-                        className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
-                    >
-                        <X size={18} />
-                    </button>
-                </div>
-
-                {/* Search and Filters */}
-                <div className="px-4 py-3 border-b border-[#1e2a3b]">
-                    <div className="flex items-center gap-3">
-                        <div className="relative flex-1">
-                            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
-                            <input
-                                type="text"
-                                placeholder="Search templates..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full pl-8 pr-3 py-1.5 rounded bg-[#0f1629] border border-[#1e2a3b] text-white text-xs placeholder-gray-500 focus:outline-none focus:border-blue-500/50"
-                            />
+                {/* Modal */}
+                <div className="relative w-full max-w-3xl max-h-[80vh] bg-[#0b1021] border border-[#1e2a3b] rounded-lg shadow-2xl overflow-hidden flex flex-col">
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e2a3b] shrink-0">
+                        <div>
+                            <h2 className="text-base font-semibold text-white">Apps Library</h2>
+                            <p className="text-xs text-gray-500 mt-0.5">Pre-configured dashboard templates</p>
                         </div>
-                        <div className="flex gap-1">
-                            {(['all', 'market', 'analysis', 'research'] as const).map(cat => (
+                        <button
+                            onClick={onClose}
+                            className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                        >
+                            <X size={18} />
+                        </button>
+                    </div>
+
+                    {/* Search and Filters */}
+                    <div className="px-4 py-3 border-b border-[#1e2a3b] shrink-0">
+                        <div className="flex items-center gap-3">
+                            <div className="relative flex-1">
+                                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                                <input
+                                    type="text"
+                                    placeholder="Search templates..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full pl-8 pr-3 py-1.5 rounded bg-[#0f1629] border border-[#1e2a3b] text-white text-xs placeholder-gray-500 focus:outline-none focus:border-blue-500/50"
+                                />
+                            </div>
+                            <div className="flex gap-1">
+                                {(['all', 'market', 'analysis', 'research'] as const).map(cat => (
+                                    <button
+                                        key={cat}
+                                        onClick={() => setSelectedCategory(cat)}
+                                        className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${selectedCategory === cat
+                                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                            : 'text-gray-400 hover:text-gray-200 hover:bg-[#1e2a3b]'
+                                            }`}
+                                    >
+                                        {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Templates Grid */}
+                    <div className="flex-1 min-h-0 p-4 overflow-y-auto">
+                        <div className="grid grid-cols-2 gap-3">
+                            {filteredTemplates.map(template => (
                                 <button
-                                    key={cat}
-                                    onClick={() => setSelectedCategory(cat)}
-                                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${selectedCategory === cat
-                                        ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                                        : 'text-gray-400 hover:text-gray-200 hover:bg-[#1e2a3b]'
-                                        }`}
+                                    key={template.id}
+                                    onClick={() => handleApplyTemplate(template)}
+                                    className="group flex flex-col p-4 rounded-lg border border-[#1e2a3b] bg-[#0f1629]/50 hover:bg-[#1e2a3b]/50 hover:border-[#2e3a4b] transition-all text-left"
                                 >
-                                    {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                                    {/* Icon */}
+                                    <div
+                                        className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
+                                        style={{ backgroundColor: `${template.color}20`, color: template.color }}
+                                    >
+                                        {template.icon}
+                                    </div>
+
+                                    {/* Content */}
+                                    <h3 className="text-sm font-medium text-white group-hover:text-blue-400 transition-colors">
+                                        {template.name}
+                                    </h3>
+                                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                        {template.description}
+                                    </p>
+
+                                    {/* Widget count */}
+                                    <div className="mt-3 flex items-center gap-1.5">
+                                        <Layout size={12} className="text-gray-600" />
+                                        <span className="text-[10px] text-gray-600">
+                                            {template.widgets.length} widgets
+                                        </span>
+                                    </div>
                                 </button>
                             ))}
                         </div>
+
+                        {filteredTemplates.length === 0 && (
+                            <div className="text-center py-8">
+                                <p className="text-gray-500 text-sm">No templates found</p>
+                            </div>
+                        )}
                     </div>
                 </div>
-
-                {/* Templates Grid */}
-                <div className="p-4 overflow-y-auto max-h-[calc(80vh-140px)]">
-                    <div className="grid grid-cols-2 gap-3">
-                        {filteredTemplates.map(template => (
-                            <button
-                                key={template.id}
-                                onClick={() => handleApplyTemplate(template)}
-                                className="group flex flex-col p-4 rounded-lg border border-[#1e2a3b] bg-[#0f1629]/50 hover:bg-[#1e2a3b]/50 hover:border-[#2e3a4b] transition-all text-left"
-                            >
-                                {/* Icon */}
-                                <div
-                                    className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
-                                    style={{ backgroundColor: `${template.color}20`, color: template.color }}
-                                >
-                                    {template.icon}
-                                </div>
-
-                                {/* Content */}
-                                <h3 className="text-sm font-medium text-white group-hover:text-blue-400 transition-colors">
-                                    {template.name}
-                                </h3>
-                                <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                                    {template.description}
-                                </p>
-
-                                {/* Widget count */}
-                                <div className="mt-3 flex items-center gap-1.5">
-                                    <Layout size={12} className="text-gray-600" />
-                                    <span className="text-[10px] text-gray-600">
-                                        {template.widgets.length} widgets
-                                    </span>
-                                </div>
-                            </button>
-                        ))}
-                    </div>
-
-                    {filteredTemplates.length === 0 && (
-                        <div className="text-center py-8">
-                            <p className="text-gray-500 text-sm">No templates found</p>
-                        </div>
-                    )}
-                </div>
-            </div>
-        </div>
+</div>
     );
 }

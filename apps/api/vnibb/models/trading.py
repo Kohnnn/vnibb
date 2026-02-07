@@ -158,6 +158,50 @@ class ForeignTrading(Base):
         return f"<ForeignTrading(symbol='{self.symbol}', date='{self.trade_date}', net={self.net_value})>"
 
 
+class OrderFlowDaily(Base):
+    """
+    Daily order flow summary derived from intraday trades.
+    """
+
+    __tablename__ = "order_flow_daily"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    symbol: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+
+    buy_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    sell_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    buy_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sell_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    net_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    net_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    foreign_buy_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    foreign_sell_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    foreign_net_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+
+    proprietary_buy_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    proprietary_sell_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    proprietary_net_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+
+    big_order_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    block_trade_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "trade_date", name="uq_order_flow_symbol_date"),
+        Index("ix_order_flow_symbol_date", "symbol", "trade_date"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OrderFlowDaily(symbol='{self.symbol}', date='{self.trade_date}')>"
+
+
 class FinancialRatio(Base):
     """
     Key financial ratios.

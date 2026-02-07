@@ -1,19 +1,21 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useScreenerData } from '@/lib/queries';
-import { formatRatio, formatPercent, formatVND } from '@/lib/formatters';
+import { formatRatio } from '@/lib/formatters';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
   Cell
 } from 'recharts';
+import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 
 interface ValuationWidgetProps {
   symbol: string;
@@ -21,18 +23,24 @@ interface ValuationWidgetProps {
 }
 
 export function ValuationWidget({ symbol, onDataChange }: ValuationWidgetProps) {
-  // Fetch peer data for comparison
-  const { data: peerData, isLoading, error, refetch } = useScreenerData({
+  const { data: peerData, isLoading, error, refetch, isFetching, dataUpdatedAt } = useScreenerData({
     limit: 10,
-    // In a real app we'd fetch peers by sector
   });
 
   const stocks = peerData?.data || [];
+  const hasData = stocks.length > 0;
+  const isFallback = Boolean(error && hasData);
   const currentStock = stocks.find(s => s.ticker === symbol) || stocks[0];
 
-  if (isLoading) return <WidgetSkeleton variant="chart" />;
-  if (error) return <WidgetError error={error as Error} onRetry={() => refetch()} />;
-  if (!stocks.length) return <WidgetEmpty message="No valuation data" />;
+  useEffect(() => {
+    if (peerData) {
+      onDataChange?.(peerData);
+    }
+  }, [peerData, onDataChange]);
+
+  if (isLoading && !hasData) return <WidgetSkeleton variant="chart" />;
+  if (error && !hasData) return <WidgetError error={error as Error} onRetry={() => refetch()} />;
+  if (!hasData) return <WidgetEmpty message="No valuation data" />;
 
   const chartData = stocks.slice(0, 8).map(s => ({
     name: s.ticker,
@@ -42,7 +50,15 @@ export function ValuationWidget({ symbol, onDataChange }: ValuationWidgetProps) 
   }));
 
   return (
-    <div className="p-4 flex flex-col h-full space-y-4 overflow-hidden">
+    <div className="p-4 flex flex-col h-full space-y-3 overflow-hidden">
+      <WidgetMeta
+        updatedAt={dataUpdatedAt}
+        isFetching={isFetching && hasData}
+        isCached={isFallback}
+        note="Peer snapshot"
+        align="right"
+      />
+
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-[#0d0d0d] p-3 rounded-lg border border-[#1a1a1a]">
           <span className="text-[10px] text-gray-500 uppercase font-bold">P/E Ratio</span>
@@ -58,37 +74,39 @@ export function ValuationWidget({ symbol, onDataChange }: ValuationWidgetProps) 
         </div>
       </div>
 
-      <div className="flex-1 min-h-[150px] w-full">
-        <h3 className="text-[10px] text-gray-500 uppercase font-bold mb-4">Peer P/E Comparison</h3>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
-            <XAxis 
-              dataKey="name" 
-              axisLine={false} 
-              tickLine={false} 
-              tick={{ fill: '#666', fontSize: 10 }}
-            />
-            <YAxis 
-              axisLine={false} 
-              tickLine={false} 
-              tick={{ fill: '#666', fontSize: 10 }}
-            />
-            <Tooltip 
-              contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #222', fontSize: '12px' }}
-              itemStyle={{ color: '#fff' }}
-            />
-            <Bar dataKey="pe" radius={[4, 4, 0, 0]}>
-              {chartData.map((entry, index) => (
-                <Cell 
-                  key={`cell-${index}`} 
-                  fill={entry.isCurrent ? '#3b82f6' : '#1e1e1e'} 
-                  stroke={entry.isCurrent ? '#60a5fa' : '#333'}
-                />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+      <div className="flex-1 w-full">
+        <h3 className="text-[10px] text-gray-500 uppercase font-bold mb-3">Peer P/E Comparison</h3>
+        <ChartSizeBox className="h-full" minHeight={140}>
+          {({ width, height }) => (
+            <BarChart width={width} height={height} data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
+              <XAxis
+                dataKey="name"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: '#666', fontSize: 10 }}
+              />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: '#666', fontSize: 10 }}
+              />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #222', fontSize: '12px' }}
+                itemStyle={{ color: '#fff' }}
+              />
+              <Bar dataKey="pe" radius={[4, 4, 0, 0]}>
+                {chartData.map((entry, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={entry.isCurrent ? '#3b82f6' : '#1e1e1e'}
+                    stroke={entry.isCurrent ? '#60a5fa' : '#333'}
+                  />
+                ))}
+              </Bar>
+            </BarChart>
+          )}
+        </ChartSizeBox>
       </div>
     </div>
   );

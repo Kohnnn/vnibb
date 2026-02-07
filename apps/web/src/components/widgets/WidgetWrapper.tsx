@@ -29,6 +29,7 @@ import {
     type WidgetParameter,
     type ParameterOption
 } from './WidgetParameterDropdown';
+import { WidgetHeaderVisibilityProvider } from '@/components/ui/WidgetContainer';
 import { WidgetToolbar } from '@/components/ui/WidgetToolbar';
 import { WidgetErrorBoundary } from './ErrorBoundary';
 import { MaximizedWidgetPortal } from './MaximizedWidgetPortal';
@@ -201,6 +202,7 @@ export function WidgetWrapper({
                 <WidgetToolbar
                     title={title}
                     symbol={displaySymbol}
+                    isEditing={isEditing}
                     showSymbolSelector={showTickerSelector}
                     onSymbolChange={() => setIsTickerDropdownOpen(true)}
                     showGroupSelector={showGroupLabels}
@@ -315,20 +317,21 @@ export function WidgetWrapper({
 
 
                 {/* Content */}
-                <div id={id} className="flex-1 overflow-auto relative bg-secondary">
-                    <WidgetErrorBoundary
-                        onError={(error) => console.error(`Widget ${id} (${title}) crashed:`, error)}
-                    >
-                        {React.isValidElement(children)
-                            ? React.cloneElement(children as React.ReactElement<any>, {
-                                id: id,
-                                symbol: displaySymbol,
-                                widgetGroup,
-                                onDataChange: setInternalData,
-                                hideHeader: true
-                            })
-                            : children}
-                    </WidgetErrorBoundary>
+                <div id={id} className="flex-1 overflow-auto relative bg-secondary p-3 sm:p-4">
+                    <WidgetHeaderVisibilityProvider hideHeader>
+                        <WidgetErrorBoundary
+                            onError={(error) => console.error(`Widget ${id} (${title}) crashed:`, error)}
+                        >
+                            {React.isValidElement(children)
+                                ? React.cloneElement(children as React.ReactElement<any>, {
+                                    id: id,
+                                    symbol: displaySymbol,
+                                    widgetGroup,
+                                    onDataChange: setInternalData,
+                                })
+                                : children}
+                        </WidgetErrorBoundary>
+                    </WidgetHeaderVisibilityProvider>
                 </div>
 
             </div>

@@ -273,6 +273,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultConfig: {},
         defaultLayout: { w: 4, h: 4, minW: 3, minH: 3 }
     },
+    {
+        type: 'market_breadth',
+        name: 'Market Breadth',
+        description: 'Advancers vs decliners by exchange',
+        category: 'core_data',
+        defaultConfig: {},
+        defaultLayout: { w: 5, h: 6, minW: 4, minH: 5 }
+    },
 
     // Advanced & Market Widgets
     {
@@ -315,6 +323,22 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultConfig: {},
         defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
     },
+    {
+        type: 'sector_rotation_radar',
+        name: 'Sector Rotation Radar',
+        description: 'Sector leaders and laggards in one view',
+        category: 'core_data',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'market_movers_sectors',
+        name: 'Market Movers & Sectors',
+        description: 'Sector performance with top gainers/losers',
+        category: 'core_data',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
+    },
 
     // Portfolio & Alerts
     {
@@ -341,6 +365,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultConfig: {},
         defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
     },
+    {
+        type: 'dividend_ladder',
+        name: 'Dividend Ladder',
+        description: 'Upcoming dividend schedule and payments',
+        category: 'calendar',
+        defaultConfig: {},
+        defaultLayout: { w: 5, h: 7, minW: 4, minH: 5 }
+    },
 
     // Technical Analysis
     {
@@ -358,6 +390,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'core_data',
         defaultConfig: {},
         defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
+    },
+    {
+        type: 'technical_snapshot',
+        name: 'Technical Snapshot',
+        description: 'Daily technical indicator overview',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 5, h: 6, minW: 4, minH: 5 }
     },
 
     // Global & Utility
@@ -400,6 +440,30 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'core_data',
         defaultConfig: {},
         defaultLayout: { w: 4, h: 6, minW: 2, minH: 4 }
+    },
+    {
+        type: 'research_browser',
+        name: 'Research Browser',
+        description: 'Embed and save external research sites',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 }
+    },
+    {
+        type: 'insider_deal_timeline',
+        name: 'Insider Deal Timeline',
+        description: 'Recent insider activity and net flow',
+        category: 'ownership',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'ownership_changes',
+        name: 'Ownership Changes',
+        description: 'Latest major shareholder snapshot',
+        category: 'ownership',
+        defaultConfig: {},
+        defaultLayout: { w: 5, h: 6, minW: 4, minH: 5 }
     },
     {
         type: 'database_inspector',
@@ -456,6 +520,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'core_data',
         defaultConfig: {},
         defaultLayout: { w: 4, h: 8, minW: 3, minH: 6 }
+    },
+    {
+        type: 'news_corporate_actions',
+        name: 'News + Corporate Actions',
+        description: 'Company news with dividends and insider deals',
+        category: 'core_data',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
         type: 'ai_analysis',

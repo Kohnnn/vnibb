@@ -1,43 +1,58 @@
 'use client';
 
-import { useMemo } from 'react';
-import { Area, AreaChart, ResponsiveContainer, YAxis } from 'recharts';
+import { useEffect, useMemo, useRef } from 'react';
+import { toTradingViewSymbol } from '@/lib/tradingView';
 
 interface MiniChartProps {
-  data: { date: string; close: number }[];
+  symbol: string;
+  exchange?: string;
   width?: number | string;
   height?: number;
-  positive?: boolean;
 }
 
-export function MiniChart({ data, width = "100%", height = 40, positive }: MiniChartProps) {
-  const color = positive ? '#10B981' : '#EF4444';
-  
-  if (!data || data.length === 0) {
-      return <div className="h-[40px] w-full bg-gray-900/20 rounded animate-pulse" />;
+const SCRIPT_SRC =
+  'https://s3.tradingview.com/external-embedding/embed-widget-mini-symbol-overview.js';
+
+export function MiniChart({ symbol, exchange, width = '100%', height = 40 }: MiniChartProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const tvSymbol = useMemo(() => toTradingViewSymbol(symbol, exchange), [symbol, exchange]);
+
+  useEffect(() => {
+    if (!containerRef.current || !tvSymbol) return;
+    containerRef.current.innerHTML = '';
+
+    const script = document.createElement('script');
+    script.src = SCRIPT_SRC;
+    script.async = true;
+    script.type = 'text/javascript';
+    script.innerHTML = JSON.stringify({
+      symbol: tvSymbol,
+      width: '100%',
+      height: '100%',
+      locale: 'en',
+      dateRange: '1M',
+      colorTheme: 'dark',
+      isTransparent: true,
+    });
+
+    containerRef.current.appendChild(script);
+
+    return () => {
+      if (containerRef.current) {
+        containerRef.current.innerHTML = '';
+      }
+    };
+  }, [tvSymbol]);
+
+  if (!symbol) {
+    return <div className="h-[40px] w-full bg-gray-900/20 rounded animate-pulse" />;
   }
 
   return (
     <div style={{ width, height }}>
-        <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
-            <defs>
-            <linearGradient id={`gradient-${positive ? 'pos' : 'neg'}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={color} stopOpacity={0.3} />
-                <stop offset="100%" stopColor={color} stopOpacity={0} />
-            </linearGradient>
-            </defs>
-            <YAxis hide domain={['dataMin', 'dataMax']} />
-            <Area
-            isAnimationActive={false}
-            type="monotone"
-            dataKey="close"
-            stroke={color}
-            strokeWidth={1.5}
-            fill={`url(#gradient-${positive ? 'pos' : 'neg'})`}
-            />
-        </AreaChart>
-        </ResponsiveContainer>
+      <div ref={containerRef} className="tradingview-widget-container h-full w-full" />
     </div>
   );
 }
+
+export default MiniChart;

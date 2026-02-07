@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect, useRef, type ReactNode } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Responsive } from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
@@ -36,9 +36,10 @@ const DEFAULT_MIN_H = 2;
 // Breakpoints matching Tailwind defaults
 const BREAKPOINTS = { lg: 1024, md: 768, sm: 640, xs: 0 };
 const COLS = { lg: 24, md: 12, sm: 6, xs: 2 };
+const GRID_GAP = { lg: 20, md: 16, sm: 16, xs: 12 } as const;
 
 interface DashboardGridProps {
-    children: ReactNode;
+    children: any;
     layouts: LayoutItem[];
     onLayoutChange?: (layout: LayoutItem[]) => void;
     isEditing?: boolean;
@@ -143,24 +144,46 @@ export function DashboardGrid({
         setCurrentBreakpoint(breakpoint);
     }, []);
 
+    const gridSpacing = GRID_GAP[currentBreakpoint as keyof typeof GRID_GAP] ?? GRID_GAP.lg;
+    const gridMargin: [number, number] = [gridSpacing, gridSpacing];
+
     const canEdit = isEditing && currentBreakpoint === 'lg';
+    const draggableHandle = canEdit ? '.widget-drag-handle' : undefined;
+
+    const effectiveLayouts = useMemo(() => {
+        if (canEdit) return responsiveLayouts;
+
+        const toStatic = (items?: LayoutItem[]) =>
+            (items || []).map((item) => ({
+                ...item,
+                static: true,
+            }));
+
+        return {
+            lg: toStatic(responsiveLayouts.lg),
+            md: toStatic(responsiveLayouts.md),
+            sm: toStatic(responsiveLayouts.sm),
+            xs: toStatic(responsiveLayouts.xs),
+        };
+    }, [canEdit, responsiveLayouts]);
 
     // All extra props that may not be in the type definitions
     const gridProps = {
         className: 'layout',
-        layouts: responsiveLayouts,
+        layouts: effectiveLayouts,
         breakpoints: BREAKPOINTS,
         cols: COLS,
-        rowHeight: 70,
+        rowHeight: 60,
         width,
         onLayoutChange: handleLayoutChange,
         onBreakpointChange: handleBreakpointChange,
-        draggableHandle: '.widget-drag-handle',
+        draggableHandle,
         isDraggable: canEdit,
         isResizable: canEdit,
+        isDroppable: false,
         compactType: 'vertical' as const,
         preventCollision: false,
-        margin: [8, 8] as [number, number],
+        margin: gridMargin,
         containerPadding: [0, 0] as [number, number],
         useCSSTransforms: true,
     };
@@ -168,7 +191,7 @@ export function DashboardGrid({
     return (
         <div ref={containerRef} className="dashboard-grid w-full">
             <Responsive {...gridProps}>
-                {children}
+                {children as any}
             </Responsive>
         </div>
     );

@@ -59,18 +59,8 @@ async def seed_prices(days: int = 365, symbols: Optional[List[str]] = None) -> i
 
 async def seed_index_prices(days: int = 365) -> int:
     """Seed market index prices."""
-    logger.info(f"🔄 Seeding {days} days of index prices...")
-    pipeline = DataPipeline()
-    
-    start_date = date.today() - timedelta(days=days)
-    end_date = date.today()
-    
-    count = await pipeline.sync_index_prices(
-        start_date=start_date,
-        end_date=end_date
-    )
-    logger.info(f"✅ Synced {count} index price records")
-    return count
+    logger.warning("Index price sync is not implemented in DataPipeline. Skipping.")
+    return 0
 
 
 async def seed_screener() -> int:
@@ -128,37 +118,18 @@ async def seed_company_profiles(symbols: Optional[List[str]] = None) -> int:
 
 
 async def seed_full(days: int = 365, include_financials: bool = True):
-    """Run complete database seeding."""
+    """Run complete database seeding using DataPipeline with resume support."""
     logger.info("=" * 60)
     logger.info("🚀 FULL DATABASE SEEDING STARTED (Golden Sponsor)")
     logger.info("=" * 60)
-    
-    results = {}
-    
-    # 1. Stock list (required first)
-    results["stocks"] = await seed_stocks()
-    
-    # 2. Index prices
-    results["index_prices"] = await seed_index_prices(days)
-    
-    # 3. Daily prices (takes longest)
-    results["prices"] = await seed_prices(days)
-    
-    # 4. Screener data
-    results["screener"] = await seed_screener()
-    
-    # 5. Company profiles
-    results["profiles"] = await seed_company_profiles()
-    
+
+    pipeline = DataPipeline()
+    await pipeline.run_full_seeding(days=days, include_prices=True, resume=True)
+
     logger.info("=" * 60)
-    logger.info("📊 SEEDING COMPLETE - SUMMARY")
+    logger.info("✅ SEEDING COMPLETE")
     logger.info("=" * 60)
-    for key, value in results.items():
-        logger.info(f"  {key}: {value:,} records")
-    logger.info(f"  TOTAL: {sum(results.values()):,} records")
-    logger.info("=" * 60)
-    
-    return results
+    return {"status": "completed", "days": days, "include_financials": include_financials}
 
 
 def main():

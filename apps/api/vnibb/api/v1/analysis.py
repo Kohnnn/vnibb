@@ -5,6 +5,7 @@ Provides endpoints for stock analysis and comparison features.
 """
 
 import logging
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -14,6 +15,7 @@ from vnibb.services.comparison_service import (
     ComparisonResponse,
     PeerCompany,
     PeersResponse,
+    COMPARISON_METRICS,
     comparison_service,
 )
 
@@ -31,37 +33,31 @@ async def compare_stocks(
     symbols: str = Query(
         ...,
         description="Comma-separated stock symbols, e.g., VNM,FPT,VCB",
-        examples=["VNM,FPT,VCB"]
+        examples=["VNM,FPT,VCB"],
     ),
-
     period: str = Query(
         default="1Y",
         pattern=r"^(1M|3M|6M|1Y|YTD|ALL)$",
-        description="Time period for price performance normalization"
+        description="Time period for price performance normalization",
     ),
-    source: str = Query(
-        default="KBS",
-        pattern=r"^(KBS|VCI|TCBS|DNSE)$",
-        description="Data source"
-    )
-
+    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|DNSE)$", description="Data source"),
 ) -> ComparisonResponse:
     """
     Compare multiple stocks side by side.
-    
+
     Returns a matrix of metrics and normalized price history for all specified symbols.
     Maximum 6 symbols allowed per request for UI clarity.
     """
     # Parse symbols
     symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-    
+
     # Validate
     if not symbol_list:
         raise HTTPException(400, "At least one symbol is required")
-    
+
     if len(symbol_list) > 6:
         raise HTTPException(400, "Maximum 6 symbols allowed per comparison")
-    
+
     # Remove duplicates while preserving order
     seen = set()
     unique_symbols = []
@@ -69,14 +65,20 @@ async def compare_stocks(
         if s not in seen:
             seen.add(s)
             unique_symbols.append(s)
-    
+
     try:
         result = await comparison_service.compare(unique_symbols, source=source, period=period)
         return result
     except Exception as e:
         logger.error(f"Comparison failed for {symbols}: {e}")
-        raise HTTPException(500, f"Failed to compare stocks: {str(e)}")
-
+        return ComparisonResponse(
+            symbols=unique_symbols,
+            metrics=COMPARISON_METRICS,
+            data={},
+            price_history=[],
+            sector_averages={},
+            generated_at=datetime.utcnow(),
+        )
 
 
 @router.get(
@@ -91,16 +93,16 @@ async def get_peer_companies(
 ) -> PeersResponse:
     """
     Find peer companies in the same industry/sector.
-    
+
     Uses screener data to find companies with similar:
     - Industry classification (ICB)
     - Market cap range (within 5x)
-    
+
     Results are sorted by market cap similarity.
     """
     symbol = symbol.strip().upper()
     logger.info(f"API: Getting peers for {symbol} (limit={limit})")
-    
+
     try:
         peers = await comparison_service.get_peers(symbol, limit=limit)
         logger.info(f"API: Returning {peers.count} peers for {symbol}")

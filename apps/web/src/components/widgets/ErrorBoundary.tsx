@@ -137,8 +137,13 @@ export const WidgetErrorFallback: React.FC<ErrorFallbackProps> = ({
 interface EmptyStateProps {
   title?: string;
   message?: string;
+  hint?: string;
   icon?: ReactNode;
   action?: {
+    label: string;
+    onClick: () => void;
+  };
+  secondaryAction?: {
     label: string;
     onClick: () => void;
   };
@@ -147,17 +152,32 @@ interface EmptyStateProps {
 export const WidgetEmptyState: React.FC<EmptyStateProps> = ({
   title = 'No data available',
   message = 'There is no data to display at this time.',
+  hint = 'Try switching period or data source.',
   icon,
   action,
+  secondaryAction,
 }) => (
   <div className="widget-empty">
     {icon && <div className="widget-empty__icon">{icon}</div>}
     <h4 className="widget-empty__title">{title}</h4>
     <p className="widget-empty__message">{message}</p>
-    {action && (
-      <button className="widget-empty__action" onClick={action.onClick}>
-        {action.label}
-      </button>
+    {hint && <p className="widget-empty__hint">{hint}</p>}
+    {(action || secondaryAction) && (
+      <div className="widget-empty__actions">
+        {action && (
+          <button className="widget-empty__action" onClick={action.onClick}>
+            {action.label}
+          </button>
+        )}
+        {secondaryAction && (
+          <button
+            className="widget-empty__action widget-empty__action--secondary"
+            onClick={secondaryAction.onClick}
+          >
+            {secondaryAction.label}
+          </button>
+        )}
+      </div>
     )}
   </div>
 );
@@ -168,13 +188,16 @@ export const WidgetEmptyState: React.FC<EmptyStateProps> = ({
  */
 interface LoadingStateProps {
   message?: string;
+  hint?: string;
 }
 
 export const WidgetLoadingState: React.FC<LoadingStateProps> = ({
-  message = 'Loading...',
+  message = 'Loading data...',
+  hint,
 }) => (
   <div className="widget-loading">
     <div className="widget-loading__spinner" />
     <p className="widget-loading__message">{message}</p>
+    {hint && <p className="widget-loading__hint">{hint}</p>}
   </div>
 );

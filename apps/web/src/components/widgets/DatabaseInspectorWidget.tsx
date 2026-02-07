@@ -2,9 +2,12 @@
 
 import { useState, useEffect, useMemo, memo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Database, Table, Search, Download, RefreshCw, AlertCircle, Clock, CheckCircle, X } from 'lucide-react';
+import { Database, Search, Download, RefreshCw } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/VirtualizedTable';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface TableData {
   name: string;
@@ -95,7 +98,14 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?
   const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const { data: stats, isLoading: statsLoading, refetch } = useQuery({
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    error: statsError,
+    refetch,
+    isFetching,
+    dataUpdatedAt,
+  } = useQuery({
     queryKey: ['databaseStats'],
     queryFn: fetchDatabaseStats,
     staleTime: 30000,
@@ -143,32 +153,48 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?
     downloadCSV(csv, `${selectedTable}_export.csv`);
   };
 
+  const hasTables = Boolean(stats?.tables?.length);
+
   return (
     <WidgetContainer
       title="Data Browser"
       onRefresh={() => refetch()}
       onClose={onRemove}
-      isLoading={statsLoading || sampleLoading}
+      isLoading={statsLoading && !hasTables}
       noPadding
     >
       <div className="flex flex-col h-full overflow-hidden">
+        <div className="px-3 pt-2">
+          <WidgetMeta
+            updatedAt={dataUpdatedAt}
+            isFetching={isFetching && hasTables}
+            isCached={Boolean(statsError && hasTables)}
+            note="Admin stats"
+            align="right"
+          />
+        </div>
         {/* Table List */}
         <div className="p-2 border-b border-gray-800 bg-[#0a0a0a] flex flex-wrap gap-1">
-          {stats?.tables?.map((table: TableData) => (
-            <button
-              key={table.name}
-              onClick={() => setSelectedTable(table.name)}
-              className={`px-2 py-1 text-[10px] font-bold rounded transition-all uppercase ${
-                selectedTable === table.name
-                  ? 'bg-blue-600 text-white shadow-lg'
-                  : 'bg-gray-800 text-gray-500 hover:text-gray-300 hover:bg-gray-700'
-              }`}
-            >
-              {table.name} ({table.count})
-            </button>
-          ))}
-          {(!stats?.tables || stats.tables.length === 0) && !statsLoading && (
-              <div className="text-[10px] text-gray-500 py-1 px-2 italic">No tables found or backend offline</div>
+          {statsLoading && !hasTables ? (
+            <WidgetSkeleton lines={3} />
+          ) : statsError && !hasTables ? (
+            <WidgetError error={statsError as Error} onRetry={() => refetch()} />
+          ) : !hasTables ? (
+            <WidgetEmpty message="No tables found or backend offline" />
+          ) : (
+            stats?.tables?.map((table: TableData) => (
+              <button
+                key={table.name}
+                onClick={() => setSelectedTable(table.name)}
+                className={`px-2 py-1 text-[10px] font-bold rounded transition-all uppercase ${
+                  selectedTable === table.name
+                    ? 'bg-blue-600 text-white shadow-lg'
+                    : 'bg-gray-800 text-gray-500 hover:text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                {table.name} ({table.count})
+              </button>
+            ))
           )}
         </div>
 
@@ -205,9 +231,7 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?
                              <span className="text-[10px] font-bold uppercase tracking-widest">Fetching data...</span>
                         </div>
                     ) : rows.length === 0 ? (
-                         <div className="flex items-center justify-center h-full text-gray-600 text-xs italic">
-                            No rows match your filter
-                         </div>
+                         <WidgetEmpty message="No rows match your filter" />
                     ) : (
                         <VirtualizedTable
                             data={rows}

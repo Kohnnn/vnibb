@@ -7,6 +7,9 @@ import { Settings, Save, Bell, Mail, Volume2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAlertSettings, updateAlertSettings } from '@/lib/api';
 import type { AlertSettings } from '@/types/insider';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface AlertSettingsPanelProps {
   userId?: number;
@@ -15,7 +18,14 @@ interface AlertSettingsPanelProps {
 export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
   const queryClient = useQueryClient();
 
-  const { data: settings, isLoading } = useQuery({
+  const {
+    data: settings,
+    isLoading,
+    error,
+    isFetching,
+    dataUpdatedAt,
+    refetch,
+  } = useQuery({
     queryKey: ['alert-settings', userId],
     queryFn: () => getAlertSettings(userId),
   });
@@ -68,12 +78,12 @@ export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="animate-spin h-6 w-6 border-2 border-blue-500 border-t-transparent rounded-full" />
-      </div>
-    );
+  if (isLoading && !settings) {
+    return <WidgetSkeleton lines={6} />;
+  }
+
+  if (error && !settings) {
+    return <WidgetError error={error as Error} onRetry={() => refetch()} />;
   }
 
   const notificationPermission = typeof window !== 'undefined' && 'Notification' in window
@@ -88,14 +98,22 @@ export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
           <Settings size={14} className="text-gray-400" />
           <h3 className="text-sm font-medium text-zinc-100">Alert Settings</h3>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={updateMutation.isPending}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors disabled:opacity-50"
-        >
-          <Save size={12} />
-          {updateMutation.isPending ? 'Saving...' : 'Save'}
-        </button>
+        <div className="flex items-center gap-2">
+          <WidgetMeta
+            updatedAt={dataUpdatedAt}
+            isFetching={isFetching}
+            note="Alert preferences"
+            align="right"
+          />
+          <button
+            onClick={handleSave}
+            disabled={updateMutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors disabled:opacity-50"
+          >
+            <Save size={12} />
+            {updateMutation.isPending ? 'Saving...' : 'Save'}
+          </button>
+        </div>
       </div>
 
       {/* Settings Form */}

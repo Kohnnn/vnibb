@@ -1,4 +1,4 @@
-import { Area, AreaChart, ResponsiveContainer } from 'recharts';
+import { Area, AreaChart } from 'recharts';
 
 interface SparklineProps {
   data: number[];
@@ -25,20 +25,20 @@ export function Sparkline({
   const isPositive = data.length > 1 ? data[data.length - 1] > data[0] : true;
   const autoColor = isPositive ? colorMap.green : colorMap.red;
   const fillColor = color === 'blue' ? colorMap.blue : autoColor;
+  const chartWidth = typeof width === 'number' ? width : 60;
+  const chartHeight = typeof height === 'number' ? height : 20;
   
   return (
     <div style={{ width, height }}>
-      <ResponsiveContainer>
-        <AreaChart data={chartData}>
-          <Area
-            type="monotone"
-            dataKey="value"
-            stroke={fillColor}
-            fill={showArea ? `${fillColor}20` : 'transparent'}
-            strokeWidth={1.5}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
+      <AreaChart width={chartWidth} height={chartHeight} data={chartData}>
+        <Area
+          type="monotone"
+          dataKey="value"
+          stroke={fillColor}
+          fill={showArea ? `${fillColor}20` : 'transparent'}
+          strokeWidth={1.5}
+        />
+      </AreaChart>
     </div>
   );
 }

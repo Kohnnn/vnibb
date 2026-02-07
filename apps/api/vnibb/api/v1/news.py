@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 
 from vnibb.core.config import settings
 from vnibb.services.news_crawler import news_crawler
+from vnibb.providers.vnstock.company_news import (
+    VnstockCompanyNewsFetcher,
+    CompanyNewsQueryParams,
+)
 from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
     StockScreenerParams,
@@ -29,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 class NewsArticle(BaseModel):
     """News article with AI sentiment."""
+
     id: Optional[int] = None
     title: str
     summary: Optional[str] = None
@@ -50,13 +55,114 @@ class NewsArticle(BaseModel):
 
 class NewsFeed(BaseModel):
     """News feed response."""
+
     articles: List[NewsArticle]
     total: int
     source: Optional[str] = None
 
 
+async def get_news_feed(
+    source: Optional[str] = None,
+    sentiment: Optional[str] = None,
+    symbol: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> NewsFeed:
+    """Fetch latest news and normalize into NewsFeed."""
+    articles = await news_crawler.get_latest_news(
+        source=source,
+        sentiment=sentiment,
+        symbol=symbol,
+        limit=limit,
+        offset=offset,
+    )
+
+    normalized: List[NewsArticle] = []
+    for item in articles:
+        related_symbols = item.get("related_symbols", [])
+        if isinstance(related_symbols, str):
+            related_symbols = [s.strip() for s in related_symbols.split(",") if s.strip()]
+
+        sectors = item.get("sectors", [])
+        if isinstance(sectors, str):
+            sectors = [s.strip() for s in sectors.split(",") if s.strip()]
+
+        normalized.append(
+            NewsArticle(
+                id=item.get("id"),
+                title=item.get("title", ""),
+                summary=item.get("summary"),
+                content=item.get("content"),
+                source=item.get("source", ""),
+                url=item.get("url"),
+                author=item.get("author"),
+                image_url=item.get("image_url"),
+                category=item.get("category"),
+                published_date=item.get("published_date"),
+                related_symbols=related_symbols,
+                sectors=sectors,
+                sentiment=item.get("sentiment"),
+                sentiment_score=item.get("sentiment_score"),
+                ai_summary=item.get("ai_summary"),
+                read_count=item.get("read_count", 0),
+                bookmarked=item.get("bookmarked", False),
+            )
+        )
+
+    if not normalized and symbol:
+        try:
+            company_news = await VnstockCompanyNewsFetcher.fetch(
+                CompanyNewsQueryParams(symbol=symbol.upper(), limit=limit)
+            )
+            for idx, item in enumerate(company_news):
+                normalized.append(
+                    NewsArticle(
+                        id=idx,
+                        title=item.title,
+                        summary=item.summary,
+                        source=item.source or "vnstock",
+                        url=item.url,
+                        category=item.category,
+                        published_date=item.published_at,
+                        related_symbols=[symbol.upper()],
+                    )
+                )
+        except Exception as fallback_error:
+            logger.debug(f"Company news fallback failed for {symbol}: {fallback_error}")
+
+    if not normalized and not symbol:
+        fallback_symbols = ["VNM", "FPT", "VCB", "HPG", "VIC"]
+        for fallback_symbol in fallback_symbols:
+            if len(normalized) >= limit:
+                break
+            try:
+                company_news = await VnstockCompanyNewsFetcher.fetch(
+                    CompanyNewsQueryParams(symbol=fallback_symbol, limit=max(1, limit // 2))
+                )
+                for item in company_news:
+                    normalized.append(
+                        NewsArticle(
+                            id=None,
+                            title=item.title,
+                            summary=item.summary,
+                            source=item.source or "vnstock",
+                            url=item.url,
+                            category=item.category,
+                            published_date=item.published_at,
+                            related_symbols=[fallback_symbol],
+                        )
+                    )
+                    if len(normalized) >= limit:
+                        break
+            except Exception:
+                continue
+
+    return NewsFeed(articles=normalized, total=len(normalized), source=source)
+
+
 class MarketSentiment(BaseModel):
     """Market sentiment summary."""
+
     overall: str = "neutral"
     bullish_count: int = 0
     neutral_count: int = 0
@@ -69,6 +175,7 @@ class MarketSentiment(BaseModel):
 
 class TrendingAnalysis(BaseModel):
     """Trending topics analysis."""
+
     topics: List[str] = []
     stocks_mentioned: List[str] = []
     sentiment: str = "neutral"
@@ -76,6 +183,7 @@ class TrendingAnalysis(BaseModel):
 
 class CrawlStatus(BaseModel):
     """News crawl status."""
+
     status: str
     message: str
     count: Optional[int] = None
@@ -85,9 +193,10 @@ class CrawlStatus(BaseModel):
 # HEATMAP MODELS
 # ============================================================================
 
+
 class HeatmapStock(BaseModel):
     """Individual stock data for heatmap visualization."""
-    
+
     symbol: str
     name: str
     sector: str
@@ -101,7 +210,7 @@ class HeatmapStock(BaseModel):
 
 class SectorGroup(BaseModel):
     """Aggregated sector data for heatmap."""
-    
+
     sector: str
     stocks: List[HeatmapStock]
     total_market_cap: float
@@ -111,7 +220,7 @@ class SectorGroup(BaseModel):
 
 class HeatmapResponse(BaseModel):
     """API response for heatmap data."""
-    
+
     count: int
     group_by: str
     color_metric: str
@@ -126,6 +235,40 @@ class HeatmapResponse(BaseModel):
 
 from vnibb.services.news_service import get_news_flow, NewsResponse, NewsSentiment
 
+
+@router.get(
+    "/feed",
+    response_model=NewsFeed,
+    summary="Get News Feed",
+    description="Get latest market news with optional filters.",
+)
+async def get_news_feed_api(
+    background_tasks: BackgroundTasks,
+    source: Optional[str] = Query(default=None, description="Filter by source"),
+    sentiment: Optional[str] = Query(default=None, description="Filter by sentiment"),
+    symbol: Optional[str] = Query(default=None, description="Filter by symbol"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> NewsFeed:
+    feed = await get_news_feed(
+        source=source,
+        sentiment=sentiment,
+        symbol=symbol,
+        limit=limit,
+        offset=offset,
+    )
+
+    if feed.total == 0 and news_crawler._news_available:
+        background_tasks.add_task(
+            news_crawler.crawl_market_news,
+            sources=None,
+            limit=min(limit, 30),
+            analyze_sentiment=True,
+        )
+
+    return feed
+
+
 @router.get(
     "/flow",
     response_model=NewsResponse,
@@ -135,7 +278,9 @@ from vnibb.services.news_service import get_news_flow, NewsResponse, NewsSentime
 async def get_news_flow_api(
     symbols: Optional[str] = Query(None, description="Comma-separated symbols"),
     sector: Optional[str] = Query(None),
-    sentiment: Optional[str] = Query(None, pattern=r"^(bullish|neutral|bearish|positive|negative)$"),
+    sentiment: Optional[str] = Query(
+        None, pattern=r"^(bullish|neutral|bearish|positive|negative)$"
+    ),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
@@ -143,7 +288,7 @@ async def get_news_flow_api(
     Get news flow with optional filters.
     """
     symbol_list = symbols.split(",") if symbols else None
-    
+
     return await get_news_flow(
         symbols=symbol_list,
         sector=sector,
@@ -181,7 +326,7 @@ async def search_news_by_symbol(
     """Search news related to a stock."""
     try:
         articles = await news_crawler.search_news(symbol=symbol.upper(), limit=limit)
-        
+
         return NewsFeed(
             articles=[NewsArticle(**a) for a in articles],
             total=len(articles),
@@ -202,6 +347,16 @@ async def get_sources() -> Dict[str, Any]:
         "sources": news_crawler.SOURCES,
         "available": news_crawler._news_available,
     }
+
+
+@router.get(
+    "/sentiment",
+    response_model=MarketSentiment,
+    summary="Get Market Sentiment",
+    description="Get aggregate market sentiment from recent news articles.",
+)
+async def get_market_sentiment_alias() -> MarketSentiment:
+    return await get_market_sentiment()
 
 
 @router.get(
@@ -262,7 +417,7 @@ async def crawl_news(
             status="started",
             message="News crawling started in background",
         )
-    
+
     try:
         count = await news_crawler.crawl_market_news(
             sources=sources,
@@ -302,7 +457,7 @@ async def analyze_sentiment(
             status="started",
             message="Sentiment analysis started in background",
         )
-    
+
     try:
         count = await news_crawler.analyze_unprocessed_articles(
             batch_size=batch_size,
@@ -321,6 +476,7 @@ async def analyze_sentiment(
 # ============================================================================
 # HEATMAP ENDPOINT
 # ============================================================================
+
 
 @router.get(
     "/heatmap",
@@ -362,19 +518,19 @@ async def get_heatmap_data(
 ) -> HeatmapResponse:
     """
     Fetch market heatmap data with sector/industry grouping.
-    
+
     ## Features
     - **Treemap Visualization**: Rectangle size by market cap, color by price change
     - **Grouping**: By sector, industry, or index (VN30, HNX30)
     - **Metrics**: Customizable color and size metrics
-    
+
     ## Use Cases
     - Market overview dashboard
     - Sector performance analysis
     - Visual stock screening
     """
     cache_manager = CacheManager()
-    
+
     # Step 1: Fetch screener data (with cache support)
     try:
         params = StockScreenerParams(
@@ -383,11 +539,11 @@ async def get_heatmap_data(
             limit=limit,
             source=settings.vnstock_source,
         )
-        
+
         # Try cache first
         screener_data: List[ScreenerData] = []
         cached = False
-        
+
         if use_cache:
             try:
                 cache_result = await cache_manager.get_screener_data(
@@ -395,9 +551,11 @@ async def get_heatmap_data(
                     source=settings.vnstock_source,
                     allow_stale=True,
                 )
-                
+
                 if cache_result.is_fresh and cache_result.data:
-                    logger.info(f"Using cached screener data for heatmap ({len(cache_result.data)} records)")
+                    logger.info(
+                        f"Using cached screener data for heatmap ({len(cache_result.data)} records)"
+                    )
                     # Convert ORM to Pydantic
                     screener_data = [
                         ScreenerData(
@@ -416,36 +574,39 @@ async def get_heatmap_data(
                     cached = True
             except Exception as e:
                 logger.warning(f"Cache lookup failed for heatmap: {e}")
-        
+
         # Fetch from API if no cache
         if not screener_data:
             screener_data = await VnstockScreenerFetcher.fetch(params)
             logger.info(f"Fetched {len(screener_data)} stocks from API for heatmap")
-        
+
         # Step 2: Filter by exchange if needed
         if exchange != "ALL":
             screener_data = [s for s in screener_data if s.exchange == exchange]
-        
+
         # Step 3: Calculate change_pct (for now, use mock data since we don't have historical prices)
         # In production, you'd fetch yesterday's close price and calculate actual change
         # For now, we'll use a simple heuristic based on volume/market_cap
         import random
+
         random.seed(42)  # Deterministic for demo
-        
+
         # Step 4: Group stocks by sector/industry
         groups: Dict[str, List[HeatmapStock]] = defaultdict(list)
-        
+
         for stock in screener_data:
             # Skip stocks with missing critical data
             if not stock.market_cap or stock.market_cap <= 0:
                 continue
             if not stock.price or stock.price <= 0:
                 continue
-            
+
             # Determine grouping key
             if group_by == "sector":
                 # Extract sector from industry_name (e.g., "Ngân hàng" from "Ngân hàng - Dịch vụ tài chính")
-                group_key = stock.industry_name.split("-")[0].strip() if stock.industry_name else "Other"
+                group_key = (
+                    stock.industry_name.split("-")[0].strip() if stock.industry_name else "Other"
+                )
             elif group_by == "industry":
                 group_key = stock.industry_name or "Other"
             elif group_by == "vn30":
@@ -456,12 +617,12 @@ async def get_heatmap_data(
                 group_key = "HNX30"
             else:
                 group_key = "Other"
-            
+
             # Mock change_pct calculation (replace with real data in production)
             # Use a normal distribution centered around 0
             change_pct = random.gauss(0, 2.5)  # Mean 0%, StdDev 2.5%
             change = stock.price * (change_pct / 100)
-            
+
             heatmap_stock = HeatmapStock(
                 symbol=stock.symbol,
                 name=stock.organ_name or stock.symbol,
@@ -473,9 +634,9 @@ async def get_heatmap_data(
                 change_pct=change_pct,
                 volume=stock.volume,
             )
-            
+
             groups[group_key].append(heatmap_stock)
-        
+
         # Step 5: Create sector aggregations
         sectors: List[SectorGroup] = []
         for sector_name, stocks in groups.items():
@@ -485,7 +646,7 @@ async def get_heatmap_data(
                 avg_change_pct = sum(s.change_pct * s.market_cap for s in stocks) / total_market_cap
             else:
                 avg_change_pct = 0
-            
+
             sectors.append(
                 SectorGroup(
                     sector=sector_name,
@@ -495,12 +656,12 @@ async def get_heatmap_data(
                     stock_count=len(stocks),
                 )
             )
-        
+
         # Sort sectors by total market cap (largest first)
         sectors.sort(key=lambda s: s.total_market_cap, reverse=True)
-        
+
         total_stocks = sum(len(s.stocks) for s in sectors)
-        
+
         return HeatmapResponse(
             count=total_stocks,
             group_by=group_by,
@@ -509,11 +670,10 @@ async def get_heatmap_data(
             sectors=sectors,
             cached=cached,
         )
-        
+
     except (ProviderTimeoutError, ProviderError) as e:
         if isinstance(e, ProviderTimeoutError):
             raise HTTPException(status_code=504, detail=f"Timeout: {e.message}")
         raise HTTPException(status_code=502, detail=f"Provider error: {e.message}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-

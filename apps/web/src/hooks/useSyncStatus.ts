@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { config } from '@/lib/config';
 
 interface SyncStatus {
   isRunning: boolean;
@@ -19,9 +20,9 @@ export function useSyncStatus() {
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
-    // Ensure we don't have double slashes if wsUrl ends with /
-    const baseWsUrl = wsUrl.replace(/\/$/, '');
+    if (!config.enableRealtime || config.isDev) return;
+
+    const baseWsUrl = config.wsBaseUrl.replace(/\/$/, '');
     const ws = new WebSocket(`${baseWsUrl}/api/v1/data/sync/ws/status`);
 
     ws.onopen = () => setIsConnected(true);

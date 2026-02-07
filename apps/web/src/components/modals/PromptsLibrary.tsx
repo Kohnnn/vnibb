@@ -143,9 +143,9 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
             {/* Modal */}
-            <div className="relative w-full max-w-2xl max-h-[80vh] bg-[#0b1021] border border-[#1e2a3b] rounded-lg shadow-2xl overflow-hidden">
+            <div className="relative w-full max-w-2xl max-h-[80vh] bg-[#0b1021] border border-[#1e2a3b] rounded-lg shadow-2xl overflow-hidden flex flex-col">
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e2a3b]">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e2a3b] shrink-0">
                     <div className="flex items-center gap-2">
                         <Sparkles size={18} className="text-blue-400" />
                         <div>
@@ -171,7 +171,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                 </div>
 
                 {/* Search and Filters */}
-                <div className="px-4 py-3 border-b border-[#1e2a3b]">
+                <div className="px-4 py-3 border-b border-[#1e2a3b] shrink-0">
                     <div className="flex items-center gap-3">
                         <div className="relative flex-1">
                             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -202,7 +202,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
 
                 {/* Add New Prompt Form */}
                 {isAddingNew && (
-                    <div className="px-4 py-3 border-b border-[#1e2a3b] bg-[#0f1629]/50">
+                    <div className="px-4 py-3 border-b border-[#1e2a3b] bg-[#0f1629]/50 shrink-0">
                         <div className="space-y-2">
                             <input
                                 type="text"
@@ -238,7 +238,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                 )}
 
                 {/* Prompts List */}
-                <div className="p-4 overflow-y-auto max-h-[calc(80vh-180px)]">
+                <div className="flex-1 min-h-0 p-4 overflow-y-auto">
                     <div className="space-y-2">
                         {filteredPrompts.map(prompt => (
                             <div

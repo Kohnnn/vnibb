@@ -6,21 +6,21 @@ import { cn } from '@/lib/utils';
 
 export interface ChartGridCardProps {
   symbol: string;
+  exchange?: string;
   name: string;
   price: number;
   change: number;
   changePercent: number;
-  priceHistory?: { date: string; close: number }[];
   onClick?: () => void;
 }
 
 export function ChartGridCard({
   symbol,
+  exchange,
   name,
   price,
   change,
   changePercent,
-  priceHistory = [],
   onClick,
 }: ChartGridCardProps) {
   const isPositive = changePercent >= 0;
@@ -41,7 +41,7 @@ export function ChartGridCard({
 
       {/* Mini Chart */}
       <div className="my-3 -mx-1">
-        <MiniChart data={priceHistory} height={60} positive={isPositive} />
+        <MiniChart symbol={symbol} exchange={exchange} height={60} />
       </div>
 
       {/* Price + Change */}

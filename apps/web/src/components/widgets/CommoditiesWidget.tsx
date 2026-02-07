@@ -4,6 +4,8 @@
 
 import { useState } from 'react';
 import { Gem, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { WidgetEmpty } from '@/components/ui/widget-states';
 
 interface Commodity {
     name: string;
@@ -19,7 +21,6 @@ interface CommoditiesWidgetProps {
     onRemove?: () => void;
 }
 
-// Mock commodities data
 const COMMODITIES: Commodity[] = [
     { name: 'Gold', symbol: 'XAU', price: 2045.30, unit: 'USD/oz', change: 12.50, changePct: 0.61 },
     { name: 'Silver', symbol: 'XAG', price: 23.15, unit: 'USD/oz', change: -0.25, changePct: -1.07 },
@@ -45,17 +46,20 @@ function getCommodityIcon(symbol: string): string {
     }
 }
 
-export function CommoditiesWidget({ isEditing, onRemove }: CommoditiesWidgetProps) {
+export function CommoditiesWidget({}: CommoditiesWidgetProps) {
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(new Date());
 
     const handleRefresh = () => {
         setIsRefreshing(true);
-        setTimeout(() => setIsRefreshing(false), 500);
+        setTimeout(() => {
+            setIsRefreshing(false);
+            setLastUpdated(new Date());
+        }, 500);
     };
 
     return (
         <div className="h-full flex flex-col">
-            {/* Header */}
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2 text-xs text-gray-500">
                     <Gem size={12} className="text-yellow-400" />
@@ -64,40 +68,47 @@ export function CommoditiesWidget({ isEditing, onRemove }: CommoditiesWidgetProp
                 <button
                     onClick={handleRefresh}
                     className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded"
+                    type="button"
                 >
                     <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
                 </button>
             </div>
 
-            {/* Commodities List */}
-            <div className="flex-1 overflow-auto space-y-1">
-                {COMMODITIES.map((commodity) => {
-                    const isUp = commodity.changePct >= 0;
-                    return (
-                        <div
-                            key={commodity.symbol}
-                            className="flex items-center justify-between p-2 rounded bg-gray-800/20 hover:bg-gray-800/40"
-                        >
-                            <div className="flex items-center gap-2">
-                                <span className="text-lg">{getCommodityIcon(commodity.symbol)}</span>
-                                <div>
-                                    <div className="text-sm font-medium text-white">{commodity.name}</div>
-                                    <div className="text-[10px] text-gray-500">{commodity.unit}</div>
+            <div className="pb-2 border-b border-gray-800/50">
+                <WidgetMeta updatedAt={lastUpdated} isFetching={isRefreshing} note="Sample data" align="right" />
+            </div>
+
+            <div className="flex-1 overflow-auto space-y-1 pt-2">
+                {COMMODITIES.length === 0 ? (
+                    <WidgetEmpty message="No commodities available" icon={<Gem size={18} />} />
+                ) : (
+                    COMMODITIES.map((commodity, index) => {
+                        const isUp = commodity.changePct >= 0;
+                        return (
+                            <div
+                                key={`${commodity.symbol}-${index}`}
+                                className="flex items-center justify-between p-2 rounded bg-gray-800/20 hover:bg-gray-800/40"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <span className="text-lg">{getCommodityIcon(commodity.symbol)}</span>
+                                    <div>
+                                        <div className="text-sm font-medium text-white">{commodity.name}</div>
+                                        <div className="text-[10px] text-gray-500">{commodity.unit}</div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-sm font-mono text-white">
+                                        ${commodity.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                    </div>
+                                    <div className={`text-xs flex items-center justify-end gap-0.5 ${isUp ? 'text-green-400' : 'text-red-400'}`}>
+                                        {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                                        {isUp ? '+' : ''}{commodity.changePct.toFixed(2)}%
+                                    </div>
                                 </div>
                             </div>
-                            <div className="text-right">
-                                <div className="text-sm font-mono text-white">
-                                    ${commodity.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                                </div>
-                                <div className={`text-xs flex items-center justify-end gap-0.5 ${isUp ? 'text-green-400' : 'text-red-400'
-                                    }`}>
-                                    {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                    {isUp ? '+' : ''}{commodity.changePct.toFixed(2)}%
-                                </div>
-                            </div>
-                        </div>
-                    );
-                })}
+                        );
+                    })
+                )}
             </div>
         </div>
     );

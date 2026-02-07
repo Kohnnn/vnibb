@@ -10,6 +10,10 @@ import {
 import { usePortfolio, type Position } from '@/lib/hooks/usePortfolio';
 import { usePortfolioPrices } from '@/lib/hooks/usePortfolioPrices';
 import { formatVND, formatPercent } from '@/lib/formatters';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { WidgetEmpty } from '@/components/ui/widget-states';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import type { WidgetGroupId } from '@/types/widget';
 
 // ============================================================================
 // Types
@@ -19,6 +23,7 @@ interface PortfolioTrackerWidgetProps {
     isEditing?: boolean;
     onRemove?: () => void;
     onSymbolClick?: (symbol: string) => void;
+    widgetGroup?: WidgetGroupId;
 }
 
 interface PositionWithPL extends Position {
@@ -295,7 +300,9 @@ function AllocationChart({
 
 export function PortfolioTrackerWidget({
     onSymbolClick,
+    widgetGroup,
 }: PortfolioTrackerWidgetProps) {
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
     const {
         positions,
         symbols,
@@ -446,7 +453,12 @@ export function PortfolioTrackerWidget({
                         </span>
                     </div>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2">
+                    <WidgetMeta
+                        isFetching={pricesLoading}
+                        note="Local portfolio"
+                        align="right"
+                    />
                     <button
                         onClick={() => refetch()}
                         className="p-1 text-zinc-500 hover:text-white hover:bg-zinc-700 rounded transition-colors"
@@ -521,10 +533,7 @@ export function PortfolioTrackerWidget({
                 {viewMode === 'allocation' ? (
                     <AllocationChart positions={enrichedPositions} />
                 ) : positions.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-32 text-zinc-500">
-                        <Briefcase size={24} className="mb-2 opacity-30" />
-                        <p className="text-xs">Add holdings to track</p>
-                    </div>
+                    <WidgetEmpty message="Add holdings to track" icon={<Briefcase size={18} />} />
                 ) : (
                     <table className="w-full text-xs">
                         <thead className="text-zinc-500 sticky top-0 bg-zinc-900">
@@ -579,21 +588,27 @@ export function PortfolioTrackerWidget({
                                         key={pos.id}
                                         className="border-b border-zinc-800/30 hover:bg-zinc-800/20 group"
                                     >
-                                        <td
-                                            className="py-1.5 px-1 text-white font-medium cursor-pointer hover:text-blue-400"
-                                            onClick={() => onSymbolClick?.(pos.symbol)}
-                                        >
-                                            <div className="flex items-center gap-1">
-                                                {pos.symbol}
-                                                {pos.isLoading && (
-                                                    <div className="w-2 h-2 border border-zinc-500 border-t-transparent rounded-full animate-spin" />
-                                                )}
-                                            </div>
-                                            {pos.dayChangePct !== null && (
-                                                <div className={`text-[10px] ${pos.dayChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                                    {pos.dayChangePct >= 0 ? '↑' : '↓'} {Math.abs(pos.dayChangePct).toFixed(1)}%
+                                        <td className="py-1.5 px-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setLinkedSymbol(pos.symbol);
+                                                    onSymbolClick?.(pos.symbol);
+                                                }}
+                                                className="text-left text-white font-medium hover:text-blue-400"
+                                            >
+                                                <div className="flex items-center gap-1">
+                                                    {pos.symbol}
+                                                    {pos.isLoading && (
+                                                        <div className="w-2 h-2 border border-zinc-500 border-t-transparent rounded-full animate-spin" />
+                                                    )}
                                                 </div>
-                                            )}
+                                                {pos.dayChangePct !== null && (
+                                                    <div className={`text-[10px] ${pos.dayChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                        {pos.dayChangePct >= 0 ? '↑' : '↓'} {Math.abs(pos.dayChangePct).toFixed(1)}%
+                                                    </div>
+                                                )}
+                                            </button>
                                         </td>
                                         <td className="py-1.5 px-1 text-right text-zinc-400">
                                             {pos.quantity.toLocaleString()}

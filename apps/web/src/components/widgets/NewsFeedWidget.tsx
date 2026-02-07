@@ -2,11 +2,10 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
     ExternalLink,
     Newspaper,
-    RefreshCw,
     Clock,
     TrendingUp,
     TrendingDown,
@@ -17,6 +16,10 @@ import {
     BookmarkCheck
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { API_BASE_URL } from '@/lib/api';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface NewsArticle {
     id: number;
@@ -117,7 +120,14 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
     const [bookmarkedIds, setBookmarkedIds] = useState<Set<number>>(new Set());
 
     // Fetch news feed with filters
-    const { data, isLoading, refetch, isRefetching } = useQuery({
+    const {
+        data,
+        isLoading,
+        error,
+        refetch,
+        isFetching,
+        dataUpdatedAt,
+    } = useQuery({
         queryKey: ['news-feed', symbol, sourceFilter, sentimentFilter],
         queryFn: async () => {
             const params = new URLSearchParams();
@@ -126,7 +136,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
             if (sentimentFilter) params.append('sentiment', sentimentFilter);
             params.append('limit', '30');
 
-            const response = await fetch(`/api/v1/news/feed?${params}`);
+            const response = await fetch(`${API_BASE_URL}/news/feed?${params}`);
             if (!response.ok) throw new Error('Failed to fetch news');
             return response.json();
         },
@@ -137,7 +147,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
     const { data: marketSentiment } = useQuery({
         queryKey: ['market-sentiment'],
         queryFn: async () => {
-            const response = await fetch('/api/v1/news/sentiment');
+            const response = await fetch(`${API_BASE_URL}/news/sentiment`);
             if (!response.ok) throw new Error('Failed to fetch sentiment');
             return response.json();
         },
@@ -145,6 +155,8 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
     });
 
     const newsItems: NewsArticle[] = data?.articles || [];
+    const hasData = newsItems.length > 0;
+    const isFallback = Boolean(error && hasData);
 
     // Filter by search query
     const filteredNews = newsItems.filter(item =>
@@ -175,7 +187,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
             symbol={symbol}
             onRefresh={() => refetch()}
             onClose={onRemove}
-            isLoading={isLoading || isRefetching}
+            isLoading={isLoading && !hasData}
             noPadding
         >
             <div className="h-full flex flex-col">
@@ -196,6 +208,15 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                         </div>
                     </div>
                 )}
+                <div className="px-3 pt-2">
+                    <WidgetMeta
+                        updatedAt={dataUpdatedAt}
+                        isFetching={isFetching && hasData}
+                        isCached={isFallback}
+                        note={symbol ? `${symbol} feed` : 'Market feed'}
+                        align="right"
+                    />
+                </div>
 
                 {/* Filters */}
                 <div className="px-2 py-2 space-y-2 border-b border-gray-800">
@@ -245,30 +266,25 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
 
                 {/* News List */}
                 <div className="flex-1 overflow-y-auto">
-                    {isLoading ? (
-                        <div className="space-y-3 p-2 text-left">
-                            {[...Array(5)].map((_, i) => (
-                                <div key={i} className="animate-pulse">
-                                    <div className="h-4 bg-gray-800 rounded w-3/4 mb-2" />
-                                    <div className="h-3 bg-gray-800 rounded w-1/2 mb-1" />
-                                    <div className="h-2 bg-gray-800 rounded w-1/4" />
-                                </div>
-                            ))}
-                        </div>
+                    {isLoading && !hasData ? (
+                        <WidgetSkeleton lines={6} />
+                    ) : error && !hasData ? (
+                        <WidgetError error={error as Error} onRetry={() => refetch()} />
+                    ) : !hasData ? (
+                        <WidgetEmpty
+                            message={symbol
+                                ? `No news available for ${symbol}. Try refreshing or check back later.`
+                                : 'No news available yet. Try refreshing or check back later.'}
+                            icon={<Newspaper size={18} />}
+                            action={{ label: 'Refresh', onClick: () => refetch() }}
+                        />
                     ) : filteredNews.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-32 text-gray-500">
-                            <Newspaper size={24} className="mb-2 opacity-30" />
-                            <p className="text-xs">
-                                {searchQuery ? 'No matching news found' :
-                                    symbol ? `No news available for ${symbol}` :
-                                        'No news available'}
-                            </p>
-                        </div>
+                        <WidgetEmpty message="No matching news found. Try adjusting filters." icon={<Newspaper size={18} />} />
                     ) : (
                         <div className="divide-y divide-gray-800/30 text-left">
-                            {filteredNews.map((item) => (
+                            {filteredNews.map((item, index) => (
                                 <div
-                                    key={item.id}
+                                    key={`${item.id ?? item.url ?? item.title}-${index}`}
                                     className="group p-3 hover:bg-gray-800/30 cursor-pointer transition-colors"
                                     onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
                                 >

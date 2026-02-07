@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { config } from '@/lib/config';
 
-const WS_URL = config.wsUrl;
+const WS_URL = config.wsPriceUrl;
 
 // Type definitions
 export interface PriceUpdate {
@@ -61,25 +61,36 @@ export function useWebSocket({
 
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const reconnectAttemptRef = useRef(0);
     const symbolsRef = useRef<string[]>(symbols);
     const previousPricesRef = useRef<Map<string, number>>(new Map());
+    const intentionalCloseRef = useRef(false);
 
     // Update symbols ref
     symbolsRef.current = symbols;
 
+    const shouldEnable = enabled && config.enableRealtime && Boolean(WS_URL);
+    const maxReconnectAttempts = config.isProd ? 10 : 3;
+
     const connect = useCallback(() => {
-        if (!enabled || symbols.length === 0) return;
+        if (!shouldEnable || symbolsRef.current.length === 0) return;
+
+        if (reconnectAttemptRef.current >= maxReconnectAttempts) {
+            return;
+        }
 
         // Prevent multiple connections
         if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
         try {
+            intentionalCloseRef.current = false;
             const ws = new WebSocket(WS_URL);
             wsRef.current = ws;
 
             ws.onopen = () => {
                 setIsConnected(true);
                 reconnectTimeoutRef.current = null; // Reset backoff on successful connection
+                reconnectAttemptRef.current = 0;
                 // Subscribe to symbols
                 ws.send(JSON.stringify({
                     action: 'subscribe',
@@ -139,21 +150,33 @@ export function useWebSocket({
                 setIsConnected(false);
                 wsRef.current = null;
 
+                if (intentionalCloseRef.current) {
+                    return;
+                }
+
                 // Exponential backoff for reconnection
-                const attempt = (reconnectTimeoutRef.current as any)?.attempt || 0;
+                const attempt = reconnectAttemptRef.current;
                 const delay = Math.min(1000 * Math.pow(2, attempt), 30000); // Max 30s
 
+                if (attempt >= maxReconnectAttempts) {
+                    return;
+                }
+
                 const timeoutId = setTimeout(() => {
-                    if (enabled) connect();
+                    if (shouldEnable) connect();
                 }, delay);
 
-                // Store attempt count in timeout object for persistence (hacky but works in refs)
-                (timeoutId as any).attempt = attempt + 1;
+                reconnectAttemptRef.current = attempt + 1;
                 reconnectTimeoutRef.current = timeoutId;
             };
 
             ws.onerror = (err) => {
-                console.warn('WebSocket encountered error:', err);
+                if (intentionalCloseRef.current) {
+                    return;
+                }
+                if (!config.isDev) {
+                    console.warn('WebSocket encountered error:', err);
+                }
                 ws.close(); // Ensure close is called to trigger onclose for reconnection
             };
 
@@ -164,31 +187,41 @@ export function useWebSocket({
                 if (enabled) connect();
             }, 5000);
         }
-    }, [enabled, symbols, onUpdate]);
+    }, [shouldEnable, onUpdate, maxReconnectAttempts]);
 
     const disconnect = useCallback(() => {
+        intentionalCloseRef.current = true;
         if (wsRef.current) {
-            wsRef.current.close();
+            if (wsRef.current.readyState === WebSocket.OPEN) {
+                wsRef.current.close();
+            } else if (wsRef.current.readyState === WebSocket.CONNECTING) {
+                wsRef.current.onopen = null;
+                wsRef.current.onmessage = null;
+                wsRef.current.onerror = null;
+                wsRef.current.onclose = null;
+            }
             wsRef.current = null;
         }
         if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = null;
         }
+        reconnectAttemptRef.current = 0;
     }, []);
 
     const reconnect = useCallback(() => {
+        reconnectAttemptRef.current = 0;
         disconnect();
         connect();
     }, [disconnect, connect]);
 
     // Connect on mount
     useEffect(() => {
-        if (enabled) {
+        if (shouldEnable) {
             connect();
         }
         return () => disconnect();
-    }, [enabled, connect, disconnect]);
+    }, [shouldEnable, connect, disconnect]);
 
     // Update subscriptions when symbols change
     useEffect(() => {

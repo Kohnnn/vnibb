@@ -5,6 +5,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Bell, Plus, X, ArrowUp, ArrowDown, Check, Percent, BellOff, BellRing, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { API_BASE_URL } from '@/lib/api';
+import { config } from '@/lib/config';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { WidgetEmpty } from '@/components/ui/widget-states';
 
 // ============ Types ============
 
@@ -39,7 +42,7 @@ interface PriceAlertsWidgetProps {
 
 const STORAGE_KEY = 'vnibb_price_alerts';
 const PERMISSION_KEY = 'vnibb_notification_permission';
-const WS_URL = API_BASE_URL.replace('http', 'ws').replace('/api/v1', '/ws/prices');
+const WS_URL = config.wsPriceUrl;
 const POLL_INTERVAL = 30000; // 30 seconds fallback polling
 
 // ============ Notification Service ============
@@ -257,7 +260,6 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
                 wsRef.current = null;
             }
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeSymbols.join(',')]);
 
     // Fallback polling when WebSocket is not connected
@@ -298,7 +300,6 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
                 pollIntervalRef.current = null;
             }
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [wsConnected, activeSymbols.join(',')]);
 
     // Trigger browser notification for alert
@@ -410,7 +411,8 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
                         </span>
                     )}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2">
+                    <WidgetMeta note={wsConnected ? 'Live stream' : 'Polling'} align="right" />
                     {notificationPermission !== 'granted' && (
                         <button
                             onClick={handleRequestPermission}
@@ -489,16 +491,11 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
             {/* Alerts List */}
             <div className="flex-1 overflow-auto">
                 {alerts.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-32 text-zinc-500">
-                        <Bell size={24} className="mb-2 opacity-30" />
-                        <p className="text-xs">No price alerts set</p>
-                        <button
-                            onClick={() => setShowAdd(true)}
-                            className="mt-2 text-xs text-blue-400 hover:text-blue-300"
-                        >
-                            Create your first alert
-                        </button>
-                    </div>
+                    <WidgetEmpty
+                        message="No price alerts set"
+                        icon={<Bell size={18} />}
+                        action={{ label: 'Create alert', onClick: () => setShowAdd(true) }}
+                    />
                 ) : (
                     <div className="p-1 space-y-1">
                         {/* Active Alerts */}

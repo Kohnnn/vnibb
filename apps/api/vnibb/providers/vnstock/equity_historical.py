@@ -47,8 +47,8 @@ class EquityHistoricalQueryParams(BaseModel):
     )
     source: str = Field(
         default="KBS",
-        pattern=r"^(KBS|VCI|TCBS|DNSE)$",
-        description="Data source: KBS (default), VCI, TCBS, or DNSE",
+        pattern=r"^(KBS|VCI|DNSE)$",
+        description="Data source: KBS (default), VCI, or DNSE",
     )
 
     

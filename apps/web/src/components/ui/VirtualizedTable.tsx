@@ -127,20 +127,32 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
           {virtualItems.map(virtualItem => {
             const row = data[virtualItem.index];
             if (!row) return null;
+            const rowLabel = (row as any).symbol || (row as any).ticker || (row as any).name;
+            const isClickable = Boolean(onRowClick);
 
             return (
               <div
                 key={virtualItem.key}
                 className={cn(
                     "absolute top-0 left-0 w-full flex items-center border-b border-gray-800/30 transition-colors",
-                    onRowClick ? 'cursor-pointer hover:bg-white/5' : '',
+                    isClickable ? 'cursor-pointer hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30' : '',
                     virtualItem.index % 2 ? 'bg-gray-900/10' : 'bg-transparent'
                 )}
                 style={{
                   height: `${virtualItem.size}px`,
                   transform: `translateY(${virtualItem.start}px)`,
                 }}
+                role={isClickable ? 'button' : undefined}
+                tabIndex={isClickable ? 0 : undefined}
+                aria-label={isClickable ? `View ${rowLabel || 'row'}` : undefined}
                 onClick={() => onRowClick?.(row, virtualItem.index)}
+                onKeyDown={(event) => {
+                  if (!isClickable) return;
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onRowClick?.(row, virtualItem.index);
+                  }
+                }}
               >
                 {columns.map(column => (
                   <div

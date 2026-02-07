@@ -7,7 +7,9 @@ import { env } from './env';
 export const config = {
   // API
   apiUrl: env.apiUrl,
-  wsUrl: env.wsUrl,
+  wsUrl: env.wsPriceUrl,
+  wsBaseUrl: env.wsBaseUrl,
+  wsPriceUrl: env.wsPriceUrl,
   
   // Supabase
   supabaseUrl: env.supabaseUrl || '',
@@ -15,7 +17,9 @@ export const config = {
   
   // Feature flags
   enableAiAnalysis: env.geminiApiKey ? true : false,
-  enableRealtime: true,
+  enableRealtime: env.enableRealtime,
+  isDev: env.isDev,
+  isProd: env.isProd,
   
   // Computed
   get isSupabaseConfigured(): boolean {

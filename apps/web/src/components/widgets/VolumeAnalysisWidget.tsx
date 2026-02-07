@@ -2,8 +2,11 @@
 
 'use client';
 
-import { BarChart2, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import { BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
 import { useHistoricalPrices } from '@/lib/queries';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface VolumeAnalysisWidgetProps {
     symbol: string;
@@ -18,21 +21,26 @@ function formatVolume(vol: number): string {
     return vol.toLocaleString();
 }
 
-export function VolumeAnalysisWidget({ symbol, isEditing, onRemove }: VolumeAnalysisWidgetProps) {
-    const { data, isLoading, refetch, isRefetching } = useHistoricalPrices(symbol, {
+export function VolumeAnalysisWidget({ symbol }: VolumeAnalysisWidgetProps) {
+    const {
+        data,
+        isLoading,
+        error,
+        refetch,
+        isFetching,
+        dataUpdatedAt,
+    } = useHistoricalPrices(symbol, {
         startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     });
 
     const prices = data?.data || [];
 
-    // Calculate volume metrics
-    const volumes = prices.map(p => p.volume || 0);
+    const volumes = prices.map((p) => p.volume || 0);
     const avgVolume = volumes.length > 0 ? volumes.reduce((a, b) => a + b, 0) / volumes.length : 0;
     const maxVolume = Math.max(...volumes, 1);
     const latestVolume = volumes[volumes.length - 1] || 0;
     const volumeChange = avgVolume > 0 ? ((latestVolume - avgVolume) / avgVolume) * 100 : 0;
 
-    // Get last 10 days for display
     const recentData = prices.slice(-10).map((p, i) => ({
         date: p.time || '',
         volume: p.volume || 0,
@@ -42,9 +50,15 @@ export function VolumeAnalysisWidget({ symbol, isEditing, onRemove }: VolumeAnal
             : 0,
     }));
 
+    const hasData = prices.length > 0;
+    const isFallback = Boolean(error && hasData);
+
+    if (!symbol) {
+        return <WidgetEmpty message="Select a symbol to view volume" />;
+    }
+
     return (
         <div className="h-full flex flex-col">
-            {/* Header */}
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2 text-xs">
                     <BarChart2 size={12} className="text-cyan-400" />
@@ -55,26 +69,31 @@ export function VolumeAnalysisWidget({ symbol, isEditing, onRemove }: VolumeAnal
                 </div>
                 <button
                     onClick={() => refetch()}
-                    disabled={isRefetching}
+                    disabled={isFetching}
                     className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded"
+                    type="button"
                 >
-                    <RefreshCw size={12} className={isRefetching ? 'animate-spin' : ''} />
+                    <BarChart2 size={12} className={isFetching ? 'animate-pulse' : ''} />
                 </button>
             </div>
 
-            {/* Volume Bars */}
-            <div className="flex-1 overflow-auto">
-                {isLoading ? (
-                    <div className="space-y-2">
-                        {[...Array(8)].map((_, i) => (
-                            <div key={i} className="animate-pulse h-6 bg-gray-800/30 rounded" />
-                        ))}
-                    </div>
-                ) : recentData.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-32 text-gray-500">
-                        <BarChart2 size={24} className="mb-2 opacity-30" />
-                        <p className="text-xs">No volume data</p>
-                    </div>
+            <div className="pb-2 border-b border-gray-800/50">
+                <WidgetMeta
+                    updatedAt={dataUpdatedAt}
+                    isFetching={isFetching && hasData}
+                    isCached={isFallback}
+                    note="30-day volume"
+                    align="right"
+                />
+            </div>
+
+            <div className="flex-1 overflow-auto pt-2">
+                {isLoading && !hasData ? (
+                    <WidgetSkeleton lines={6} />
+                ) : error && !hasData ? (
+                    <WidgetError error={error as Error} onRetry={() => refetch()} />
+                ) : !hasData ? (
+                    <WidgetEmpty message="No volume data" icon={<BarChart2 size={18} />} />
                 ) : (
                     <div className="space-y-1">
                         {recentData.map((day, i) => {
@@ -90,8 +109,8 @@ export function VolumeAnalysisWidget({ symbol, isEditing, onRemove }: VolumeAnal
                                     <div className="flex-1 h-5 bg-gray-800/30 rounded overflow-hidden relative">
                                         <div
                                             className={`h-full transition-all ${isUp
-                                                    ? isAboveAvg ? 'bg-green-500' : 'bg-green-500/50'
-                                                    : isAboveAvg ? 'bg-red-500' : 'bg-red-500/50'
+                                                ? isAboveAvg ? 'bg-green-500' : 'bg-green-500/50'
+                                                : isAboveAvg ? 'bg-red-500' : 'bg-red-500/50'
                                                 }`}
                                             style={{ width: `${widthPct}%` }}
                                         />
@@ -113,7 +132,6 @@ export function VolumeAnalysisWidget({ symbol, isEditing, onRemove }: VolumeAnal
                 )}
             </div>
 
-            {/* Legend */}
             <div className="flex items-center justify-center gap-4 pt-2 text-[10px] text-gray-500">
                 <div className="flex items-center gap-1">
                     <div className="w-3 h-2 bg-green-500 rounded" />

@@ -1,18 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-    Loader2, RefreshCw, Database, AlertCircle, Search, 
-    ChevronLeft, ChevronRight, FileJson, Download, Terminal, 
-    Code, Info, Table as TableIcon, X
+import { WidgetEmpty, WidgetError, WidgetLoading } from "@/components/ui/widget-states";
+import { WidgetMeta } from "@/components/ui/WidgetMeta";
+import { API_BASE_URL } from "@/lib/api";
+import {
+    Loader2, RefreshCw, Database, Search,
+    ChevronLeft, ChevronRight, FileJson, Download, Terminal,
+    Code, Table as TableIcon, X
 } from "lucide-react";
 
 interface TableInfo {
@@ -38,8 +40,6 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
     const [selectedRow, setSelectedRow] = useState<any>(null);
     const [activeTab, setActiveTab] = useState("browser");
     
-    const queryClient = useQueryClient();
-
     // Debounce search
     useEffect(() => {
         const timer = setTimeout(() => setDebouncedSearch(search), 500);
@@ -52,10 +52,17 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
     }, [selectedTable, debouncedSearch]);
 
     // Fetch all tables with stats
-    const { data: tablesData, isLoading: tablesLoading } = useQuery({
+    const {
+        data: tablesData,
+        isLoading: tablesLoading,
+        error: tablesError,
+        refetch: refetchTables,
+        isFetching: tablesFetching,
+        dataUpdatedAt: tablesUpdatedAt,
+    } = useQuery({
         queryKey: ["database-tables"],
         queryFn: async () => {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/database/tables`);
+            const res = await fetch(`${API_BASE_URL}/admin/database/tables`);
             if (!res.ok) throw new Error("Failed to fetch tables");
             return res.json();
         },
@@ -65,12 +72,12 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
     const tables: TableInfo[] = tablesData?.tables || [];
 
     // Fetch table data
-    const { data: tableData, isLoading: tableLoading } = useQuery({
+    const { data: tableData, isLoading: tableLoading, error: tableError, refetch: refetchTableData } = useQuery({
         queryKey: ["database-table-data", selectedTable, page, debouncedSearch],
         queryFn: async () => {
             if (!selectedTable) return null;
             const offset = (page - 1) * limit;
-            let url = `${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/database/table/${selectedTable}/sample?limit=${limit}&offset=${offset}`;
+            let url = `${API_BASE_URL}/admin/database/table/${selectedTable}/sample?limit=${limit}&offset=${offset}`;
             if (debouncedSearch) url += `&search=${encodeURIComponent(debouncedSearch)}`;
             
             const res = await fetch(url);
@@ -81,11 +88,11 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
     });
 
     // Fetch table schema
-    const { data: schemaData, isLoading: schemaLoading } = useQuery({
+    const { data: schemaData, isLoading: schemaLoading, error: schemaError, refetch: refetchSchema } = useQuery({
         queryKey: ["database-table-schema", selectedTable],
         queryFn: async () => {
             if (!selectedTable) return null;
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/database/table/${selectedTable}/schema`);
+            const res = await fetch(`${API_BASE_URL}/admin/database/table/${selectedTable}/schema`);
             if (!res.ok) throw new Error("Failed to fetch schema");
             return res.json();
         },
@@ -95,7 +102,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
     // Execute Custom Query
     const queryMutation = useMutation({
         mutationFn: async (query: string) => {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/admin/database/query`, {
+            const res = await fetch(`${API_BASE_URL}/admin/database/query`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ query }),
@@ -150,6 +157,13 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                         Database Explorer
                     </CardTitle>
                     <div className="flex items-center gap-2">
+                         <WidgetMeta
+                             updatedAt={tablesUpdatedAt}
+                             isFetching={tablesFetching && tables.length > 0}
+                             isCached={Boolean(tablesError && tables.length > 0)}
+                             note="Admin tables"
+                             align="right"
+                         />
                          <Select value={selectedTable} onValueChange={setSelectedTable}>
                             <SelectTrigger className="w-[200px] h-8 text-xs">
                                 <SelectValue placeholder="Select table..." />
@@ -169,7 +183,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            onClick={() => queryClient.invalidateQueries({ queryKey: ["database-tables"] })}
+                            onClick={() => refetchTables()}
                         >
                             <RefreshCw className="h-4 w-4" />
                         </Button>
@@ -177,6 +191,20 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                 </div>
             </CardHeader>
             <CardContent className="p-0 flex-1 flex flex-col overflow-hidden">
+                {tablesLoading ? (
+                    <WidgetLoading message="Loading database tables..." />
+                ) : tablesError ? (
+                    <WidgetError
+                        error={tablesError as Error}
+                        title="Unable to load tables"
+                        onRetry={() => refetchTables()}
+                    />
+                ) : tables.length === 0 ? (
+                    <WidgetEmpty
+                        message="No tables found in the database"
+                        action={{ label: "Refresh", onClick: () => refetchTables() }}
+                    />
+                ) : (
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
                     <div className="flex items-center justify-between border-b border-white/5 mb-4">
                         <TabsList className="bg-transparent h-9 p-0 gap-4">
@@ -212,9 +240,15 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                     <TabsContent value="browser" className="flex-1 flex flex-col m-0 overflow-hidden">
                         <div className="flex-1 overflow-auto border rounded-md border-white/5 scrollbar-hide">
                             {tableLoading ? (
-                                <div className="flex items-center justify-center h-full">
-                                    <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-                                </div>
+                                <WidgetLoading message="Loading rows..." />
+                            ) : tableError ? (
+                                <WidgetError
+                                    error={tableError as Error}
+                                    title="Failed to load table data"
+                                    onRetry={() => refetchTableData()}
+                                />
+                            ) : !selectedTable ? (
+                                <WidgetEmpty message="Select a table to view data" />
                             ) : tableData?.rows?.length > 0 ? (
                                 <Table>
                                     <TableHeader className="bg-muted/30">
@@ -243,10 +277,10 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                     </TableBody>
                                 </Table>
                             ) : (
-                                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                                    <Info className="h-8 w-8 mb-2 opacity-20" />
-                                    <p className="text-sm font-bold opacity-50">No records found</p>
-                                </div>
+                                <WidgetEmpty
+                                    message={debouncedSearch ? "No rows match your search" : "No records found"}
+                                    action={debouncedSearch ? { label: "Clear search", onClick: () => setSearch("") } : undefined}
+                                />
                             )}
                         </div>
 
@@ -306,9 +340,11 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                              <div className="text-[10px] font-black uppercase text-muted-foreground tracking-widest mb-2">Results</div>
                              <div className="flex-1 overflow-auto border rounded-md border-white/5 scrollbar-hide">
                                 {queryMutation.error ? (
-                                    <div className="p-4 text-red-400 text-xs font-mono whitespace-pre-wrap">
-                                        Error: {(queryMutation.error as Error).message}
-                                    </div>
+                                    <WidgetError
+                                        error={queryMutation.error as Error}
+                                        title="Query failed"
+                                        onRetry={() => queryMutation.mutate(sqlQuery)}
+                                    />
                                 ) : queryMutation.data?.rows ? (
                                     <Table>
                                          <TableHeader className="bg-muted/30">
@@ -333,10 +369,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                         </TableBody>
                                     </Table>
                                 ) : (
-                                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                                        <Code className="h-8 w-8 mb-2 opacity-20" />
-                                        <p className="text-sm font-bold opacity-30">Run a query to see results</p>
-                                    </div>
+                                    <WidgetEmpty message="Run a query to see results" icon={<Code className="h-8 w-8 opacity-30" />} />
                                 )}
                              </div>
                         </div>
@@ -345,9 +378,15 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                     <TabsContent value="schema" className="flex-1 flex flex-col m-0 overflow-hidden">
                          <div className="flex-1 overflow-auto border rounded-md border-white/5 scrollbar-hide">
                             {schemaLoading ? (
-                                <div className="flex items-center justify-center h-full">
-                                    <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-                                </div>
+                                <WidgetLoading message="Loading schema..." />
+                            ) : schemaError ? (
+                                <WidgetError
+                                    error={schemaError as Error}
+                                    title="Failed to load schema"
+                                    onRetry={() => refetchSchema()}
+                                />
+                            ) : !selectedTable ? (
+                                <WidgetEmpty message="Select a table to view schema" />
                             ) : schemaData?.columns ? (
                                 <Table>
                                     <TableHeader className="bg-muted/30">
@@ -371,10 +410,13 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                         ))}
                                     </TableBody>
                                 </Table>
-                            ) : null}
+                            ) : (
+                                <WidgetEmpty message="No schema information found" />
+                            )}
                          </div>
                     </TabsContent>
                 </Tabs>
+                )}
             </CardContent>
 
             {/* Row Detail View (Overlay) */}

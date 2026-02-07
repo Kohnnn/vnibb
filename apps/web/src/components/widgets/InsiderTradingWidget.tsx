@@ -3,10 +3,12 @@
 'use client';
 
 import { useState } from 'react';
-import { TrendingUp, TrendingDown, RefreshCw, User, AlertCircle } from 'lucide-react';
+import { TrendingUp, TrendingDown, RefreshCw, AlertCircle } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { getInsiderDeals, getInsiderSentiment } from '@/lib/api';
-import type { InsiderTrade, InsiderSentiment } from '@/types/insider';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface InsiderTradingWidgetProps {
   symbol?: string;
@@ -46,13 +48,26 @@ function getSentimentLabel(score: number): string {
 export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetProps) {
   const [filter, setFilter] = useState<'all' | 'buy' | 'sell'>('all');
 
-  const { data: dealsData, isLoading: dealsLoading, refetch: refetchDeals, isRefetching } = useQuery({
+  const {
+    data: dealsData,
+    isLoading: dealsLoading,
+    error: dealsError,
+    refetch: refetchDeals,
+    isFetching: dealsFetching,
+    dataUpdatedAt: dealsUpdatedAt,
+  } = useQuery({
     queryKey: ['insider-deals', symbol],
     queryFn: () => getInsiderDeals(symbol, { limit: 20 }),
     enabled: !!symbol,
   });
 
-  const { data: sentimentData, isLoading: sentimentLoading } = useQuery({
+  const {
+    data: sentimentData,
+    isLoading: sentimentLoading,
+    error: sentimentError,
+    refetch: refetchSentiment,
+    isFetching: sentimentFetching,
+  } = useQuery({
     queryKey: ['insider-sentiment', symbol],
     queryFn: () => getInsiderSentiment(symbol, 90),
     enabled: !!symbol,
@@ -69,6 +84,10 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
   });
 
   const isLoading = dealsLoading || sentimentLoading;
+  const error = dealsError || sentimentError;
+  const isFetching = dealsFetching || sentimentFetching;
+  const hasData = deals.length > 0;
+  const isFallback = Boolean(error && hasData);
 
   return (
     <div className="h-full flex flex-col">
@@ -87,13 +106,25 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
             </div>
           )}
         </div>
-        <button
-          onClick={() => refetchDeals()}
-          disabled={isRefetching}
-          className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
-        >
-          <RefreshCw size={12} className={isRefetching ? 'animate-spin' : ''} />
-        </button>
+        <div className="flex items-center gap-2">
+          <WidgetMeta
+            updatedAt={dealsUpdatedAt}
+            isFetching={isFetching && hasData}
+            isCached={isFallback}
+            note="90d sentiment"
+            align="right"
+          />
+          <button
+            onClick={() => {
+              refetchDeals();
+              refetchSentiment();
+            }}
+            disabled={isFetching}
+            className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
+          >
+            <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
       {/* Filter Tabs */}
@@ -132,20 +163,12 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
 
       {/* Deals List */}
       <div className="flex-1 overflow-y-auto">
-        {isLoading ? (
-          <div className="space-y-2">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="animate-pulse p-2 bg-gray-800/30 rounded">
-                <div className="h-3 bg-gray-800 rounded w-3/4 mb-1" />
-                <div className="h-2 bg-gray-800 rounded w-1/2" />
-              </div>
-            ))}
-          </div>
+        {isLoading && !hasData ? (
+          <WidgetSkeleton lines={5} />
+        ) : error && !hasData ? (
+          <WidgetError error={error as Error} onRetry={() => refetchDeals()} />
         ) : filteredDeals.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 text-gray-500">
-            <AlertCircle size={24} className="mb-2 opacity-30" />
-            <p className="text-xs">No insider trades found</p>
-          </div>
+          <WidgetEmpty message="No insider trades found" icon={<AlertCircle size={18} />} />
         ) : (
           <div className="space-y-1.5">
             {filteredDeals.map((deal) => {

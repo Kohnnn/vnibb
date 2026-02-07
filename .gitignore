@@ -46,15 +46,19 @@ coverage/
 .pytest_cache/
 .nyc_output/
 *.log
+apps/web/playwright-report/
+apps/web/test-results/
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
+*.bak
 
 # Cache
 .cache/
 *.cache
+.turbo/
 
 # Python
 *.pyc
@@ -63,11 +67,13 @@ coverage/
 pip-wheel-metadata/
 
 # Local development only
-#.agent/
+.agent/
 .kiro/
 .opencode/
 temp_vnstock_installer/
 server.log
+apps/api/nul
+image/
 
 # Test files (not for production)
 test.db

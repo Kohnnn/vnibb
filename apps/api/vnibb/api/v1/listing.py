@@ -63,7 +63,7 @@ class IndustriesResponse(BaseModel):
     description="Get list of all stock symbols in Vietnam market.",
 )
 async def get_all_symbols(
-    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|TCBS|DNSE)$"),
+    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|DNSE)$"),
 
 ) -> SymbolsResponse:
     """Fetch all stock symbols. Cached for 24 hours using database."""
@@ -132,7 +132,7 @@ async def get_all_symbols(
     description="Get symbols categorized by exchange (HOSE, HNX, UPCOM).",
 )
 async def get_symbols_by_exchange(
-    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|TCBS|DNSE)$"),
+    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|DNSE)$"),
 
     lang: str = Query(default="en", pattern=r"^(en|vi)$"),
 ) -> ExchangeSymbolsResponse:
@@ -154,7 +154,7 @@ async def get_symbols_by_exchange(
 )
 async def get_symbols_by_group(
     group: str,
-    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|TCBS|DNSE)$"),
+    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|DNSE)$"),
 
 ) -> GroupSymbolsResponse:
     """Fetch symbols in an index group."""
@@ -174,7 +174,7 @@ async def get_symbols_by_group(
     description="Get ICB (Industry Classification Benchmark) industry list.",
 )
 async def get_industries(
-    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|TCBS|DNSE)$"),
+    source: str = Query(default="KBS", pattern=r"^(KBS|VCI|VND|DNSE)$"),
 
 ) -> IndustriesResponse:
     """Fetch ICB industry classification. Cached for 24 hours using database."""

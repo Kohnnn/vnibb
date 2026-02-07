@@ -15,6 +15,7 @@ from typing import Optional, List
 from pydantic import BaseModel
 
 from vnibb.services.websocket_service import manager
+from vnibb.core.config import settings
 
 
 router = APIRouter()
@@ -47,6 +48,14 @@ class SyncResponse(BaseModel):
     status: str
     message: str
     count: Optional[int] = None
+
+
+class CleanupResponse(BaseModel):
+    """Response for retention cleanup operations."""
+    status: str
+    message: str
+    removed: dict
+    total_removed: int
 
 
 class SyncJobRequest(BaseModel):
@@ -196,7 +205,12 @@ async def seed_stocks(
 async def seed_full(
     background_tasks: BackgroundTasks,
     include_prices: bool = Query(default=False, description="Also seed price data"),
-    price_days: int = Query(default=30, ge=1, le=365, description="Days of price history"),
+    price_days: int = Query(
+        default=settings.price_history_years * 365,
+        ge=1,
+        le=3650,
+        description="Days of price history",
+    ),
 ) -> SyncResponse:
     """
     Run complete database seeding.
@@ -206,10 +220,10 @@ async def seed_full(
     - ICB industry mappings
     - Optionally: Historical price data
     """
-    from vnibb.cli.seed import run_full_seed
+    from vnibb.services.data_pipeline import data_pipeline
     
     async def _run_seed():
-        await run_full_seed(include_prices=include_prices, price_days=price_days)
+        await data_pipeline.run_full_seeding(days=price_days, include_prices=include_prices)
     
     background_tasks.add_task(_run_seed)
     
@@ -391,6 +405,27 @@ async def sync_news(
 
 
 @router.post(
+    "/sync/company-news",
+    response_model=SyncResponse,
+    summary="Sync Company News",
+    description="Sync company news for all or specified stocks.",
+)
+async def sync_company_news(
+    background_tasks: BackgroundTasks,
+    symbols: Optional[list[str]] = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    async_mode: bool = Query(default=True),
+) -> SyncResponse:
+    """Sync company news to database."""
+    return await sync_news(
+        background_tasks=background_tasks,
+        symbols=symbols,
+        limit=limit,
+        async_mode=async_mode,
+    )
+
+
+@router.post(
     "/sync/dividends",
     response_model=SyncResponse,
     summary="Sync Dividends",
@@ -426,6 +461,216 @@ async def sync_dividends(
 
 
 @router.post(
+    "/sync/company-events",
+    response_model=SyncResponse,
+    summary="Sync Company Events",
+    description="Sync company events for all or specified stocks.",
+)
+async def sync_company_events(
+    background_tasks: BackgroundTasks,
+    symbols: Optional[list[str]] = Query(default=None),
+    limit: int = Query(default=30, ge=1, le=200),
+    async_mode: bool = Query(default=True),
+) -> SyncResponse:
+    """Sync company events."""
+    from vnibb.services.data_pipeline import data_pipeline
+    if async_mode:
+        background_tasks.add_task(
+            data_pipeline.sync_company_events,
+            symbols=symbols,
+            limit=limit,
+        )
+        return SyncResponse(
+            status="started",
+            message="Company events sync started in background",
+        )
+
+    try:
+        count = await data_pipeline.sync_company_events(symbols=symbols, limit=limit)
+        return SyncResponse(
+            status="success",
+            message=f"Synced {count} company events",
+            count=count,
+        )
+    except Exception as e:
+        logger.error(f"Company events sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/sync/insider-deals",
+    response_model=SyncResponse,
+    summary="Sync Insider Deals",
+    description="Sync insider deals for all or specified stocks.",
+)
+async def sync_insider_deals(
+    background_tasks: BackgroundTasks,
+    symbols: Optional[list[str]] = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=200),
+    async_mode: bool = Query(default=True),
+) -> SyncResponse:
+    """Sync insider deals."""
+    from vnibb.services.data_pipeline import data_pipeline
+    if async_mode:
+        background_tasks.add_task(
+            data_pipeline.sync_insider_deals,
+            symbols=symbols,
+            limit=limit,
+        )
+        return SyncResponse(
+            status="started",
+            message="Insider deals sync started in background",
+        )
+
+    try:
+        count = await data_pipeline.sync_insider_deals(symbols=symbols, limit=limit)
+        return SyncResponse(
+            status="success",
+            message=f"Synced {count} insider deals",
+            count=count,
+        )
+    except Exception as e:
+        logger.error(f"Insider deals sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/sync/shareholders",
+    response_model=SyncResponse,
+    summary="Sync Shareholders",
+    description="Sync major shareholders for all or specified stocks.",
+)
+async def sync_shareholders(
+    background_tasks: BackgroundTasks,
+    symbols: Optional[list[str]] = Query(default=None),
+    async_mode: bool = Query(default=True),
+) -> SyncResponse:
+    """Sync shareholders."""
+    from vnibb.services.data_pipeline import data_pipeline
+    if async_mode:
+        background_tasks.add_task(
+            data_pipeline.sync_shareholders,
+            symbols=symbols,
+        )
+        return SyncResponse(
+            status="started",
+            message="Shareholders sync started in background",
+        )
+
+    try:
+        count = await data_pipeline.sync_shareholders(symbols=symbols)
+        return SyncResponse(
+            status="success",
+            message=f"Synced {count} shareholders",
+            count=count,
+        )
+    except Exception as e:
+        logger.error(f"Shareholders sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/sync/officers",
+    response_model=SyncResponse,
+    summary="Sync Officers",
+    description="Sync company officers for all or specified stocks.",
+)
+async def sync_officers(
+    background_tasks: BackgroundTasks,
+    symbols: Optional[list[str]] = Query(default=None),
+    async_mode: bool = Query(default=True),
+) -> SyncResponse:
+    """Sync officers."""
+    from vnibb.services.data_pipeline import data_pipeline
+    if async_mode:
+        background_tasks.add_task(
+            data_pipeline.sync_officers,
+            symbols=symbols,
+        )
+        return SyncResponse(
+            status="started",
+            message="Officers sync started in background",
+        )
+
+    try:
+        count = await data_pipeline.sync_officers(symbols=symbols)
+        return SyncResponse(
+            status="success",
+            message=f"Synced {count} officers",
+            count=count,
+        )
+    except Exception as e:
+        logger.error(f"Officers sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/sync/subsidiaries",
+    response_model=SyncResponse,
+    summary="Sync Subsidiaries",
+    description="Sync subsidiaries for all or specified stocks.",
+)
+async def sync_subsidiaries(
+    background_tasks: BackgroundTasks,
+    symbols: Optional[list[str]] = Query(default=None),
+    async_mode: bool = Query(default=True),
+) -> SyncResponse:
+    """Sync subsidiaries."""
+    from vnibb.services.data_pipeline import data_pipeline
+    if async_mode:
+        background_tasks.add_task(
+            data_pipeline.sync_subsidiaries,
+            symbols=symbols,
+        )
+        return SyncResponse(
+            status="started",
+            message="Subsidiaries sync started in background",
+        )
+
+    try:
+        count = await data_pipeline.sync_subsidiaries(symbols=symbols)
+        return SyncResponse(
+            status="success",
+            message=f"Synced {count} subsidiaries",
+            count=count,
+        )
+    except Exception as e:
+        logger.error(f"Subsidiaries sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/sync/market-sectors",
+    response_model=SyncResponse,
+    summary="Sync Market Sectors",
+    description="Sync market sector master data.",
+)
+async def sync_market_sectors(
+    background_tasks: BackgroundTasks,
+    async_mode: bool = Query(default=True),
+) -> SyncResponse:
+    """Sync market sector master data."""
+    from vnibb.services.data_pipeline import data_pipeline
+    if async_mode:
+        background_tasks.add_task(data_pipeline.sync_market_sectors)
+        return SyncResponse(
+            status="started",
+            message="Market sectors sync started in background",
+        )
+
+    try:
+        count = await data_pipeline.sync_market_sectors()
+        return SyncResponse(
+            status="success",
+            message=f"Synced {count} market sectors",
+            count=count,
+        )
+    except Exception as e:
+        logger.error(f"Market sectors sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
     "/sync/foreign-trading",
     response_model=SyncResponse,
     summary="Sync Foreign Trading",
@@ -449,6 +694,85 @@ async def sync_foreign_trading(
 
 
 @router.post(
+    "/sync/daily-trading",
+    response_model=SyncResponse,
+    summary="Sync Daily Trading Flow",
+    description="Sync order flow, foreign trading, block trades, and derivatives.",
+)
+async def sync_daily_trading(
+    background_tasks: BackgroundTasks,
+    trade_date: Optional[date] = Query(default=None),
+    async_mode: bool = Query(default=True, description="Run in background"),
+) -> SyncResponse:
+    """Run daily trading updates."""
+    from vnibb.services.data_pipeline import data_pipeline
+
+    if async_mode:
+        background_tasks.add_task(
+            data_pipeline.run_daily_trading_updates,
+            trade_date=trade_date,
+            resume=False,
+        )
+        return SyncResponse(
+            status="started",
+            message="Daily trading sync started in background",
+        )
+
+    try:
+        await data_pipeline.run_daily_trading_updates(trade_date=trade_date, resume=False)
+        return SyncResponse(
+            status="success",
+            message="Daily trading sync completed",
+        )
+    except Exception as e:
+        logger.error(f"Daily trading sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/sync/cleanup",
+    response_model=CleanupResponse,
+    summary="Run Retention Cleanup",
+    description="Delete old records based on retention settings.",
+)
+async def run_retention_cleanup(
+    background_tasks: BackgroundTasks,
+    include_prices: bool = Query(
+        default=True,
+        description="Also clean historical price data",
+    ),
+    async_mode: bool = Query(default=True, description="Run in background"),
+) -> CleanupResponse:
+    """Run retention cleanup for large tables."""
+    from vnibb.services.data_pipeline import data_pipeline
+
+    async def _run_cleanup() -> dict:
+        return await data_pipeline.run_retention_cleanup(include_price_history=include_prices)
+
+    if async_mode:
+        background_tasks.add_task(_run_cleanup)
+        return CleanupResponse(
+            status="started",
+            message="Retention cleanup started in background",
+            removed={},
+            total_removed=0,
+        )
+
+    try:
+        removed = await _run_cleanup()
+        total_removed = sum(removed.values()) if removed else 0
+        return CleanupResponse(
+            status="success",
+            message="Retention cleanup completed",
+            removed=removed,
+            total_removed=total_removed,
+        )
+    except Exception as e:
+        logger.error(f"Retention cleanup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
     "/sync/financials",
     response_model=SyncResponse,
     summary="Sync Financial Statements",
@@ -468,7 +792,7 @@ async def sync_financials(
     from vnibb.services.data_pipeline import data_pipeline
     if async_mode:
         background_tasks.add_task(
-            data_pipeline.sync_financial_statements,
+            data_pipeline.sync_financials,
             symbols=symbols,
             period=period,
         )
@@ -478,14 +802,10 @@ async def sync_financials(
         )
     
     try:
-        counts = await data_pipeline.sync_financial_statements(
-            symbols=symbols,
-            period=period,
-        )
-        total = sum(counts.values()) if isinstance(counts, dict) else counts
+        total = await data_pipeline.sync_financials(symbols=symbols, period=period)
         return SyncResponse(
             status="success",
-            message=f"Synced financial statements: {counts}",
+            message=f"Synced financial statements for {total} symbols",
             count=total,
         )
     except Exception as e:
@@ -509,15 +829,15 @@ async def sync_metrics(
     from vnibb.services.data_pipeline import data_pipeline
     
     async def _run_sync():
-        await data_pipeline.sync_financial_statements(symbols=symbols, period=period)
+        await data_pipeline.sync_financial_ratios(symbols=symbols, period=period)
         
     if async_mode:
         background_tasks.add_task(_run_sync)
         return SyncResponse(status="started", message="Metrics sync started in background")
     
     try:
-        counts = await data_pipeline.sync_financial_statements(symbols=symbols, period=period)
-        return SyncResponse(status="success", message=f"Synced metrics: {counts}", count=counts.get('ratios', 0))
+        total = await data_pipeline.sync_financial_ratios(symbols=symbols, period=period)
+        return SyncResponse(status="success", message=f"Synced ratios for {total} symbols", count=total)
     except Exception as e:
         logger.error(f"Metrics sync failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

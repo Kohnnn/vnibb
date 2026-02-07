@@ -3,7 +3,11 @@
 'use client';
 
 import { useCompanyEvents } from '@/lib/queries';
-import { Calendar, RefreshCw, AlertCircle, FileText } from 'lucide-react';
+import { Calendar, FileText } from 'lucide-react';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import type { CompanyEventData } from '@/types/equity';
 
 interface CompanyFilingsWidgetProps {
     symbol: string;
@@ -35,122 +39,104 @@ function formatEventDate(dateStr: string | null | undefined): string {
         return date.toLocaleDateString('vi-VN', {
             day: '2-digit',
             month: '2-digit',
-            year: 'numeric'
+            year: 'numeric',
         });
     } catch {
         return dateStr;
     }
 }
 
-// Helper to get the best available date from event data
-function getEventDate(event: Record<string, unknown>): string {
+function getEventDate(event: CompanyEventData): string {
     return formatEventDate(
-        (event.ex_date as string) ||
-        (event.record_date as string) ||
-        (event.event_date as string) ||
-        (event.payment_date as string)
+        event.ex_date ||
+        event.record_date ||
+        event.event_date ||
+        event.payment_date
     );
 }
 
-// Helper to get event type label
-function getEventTypeLabel(event: Record<string, unknown>): string {
-    return (event.event_type as string) ||
-        (event.event_name as string) ||
-        'Event';
+function getEventTypeLabel(event: CompanyEventData): string {
+    return event.event_type || event.event_name || 'Event';
 }
 
-// Helper to get event description
-function getEventDescription(event: Record<string, unknown>): string {
-    return (event.description as string) ||
-        (event.value as string) ||
-        '-';
+function getEventDescription(event: CompanyEventData): string {
+    return event.description || event.value || '-';
 }
 
-export function CompanyFilingsWidget({ symbol, isEditing, onRemove }: CompanyFilingsWidgetProps) {
+export function CompanyFilingsWidget({ symbol }: CompanyFilingsWidgetProps) {
     const {
-        data: eventsData,
+        data,
         isLoading,
-        isError,
-        refetch
+        error,
+        refetch,
+        isFetching,
+        dataUpdatedAt,
     } = useCompanyEvents(symbol, { limit: 10, enabled: !!symbol });
 
-    // Loading state
-    if (isLoading) {
-        return (
-            <div className="flex items-center justify-center h-32">
-                <div className="animate-pulse flex flex-col items-center gap-2">
-                    <div className="h-4 w-32 bg-gray-800 rounded" />
-                    <div className="h-3 w-24 bg-gray-800 rounded" />
-                </div>
-            </div>
-        );
-    }
+    const events = data?.data || [];
+    const hasData = events.length > 0;
+    const isFallback = Boolean(error && hasData);
 
-    // Error state
-    if (isError) {
-        return (
-            <div className="flex flex-col items-center justify-center h-32 p-4 text-center">
-                <AlertCircle size={24} className="text-red-500 mb-2" />
-                <p className="text-sm text-gray-400">Failed to load events for {symbol}</p>
-                <button
-                    onClick={() => refetch()}
-                    className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 text-xs text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 rounded transition-colors"
-                >
-                    <RefreshCw size={12} />
-                    Retry
-                </button>
-            </div>
-        );
-    }
-
-    const events = eventsData?.data || [];
-
-    // Empty state
-    if (events.length === 0) {
-        return (
-            <div className="flex flex-col items-center justify-center h-32 p-4 text-center">
-                <FileText size={28} className="text-gray-500 mb-2" />
-                <p className="text-sm text-gray-400">No corporate events for {symbol}</p>
-                <p className="text-xs text-gray-600 mt-1">Check back later for updates</p>
-            </div>
-        );
+    if (!symbol) {
+        return <WidgetEmpty message="Select a symbol to view corporate events" icon={<FileText size={18} />} />;
     }
 
     return (
-        <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-                <thead>
-                    <tr className="text-left text-xs text-gray-500 uppercase">
-                        <th className="pb-2 pr-4">Date</th>
-                        <th className="pb-2 pr-4">Event</th>
-                        <th className="pb-2">Details</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {events.map((event, idx) => {
-                        const eventType = getEventTypeLabel(event as unknown as Record<string, unknown>);
-                        const eventDesc = getEventDescription(event as unknown as Record<string, unknown>);
-                        return (
-                            <tr key={idx} className="border-t border-gray-800/50 hover:bg-gray-800/30">
-                                <td className="py-2 pr-4 text-gray-300 whitespace-nowrap">
-                                    <div className="flex items-center gap-1.5">
-                                        <Calendar size={12} className="text-gray-500" />
-                                        {getEventDate(event as unknown as Record<string, unknown>)}
-                                    </div>
-                                </td>
-                                <td className="py-2 pr-4">
-                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${getEventTypeColor(eventType)}`}>
-                                        {eventType}
-                                    </span>
-                                </td>
-                                <td className="py-2 text-gray-400 text-xs max-w-[200px] truncate" title={eventDesc}>
-                                    {eventDesc}
-                                </td>
+        <div className="h-full flex flex-col">
+            <div className="pb-2 border-b border-gray-800/50">
+                <WidgetMeta
+                    updatedAt={dataUpdatedAt}
+                    isFetching={isFetching && hasData}
+                    isCached={isFallback}
+                    note="Corporate events"
+                    align="right"
+                />
+            </div>
+
+            <div className="flex-1 overflow-x-auto pt-2">
+                {isLoading && !hasData ? (
+                    <WidgetSkeleton variant="table" lines={6} />
+                ) : error && !hasData ? (
+                    <WidgetError error={error as Error} onRetry={() => refetch()} />
+                ) : !hasData ? (
+                    <WidgetEmpty message={`No corporate events for ${symbol}`} icon={<FileText size={18} />} />
+                ) : (
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="text-left text-xs text-gray-500 uppercase">
+                                <th className="pb-2 pr-4">Date</th>
+                                <th className="pb-2 pr-4">Event</th>
+                                <th className="pb-2">Details</th>
                             </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
+                        </thead>
+                        <tbody>
+                            {events.map((event, idx) => {
+                                const eventType = getEventTypeLabel(event);
+                                const eventDesc = getEventDescription(event);
+
+                                return (
+                                    <tr key={idx} className="border-t border-gray-800/50 hover:bg-gray-800/30">
+                                        <td className="py-2 pr-4 text-gray-300 whitespace-nowrap">
+                                            <div className="flex items-center gap-1.5">
+                                                <Calendar size={12} className="text-gray-500" />
+                                                {getEventDate(event)}
+                                            </div>
+                                        </td>
+                                        <td className="py-2 pr-4">
+                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${getEventTypeColor(eventType)}`}>
+                                                {eventType}
+                                            </span>
+                                        </td>
+                                        <td className="py-2 text-gray-400 text-xs max-w-[200px] truncate" title={eventDesc}>
+                                            {eventDesc}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                )}
+            </div>
         </div>
     );
 }

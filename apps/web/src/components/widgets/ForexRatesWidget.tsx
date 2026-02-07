@@ -4,6 +4,8 @@
 
 import { useState } from 'react';
 import { DollarSign, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { WidgetEmpty } from '@/components/ui/widget-states';
 
 interface ForexPair {
     pair: string;
@@ -17,7 +19,6 @@ interface ForexRatesWidgetProps {
     onRemove?: () => void;
 }
 
-// Mock forex data (VND pairs)
 const FOREX_PAIRS: ForexPair[] = [
     { pair: 'USD/VND', rate: 24500, change: 50, changePct: 0.20 },
     { pair: 'EUR/VND', rate: 26850, change: -120, changePct: -0.45 },
@@ -29,17 +30,20 @@ const FOREX_PAIRS: ForexPair[] = [
     { pair: 'THB/VND', rate: 695, change: 3, changePct: 0.43 },
 ];
 
-export function ForexRatesWidget({ isEditing, onRemove }: ForexRatesWidgetProps) {
+export function ForexRatesWidget({}: ForexRatesWidgetProps) {
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [lastUpdated, setLastUpdated] = useState<Date | null>(new Date());
 
     const handleRefresh = () => {
         setIsRefreshing(true);
-        setTimeout(() => setIsRefreshing(false), 500);
+        setTimeout(() => {
+            setIsRefreshing(false);
+            setLastUpdated(new Date());
+        }, 500);
     };
 
     return (
         <div className="h-full flex flex-col">
-            {/* Header */}
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2 text-xs text-gray-500">
                     <DollarSign size={12} className="text-green-400" />
@@ -48,40 +52,47 @@ export function ForexRatesWidget({ isEditing, onRemove }: ForexRatesWidgetProps)
                 <button
                     onClick={handleRefresh}
                     className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded"
+                    type="button"
                 >
                     <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
                 </button>
             </div>
 
-            {/* Rates List */}
-            <div className="flex-1 overflow-auto">
-                <table className="w-full text-xs">
-                    <thead className="text-gray-500 sticky top-0 bg-gray-900">
-                        <tr className="border-b border-gray-800">
-                            <th className="text-left py-1.5 px-1 font-medium">Pair</th>
-                            <th className="text-right py-1.5 px-1 font-medium">Rate</th>
-                            <th className="text-right py-1.5 px-1 font-medium">Change</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {FOREX_PAIRS.map((pair) => {
-                            const isUp = pair.changePct >= 0;
-                            return (
-                                <tr key={pair.pair} className="border-b border-gray-800/30 hover:bg-gray-800/20">
-                                    <td className="py-1.5 px-1 font-medium text-white">{pair.pair}</td>
-                                    <td className="py-1.5 px-1 text-right text-gray-300 font-mono">
-                                        {pair.rate.toLocaleString()}
-                                    </td>
-                                    <td className={`py-1.5 px-1 text-right flex items-center justify-end gap-1 ${isUp ? 'text-green-400' : 'text-red-400'
-                                        }`}>
-                                        {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                        {isUp ? '+' : ''}{pair.changePct.toFixed(2)}%
-                                    </td>
-                                </tr>
-                            );
-                        })}
-                    </tbody>
-                </table>
+            <div className="pb-2 border-b border-gray-800/50">
+                <WidgetMeta updatedAt={lastUpdated} isFetching={isRefreshing} note="Sample data" align="right" />
+            </div>
+
+            <div className="flex-1 overflow-auto pt-2">
+                {FOREX_PAIRS.length === 0 ? (
+                    <WidgetEmpty message="No forex data available" icon={<DollarSign size={18} />} />
+                ) : (
+                    <table className="w-full text-xs">
+                        <thead className="text-gray-500 sticky top-0 bg-gray-900">
+                            <tr className="border-b border-gray-800">
+                                <th className="text-left py-1.5 px-1 font-medium">Pair</th>
+                                <th className="text-right py-1.5 px-1 font-medium">Rate</th>
+                                <th className="text-right py-1.5 px-1 font-medium">Change</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {FOREX_PAIRS.map((pair) => {
+                                const isUp = pair.changePct >= 0;
+                                return (
+                                    <tr key={pair.pair} className="border-b border-gray-800/30 hover:bg-gray-800/20">
+                                        <td className="py-1.5 px-1 font-medium text-white">{pair.pair}</td>
+                                        <td className="py-1.5 px-1 text-right text-gray-300 font-mono">
+                                            {pair.rate.toLocaleString()}
+                                        </td>
+                                        <td className={`py-1.5 px-1 text-right flex items-center justify-end gap-1 ${isUp ? 'text-green-400' : 'text-red-400'}`}>
+                                            {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                                            {isUp ? '+' : ''}{pair.changePct.toFixed(2)}%
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                )}
             </div>
         </div>
     );

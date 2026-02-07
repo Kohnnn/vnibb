@@ -62,9 +62,14 @@ export { NewsFlowWidget } from './NewsFlowWidget';
 export { SectorPerformanceWidget } from './SectorPerformanceWidget';
 export { SectorTopMoversWidget } from './SectorTopMoversWidget';
 export { SectorBreakdownWidget } from './SectorBreakdownWidget';
+export { MarketMoversSectorsWidget } from './MarketMoversSectorsWidget';
+export { SectorRotationRadarWidget } from './SectorRotationRadarWidget';
+export { MarketBreadthWidget } from './MarketBreadthWidget';
 export { IndexComparisonWidget } from './IndexComparisonWidget';
 export { EconomicCalendarWidget } from './EconomicCalendarWidget';
 export { EventsCalendarWidget } from './EventsCalendarWidget';
+export { NewsCorporateActionsWidget } from './NewsCorporateActionsWidget';
+export { DividendLadderWidget } from './DividendLadderWidget';
 
 // === Analysis Widgets ===
 export { ComparisonWidget } from './ComparisonWidget';
@@ -80,10 +85,14 @@ export { OrderbookWidget } from './OrderbookWidget';
 export { PriceAlertsWidget } from './PriceAlertsWidget';
 export { PortfolioTrackerWidget } from './PortfolioTrackerWidget';
 export { WatchlistWidget } from './WatchlistWidget';
+export { ResearchBrowserWidget } from './ResearchBrowserWidget';
 
 // === AI Widgets ===
 export { AIAnalysisWidget } from './AIAnalysisWidget';
 export { AICopilotWidget } from './AICopilotWidget';
+export { TechnicalSnapshotWidget } from './TechnicalSnapshotWidget';
+export { InsiderDealTimelineWidget } from './InsiderDealTimelineWidget';
+export { OwnershipChangesWidget } from './OwnershipChangesWidget';
 
 // === Utility Widgets ===
 export { NotesWidget } from './NotesWidget';

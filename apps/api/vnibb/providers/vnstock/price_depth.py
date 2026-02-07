@@ -45,6 +45,7 @@ class PriceDepthData(BaseModel):
     total_ask_volume: Optional[int] = Field(None, alias="totalAskVolume")
     last_price: Optional[float] = Field(None, alias="lastPrice")
     last_volume: Optional[int] = Field(None, alias="lastVolume")
+    raw_levels: Optional[list[dict]] = None
     
     model_config = {"populate_by_name": True}
 
@@ -86,11 +87,18 @@ class VnstockPriceDepthFetcher:
         """
         try:
             def _fetch():
-                from vnstock import Vnstock
-                stock = Vnstock().stock(symbol=symbol.upper(), source=source.upper())
+                try:
+                    from vnstock_data.api.quote import Quote
 
-                df = stock.quote.price_depth()
-                return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
+                    quote = Quote(source=source.upper(), symbol=symbol.upper())
+                    df = quote.price_depth()
+                    return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
+                except Exception:
+                    from vnstock import Vnstock
+
+                    stock = Vnstock().stock(symbol=symbol.upper(), source=source.upper())
+                    df = stock.quote.price_depth()
+                    return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
             
             loop = asyncio.get_event_loop()
             records = await loop.run_in_executor(None, _fetch)
@@ -118,6 +126,15 @@ class VnstockPriceDepthFetcher:
             # If no side info, try to parse from column-based format
             if not bids and not asks and records:
                 r = records[0]
+                if "buyVol" in r or "sellVol" in r:
+                    total_bid_volume = sum((row.get("buyVol") or 0) for row in records)
+                    total_ask_volume = sum((row.get("sellVol") or 0) for row in records)
+                    return PriceDepthData(
+                        symbol=symbol.upper(),
+                        total_bid_volume=total_bid_volume or None,
+                        total_ask_volume=total_ask_volume or None,
+                        raw_levels=records,
+                    )
                 for i in range(1, 4):
                     bid_price = r.get(f"bidPrice{i}") or r.get(f"bid{i}")
                     bid_vol = r.get(f"bidVol{i}") or r.get(f"bidVolume{i}")
@@ -139,8 +156,13 @@ class VnstockPriceDepthFetcher:
                 ask_3=asks[2] if len(asks) > 2 else None,
                 total_bid_volume=sum(b.volume for b in bids) if bids else None,
                 total_ask_volume=sum(a.volume for a in asks) if asks else None,
+                raw_levels=records,
             )
             
         except Exception as e:
             logger.error(f"Price depth fetch failed for {symbol}: {e}")
-            raise ProviderError(f"Failed to fetch price depth for {symbol}: {e}")
+            raise ProviderError(
+                message=f"Failed to fetch price depth for {symbol}: {e}",
+                provider="vnstock",
+                details={"symbol": symbol},
+            )

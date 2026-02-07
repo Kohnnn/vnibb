@@ -6,7 +6,9 @@ import { useState } from 'react';
 import { TrendingUp, TrendingDown, RefreshCw, AlertTriangle, Globe, Building2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { getBlockTrades } from '@/lib/api';
-import type { BlockTrade } from '@/types/insider';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface BlockTradeWidgetProps {
   symbol?: string;
@@ -43,13 +45,23 @@ function formatQuantity(qty: number): string {
 export function BlockTradeWidget({ symbol }: BlockTradeWidgetProps) {
   const [minThreshold, setMinThreshold] = useState<number>(10); // VND billions
 
-  const { data, isLoading, refetch, isRefetching } = useQuery({
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+    dataUpdatedAt,
+  } = useQuery({
     queryKey: ['block-trades', symbol],
     queryFn: () => getBlockTrades({ symbol, limit: 50 }),
     refetchInterval: 60000, // Refresh every minute
   });
 
   const trades = data || [];
+  const hasData = trades.length > 0;
+  const isMissingData = trades.length === 0;
+  const isFallback = Boolean(error && hasData);
 
   // Filter by threshold
   const filteredTrades = trades.filter((trade) => {
@@ -74,13 +86,22 @@ export function BlockTradeWidget({ symbol }: BlockTradeWidgetProps) {
           <AlertTriangle size={12} className="text-yellow-400" />
           <span className="text-gray-500">{filteredTrades.length} block trades</span>
         </div>
-        <button
-          onClick={() => refetch()}
-          disabled={isRefetching}
-          className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
-        >
-          <RefreshCw size={12} className={isRefetching ? 'animate-spin' : ''} />
-        </button>
+        <div className="flex items-center gap-2">
+          <WidgetMeta
+            updatedAt={dataUpdatedAt}
+            isFetching={isFetching && hasData}
+            isCached={isFallback}
+            note="Large trades"
+            align="right"
+          />
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
+          >
+            <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
 
       {/* Threshold Selector */}
@@ -123,21 +144,16 @@ export function BlockTradeWidget({ symbol }: BlockTradeWidgetProps) {
 
       {/* Trades List */}
       <div className="flex-1 overflow-y-auto">
-        {isLoading ? (
-          <div className="space-y-2">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="animate-pulse p-2 bg-gray-800/30 rounded">
-                <div className="h-3 bg-gray-800 rounded w-3/4 mb-1" />
-                <div className="h-2 bg-gray-800 rounded w-1/2" />
-              </div>
-            ))}
-          </div>
+        {isLoading && !hasData ? (
+          <WidgetSkeleton lines={5} />
+        ) : error && !hasData ? (
+          <WidgetError error={error as Error} onRetry={() => refetch()} />
         ) : filteredTrades.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 text-gray-500">
-            <AlertTriangle size={24} className="mb-2 opacity-30" />
-            <p className="text-xs">No block trades found</p>
-            <p className="text-[10px] mt-1">Try lowering the threshold</p>
-          </div>
+          <WidgetEmpty
+            message={isMissingData ? 'Block trade data not available yet' : 'No block trades match your filter'}
+            icon={<AlertTriangle size={18} />}
+            action={!isMissingData ? { label: 'Lower threshold', onClick: () => setMinThreshold(5) } : undefined}
+          />
         ) : (
           <div className="space-y-1.5">
             {filteredTrades.map((trade) => {

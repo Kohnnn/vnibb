@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 // @ts-expect-error - next-pwa doesn't have type declarations
 import withPWA from "next-pwa";
 
+const isProduction = process.env.NODE_ENV === "production";
+
 const nextConfig: NextConfig = {
   // Enable Turbopack with empty config to silence the warning
   turbopack: {},
@@ -11,8 +13,8 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: false,
   },
   
-  // Skip static generation for pages that require runtime data
-  output: 'standalone',
+  // Enable standalone output only for production builds
+  ...(isProduction ? { output: "standalone" } : {}),
 };
 
 // Wrap with PWA config for production builds

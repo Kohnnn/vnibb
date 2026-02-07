@@ -70,13 +70,22 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
     }
 
     // Set timeout for requests (configurable, default 30s)
-    // Use provided signal if available, otherwise create new controller
-    const controller = signal ? null : new AbortController();
-    const timeoutId = setTimeout(
-        () => controller?.abort(),
-        timeout
-    );
-    const requestSignal = signal || controller!.signal;
+    // Always use an internal controller so timeout and external abort can coexist.
+    const controller = new AbortController();
+    let timedOut = false;
+    const abortFromCaller = () => controller.abort();
+    if (signal) {
+        if (signal.aborted) {
+            controller.abort();
+        } else {
+            signal.addEventListener('abort', abortFromCaller, { once: true });
+        }
+    }
+    const timeoutId = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+    }, timeout);
+    const requestSignal = controller.signal;
 
     try {
         const response = await fetch(url, {
@@ -89,6 +98,7 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
         });
 
         clearTimeout(timeoutId);
+        if (signal) signal.removeEventListener('abort', abortFromCaller);
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({
@@ -121,9 +131,13 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
         return response.json();
     } catch (error: any) {
         clearTimeout(timeoutId);
+        if (signal) signal.removeEventListener('abort', abortFromCaller);
 
         // Handle timeout
         if (error.name === 'AbortError') {
+            if (!timedOut) {
+                throw error;
+            }
             const timeoutSec = Math.round(timeout / 1000);
             throw new APIError(
                 `Request timed out after ${timeoutSec} seconds. The server is slow or unavailable.`,
@@ -182,7 +196,10 @@ export async function getHistoricalPrices(
 }
 
 export async function getProfile(symbol: string, signal?: AbortSignal): Promise<EquityProfileResponse> {
-    return fetchAPI<EquityProfileResponse>(`/equity/${symbol}/profile`, { signal });
+    return fetchAPI<EquityProfileResponse>(`/equity/${symbol}/profile`, {
+        timeout: 20000,
+        signal,
+    });
 }
 
 
@@ -208,9 +225,9 @@ export interface QuoteResponse {
 }
 
 export async function getQuote(symbol: string, signal?: AbortSignal): Promise<QuoteResponse> {
-    // Quote data can be slow, use 10s timeout
+    // Quote data can be slow, use 20s timeout
     return fetchAPI<QuoteResponse>(`/equity/${symbol}/quote`, {
-        timeout: 10000,
+        timeout: 20000,
         signal
     });
 }
@@ -382,7 +399,11 @@ export async function getScreenerData(options?: ScreenerFilterParams, signal?: A
         });
     }
 
-    return fetchAPI<ScreenerResponse>('/screener/', { params, signal });
+    return fetchAPI<ScreenerResponse>('/screener/', {
+        params,
+        timeout: 45000,
+        signal,
+    });
 }
 
 

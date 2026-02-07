@@ -30,9 +30,9 @@ function NewsFilterBarComponent({ filters, onFiltersChange }: NewsFilterBarProps
 
       {/* Symbol tags */}
       <div className="flex flex-wrap gap-1">
-        {filters.symbols.map(symbol => (
+        {filters.symbols.map((symbol, index) => (
           <span 
-            key={symbol}
+            key={`${symbol}-${index}`}
             className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded text-[10px] font-bold"
           >
             {symbol}

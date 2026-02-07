@@ -75,6 +75,10 @@ function DashboardContent() {
     const [showAICopilot, setShowAICopilot] = useState(false);
     const [sidebarWidth, setSidebarWidth] = useState(208);
     const [mounted, setMounted] = useState(false);
+    const [widgetSettingsState, setWidgetSettingsState] = useState<{
+        widgetId: string;
+        tabId: string;
+    } | null>(null);
 
     const updateSidebarWidth = useCallback(() => {
         if (typeof window !== 'undefined') {
@@ -132,6 +136,28 @@ function DashboardContent() {
         }
     }, [activeDashboard, activeTab, resetTabLayout]);
 
+    const handleWidgetConfigChange = useCallback((
+        widgetId: string,
+        key: string,
+        value: string
+    ) => {
+        if (!activeDashboard || !activeTab) return;
+        const widget = activeTab.widgets.find((current) => current.id === widgetId);
+        if (!widget) return;
+
+        updateWidget(activeDashboard.id, activeTab.id, widgetId, {
+            config: {
+                ...widget.config,
+                [key]: value
+            }
+        });
+    }, [activeDashboard, activeTab, updateWidget]);
+
+    const handleOpenWidgetSettings = useCallback((widgetId: string) => {
+        if (!activeTab) return;
+        setWidgetSettingsState({ widgetId, tabId: activeTab.id });
+    }, [activeTab]);
+
     const handleApplyTemplate = useCallback((template: DashboardTemplate) => {
         if (!activeDashboard || !activeTab) return;
         
@@ -149,13 +175,25 @@ function DashboardContent() {
 
     const memoizedLayouts = useMemo(() => {
         if (!activeTab?.widgets) return [];
+
+        const compactHeights: Partial<Record<WidgetType, number>> = {
+            income_statement: 5,
+            balance_sheet: 5,
+            cash_flow: 5,
+            financial_ratios: 5,
+            comparison_analysis: 8,
+        };
+
         return activeTab.widgets.map(w => ({
             ...w.layout,
             i: w.id,
+            h: !isEditing && compactHeights[w.type]
+                ? Math.min(w.layout.h, compactHeights[w.type] as number)
+                : w.layout.h,
             minW: w.layout.minW ?? 4,
             minH: w.layout.minH ?? 3,
         }));
-    }, [activeTab?.widgets]);
+    }, [activeTab?.widgets, isEditing]);
 
     const getWidgetParameters = useCallback((
         widget: WidgetInstance,
@@ -216,7 +254,7 @@ function DashboardContent() {
 
                 <TabBar symbol={globalSymbol} />
 
-                <div className="flex-1 p-4 overflow-hidden bg-[#0a0a0a]">
+                <div className="flex-1 p-3 sm:p-4 overflow-hidden bg-[#0a0a0a]">
                     {activeDashboard && activeTab ? (
                         <div className="h-full w-full overflow-y-auto scrollbar-hide">
                             {activeTab.widgets.length > 0 ? (
@@ -230,6 +268,9 @@ function DashboardContent() {
                                     {activeTab.widgets.map((widget) => {
                                         const widgetType = widget.type;
                                         const WidgetComponent = widgetRegistry[widgetType];
+                                        const parameters = getWidgetParameters(widget, (key, value) =>
+                                            handleWidgetConfigChange(widget.id, key, value)
+                                        );
                                         
                                         return (
                                             <div key={widget.id} className="h-full">
@@ -239,10 +280,13 @@ function DashboardContent() {
                                                     symbol={globalSymbol}
                                                     tabId={activeTab.id}
                                                     dashboardId={activeDashboard.id}
+                                                    widgetGroup={widget.widgetGroup}
                                                     isEditing={isEditing}
                                                     onRemove={() => deleteWidget(activeDashboard.id, activeTab.id, widget.id)}
                                                     onSymbolChange={handleSymbolChange}
                                                     onCopilotClick={() => setShowAICopilot(true)}
+                                                    onSettingsClick={() => handleOpenWidgetSettings(widget.id)}
+                                                    parameters={parameters}
                                                 >
                                                     {WidgetComponent ? (
                                                         <WidgetComponent 
@@ -309,6 +353,14 @@ function DashboardContent() {
                 open={isTemplateSelectorOpen}
                 onClose={() => setIsTemplateSelectorOpen(false)}
                 onSelectTemplate={handleApplyTemplate}
+            />
+
+            <WidgetSettingsModal
+                isOpen={Boolean(widgetSettingsState)}
+                onClose={() => setWidgetSettingsState(null)}
+                widgetId={widgetSettingsState?.widgetId ?? null}
+                dashboardId={activeDashboard?.id ?? null}
+                tabId={widgetSettingsState?.tabId ?? null}
             />
         </div>
     );

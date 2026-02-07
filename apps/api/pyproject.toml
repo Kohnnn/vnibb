@@ -34,7 +34,7 @@ dependencies = [
     "numpy>=1.24.0",
     
     # Data Providers
-    "vnstock>=3.3.0",  # Vietnam stock data - requires Golden Sponsor API key for 10x rate limits (3.3.1 is max on PyPI)
+    "vnstock>=3.4.0",  # Vietnam stock data - requires Golden Sponsor API key for 10x rate limits
     "vnai>=2.3.9",     # Required for device fingerprinting in vnstock installer
     # Premium packages (vnstock_data, vnstock_ta, vnstock_news, vnstock_pipeline)
     # are installed via CLI installer, not pip
@@ -53,7 +53,6 @@ dependencies = [
     "alembic>=1.13.0",
     "asyncpg>=0.29.0",  # PostgreSQL async driver (Supabase)
     "psycopg2-binary>=2.9.0",  # PostgreSQL sync driver
-    "supabase>=2.0.0",  # Supabase client
     "python-jose[cryptography]>=3.3.0",  # JWT handling
     
     # Cache
@@ -92,6 +91,9 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.8.0",
     "pre-commit>=3.6.0",
+]
+supabase = [
+    "supabase>=2.0.0",
 ]
 scheduler = [
     "apscheduler>=3.10.0",

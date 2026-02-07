@@ -2,8 +2,11 @@
 
 'use client';
 
-import { Users, RefreshCw, Building2, User, Globe } from 'lucide-react';
+import { Users, Building2, User, Globe } from 'lucide-react';
 import { useShareholders } from '@/lib/queries';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface MajorShareholdersWidgetProps {
     symbol: string;
@@ -32,44 +35,39 @@ function getTypeIcon(type: string | null | undefined) {
     return User;
 }
 
-export function MajorShareholdersWidget({ symbol, isEditing, onRemove }: MajorShareholdersWidgetProps) {
-    const { data, isLoading, refetch, isRefetching } = useShareholders(symbol);
+export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps) {
+    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useShareholders(symbol, !!symbol);
 
     const shareholders = data?.data || [];
+    const hasData = shareholders.length > 0;
+    const isFallback = Boolean(error && hasData);
+
+    if (!symbol) {
+        return <WidgetEmpty message="Select a symbol to view shareholders" icon={<Users size={18} />} />;
+    }
 
     return (
         <div className="h-full flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between px-1 py-1 mb-2">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-800/50">
                 <div className="flex items-center gap-2 text-xs text-gray-500">
                     <Users size={12} />
                     <span>{shareholders.length} shareholders</span>
                 </div>
-                <button
-                    onClick={() => refetch()}
-                    disabled={isRefetching}
-                    className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
-                >
-                    <RefreshCw size={12} className={isRefetching ? 'animate-spin' : ''} />
-                </button>
+                <WidgetMeta
+                    updatedAt={dataUpdatedAt}
+                    isFetching={isFetching && hasData}
+                    isCached={isFallback}
+                    align="right"
+                />
             </div>
 
-            {/* Shareholders List */}
-            <div className="flex-1 overflow-y-auto">
-                {isLoading ? (
-                    <div className="space-y-2">
-                        {[...Array(5)].map((_, i) => (
-                            <div key={i} className="animate-pulse p-2 bg-gray-800/30 rounded">
-                                <div className="h-4 bg-gray-800 rounded w-3/4 mb-1" />
-                                <div className="h-3 bg-gray-800 rounded w-1/2" />
-                            </div>
-                        ))}
-                    </div>
-                ) : shareholders.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-32 text-gray-500">
-                        <Users size={24} className="mb-2 opacity-30" />
-                        <p className="text-xs">No shareholders data</p>
-                    </div>
+            <div className="flex-1 overflow-y-auto pt-2">
+                {isLoading && !hasData ? (
+                    <WidgetSkeleton lines={5} />
+                ) : error && !hasData ? (
+                    <WidgetError error={error as Error} onRetry={() => refetch()} />
+                ) : !hasData ? (
+                    <WidgetEmpty message="No shareholders data" icon={<Users size={18} />} />
                 ) : (
                     <table className="w-full text-xs">
                         <thead className="text-gray-500">

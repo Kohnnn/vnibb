@@ -7,6 +7,7 @@ import { Send, Sparkles, Loader2, X, Download, Copy, Check } from 'lucide-react'
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { API_BASE_URL } from '@/lib/api';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface WidgetContext {
     widgetType: string;
@@ -246,13 +247,16 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                         </span>
                     )}
                 </div>
-                <button
-                    onClick={exportChat}
-                    className="p-1 text-gray-500 hover:text-gray-300 transition-colors"
-                    title="Export chat"
-                >
-                    <Download size={14} />
-                </button>
+                <div className="flex items-center gap-2">
+                    <WidgetMeta note="AI chat" isFetching={isLoading} align="right" />
+                    <button
+                        onClick={exportChat}
+                        className="p-1 text-gray-500 hover:text-gray-300 transition-colors"
+                        title="Export chat"
+                    >
+                        <Download size={14} />
+                    </button>
+                </div>
             </div>
 
             {/* Quick Prompts */}

@@ -3,8 +3,11 @@
 import { memo } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { useMarketOverview } from '@/lib/queries';
-import { TrendingUp, TrendingDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowUp, ArrowDown, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 const INDICES = [
   { symbol: 'VNINDEX', name: 'VN-Index' },
@@ -14,42 +17,65 @@ const INDICES = [
 ];
 
 function IndexComparisonWidgetComponent() {
-  const { data: indices, isLoading } = useMarketOverview();
-  const dataList = indices?.data || [];
+  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMarketOverview();
+  const dataList = data?.data || [];
+  const hasData = dataList.length > 0;
+  const isFallback = Boolean(error && hasData);
 
   return (
-    <WidgetContainer title="Index Comparison">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 h-full">
-        {INDICES.map(index => {
-          const data = dataList.find((i: any) => 
-            i.index_name === index.symbol || 
-            i.index_name === index.name ||
-            (index.symbol === 'VNINDEX' && i.index_name === 'VN-INDEX')
-          );
-          
-          const isUp = (data?.change_pct || 0) >= 0;
-          
-          return (
-            <div 
-              key={index.symbol}
-              className="p-3 bg-gray-900/40 rounded-lg border border-gray-800 flex flex-col justify-between hover:border-gray-700 transition-colors"
-            >
-              <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{index.name}</div>
-              <div className="flex items-baseline justify-between mt-1">
-                <div className="text-lg font-black text-white">
-                    {data?.current_value?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '—'}
+    <WidgetContainer title="Index Comparison" onRefresh={() => refetch()} isLoading={isLoading && !hasData}>
+      <div className="h-full flex flex-col">
+        <div className="pb-2 border-b border-gray-800/50">
+          <WidgetMeta
+            updatedAt={dataUpdatedAt}
+            isFetching={isFetching && hasData}
+            isCached={isFallback}
+            note="Major indices"
+            align="right"
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 h-full pt-2">
+          {isLoading && !hasData ? (
+            <WidgetSkeleton lines={4} />
+          ) : error && !hasData ? (
+            <WidgetError error={error as Error} onRetry={() => refetch()} />
+          ) : !hasData ? (
+            <WidgetEmpty message="Index data will appear when available." icon={<Activity size={18} />} />
+          ) : (
+            INDICES.map((index, idx) => {
+              const dataPoint = dataList.find((i: any) =>
+                i.index_name === index.symbol ||
+                i.index_name === index.name ||
+                (index.symbol === 'VNINDEX' && i.index_name === 'VN-INDEX')
+              );
+
+              const isUp = (dataPoint?.change_pct || 0) >= 0;
+
+              return (
+                <div
+                  key={`${index.symbol}-${idx}`}
+                  className="p-3 bg-gray-900/40 rounded-lg border border-gray-800 flex flex-col justify-between hover:border-gray-700 transition-colors"
+                >
+                  <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{index.name}</div>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <div className="text-lg font-black text-white">
+                      {dataPoint?.current_value?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '—'}
+                    </div>
+                    <div
+                      className={cn(
+                        'flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded',
+                        isUp ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'
+                      )}
+                    >
+                      {isUp ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
+                      {isUp ? '+' : ''}{dataPoint?.change_pct?.toFixed(2)}%
+                    </div>
+                  </div>
                 </div>
-                <div className={cn(
-                    "flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded",
-                    isUp ? "text-green-400 bg-green-500/10" : "text-red-400 bg-red-500/10"
-                )}>
-                    {isUp ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
-                    {isUp ? '+' : ''}{data?.change_pct?.toFixed(2)}%
-                </div>
-              </div>
-            </div>
-          );
-        })}
+              );
+            })
+          )}
+        </div>
       </div>
     </WidgetContainer>
   );

@@ -2,8 +2,11 @@
 'use client';
 
 import { useState, useMemo, memo } from 'react';
-import { Scale, RefreshCw, Table, BarChart3 } from 'lucide-react';
+import { Scale, Table, BarChart3 } from 'lucide-react';
 import { useBalanceSheet } from '@/lib/queries';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import {
     ComposedChart,
     Bar,
@@ -39,6 +42,13 @@ function formatBillions(value: number | null | undefined): string {
     return `${(value / 1e9).toFixed(1)}B`;
 }
 
+function formatPeriodLabel(value: string | null | undefined): string {
+    if (!value) return '-';
+    const cleaned = value.trim();
+    if (!cleaned || cleaned.toLowerCase() === 'unknown' || cleaned.toLowerCase() === 'nan') return '-';
+    return cleaned;
+}
+
 const labels: Record<string, string> = {
     total_assets: 'Total Assets',
     current_assets: 'Current Assets',
@@ -65,14 +75,23 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
         return period;
     }, [period]);
 
-    const { data, isLoading, refetch, isRefetching } = useBalanceSheet(symbol, { period: apiPeriod });
+    const {
+        data,
+        isLoading,
+        error,
+        refetch,
+        isFetching,
+        dataUpdatedAt,
+    } = useBalanceSheet(symbol, { period: apiPeriod });
 
     const items = data?.data || [];
+    const hasData = items.length > 0;
+    const isFallback = Boolean(error && hasData);
 
     const chartData = useMemo(() => {
         if (!items.length) return [];
         return [...items].slice(0, 5).reverse().map((d) => ({
-            period: d.period || '-',
+            period: formatPeriodLabel(d.period),
             totalAssets: d.total_assets || 0,
             totalLiabilities: d.total_liabilities || 0,
             equity: d.equity || 0,
@@ -89,7 +108,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                 <tr className="border-b border-gray-800">
                     <th className="py-2 px-1 font-bold uppercase tracking-tighter">Item</th>
                     {items.slice(0, 4).map((d, i) => (
-                        <th key={i} className="text-right py-2 px-1 font-bold">{d.period || '-'}</th>
+                        <th key={i} className="text-right py-2 px-1 font-bold">{formatPeriodLabel(d.period)}</th>
                     ))}
                 </tr>
             </thead>
@@ -121,8 +140,8 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
         }
 
         return (
-            <div className="h-full flex flex-col gap-2">
-                <div className="flex justify-end px-2 pt-1">
+            <div className="h-full flex flex-col gap-1">
+                <div className="flex justify-end px-1 pt-0.5">
                     <select
                         value={chartType}
                         onChange={(e) => setChartType(e.target.value as any)}
@@ -133,8 +152,8 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                     </select>
                 </div>
 
-                <div className="flex-1 min-h-[150px]">
-                    <ResponsiveContainer width="100%" height="100%">
+                <div className="flex-1 min-h-[132px]">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
                         {chartType === 'overview' ? (
                             <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
@@ -169,7 +188,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
     };
 
     const headerActions = (
-        <div className="flex items-center gap-2 mr-2">
+        <div className="flex items-center gap-1.5 mr-1">
             <div className="flex bg-gray-900 rounded p-0.5 border border-gray-800">
                 <button
                     onClick={() => setViewMode('table')}
@@ -202,21 +221,35 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
             symbol={symbol}
             onRefresh={() => refetch()}
             onClose={onRemove}
-            isLoading={isLoading || isRefetching}
+            isLoading={isLoading && !hasData}
             headerActions={headerActions}
             noPadding
             widgetId={id}
             showLinkToggle
             exportData={items}
         >
-            <div className="h-full flex flex-col p-2">
-                <div className="flex-1 overflow-auto scrollbar-hide">
-                    {items.length === 0 && !isLoading ? (
-                        <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-2 opacity-50 uppercase font-black text-[10px] tracking-widest">
-                            <Scale size={32} strokeWidth={1} />
-                            No Statement Found
-                        </div>
-                    ) : viewMode === 'table' ? renderTable() : renderChart()}
+            <div className="h-full flex flex-col px-2 py-1.5">
+                <div className="pb-1 border-b border-gray-800/50">
+                    <WidgetMeta
+                        updatedAt={dataUpdatedAt}
+                        isFetching={isFetching && hasData}
+                        isCached={isFallback}
+                        note={period === 'FY' ? 'Annual' : 'Quarterly'}
+                        align="right"
+                    />
+                </div>
+                <div className="flex-1 overflow-auto scrollbar-hide pt-1">
+                    {isLoading && !hasData ? (
+                        <WidgetSkeleton variant="table" lines={6} />
+                    ) : error && !hasData ? (
+                        <WidgetError error={error as Error} onRetry={() => refetch()} />
+                    ) : !hasData ? (
+                        <WidgetEmpty message={`No balance sheet data for ${symbol}`} icon={<Scale size={18} />} />
+                    ) : viewMode === 'table' ? (
+                        renderTable()
+                    ) : (
+                        renderChart()
+                    )}
                 </div>
             </div>
         </WidgetContainer>

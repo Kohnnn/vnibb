@@ -20,8 +20,16 @@ from vnibb.models.dashboard import UserDashboard, DashboardWidget
 
 # Existing models
 from vnibb.models.news import CompanyNews, CompanyEvent, Dividend, InsiderDeal
-from vnibb.models.trading import IntradayTrade, OrderbookSnapshot, ForeignTrading, FinancialRatio
+from vnibb.models.trading import (
+    IntradayTrade,
+    OrderbookSnapshot,
+    ForeignTrading,
+    FinancialRatio,
+    OrderFlowDaily,
+)
+from vnibb.models.derivatives import DerivativePrice
 from vnibb.models.market import MarketSector, SectorPerformance, Subsidiary
+from vnibb.models.app_kv import AppKeyValue
 
 # New models for vnstock premium integration
 from vnibb.models.technical_indicator import TechnicalIndicator
@@ -61,6 +69,7 @@ __all__ = [
     "OrderbookSnapshot",
     "ForeignTrading",
     "FinancialRatio",
+    "OrderFlowDaily",
     # Market
     "MarketSector",
     "SectorPerformance",
@@ -69,10 +78,13 @@ __all__ = [
     "TechnicalIndicator",
     # Market News Aggregation (new)
     "MarketNews",
+    "DerivativePrice",
+    "DerivativePrice",
     # Alert System (new)
     "BlockTrade",
     "InsiderAlert",
     "AlertSettings",
+    "AppKeyValue",
     # Sync Tracking
     "SyncStatus",
 ]

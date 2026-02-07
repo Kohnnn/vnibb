@@ -1,36 +1,20 @@
-// Sector Performance Widget - Industry sector heatmap
-
 'use client';
 
-import { useState } from 'react';
-import { LayoutGrid, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
-
-interface SectorData {
-    name: string;
-    shortName: string;
-    changePct: number;
-    marketCap: number; // in trillion VND
-    stockCount: number;
-}
+import { useState, useMemo } from 'react';
+import { LayoutGrid } from 'lucide-react';
+import { useSectorPerformance } from '@/lib/queries';
+import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import type { WidgetGroupId } from '@/types/widget';
 
 interface SectorPerformanceWidgetProps {
     isEditing?: boolean;
     onRemove?: () => void;
+    widgetGroup?: WidgetGroupId;
 }
-
-// Mock sector data for Vietnam market
-const SECTORS: SectorData[] = [
-    { name: 'Banking', shortName: 'Bank', changePct: 1.25, marketCap: 850, stockCount: 27 },
-    { name: 'Real Estate', shortName: 'RE', changePct: -0.85, marketCap: 320, stockCount: 45 },
-    { name: 'Securities', shortName: 'Sec', changePct: 2.15, marketCap: 125, stockCount: 15 },
-    { name: 'Technology', shortName: 'Tech', changePct: 1.78, marketCap: 180, stockCount: 12 },
-    { name: 'Retail', shortName: 'Retail', changePct: -1.45, marketCap: 95, stockCount: 18 },
-    { name: 'Steel', shortName: 'Steel', changePct: 0.65, marketCap: 140, stockCount: 8 },
-    { name: 'Food & Beverage', shortName: 'F&B', changePct: 0.35, marketCap: 210, stockCount: 22 },
-    { name: 'Construction', shortName: 'Const', changePct: -0.28, marketCap: 85, stockCount: 35 },
-    { name: 'Oil & Gas', shortName: 'O&G', changePct: 1.92, marketCap: 165, stockCount: 10 },
-    { name: 'Utilities', shortName: 'Util', changePct: 0.12, marketCap: 95, stockCount: 14 },
-];
 
 function getHeatmapColor(changePct: number): string {
     if (changePct >= 2) return 'bg-green-600';
@@ -43,19 +27,18 @@ function getHeatmapColor(changePct: number): string {
     return 'bg-red-600';
 }
 
-import { WidgetContainer } from '@/components/ui/WidgetContainer';
-
-export function SectorPerformanceWidget({ isEditing, onRemove }: SectorPerformanceWidgetProps) {
+export function SectorPerformanceWidget({ onRemove, widgetGroup }: SectorPerformanceWidgetProps) {
     const [view, setView] = useState<'grid' | 'list'>('grid');
-    const [isRefreshing, setIsRefreshing] = useState(false);
+    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorPerformance();
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
 
-    // Sort by absolute change for grid emphasis
-    const sortedSectors = [...SECTORS].sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
+    const sectors = data?.data || [];
+    const hasData = sectors.length > 0;
+    const isFallback = Boolean(error && hasData);
 
-    const handleRefresh = () => {
-        setIsRefreshing(true);
-        setTimeout(() => setIsRefreshing(false), 500);
-    };
+    const sortedSectors = useMemo(() => {
+        return [...sectors].sort((a, b) => Math.abs((b.changePct ?? 0) - (a.changePct ?? 0)));
+    }, [sectors]);
 
     const headerActions = (
         <div className="flex bg-gray-800 rounded text-[10px] mr-2">
@@ -77,30 +60,46 @@ export function SectorPerformanceWidget({ isEditing, onRemove }: SectorPerforman
     return (
         <WidgetContainer
             title="Sector Performance"
-            onRefresh={handleRefresh}
+            onRefresh={() => refetch()}
             onClose={onRemove}
-            isLoading={isRefreshing}
+            isLoading={isLoading && !hasData}
             headerActions={headerActions}
             noPadding
         >
             <div className="h-full flex flex-col p-2">
-                {/* Content */}
+                <WidgetMeta
+                    updatedAt={dataUpdatedAt}
+                    isFetching={isFetching && hasData}
+                    isCached={isFallback}
+                    note="Sector snapshot"
+                    align="right"
+                    className="mb-2"
+                />
+
                 <div className="flex-1 overflow-auto text-left">
-                    {view === 'grid' ? (
+                    {isLoading && !hasData ? (
+                        <WidgetSkeleton lines={6} />
+                    ) : error && !hasData ? (
+                        <WidgetError error={error as Error} onRetry={() => refetch()} />
+                    ) : !hasData ? (
+                        <WidgetEmpty message="Sector data will appear when available." icon={<LayoutGrid size={18} />} />
+                    ) : view === 'grid' ? (
                         <div className="grid grid-cols-2 gap-1.5">
                             {sortedSectors.map((sector) => {
-                                const isUp = sector.changePct >= 0;
+                                const change = sector.changePct ?? 0;
+                                const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
                                 return (
                                     <div
-                                        key={sector.name}
-                                        className={`p-3 rounded-lg ${getHeatmapColor(sector.changePct)} cursor-pointer hover:opacity-90 transition-opacity flex flex-col justify-between min-h-[60px]`}
+                                        key={sector.sectorId}
+                                        className={`p-3 rounded-lg ${getHeatmapColor(change)} cursor-pointer hover:opacity-90 transition-opacity flex flex-col justify-between min-h-[60px]`}
                                     >
                                         <div className="text-[10px] font-bold text-white/80 uppercase truncate">
-                                            {sector.shortName}
+                                            {name}
                                         </div>
                                         <div className="text-base font-black text-white">
-                                            {isUp ? '+' : ''}{sector.changePct.toFixed(2)}%
+                                            {change >= 0 ? '+' : ''}{change.toFixed(2)}%
                                         </div>
+                                        <div className="text-[9px] text-white/70">{sector.totalStocks} stocks</div>
                                     </div>
                                 );
                             })}
@@ -108,18 +107,43 @@ export function SectorPerformanceWidget({ isEditing, onRemove }: SectorPerforman
                     ) : (
                         <div className="space-y-0.5">
                             {sortedSectors.map((sector) => {
-                                const isUp = sector.changePct >= 0;
+                                const change = sector.changePct ?? 0;
+                                const isUp = change >= 0;
+                                const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
+                                const topGainer = sector.topGainer?.symbol;
+                                const topLoser = sector.topLoser?.symbol;
+
                                 return (
                                     <div
-                                        key={sector.name}
+                                        key={sector.sectorId}
                                         className="flex items-center justify-between py-2 px-3 hover:bg-gray-800/30 rounded-lg transition-colors"
                                     >
                                         <div className="flex items-center gap-3">
                                             <div className={`w-2 h-2 rounded-full ${isUp ? 'bg-green-400' : 'bg-red-400'}`} />
-                                            <span className="text-sm font-medium text-white">{sector.name}</span>
+                                            <div>
+                                                <div className="text-sm font-medium text-white">{name}</div>
+                                                <div className="text-[10px] text-gray-500 flex items-center gap-2">
+                                                    {topGainer && (
+                                                        <button
+                                                            onClick={() => setLinkedSymbol(topGainer)}
+                                                            className="text-green-400 hover:text-green-300 font-bold"
+                                                        >
+                                                            {topGainer}
+                                                        </button>
+                                                    )}
+                                                    {topLoser && (
+                                                        <button
+                                                            onClick={() => setLinkedSymbol(topLoser)}
+                                                            className="text-red-400 hover:text-red-300 font-bold"
+                                                        >
+                                                            {topLoser}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
                                         </div>
                                         <span className={`text-sm font-bold font-mono ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                                            {isUp ? '+' : ''}{sector.changePct.toFixed(2)}%
+                                            {isUp ? '+' : ''}{change.toFixed(2)}%
                                         </span>
                                     </div>
                                 );
@@ -131,4 +155,3 @@ export function SectorPerformanceWidget({ isEditing, onRemove }: SectorPerforman
         </WidgetContainer>
     );
 }
-

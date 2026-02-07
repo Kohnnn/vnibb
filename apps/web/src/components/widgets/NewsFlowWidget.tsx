@@ -2,11 +2,14 @@
 
 import { memo, useState, useEffect } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { API_BASE_URL } from '@/lib/api';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { NewsFilterBar } from './news/NewsFilterBar';
 import { NewsCard } from './news/NewsCard';
-import { Loader2, RefreshCw, Newspaper } from 'lucide-react';
-import { useLinkedSymbol } from '@/hooks/useLinkedSymbol';
+import { Loader2, Newspaper } from 'lucide-react';
 
 interface NewsFlowWidgetProps {
   id: string;
@@ -15,26 +18,20 @@ interface NewsFlowWidgetProps {
   onRemove?: () => void;
 }
 
-function NewsFlowWidgetComponent({ id, symbol: linkedSymbol, initialSymbols, onRemove }: NewsFlowWidgetProps) {
-  const { symbol, isLinked } = useLinkedSymbol({
-    widgetId: id,
-    defaultSymbol: linkedSymbol || 'VNM',
-  });
-
+function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove }: NewsFlowWidgetProps) {
   const [filters, setFilters] = useState({
-    symbols: initialSymbols || [],
+    symbols: initialSymbols || (symbol ? [symbol] : []),
     sentiment: null as string | null,
   });
 
-  // Sync symbols filter with linked symbol
   useEffect(() => {
-    if (isLinked && symbol) {
-      setFilters(prev => ({
-        ...prev,
-        symbols: [symbol]
-      }));
-    }
-  }, [isLinked, symbol]);
+    if (initialSymbols && initialSymbols.length > 0) return;
+    if (!symbol) return;
+    setFilters(prev => ({
+      ...prev,
+      symbols: [symbol],
+    }));
+  }, [symbol, initialSymbols]);
 
   const {
     data,
@@ -42,8 +39,10 @@ function NewsFlowWidgetComponent({ id, symbol: linkedSymbol, initialSymbols, onR
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    error,
     refetch,
-    isRefetching
+    isFetching,
+    dataUpdatedAt,
   } = useInfiniteQuery({
     queryKey: ['news-flow', filters],
     queryFn: async ({ pageParam = 0 }) => {
@@ -52,8 +51,8 @@ function NewsFlowWidgetComponent({ id, symbol: linkedSymbol, initialSymbols, onR
       if (filters.sentiment) params.set('sentiment', filters.sentiment);
       params.set('offset', String(pageParam));
       params.set('limit', '20');
-      
-      const res = await fetch(`/api/v1/news/flow?${params.toString()}`);
+
+      const res = await fetch(`${API_BASE_URL}/news/flow?${params.toString()}`);
       if (!res.ok) throw new Error('News flow failed');
       return res.json();
     },
@@ -67,41 +66,49 @@ function NewsFlowWidgetComponent({ id, symbol: linkedSymbol, initialSymbols, onR
     staleTime: 5 * 60 * 1000,
   });
 
-  const allNews = data?.pages.flatMap(p => p.items) || [];
+  const allNews = data?.pages.flatMap((p: any) => p.items) || [];
+  const hasData = allNews.length > 0;
+  const isFallback = Boolean(error && hasData);
 
   return (
-    <WidgetContainer 
+    <WidgetContainer
       title="News Flow"
       widgetId={id}
       onRefresh={() => refetch()}
       onClose={onRemove}
-      isLoading={isLoading || isRefetching}
-      showLinkToggle
+      isLoading={isLoading && !hasData}
       noPadding
     >
       <div className="h-full flex flex-col bg-black">
-        {/* Filter Bar */}
         <NewsFilterBar filters={filters} onFiltersChange={setFilters} />
 
-        {/* News List */}
+        <div className="px-3 py-2 border-b border-gray-800/50 bg-[#0a0a0a]">
+          <WidgetMeta
+            updatedAt={dataUpdatedAt}
+            isFetching={isFetching && hasData}
+            isCached={isFallback}
+            note={filters.symbols.length ? 'Ticker feed' : 'Market feed'}
+            align="right"
+          />
+        </div>
+
         <div className="flex-1 overflow-auto scrollbar-hide">
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-2">
-                <RefreshCw size={24} className="animate-spin" />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Streaming News...</span>
-            </div>
-          ) : allNews.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-2 opacity-50 uppercase font-black text-[10px] tracking-widest">
-                <Newspaper size={32} strokeWidth={1} />
-                No news found
-            </div>
+          {isLoading && !hasData ? (
+            <WidgetSkeleton lines={6} />
+          ) : error && !hasData ? (
+            <WidgetError error={error as Error} onRetry={() => refetch()} />
+          ) : !hasData ? (
+            <WidgetEmpty
+              message="No news flow yet. Try refreshing or adjust filters."
+              icon={<Newspaper size={18} />}
+              action={{ label: 'Refresh', onClick: () => refetch() }}
+            />
           ) : (
             <div className="flex flex-col">
-              {allNews.map((item: any) => (
-                <NewsCard key={item.id} news={item} />
-              ))}
-              
-              {/* Load More */}
+            {allNews.map((item: any, index: number) => (
+              <NewsCard key={`${item.id ?? item.url ?? item.title}-${index}`} news={item} />
+            ))}
+
               {hasNextPage && (
                 <button
                   onClick={() => fetchNextPage()}
@@ -109,18 +116,20 @@ function NewsFlowWidgetComponent({ id, symbol: linkedSymbol, initialSymbols, onR
                   className="w-full py-4 text-center text-[10px] font-black uppercase text-blue-500 hover:text-blue-400 hover:bg-white/5 transition-all"
                 >
                   {isFetchingNextPage ? (
-                      <div className="flex items-center justify-center gap-2">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        <span>Loading...</span>
-                      </div>
-                  ) : 'Load More Articles'}
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Loading...</span>
+                    </div>
+                  ) : (
+                    'Load More Articles'
+                  )}
                 </button>
               )}
-              
+
               {!hasNextPage && allNews.length > 0 && (
-                  <div className="py-6 text-center text-[10px] font-bold text-gray-700 uppercase tracking-widest">
-                    End of Flow
-                  </div>
+                <div className="py-6 text-center text-[10px] font-bold text-gray-700 uppercase tracking-widest">
+                  End of Flow
+                </div>
               )}
             </div>
           )}
