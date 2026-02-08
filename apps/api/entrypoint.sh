@@ -41,6 +41,14 @@ ensure_venv() {
     fi
 }
 
+activate_venv_for_installer() {
+    ensure_venv
+    export VIRTUAL_ENV="$VENV_PATH"
+    export PATH="$VENV_PATH/bin:$PATH"
+    export PYTHONPATH="$VENV_SITE_PACKAGES"
+    "$VENV_PATH/bin/python" -m pip install -U pip requests >/dev/null 2>&1 || true
+}
+
 backup_has_vnstock() {
     if [ -d "$PERSISTENT_BACKUP" ]; then
         ls "$PERSISTENT_BACKUP"/vnstock_data* >/dev/null 2>&1 && return 0
@@ -77,6 +85,7 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
         fi
 
         # Run installer (non-fatal if it fails)
+        activate_venv_for_installer
         set +e
         /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY"
         INSTALL_STATUS=$?
