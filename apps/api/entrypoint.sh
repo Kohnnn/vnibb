@@ -14,8 +14,15 @@ VENV_SITE_PACKAGES="$VENV_PATH/lib/python3.12/site-packages"
 PYTHON_BIN="python3"
 SITE_PACKAGES="$SYSTEM_SITE_PACKAGES"
 
-set_python_env() {
+venv_ready() {
     if [ -x "$VENV_PATH/bin/python" ]; then
+        "$VENV_PATH/bin/python" -c "import uvicorn" >/dev/null 2>&1 && return 0
+    fi
+    return 1
+}
+
+set_python_env() {
+    if venv_ready; then
         PYTHON_BIN="$VENV_PATH/bin/python"
         SITE_PACKAGES="$VENV_SITE_PACKAGES"
         export VIRTUAL_ENV="$VENV_PATH"
