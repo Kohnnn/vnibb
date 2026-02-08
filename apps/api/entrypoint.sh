@@ -69,18 +69,25 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
             chmod +x /app/vnstock-cli-installer.run
         fi
 
-        # Run installer
+        # Run installer (non-fatal if it fails)
+        set +e
         /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY"
+        INSTALL_STATUS=$?
+        set -e
         set_python_env
 
-        # 2c. Backup Code: Save the newly installed packages to volume
-        echo "VnStock Premium: Backing up packages to persistent volume..."
-        mkdir -p "$PERSISTENT_BACKUP"
-        # Copy vnstock related packages AND vnii to avoid bloating
-        cp -r "$SITE_PACKAGES"/vnstock* "$PERSISTENT_BACKUP/" 2>/dev/null || true
-        cp -r "$SITE_PACKAGES"/vnii* "$PERSISTENT_BACKUP/" 2>/dev/null || true
+        if [ "$INSTALL_STATUS" -ne 0 ]; then
+            echo "WARNING: VNStock installer failed (exit=$INSTALL_STATUS). Continuing without premium packages."
+        else
+            # 2c. Backup Code: Save the newly installed packages to volume
+            echo "VnStock Premium: Backing up packages to persistent volume..."
+            mkdir -p "$PERSISTENT_BACKUP"
+            # Copy vnstock related packages AND vnii to avoid bloating
+            cp -r "$SITE_PACKAGES"/vnstock* "$PERSISTENT_BACKUP/" 2>/dev/null || true
+            cp -r "$SITE_PACKAGES"/vnii* "$PERSISTENT_BACKUP/" 2>/dev/null || true
 
-        echo "VnStock Premium: Installation and backup complete."
+            echo "VnStock Premium: Installation and backup complete."
+        fi
     else
         echo "VnStock Premium: Packages checked and ready."
     fi
