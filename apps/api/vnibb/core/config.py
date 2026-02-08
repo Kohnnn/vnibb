@@ -105,11 +105,13 @@ class Settings(BaseSettings):
     vnstock_calls_per_minute: Optional[int] = None  # Override per-operation limits
     big_order_threshold_vnd: float = 10_000_000_000
     intraday_limit: int = 500
+    intraday_symbols_per_run: int = 200
     derivatives_symbols: Optional[str] = None  # Comma-separated override
     warrant_symbols: List[str] = []
     intraday_backoff_seconds: int = 10
     intraday_backoff_max_seconds: int = 60
     intraday_require_market_hours: bool = True
+    intraday_allow_out_of_hours_in_prod: bool = False
     intraday_market_tz: str = "Asia/Ho_Chi_Minh"
     intraday_market_open: str = "09:00"
     intraday_market_close: str = "15:00"

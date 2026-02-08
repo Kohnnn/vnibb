@@ -107,6 +107,22 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultConfig: { timeframe: '1Y', chartType: 'candle' },
         defaultLayout: { w: 8, h: 6, minW: 6, minH: 4 }
     },
+    {
+        type: 'tradingview_chart',
+        name: 'TradingView Chart',
+        description: 'Advanced TradingView chart with indicators and drawing tools',
+        category: 'charting',
+        defaultConfig: { timeframe: '1D' },
+        defaultLayout: { w: 10, h: 8, minW: 7, minH: 6 }
+    },
+    {
+        type: 'valuation_multiples_chart',
+        name: 'Valuation Multiples Chart',
+        description: 'Historical P/E, P/B, P/S and EV multiples trend',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
+    },
 
     // Calendar
     {

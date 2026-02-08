@@ -6,20 +6,21 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
+import { TickerChip } from '@/components/ui/TickerChip';
+import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle';
 import { useQuery } from '@tanstack/react-query';
 import { compareStocks } from '@/lib/api';
-import { Plus, X, TrendingUp, TrendingDown } from 'lucide-react';
+import { Plus, TrendingUp, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const CATEGORY_DEFINITIONS = [
   { id: 'valuation', name: 'Valuation Multiples', metricIds: ['pe_ratio', 'pb_ratio', 'ps_ratio', 'ev_ebitda', 'market_cap'] },
-  { id: 'financial_ratios', name: 'Financial Ratios', metricIds: ['pe_ratio', 'pb_ratio', 'roe', 'roa', 'current_ratio', 'quick_ratio', 'debt_equity'] },
   { id: 'liquidity', name: 'Liquidity', metricIds: ['current_ratio', 'quick_ratio'] },
   { id: 'efficiency', name: 'Efficiency', metricIds: ['asset_turnover', 'inventory_turnover'] },
   { id: 'profitability', name: 'Profitability', metricIds: ['roe', 'roa', 'gross_margin', 'net_margin', 'operating_margin'] },
   { id: 'leverage', name: 'Leverage', metricIds: ['debt_equity', 'debt_assets'] },
   { id: 'coverage', name: 'Coverage', metricIds: ['interest_coverage', 'debt_service_coverage'] },
-  { id: 'cashflow', name: 'Operating Cash Flow', metricIds: ['ocf_to_debt', 'fcf_yield'] },
+  { id: 'ocf', name: 'Operating Cash Flow', metricIds: ['ocf_debt', 'fcf_yield', 'ocf_sales'] },
 ];
 
 interface ComparisonAnalysisWidgetProps {
@@ -38,7 +39,7 @@ function ComparisonAnalysisWidgetComponent({
   const [symbols, setSymbols] = useState<string[]>(() => Array.from(
     new Set(initialSymbols.map((s) => s.trim().toUpperCase()).filter(Boolean))
   ));
-  const [period, setPeriod] = useState('FY');
+  const [period, setPeriod] = useState<Period>('FY');
   const [activeCategory, setActiveCategory] = useState('valuation');
   const [newSymbol, setNewSymbol] = useState('');
   const [showAddInput, setShowAddInput] = useState(false);
@@ -70,6 +71,7 @@ function ComparisonAnalysisWidgetComponent({
   const metricId = (metric: any) => metric?.id ?? metric?.key;
   const metricName = (metric: any) => metric?.name ?? metric?.label ?? metricId(metric);
   const metricFormat = (metric: any) => metric?.format ?? 'number';
+  const higherBetterOverrides = new Set(['ocf_debt', 'interest_coverage', 'debt_service_coverage']);
 
   const filteredMetrics = useMemo(() => {
     const config = CATEGORY_DEFINITIONS.find((c) => c.id === activeCategory);
@@ -100,22 +102,11 @@ function ComparisonAnalysisWidgetComponent({
         {/* Ticker Selector */}
         <div className="flex flex-wrap items-center gap-2 p-3 border-b border-gray-800">
           {symbols.map((s) => (
-            <div
+            <TickerChip
               key={s}
-              className="inline-flex items-center gap-1.5 px-2 py-1 bg-blue-500/10 text-blue-300 border border-blue-500/20 rounded text-xs font-bold"
-            >
-              <CompanyLogo symbol={s} size={14} />
-              {s}
-              {symbols.length > 2 && (
-                <button
-                  onClick={() => removeSymbol(s)}
-                  className="hover:text-red-400 transition-colors rounded-full p-0.5 hover:bg-red-500/10"
-                  aria-label={`Remove ${s}`}
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
+              symbol={s}
+              onRemove={symbols.length > 2 ? () => removeSymbol(s) : undefined}
+            />
           ))}
 
           {symbols.length < 5 && (
@@ -151,20 +142,7 @@ function ComparisonAnalysisWidgetComponent({
 
           <div className="flex items-center gap-2 ml-auto">
             {/* Period Toggle */}
-            <div className="flex bg-gray-900 rounded p-0.5 border border-gray-800">
-              {['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'].map(p => (
-                <button
-                  key={p}
-                  onClick={() => setPeriod(p)}
-                  className={cn(
-                    "px-2 py-0.5 text-[9px] font-bold rounded transition-all",
-                    period === p ? "bg-blue-600 text-white" : "text-gray-500 hover:text-gray-300"
-                  )}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
+            <PeriodToggle value={period} onChange={setPeriod} compact />
             <WidgetMeta
               updatedAt={dataUpdatedAt}
               isFetching={isFetching && hasData}
@@ -234,7 +212,8 @@ function ComparisonAnalysisWidgetComponent({
                         const isBest = value !== null && value === best && data.stocks.length > 1;
                         const isWorst = value !== null && value === worst && data.stocks.length > 1;
 
-                        const isLowerBetter = id.includes('ratio') || id.includes('debt');
+                        const isLowerBetter = (id.includes('ratio') || id.includes('debt'))
+                          && !higherBetterOverrides.has(id);
                         const highlightColor = isLowerBetter
                           ? (isWorst ? 'text-green-400' : isBest ? 'text-red-400' : 'text-white')
                           : (isBest ? 'text-green-400' : isWorst ? 'text-red-400' : 'text-white');

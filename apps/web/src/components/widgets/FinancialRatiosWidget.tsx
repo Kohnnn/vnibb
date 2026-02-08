@@ -1,10 +1,10 @@
 // Financial Ratios Widget - Historical P/E, P/B, ROE, etc.
 'use client';
 
-import { useState, useMemo, memo } from 'react';
+import { useState, memo } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { useFinancialRatios } from '@/lib/queries';
-import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle';
+import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -33,14 +33,27 @@ const ratioLabels: Record<string, string> = {
     pe: 'P/E',
     pb: 'P/B',
     ps: 'P/S',
+    ev_sales: 'EV/Sales',
+    ev_ebitda: 'EV/EBITDA',
+    current_ratio: 'Current Ratio',
+    quick_ratio: 'Quick Ratio',
+    cash_ratio: 'Cash Ratio',
+    asset_turnover: 'Asset Turnover',
+    inventory_turnover: 'Inventory Turnover',
+    receivables_turnover: 'Receivables Turnover',
+    gross_margin: 'Gross Margin',
+    operating_margin: 'Operating Margin',
+    net_margin: 'Net Margin',
     roe: 'ROE',
     roa: 'ROA',
-    eps: 'EPS',
-    bvps: 'BVPS',
-    debt_equity: 'D/E',
-    current_ratio: 'Current',
-    gross_margin: 'Gross Margin',
-    net_margin: 'Net Margin',
+    debt_equity: 'Debt/Equity',
+    debt_assets: 'Debt/Assets',
+    equity_multiplier: 'Equity Multiplier',
+    interest_coverage: 'Interest Coverage',
+    debt_service_coverage: 'Debt Service Coverage',
+    ocf_debt: 'OCF/Debt',
+    fcf_yield: 'FCF Yield',
+    ocf_sales: 'OCF/Sales',
 };
 
 function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: FinancialRatiosWidgetProps) {
@@ -49,11 +62,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
         defaultPeriod: 'FY',
     });
     
-    // Map period to API period
-    const apiPeriod = useMemo(() => {
-        if (period === 'FY') return 'year';
-        return period;
-    }, [period]);
+    const apiPeriod = period;
 
     const {
         data,
@@ -67,13 +76,30 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
     const ratios = data?.data || [];
     const hasData = ratios.length > 0;
     const isFallback = Boolean(error && hasData);
-    const [activeCategory, setActiveCategory] = useState<'valuation' | 'profitability' | 'health'>('valuation');
+    const [activeCategory, setActiveCategory] = useState<
+        'valuation' | 'liquidity' | 'efficiency' | 'profitability' | 'leverage' | 'coverage' | 'ocf'
+    >('valuation');
 
-    const categoryMetrics: Record<'valuation' | 'profitability' | 'health', string[]> = {
-        valuation: ['pe', 'pb', 'ps', 'eps', 'bvps'],
-        profitability: ['roe', 'roa', 'gross_margin', 'net_margin'],
-        health: ['debt_equity', 'current_ratio'],
+    const categoryMetrics: Record<typeof activeCategory, string[]> = {
+        valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda'],
+        liquidity: ['current_ratio', 'quick_ratio', 'cash_ratio'],
+        efficiency: ['asset_turnover', 'inventory_turnover', 'receivables_turnover'],
+        profitability: ['gross_margin', 'operating_margin', 'net_margin', 'roe', 'roa'],
+        leverage: ['debt_equity', 'debt_assets', 'equity_multiplier'],
+        coverage: ['interest_coverage', 'debt_service_coverage'],
+        ocf: ['ocf_debt', 'fcf_yield', 'ocf_sales'],
     };
+
+    const percentKeys = new Set([
+        'gross_margin',
+        'operating_margin',
+        'net_margin',
+        'roe',
+        'roa',
+        'debt_assets',
+        'fcf_yield',
+        'ocf_sales',
+    ]);
 
     const headerActions = (
         <div className="mr-1">
@@ -101,14 +127,18 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={period === 'FY' ? 'Annual' : 'Quarterly'}
+                        note={period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period}
                         align="right"
                     />
                     <div className="mt-1 flex gap-1">
                         {[
                             { id: 'valuation', label: 'Valuation' },
+                            { id: 'liquidity', label: 'Liquidity' },
+                            { id: 'efficiency', label: 'Efficiency' },
                             { id: 'profitability', label: 'Profitability' },
-                            { id: 'health', label: 'Health' },
+                            { id: 'leverage', label: 'Leverage' },
+                            { id: 'coverage', label: 'Coverage' },
+                            { id: 'ocf', label: 'Operating CF' },
                         ].map((cat) => (
                             <button
                                 key={cat.id}
@@ -152,7 +182,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                                         </td>
                                         {ratios.slice(0, 4).map((r, i) => {
                                             const value = r[key as keyof typeof r] as number | null;
-                                            const isPct = key.includes('margin') || key === 'roe' || key === 'roa';
+                                            const isPct = percentKeys.has(key);
 
                                             return (
                                                 <td key={i} className="text-right py-2 px-1 text-white font-mono">

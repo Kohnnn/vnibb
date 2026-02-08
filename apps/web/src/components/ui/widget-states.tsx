@@ -34,19 +34,54 @@ interface WidgetErrorProps {
  * Shows friendly error message with retry button
  */
 export function WidgetError({ error, onRetry, title = 'Failed to load data' }: WidgetErrorProps) {
-    const isNetworkError = error?.message.includes('fetch') || error?.message.includes('network');
+    const message = error?.message || '';
+    const lowerMessage = message.toLowerCase();
+    const isNetworkError = lowerMessage.includes('fetch') || lowerMessage.includes('network') || lowerMessage.includes('offline');
+    const isTimeout = lowerMessage.includes('timeout') || lowerMessage.includes('timed out');
+    const isRateLimit = lowerMessage.includes('429') || lowerMessage.includes('too many requests');
+    const isUnauthorized = lowerMessage.includes('401') || lowerMessage.includes('unauthorized');
+    const isForbidden = lowerMessage.includes('403') || lowerMessage.includes('forbidden');
+    const isNotFound = lowerMessage.includes('404') || lowerMessage.includes('not found');
+
+    const resolvedTitle = title !== 'Failed to load data'
+        ? title
+        : isNetworkError
+            ? 'Connection Failed'
+            : isTimeout
+                ? 'Request Timed Out'
+                : isRateLimit
+                    ? 'Too Many Requests'
+                    : isUnauthorized
+                        ? 'Authentication Required'
+                        : isForbidden
+                            ? 'Access Denied'
+                            : isNotFound
+                                ? 'Data Not Found'
+                                : 'Something Went Wrong';
+
+    const hint = isNetworkError
+        ? 'Check your connection and try again.'
+        : isTimeout
+            ? 'The server took too long to respond.'
+            : isRateLimit
+                ? 'Please wait a moment before retrying.'
+                : null;
 
     return (
         <div className="flex flex-col items-center justify-center h-full min-h-[140px] p-4 text-center">
             <div className="flex items-center gap-2 text-red-400 mb-3">
                 {isNetworkError ? <WifiOff size={18} /> : <AlertCircle size={18} />}
-                <span className="text-sm font-medium">{title}</span>
+                <span className="text-sm font-medium">{resolvedTitle}</span>
             </div>
 
-            {error?.message && (
+            {message && (
                 <p className="text-xs text-gray-500 mb-4 max-w-[280px] leading-relaxed">
-                    {getUserFriendlyErrorMessage(error.message)}
+                    {getUserFriendlyErrorMessage(message)}
                 </p>
+            )}
+
+            {hint && (
+                <p className="text-[11px] text-gray-600 mb-3">{hint}</p>
             )}
 
             {onRetry && (
@@ -55,7 +90,7 @@ export function WidgetError({ error, onRetry, title = 'Failed to load data' }: W
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 rounded-md transition-colors"
                 >
                     <RefreshCw size={12} />
-                    Try Again
+                    {isTimeout ? 'Retry' : 'Try Again'}
                 </button>
             )}
         </div>

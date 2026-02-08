@@ -31,6 +31,7 @@ export const queryKeys = {
     officers: (symbol: string) => ['officers', symbol] as const,
     intraday: (symbol: string) => ['intraday', symbol] as const,
     financialRatios: (symbol: string, period: string) => ['financialRatios', symbol, period] as const,
+    ratioHistory: (symbol: string, period: string, ratios: string[]) => ['ratioHistory', symbol, period, ratios] as const,
     foreignTrading: (symbol: string) => ['foreignTrading', symbol] as const,
     subsidiaries: (symbol: string) => ['subsidiaries', symbol] as const,
     balanceSheet: (symbol: string, period: string) => ['balanceSheet', symbol, period] as const,
@@ -199,12 +200,31 @@ export function useFinancialRatios(
     symbol: string,
     options?: { period?: string; enabled?: boolean }
 ) {
-    const period = options?.period || 'year';
+    const period = options?.period || 'FY';
     return useQuery({
         queryKey: queryKeys.financialRatios(symbol, period),
         queryFn: ({ signal }) => api.getFinancialRatios(symbol, { period }, signal),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000, // 1 hour
+    });
+}
+
+export function useRatioHistory(
+    symbol: string,
+    options?: {
+        ratios?: string[];
+        period?: 'year' | 'quarter';
+        limit?: number;
+        enabled?: boolean;
+    }
+) {
+    const ratios = options?.ratios || ['pe', 'pb', 'ps', 'ev_ebitda'];
+    const period = options?.period || 'year';
+    return useQuery({
+        queryKey: queryKeys.ratioHistory(symbol, period, ratios),
+        queryFn: () => api.getRatioHistory(symbol, { ratios, period, limit: options?.limit }),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 60 * 60 * 1000,
     });
 }
 
@@ -246,7 +266,7 @@ export function useBalanceSheet(
     symbol: string,
     options?: { period?: string; enabled?: boolean }
 ) {
-    const period = options?.period || 'year';
+    const period = options?.period || 'FY';
     return useQuery({
         queryKey: queryKeys.balanceSheet(symbol, period),
         queryFn: () => api.getBalanceSheet(symbol, { period }),
@@ -259,7 +279,7 @@ export function useIncomeStatement(
     symbol: string,
     options?: { period?: string; enabled?: boolean }
 ) {
-    const period = options?.period || 'year';
+    const period = options?.period || 'FY';
     return useQuery({
         queryKey: queryKeys.incomeStatement(symbol, period),
         queryFn: () => api.getIncomeStatement(symbol, { period }),
@@ -272,7 +292,7 @@ export function useCashFlow(
     symbol: string,
     options?: { period?: string; enabled?: boolean }
 ) {
-    const period = options?.period || 'year';
+    const period = options?.period || 'FY';
     return useQuery({
         queryKey: queryKeys.cashFlow(symbol, period),
         queryFn: () => api.getCashFlow(symbol, { period }),
@@ -811,13 +831,13 @@ export function useFinancials(
     symbol: string,
     options?: {
         type?: 'income' | 'balance' | 'cashflow';
-        period?: 'year' | 'quarter';
+        period?: 'year' | 'quarter' | 'FY' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'TTM';
         limit?: number;
         enabled?: boolean;
     }
 ) {
     const type = options?.type || 'income';
-    const period = options?.period || 'year';
+    const period = options?.period || 'FY';
     return useQuery({
         queryKey: queryKeys.financials(symbol, type, period),
         queryFn: () => api.getFinancials(symbol, { type, period, limit: options?.limit }),

@@ -56,7 +56,7 @@ export function PriceChartWidget({
     isFetching: metricsFetching,
     dataUpdatedAt: metricsUpdatedAt,
   } = useScreenerData({ symbol, limit: 1, enabled: Boolean(symbol) });
-  const { data: ratiosData } = useFinancialRatios(symbol, { period: 'year', enabled: Boolean(symbol) });
+  const { data: ratiosData } = useFinancialRatios(symbol, { period: 'FY', enabled: Boolean(symbol) });
   const exchange = profileData?.data?.exchange;
   const metrics = screenerData?.data?.[0];
   const latestRatio = ratiosData?.data?.[0];

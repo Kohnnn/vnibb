@@ -61,7 +61,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
     } = useScreenerData({ symbol, limit: 1, enabled: !!symbol });
 
     const { data: history, isFetching: historyFetching } = useMetricsHistory(symbol, { enabled: !!symbol });
-    const { data: ratiosData } = useFinancialRatios(symbol, { period: 'year', enabled: !!symbol });
+    const { data: ratiosData } = useFinancialRatios(symbol, { period: 'FY', enabled: !!symbol });
 
     const stock = screenData?.data?.[0];
     const latestRatio = ratiosData?.data?.[0];

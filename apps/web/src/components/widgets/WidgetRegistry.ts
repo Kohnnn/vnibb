@@ -5,12 +5,14 @@ import type { WidgetGroupId } from '@/types/widget';
 import { TickerInfoWidget } from './TickerInfoWidget';
 import { TickerProfileWidget } from './TickerProfileWidget';
 import { PriceChartWidget } from './PriceChartWidget';
+import { TradingViewChartWidget } from './TradingViewChartWidget';
 import { KeyMetricsWidget } from './KeyMetricsWidget';
 import { ShareStatisticsWidget } from './ShareStatisticsWidget';
 import { ScreenerWidget } from './ScreenerWidget';
 import { EarningsHistoryWidget } from './EarningsHistoryWidget';
 import { DividendPaymentWidget } from './DividendPaymentWidget';
 import { ValuationWidget } from './ValuationWidget';
+import { ValuationMultiplesChartWidget } from './ValuationMultiplesChartWidget';
 import { StockSplitsWidget } from './StockSplitsWidget';
 
 import { CompanyFilingsWidget } from './CompanyFilingsWidget';
@@ -85,6 +87,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     ticker_info: TickerInfoWidget as ComponentType<WidgetProps>,
     ticker_profile: TickerProfileWidget as ComponentType<WidgetProps>,
     price_chart: PriceChartWidget as ComponentType<WidgetProps>,
+    tradingview_chart: TradingViewChartWidget as ComponentType<WidgetProps>,
     key_metrics: KeyMetricsWidget as ComponentType<WidgetProps>,
     share_statistics: ShareStatisticsWidget as ComponentType<WidgetProps>,
     screener: ScreenerWidget as ComponentType<WidgetProps>,
@@ -92,6 +95,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     earnings_history: EarningsHistoryWidget as ComponentType<WidgetProps>,
     dividend_payment: DividendPaymentWidget as ComponentType<WidgetProps>,
     valuation_multiples: ValuationWidget as ComponentType<WidgetProps>,
+    valuation_multiples_chart: ValuationMultiplesChartWidget as ComponentType<WidgetProps>,
     stock_splits: StockSplitsWidget as ComponentType<WidgetProps>,
 
     // Financial widgets
@@ -176,9 +180,11 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
 export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; minW?: number; minH?: number }> = {
     ticker_info: { w: 4, h: 5, minW: 3, minH: 4 },
     valuation_multiples: { w: 4, h: 6, minW: 3, minH: 5 },
+    valuation_multiples_chart: { w: 7, h: 7, minW: 5, minH: 5 },
     ticker_profile: { w: 4, h: 6, minW: 3, minH: 5 },
 
     price_chart: { w: 8, h: 8, minW: 6, minH: 6 },
+    tradingview_chart: { w: 10, h: 8, minW: 7, minH: 6 },
     key_metrics: { w: 4, h: 10, minW: 3, minH: 8 },
     share_statistics: { w: 4, h: 7, minW: 3, minH: 5 },
     screener: { w: 12, h: 10, minW: 8, minH: 8 },
@@ -250,9 +256,11 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
 export const widgetNames: Record<WidgetType, string> = {
     ticker_info: 'Ticker Info',
     valuation_multiples: 'Valuation Multiples',
+    valuation_multiples_chart: 'Valuation Multiples Chart',
     ticker_profile: 'Company Profile',
 
     price_chart: 'Price Chart',
+    tradingview_chart: 'TradingView Chart',
     key_metrics: 'Key Metrics',
     share_statistics: 'Share Statistics',
     screener: 'Stock Screener',
@@ -322,8 +330,10 @@ export const widgetNames: Record<WidgetType, string> = {
 export const widgetDescriptions: Record<WidgetType, string> = {
     ticker_info: 'Real-time price and basic info',
     valuation_multiples: 'P/E, P/B, and P/S vs historical',
+    valuation_multiples_chart: 'Historical valuation multiples trend',
     ticker_profile: 'Detailed company description',
     price_chart: 'Professional candlestick charting',
+    tradingview_chart: 'Advanced TradingView chart with indicators',
     key_metrics: 'Summary of critical financial ratios',
     share_statistics: 'Share float and ownership data',
     screener: 'Filter stocks by 80+ criteria',

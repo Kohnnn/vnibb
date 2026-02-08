@@ -88,12 +88,17 @@ class FinancialStatementData(BaseModel):
     operating_income: Optional[float] = Field(None, description="Operating Income")
     net_income: Optional[float] = Field(None, description="Net Income")
     ebitda: Optional[float] = Field(None, description="EBITDA")
+    eps: Optional[float] = Field(None, description="Earnings Per Share")
+    eps_diluted: Optional[float] = Field(None, description="Diluted EPS")
 
     # Balance Sheet specific
     total_assets: Optional[float] = Field(None, description="Total Assets")
     total_liabilities: Optional[float] = Field(None, description="Total Liabilities")
     total_equity: Optional[float] = Field(None, description="Total Equity")
     cash_and_equivalents: Optional[float] = Field(None, description="Cash & Equivalents")
+    equity: Optional[float] = Field(None, description="Equity")
+    cash: Optional[float] = Field(None, description="Cash")
+    inventory: Optional[float] = Field(None, description="Inventory")
 
     # Cash Flow specific
     operating_cash_flow: Optional[float] = Field(None, description="Operating Cash Flow")
@@ -235,6 +240,13 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 return None
             return number
 
+        def _pick_number(*values: Any) -> Optional[float]:
+            for value in values:
+                numeric = _coerce_number(value)
+                if numeric is not None:
+                    return numeric
+            return None
+
         def _period_sort_key(period: str) -> int:
             if not period:
                 return 0
@@ -293,6 +305,12 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "ebitda": "ebitda",
                     "profit_before_tax": "ebitda",
                     "profit_before_tax_and_interest": "ebitda",
+                    "eps": "eps",
+                    "earnings_per_share": "eps",
+                    "basic_eps": "eps",
+                    "eps_basic": "eps",
+                    "diluted_eps": "eps_diluted",
+                    "eps_diluted": "eps_diluted",
                 }
             if statement == StatementType.BALANCE.value:
                 return {
@@ -314,6 +332,8 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "cash_and_cash_equivalents": "cash_and_equivalents",
                     "cash": "cash_and_equivalents",
                     "cash_and_bank": "cash_and_equivalents",
+                    "inventory": "inventory",
+                    "inventories": "inventory",
                 }
             return {
                 "operating_cash_flow": "operating_cash_flow",
@@ -387,6 +407,8 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             output: List[FinancialStatementData] = []
             for period in ordered_periods:
                 metrics = period_values.get(period, {})
+                total_equity = metrics.get("total_equity")
+                cash_and_equivalents = metrics.get("cash_and_equivalents")
                 output.append(
                     FinancialStatementData(
                         symbol=params.symbol.upper(),
@@ -397,10 +419,15 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         operating_income=metrics.get("operating_income"),
                         net_income=metrics.get("net_income"),
                         ebitda=metrics.get("ebitda"),
+                        eps=metrics.get("eps"),
+                        eps_diluted=metrics.get("eps_diluted"),
                         total_assets=metrics.get("total_assets"),
                         total_liabilities=metrics.get("total_liabilities"),
-                        total_equity=metrics.get("total_equity"),
-                        cash_and_equivalents=metrics.get("cash_and_equivalents"),
+                        total_equity=total_equity,
+                        cash_and_equivalents=cash_and_equivalents,
+                        equity=total_equity,
+                        cash=cash_and_equivalents,
+                        inventory=metrics.get("inventory"),
                         operating_cash_flow=metrics.get("operating_cash_flow"),
                         investing_cash_flow=metrics.get("investing_cash_flow"),
                         financing_cash_flow=metrics.get("financing_cash_flow"),
@@ -432,23 +459,28 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     period=str(period),
                     statement_type=params.statement_type.value,
                     # Map common fields
-                    revenue=row.get("revenue") or row.get("netRevenue"),
-                    gross_profit=row.get("grossProfit"),
-                    operating_income=row.get("operatingProfit") or row.get("operatingIncome"),
-                    net_income=row.get("netIncome") or row.get("postTaxProfit"),
-                    ebitda=row.get("ebitda"),
+                    revenue=_pick_number(row.get("revenue"), row.get("netRevenue")),
+                    gross_profit=_pick_number(row.get("grossProfit")),
+                    operating_income=_pick_number(row.get("operatingProfit"), row.get("operatingIncome")),
+                    net_income=_pick_number(row.get("netIncome"), row.get("postTaxProfit")),
+                    ebitda=_pick_number(row.get("ebitda")),
+                    eps=_pick_number(row.get("eps"), row.get("earningsPerShare"), row.get("basicEps")),
+                    eps_diluted=_pick_number(row.get("epsDiluted"), row.get("dilutedEps")),
                     # Balance sheet
-                    total_assets=row.get("totalAssets") or row.get("asset"),
-                    total_liabilities=row.get("totalLiabilities") or row.get("debt"),
-                    total_equity=row.get("totalEquity") or row.get("equity"),
-                    cash_and_equivalents=row.get("cash") or row.get("cashAndCashEquivalents"),
+                    total_assets=_pick_number(row.get("totalAssets"), row.get("asset")),
+                    total_liabilities=_pick_number(row.get("totalLiabilities"), row.get("debt")),
+                    total_equity=_pick_number(row.get("totalEquity"), row.get("equity")),
+                    cash_and_equivalents=_pick_number(row.get("cash"), row.get("cashAndCashEquivalents")),
+                    equity=_pick_number(row.get("totalEquity"), row.get("equity")),
+                    cash=_pick_number(row.get("cash"), row.get("cashAndCashEquivalents")),
+                    inventory=_pick_number(row.get("inventory"), row.get("inventories")),
                     # Cash flow
-                    operating_cash_flow=row.get("operatingCashFlow") or row.get("fromOperating"),
-                    investing_cash_flow=row.get("investingCashFlow") or row.get("fromInvesting"),
-                    financing_cash_flow=row.get("financingCashFlow") or row.get("fromFinancing"),
-                    free_cash_flow=row.get("freeCashFlow"),
+                    operating_cash_flow=_pick_number(row.get("operatingCashFlow"), row.get("fromOperating")),
+                    investing_cash_flow=_pick_number(row.get("investingCashFlow"), row.get("fromInvesting")),
+                    financing_cash_flow=_pick_number(row.get("financingCashFlow"), row.get("fromFinancing")),
+                    free_cash_flow=_pick_number(row.get("freeCashFlow")),
                     # Store raw data for flexibility
-                    raw_data=row,
+                    raw_data=None,
                     updated_at=datetime.utcnow(),
                 )
                 results.append(statement)

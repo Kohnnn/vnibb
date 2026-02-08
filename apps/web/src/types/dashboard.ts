@@ -26,6 +26,8 @@ export type WidgetType =
     | 'ticker_profile'
     | 'valuation_multiples'
     | 'price_chart'
+    | 'tradingview_chart'
+    | 'valuation_multiples_chart'
 
     | 'key_metrics'
     | 'share_statistics'

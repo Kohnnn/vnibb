@@ -69,7 +69,7 @@ function periodSortKey(period?: string) {
     return year * 10 + quarter;
 }
 
-function normalizePeriodLabel(row: any, index: number, total: number, mode: 'year' | 'quarter') {
+function normalizePeriodLabel(row: any, index: number, total: number, mode: 'year' | 'quarter' | 'ttm') {
     const candidate = row?.period || row?.fiscal_year || row?.fiscalYear || row?.year || '-';
     const label = String(candidate).trim();
     if (!label || label.toLowerCase() === 'unknown' || label.toLowerCase() === 'nan') {
@@ -79,6 +79,11 @@ function normalizePeriodLabel(row: any, index: number, total: number, mode: 'yea
     if (mode === 'year') {
         const yearMatch = label.match(/(20\d{2})/);
         return yearMatch ? yearMatch[1] : label;
+    }
+
+    if (mode === 'ttm') {
+        const upper = label.toUpperCase();
+        return upper.includes('TTM') ? 'TTM' : upper;
     }
 
     const upper = label.toUpperCase();
@@ -105,7 +110,9 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
     const [statementType, setStatementType] = useState<StatementType>('income');
     const [period, setPeriod] = useState<Period>('FY');
 
-    const apiPeriod = period === 'FY' ? 'year' : 'quarter';
+    const requestPeriod = period;
+    const exportPeriod = period === 'FY' ? 'year' : 'quarter';
+    const periodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
 
     const {
         data,
@@ -114,7 +121,7 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
         refetch,
         isFetching,
         dataUpdatedAt,
-    } = useFinancials(symbol, { type: statementType, period: apiPeriod, limit: 4 });
+    } = useFinancials(symbol, { type: statementType, period: requestPeriod, limit: 4 });
 
     const rawData = data?.data || [];
     const hasData = rawData.length > 0;
@@ -124,38 +131,24 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
         const normalizedRows = rawData
             .map((row: any, index: number) => ({
                 ...row,
-                __period: normalizePeriodLabel(row, index, rawData.length, apiPeriod),
+                __period: normalizePeriodLabel(row, index, rawData.length, periodMode),
             }))
             .filter((row: any) => row.__period && row.__period !== '-');
 
-        if (apiPeriod === 'year') {
+        if (periodMode === 'year') {
             return [...normalizedRows].sort((a: any, b: any) => periodSortKey(b.__period) - periodSortKey(a.__period));
+        }
+
+        if (periodMode === 'ttm') {
+            return normalizedRows.filter((row: any) => String(row.__period).toUpperCase().includes('TTM'));
         }
 
         const quarterRows = normalizedRows
             .filter((row: any) => String(row.__period).startsWith('Q'))
             .sort((a: any, b: any) => periodSortKey(b.__period) - periodSortKey(a.__period));
 
-        if (period === 'TTM') {
-            const chronological = [...quarterRows].sort((a: any, b: any) => periodSortKey(a.__period) - periodSortKey(b.__period));
-            const metricKeys = LABELS[statementType].map((metric) => metric.key);
-            const ttmRows: any[] = [];
-            for (let i = 3; i < chronological.length; i += 1) {
-                const windowRows = chronological.slice(i - 3, i + 1);
-                const aggregate: any = { __period: `TTM-${chronological[i].__period}` };
-                metricKeys.forEach((key) => {
-                    const values = windowRows
-                        .map((row: any) => Number(row[key]))
-                        .filter((value: number) => !Number.isNaN(value) && Number.isFinite(value));
-                    aggregate[key] = values.length ? values.reduce((sum, value) => sum + value, 0) : null;
-                });
-                ttmRows.push(aggregate);
-            }
-            return ttmRows.reverse();
-        }
-
         return quarterRows.filter((row: any) => String(row.__period).startsWith(`${period}-`));
-    }, [rawData, apiPeriod, period, statementType]);
+    }, [rawData, periodMode, period, statementType]);
 
     const recent = useMemo(() => displayRows.slice(0, 4), [displayRows]);
     const periodLabels = useMemo(() => recent.map((row: any) => row.__period), [recent]);
@@ -210,7 +203,7 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                         onExport={async (format) => {
                             await exportFinancials(symbol, {
                                 type: statementType,
-                                period: apiPeriod,
+                                period: exportPeriod,
                                 format,
                             });
                         }}

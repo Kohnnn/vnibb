@@ -37,14 +37,29 @@ class FinancialRatioData(BaseModel):
     pe: Optional[float] = None
     pb: Optional[float] = None
     ps: Optional[float] = None
+    ev_ebitda: Optional[float] = None
+    ev_sales: Optional[float] = None
     roe: Optional[float] = None
     roa: Optional[float] = None
     eps: Optional[float] = None
     bvps: Optional[float] = None
     debt_equity: Optional[float] = None
+    debt_assets: Optional[float] = None
+    equity_multiplier: Optional[float] = None
     current_ratio: Optional[float] = None
+    quick_ratio: Optional[float] = None
+    cash_ratio: Optional[float] = None
+    asset_turnover: Optional[float] = None
+    inventory_turnover: Optional[float] = None
+    receivables_turnover: Optional[float] = None
     gross_margin: Optional[float] = None
     net_margin: Optional[float] = None
+    operating_margin: Optional[float] = None
+    interest_coverage: Optional[float] = None
+    debt_service_coverage: Optional[float] = None
+    ocf_debt: Optional[float] = None
+    fcf_yield: Optional[float] = None
+    ocf_sales: Optional[float] = None
 
     model_config = {
         "json_schema_extra": {
@@ -125,6 +140,8 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 "p_e": "pe",
                 "p_b": "pb",
                 "p_s": "ps",
+                "ev_ebitda": "ev_ebitda",
+                "ev_sales": "ev_sales",
                 "roe": "roe",
                 "roa": "roa",
                 "trailing_eps": "eps",
@@ -132,7 +149,18 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 "gross_profit_margin": "gross_margin",
                 "net_profit_margin": "net_margin",
                 "short_term_ratio": "current_ratio",
-                "quick_ratio": "current_ratio",
+                "quick_ratio": "quick_ratio",
+                "cash_ratio": "cash_ratio",
+                "asset_turnover": "asset_turnover",
+                "inventory_turnover": "inventory_turnover",
+                "receivables_turnover": "receivables_turnover",
+                "operating_margin": "operating_margin",
+                "interest_coverage": "interest_coverage",
+                "debt_service_coverage": "debt_service_coverage",
+                "ocf_to_debt": "ocf_debt",
+                "ocf_debt": "ocf_debt",
+                "fcf_yield": "fcf_yield",
+                "ocf_sales": "ocf_sales",
             }
 
             raw_fields = {
@@ -169,9 +197,6 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         continue
                     if item_id in metric_map:
                         field = metric_map[item_id]
-                        if field == "current_ratio" and item_id == "quick_ratio":
-                            if by_year[year].get(field) is not None:
-                                continue
                         by_year[year][field] = value
                         continue
                     if item_id == "liabilities":
@@ -211,14 +236,31 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         pe=row.get("priceToEarning") or row.get("pe"),
                         pb=row.get("priceToBook") or row.get("pb"),
                         ps=row.get("priceToSales") or row.get("ps"),
+                        ev_ebitda=row.get("evToEbitda")
+                        or row.get("evEbitda")
+                        or row.get("ev_ebitda"),
+                        ev_sales=row.get("evToSales") or row.get("evSales") or row.get("ev_sales"),
                         roe=row.get("roe"),
                         roa=row.get("roa"),
                         eps=row.get("earningPerShare") or row.get("eps"),
                         bvps=row.get("bookValuePerShare") or row.get("bvps"),
                         debt_equity=row.get("debtOnEquity") or row.get("de"),
+                        debt_assets=row.get("debtOnAssets") or row.get("debtAssets"),
+                        equity_multiplier=row.get("equityMultiplier"),
                         current_ratio=row.get("currentRatio"),
+                        quick_ratio=row.get("quickRatio"),
+                        cash_ratio=row.get("cashRatio"),
+                        asset_turnover=row.get("assetTurnover"),
+                        inventory_turnover=row.get("inventoryTurnover"),
+                        receivables_turnover=row.get("receivablesTurnover"),
                         gross_margin=row.get("grossProfitMargin") or row.get("grossMargin"),
                         net_margin=row.get("postTaxMargin") or row.get("netMargin"),
+                        operating_margin=row.get("operatingMargin") or row.get("opMargin"),
+                        interest_coverage=row.get("interestCoverage"),
+                        debt_service_coverage=row.get("debtServiceCoverage"),
+                        ocf_debt=row.get("ocfToDebt") or row.get("ocfDebt"),
+                        fcf_yield=row.get("fcfYield"),
+                        ocf_sales=row.get("ocfSales"),
                     )
                 )
             except Exception as e:

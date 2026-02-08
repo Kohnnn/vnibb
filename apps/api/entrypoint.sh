@@ -95,6 +95,13 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
         if [ "$INSTALL_STATUS" -ne 0 ]; then
             echo "WARNING: VNStock installer failed (exit=$INSTALL_STATUS). Continuing without premium packages."
         else
+            # Ensure vnii is up to date for premium checks
+            if [ -x "$VENV_PATH/bin/python" ]; then
+                "$VENV_PATH/bin/python" -m pip install --upgrade --extra-index-url https://vnstocks.com/api/simple vnii >/dev/null 2>&1 || true
+            else
+                "$PYTHON_BIN" -m pip install --upgrade --extra-index-url https://vnstocks.com/api/simple vnii >/dev/null 2>&1 || true
+            fi
+
             # 2c. Backup Code: Save the newly installed packages to volume
             echo "VnStock Premium: Backing up packages to persistent volume..."
             mkdir -p "$PERSISTENT_BACKUP"

@@ -2,9 +2,18 @@
 // Prevents silent failures due to missing required environment variables.
 
 const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const derivedWsUrl = rawApiUrl.replace(/^http/, 'ws');
+const isProdEnv = process.env.NODE_ENV === 'production';
+const shouldForceHttps = isProdEnv
+  && rawApiUrl.startsWith('http://')
+  && !/localhost|127\.0\.0\.1/.test(rawApiUrl);
+const apiUrl = shouldForceHttps ? rawApiUrl.replace(/^http:/, 'https:') : rawApiUrl;
+const derivedWsUrl = apiUrl.replace(/^http/, 'ws');
 const rawWsUrl = process.env.NEXT_PUBLIC_WS_URL || derivedWsUrl;
-const wsBaseUrl = rawWsUrl.replace(/\/$/, '');
+const shouldForceWss = isProdEnv
+  && rawWsUrl.startsWith('ws://')
+  && !/localhost|127\.0\.0\.1/.test(rawWsUrl);
+const wsUrl = shouldForceWss ? rawWsUrl.replace(/^ws:/, 'wss:') : rawWsUrl;
+const wsBaseUrl = wsUrl.replace(/\/$/, '');
 const wsPriceUrl = /\/ws\/prices$/.test(wsBaseUrl)
   ? wsBaseUrl
   : /\/ws$/.test(wsBaseUrl)
@@ -31,7 +40,7 @@ if (missing.length > 0 && typeof window !== 'undefined') {
 }
 
 export const env = {
-  apiUrl: rawApiUrl,
+  apiUrl,
   wsUrl: wsPriceUrl,
   wsBaseUrl,
   wsPriceUrl,
@@ -40,7 +49,7 @@ export const env = {
   geminiApiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY,
   analyticsId: process.env.NEXT_PUBLIC_ANALYTICS_ID,
   isDev: process.env.NEXT_PUBLIC_ENV === 'development' || process.env.NODE_ENV === 'development',
-  isProd: process.env.NODE_ENV === 'production',
+  isProd: isProdEnv,
   enableRealtime,
 } as const;
 

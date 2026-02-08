@@ -62,15 +62,15 @@ class CacheManager:
         "price_depth": 0.5,  # 30 seconds (order book)
         "intraday": 1,  # 1 minute
         # Market data - short TTL
-        "screener": 5,  # 5 minutes
-        "trading_stats": 5,  # 5 minutes
-        "foreign_trading": 5,  # 5 minutes
+        "screener": 60,  # 60 minutes
+        "trading_stats": 60,  # 60 minutes
+        "foreign_trading": 60,  # 60 minutes
         # Company data - medium TTL
-        "profile": 60,  # 1 hour
-        "financial_ratios": 60,  # 1 hour
-        "officers": 60,  # 1 hour
-        "shareholders": 60,  # 1 hour
-        "insider_deals": 60,  # 1 hour
+        "profile": 10080,  # 7 days
+        "financial_ratios": 1440,  # 24 hours
+        "officers": 1440,  # 24 hours
+        "shareholders": 1440,  # 24 hours
+        "insider_deals": 1440,  # 24 hours
         # Static data - long TTL
         "listing": 1440,  # 24 hours
         "industries": 1440,  # 24 hours
@@ -82,8 +82,8 @@ class CacheManager:
     }
 
     # Legacy constants (for backward compatibility)
-    SCREENER_TTL_MINUTES = 5
-    PROFILE_TTL_HOURS = 1
+    SCREENER_TTL_MINUTES = 60
+    PROFILE_TTL_HOURS = 168
 
     def __init__(self, db: Optional[AsyncSession] = None):
         """

@@ -65,11 +65,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
     });
     const [viewMode, setViewMode] = useState<ViewMode>('table');
     
-    // Map period to API period
-    const apiPeriod = useMemo(() => {
-        if (period === 'FY') return 'year';
-        return period;
-    }, [period]);
+    const apiPeriod = period;
 
     const {
         data,
@@ -231,7 +227,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={period === 'FY' ? 'Annual' : 'Quarterly'}
+                        note={period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period}
                         align="right"
                     />
                 </div>
