@@ -2089,6 +2089,9 @@ class DataPipeline:
         if not symbols:
             return 0
 
+        if settings.intraday_symbols_per_run > 0 and len(symbols) > settings.intraday_symbols_per_run:
+            symbols = symbols[: settings.intraday_symbols_per_run]
+
         symbol_exchange: Dict[str, str] = {}
         symbol_chunk_index: Dict[str, int] = {}
         if settings.cache_foreign_trading_chunked:
@@ -2221,6 +2224,31 @@ class DataPipeline:
         trade_date = trade_date or self._get_market_date()
         limit = limit or settings.intraday_limit
 
+        if settings.environment == "production" and not settings.intraday_allow_out_of_hours_in_prod:
+            if not self._is_market_hours() and not (
+                settings.orderflow_at_close_only and self._is_after_market_close()
+            ):
+                logger.info("Intraday sync skipped outside market hours (production)")
+                if progress is not None:
+                    progress.setdefault("stage_stats", {})
+                    progress["stage"] = "intraday_trades"
+                    progress["stage_index"] = DAILY_TRADING_STAGES.index("intraday_trades")
+                    progress["stage_stats"]["intraday_trades"] = {
+                        "success": 0,
+                        "errors": 0,
+                        "total": 0,
+                        "skipped": True,
+                        "reason": "outside_market_hours_prod",
+                    }
+                    if sync_id is not None:
+                        await self._checkpoint(
+                            progress,
+                            sync_id,
+                            key=DAILY_TRADING_PROGRESS_KEY,
+                            ttl=DAILY_TRADING_PROGRESS_TTL,
+                        )
+                return 0
+
         if settings.orderflow_at_close_only and not self._is_after_market_close():
             logger.info("Intraday sync skipped before market close")
             if progress is not None:
@@ -2274,6 +2302,9 @@ class DataPipeline:
         if not symbols:
             return 0
 
+        if settings.intraday_symbols_per_run > 0 and len(symbols) > settings.intraday_symbols_per_run:
+            symbols = symbols[: settings.intraday_symbols_per_run]
+
         symbol_exchange: Dict[str, str] = {}
         symbol_chunk_index: Dict[str, int] = {}
         if settings.cache_order_flow_chunked:
@@ -2314,6 +2345,8 @@ class DataPipeline:
         total = 0
         consecutive_429 = 0
         store_intraday = settings.store_intraday_trades
+        error_counts: Dict[str, int] = {}
+        error_samples: List[str] = []
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             await self.rate_limiters["intraday"].wait()
@@ -2475,7 +2508,13 @@ class DataPipeline:
                 consecutive_429 = 0
             except Exception as exc:
                 message = str(exc)
-                logger.warning(f"Intraday sync failed for {symbol}: {message}")
+                error_key = type(exc).__name__
+                if "RetryError" in message:
+                    error_key = "RetryError"
+                error_counts[error_key] = error_counts.get(error_key, 0) + 1
+                if len(error_samples) < 5:
+                    error_samples.append(f"{symbol}:{error_key}")
+                logger.debug(f"Intraday sync failed for {symbol}: {message}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["intraday_trades"]["errors"] += 1
@@ -2497,6 +2536,17 @@ class DataPipeline:
                         key=DAILY_TRADING_PROGRESS_KEY,
                         ttl=DAILY_TRADING_PROGRESS_TTL,
                     )
+
+        if error_counts:
+            total_errors = sum(error_counts.values())
+            logger.warning(
+                "Intraday sync completed with errors",
+                extra={
+                    "errors": total_errors,
+                    "error_breakdown": error_counts,
+                    "error_samples": error_samples,
+                },
+            )
 
         if settings.cache_order_flow_chunked and order_flow_cache_records:
             await self._cache_chunked_records(

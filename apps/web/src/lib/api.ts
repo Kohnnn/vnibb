@@ -163,7 +163,7 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
 
 // ============ Equity API ============
 
-import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, ForeignTradingResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
+import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
 import type { ScreenerResponse } from '@/types/screener';
 import type { Dashboard, DashboardCreate, DashboardUpdate, WidgetCreate } from '@/types/dashboard';
 import type { FullTechnicalAnalysis, SignalSummary, TechnicalIndicators } from '@/types/technical';
@@ -279,6 +279,19 @@ export async function getFinancialRatios(
     return fetchAPI<FinancialRatiosResponse>(`/equity/${symbol}/ratios`, {
         params: { period: options?.period },
         signal
+    });
+}
+
+export async function getRatioHistory(
+    symbol: string,
+    options?: { ratios?: string[]; period?: 'year' | 'quarter'; limit?: number }
+): Promise<RatioHistoryResponse> {
+    return fetchAPI<RatioHistoryResponse>(`/equity/${symbol}/ratios/history`, {
+        params: {
+            ratios: options?.ratios?.join(','),
+            period: options?.period,
+            limit: options?.limit,
+        },
     });
 }
 
@@ -904,7 +917,7 @@ export async function getFinancials(
     symbol: string,
     options?: {
         type?: 'income' | 'balance' | 'cashflow';
-        period?: 'year' | 'quarter';
+        period?: 'year' | 'quarter' | 'FY' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'TTM';
         limit?: number;
     }
 ): Promise<FinancialsResponse> {
@@ -920,9 +933,11 @@ export async function getFinancials(
 // ============ Comparison Analysis API ============
 
 export interface MetricDefinition {
-    key: string;
-    label: string;
-    format: string;
+    id?: string;
+    key?: string;
+    name?: string;
+    label?: string;
+    format?: string;
 }
 
 export interface StockMetrics {

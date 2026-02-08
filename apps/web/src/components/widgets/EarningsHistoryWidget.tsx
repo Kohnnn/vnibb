@@ -37,7 +37,7 @@ export function EarningsHistoryWidget({ symbol }: EarningsHistoryWidgetProps) {
         refetch,
         isFetching,
         dataUpdatedAt,
-    } = useFinancialRatios(symbol, { period: 'year', enabled: !!symbol });
+    } = useFinancialRatios(symbol, { period: 'FY', enabled: !!symbol });
 
     const rows = data?.data?.slice(0, 8) || [];
     const hasData = rows.length > 0;

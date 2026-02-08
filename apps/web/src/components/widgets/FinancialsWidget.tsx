@@ -46,13 +46,20 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
         { id: 'ratios', label: 'Ratios', icon: Info },
     ];
 
-    const apiPeriod = period === 'FY' ? 'year' : 'quarter';
+    const requestPeriod = period;
+    const periodMode = period === 'TTM' && activeTab === 'ratios'
+        ? 'quarter'
+        : period === 'FY'
+            ? 'year'
+            : period === 'TTM'
+                ? 'ttm'
+                : 'quarter';
     const periodLabel = period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : `${period} Quarterly`;
 
-    const incomeQuery = useIncomeStatement(symbol, { period: apiPeriod, enabled: activeTab === 'income_statement' });
-    const balanceQuery = useBalanceSheet(symbol, { period: apiPeriod, enabled: activeTab === 'balance_sheet' });
-    const cashFlowQuery = useCashFlow(symbol, { period: apiPeriod, enabled: activeTab === 'cash_flow' });
-    const ratiosQuery = useFinancialRatios(symbol, { period: apiPeriod, enabled: activeTab === 'ratios' });
+    const incomeQuery = useIncomeStatement(symbol, { period: requestPeriod, enabled: activeTab === 'income_statement' });
+    const balanceQuery = useBalanceSheet(symbol, { period: requestPeriod, enabled: activeTab === 'balance_sheet' });
+    const cashFlowQuery = useCashFlow(symbol, { period: requestPeriod, enabled: activeTab === 'cash_flow' });
+    const ratiosQuery = useFinancialRatios(symbol, { period: requestPeriod, enabled: activeTab === 'ratios' });
 
     const activeQuery = useMemo(() => {
         switch (activeTab) {
@@ -89,9 +96,15 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                 return null;
             }
 
-            if (apiPeriod === 'year') {
+            if (periodMode === 'year') {
                 const yearMatch = label.match(/(20\d{2})/);
                 return yearMatch ? yearMatch[1] : label;
+            }
+
+            if (periodMode === 'ttm') {
+                const upper = label.toUpperCase();
+                if (upper.includes('TTM')) return 'TTM';
+                return upper;
             }
 
             const upper = label.toUpperCase();
@@ -117,28 +130,34 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
             .filter((row: any) => Boolean(row.__period));
 
         let displayRows = normalizedRows;
-        if (apiPeriod === 'quarter') {
+        if (periodMode === 'quarter') {
             const quarterRows = normalizedRows
                 .filter((row: any) => String(row.__period).startsWith('Q'))
                 .sort((a: any, b: any) => periodSortKey(a.__period) - periodSortKey(b.__period));
 
             if (period === 'TTM') {
-                const ttmRows: any[] = [];
-                for (let i = 3; i < quarterRows.length; i += 1) {
-                    const windowRows = quarterRows.slice(i - 3, i + 1);
-                    const aggregated: any = { __period: `TTM-${quarterRows[i].__period}` };
-                    selectedMetricKeys.forEach((key) => {
-                        const values = windowRows
-                            .map((row: any) => Number(row[key]))
-                            .filter((value: number) => !Number.isNaN(value) && Number.isFinite(value));
-                        aggregated[key] = values.length ? values.reduce((sum, value) => sum + value, 0) : null;
-                    });
-                    ttmRows.push(aggregated);
+                if (activeTab === 'ratios') {
+                    displayRows = quarterRows.slice(-4);
+                } else {
+                    const ttmRows: any[] = [];
+                    for (let i = 3; i < quarterRows.length; i += 1) {
+                        const windowRows = quarterRows.slice(i - 3, i + 1);
+                        const aggregated: any = { __period: `TTM-${quarterRows[i].__period}` };
+                        selectedMetricKeys.forEach((key) => {
+                            const values = windowRows
+                                .map((row: any) => Number(row[key]))
+                                .filter((value: number) => !Number.isNaN(value) && Number.isFinite(value));
+                            aggregated[key] = values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+                        });
+                        ttmRows.push(aggregated);
+                    }
+                    displayRows = ttmRows;
                 }
-                displayRows = ttmRows;
             } else if (period !== 'FY') {
                 displayRows = quarterRows.filter((row: any) => String(row.__period).startsWith(`${period}-`));
             }
+        } else if (periodMode === 'ttm') {
+            displayRows = normalizedRows.filter((row: any) => String(row.__period).toUpperCase().includes('TTM'));
         }
 
         const columns = Array.from(
@@ -190,7 +209,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                 return { label: m.label, isPct: m.isPct, values };
             })
         };
-    }, [activeQuery?.data, activeTab, apiPeriod, period]);
+    }, [activeQuery?.data, activeTab, periodMode, period]);
 
     const hasData = Boolean(tableData && tableData.periods.length > 0);
     const isFallback = Boolean(activeQuery?.error && hasData);

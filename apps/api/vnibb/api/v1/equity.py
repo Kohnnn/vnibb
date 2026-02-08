@@ -3,6 +3,7 @@ Equity API Endpoints with Graceful Degradation.
 """
 
 import asyncio
+import re
 from datetime import date, timedelta, datetime
 from typing import List, Optional, Literal, Any
 
@@ -32,11 +33,10 @@ from vnibb.providers.vnstock.equity_profile import (
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.providers.vnstock.financials import (
-    VnstockFinancialsFetcher,
-    FinancialsQueryParams,
     FinancialStatementData,
     StatementType,
 )
+from vnibb.services.financial_service import get_financials_with_ttm
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher, StockQuoteData
 from vnibb.providers.vnstock.company_news import VnstockCompanyNewsFetcher, CompanyNewsQueryParams
 from vnibb.providers.vnstock.company_events import (
@@ -139,7 +139,7 @@ async def get_historical_prices(
 
 
 @router.get("/{symbol}/quote", response_model=StandardResponse[StockQuoteData])
-@cached(ttl=30, key_prefix="quote")
+@cached(ttl=60, key_prefix="quote")
 async def get_quote(
     symbol: str,
     source: str = Query(default="VCI"),
@@ -220,7 +220,7 @@ async def get_quote(
 
 
 @router.get("/{symbol}/profile", response_model=StandardResponse[Optional[EquityProfileData]])
-@cached(ttl=3600, key_prefix="profile")
+@cached(ttl=604800, key_prefix="profile")
 async def get_profile(
     symbol: str,
     refresh: bool = Query(default=False),
@@ -300,26 +300,31 @@ async def get_profile(
 async def get_financials(
     symbol: str,
     statement_type: Literal["income", "balance", "cashflow"] = Query("income"),
-    period: Literal["year", "quarter"] = Query("year"),
+    period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
     limit: int = Query(5, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        params = FinancialsQueryParams(
-            symbol=symbol, statement_type=StatementType(statement_type), period=period, limit=limit
+        data = await get_financials_with_ttm(
+            symbol=symbol,
+            statement_type=statement_type,
+            period=period,
+            limit=limit,
         )
-        data = await VnstockFinancialsFetcher.fetch(params)
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         logger.warning(f"Live API failed for financials {symbol}, trying database fallback: {e}")
         try:
+            normalized_period = "year"
+            if period in {"quarter", "Q1", "Q2", "Q3", "Q4", "TTM"}:
+                normalized_period = "quarter"
             # Database Fallback
             model = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow}.get(
                 statement_type
             )
             stmt = (
                 select(model)
-                .where(model.symbol == symbol.upper(), model.period_type == period)
+                .where(model.symbol == symbol.upper(), model.period_type == normalized_period)
                 .order_by(model.fiscal_year.desc())
                 .limit(limit)
             )
@@ -334,6 +339,14 @@ async def get_financials(
                         fiscal_quarter=r.fiscal_quarter,
                         revenue=getattr(r, "revenue", None),
                         net_income=getattr(r, "net_income", None),
+                        eps=getattr(r, "eps", None),
+                        total_assets=getattr(r, "total_assets", None),
+                        total_liabilities=getattr(r, "total_liabilities", None),
+                        total_equity=getattr(r, "total_equity", None),
+                        cash_and_equivalents=getattr(r, "cash_and_equivalents", None),
+                        equity=getattr(r, "total_equity", None),
+                        cash=getattr(r, "cash_and_equivalents", None),
+                        inventory=getattr(r, "inventory", None),
                     )
                     for r in rows
                 ]
@@ -394,12 +407,55 @@ async def get_officers(symbol: str):
 
 
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[Any]])
-async def get_financial_ratios(symbol: str, period: str = "year"):
+async def get_financial_ratios(
+    symbol: str,
+    period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
+):
+    try:
+        normalized_period = "year" if period in {"year", "FY"} else "quarter"
+        data = await VnstockFinancialRatiosFetcher.fetch(
+            FinancialRatiosQueryParams(symbol=symbol, period=normalized_period)
+        )
+        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+    except Exception as e:
+        return StandardResponse(data=[], error=str(e))
+
+
+@router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])
+@cached(ttl=86400, key_prefix="ratios_history")
+async def get_ratio_history(
+    symbol: str,
+    ratios: str = Query("pe,pb,ps", description="Comma-separated ratio keys"),
+    period: Literal["year", "quarter"] = Query("year"),
+    limit: int = Query(20, ge=1, le=60),
+):
+    ratio_list = [r.strip() for r in ratios.split(",") if r.strip()]
+    if not ratio_list:
+        ratio_list = ["pe", "pb", "ps"]
+
+    def period_sort_key(value: str) -> int:
+        if not value:
+            return 0
+        upper = value.upper()
+        year_match = re.search(r"(20\d{2})", upper)
+        year = int(year_match.group(1)) if year_match else 0
+        quarter_match = re.search(r"Q([1-4])", upper)
+        quarter = int(quarter_match.group(1)) if quarter_match else 0
+        return year * 10 + quarter
+
     try:
         data = await VnstockFinancialRatiosFetcher.fetch(
             FinancialRatiosQueryParams(symbol=symbol, period=period)
         )
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        rows: List[dict[str, Any]] = []
+        for item in data:
+            row: dict[str, Any] = {"period": item.period or ""}
+            for key in ratio_list:
+                row[key] = getattr(item, key, None)
+            rows.append(row)
+
+        rows = sorted(rows, key=lambda r: period_sort_key(str(r.get("period", ""))), reverse=True)
+        return StandardResponse(data=rows[:limit], meta=MetaData(count=min(len(rows), limit)))
     except Exception as e:
         return StandardResponse(data=[], error=str(e))
 
@@ -499,20 +555,19 @@ async def get_metrics_history(
 @router.get(
     "/{symbol}/income-statement", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=3600, key_prefix="income_statement")
+@cached(ttl=86400, key_prefix="income_statement")
 async def get_income_statement(
     symbol: str,
-    period: Literal["year", "quarter"] = Query("year"),
+    period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
     limit: int = Query(5, ge=1, le=20),
 ):
     try:
-        params = FinancialsQueryParams(
+        data = await get_financials_with_ttm(
             symbol=symbol,
-            statement_type=StatementType.INCOME,
+            statement_type=StatementType.INCOME.value,
             period=period,
             limit=limit,
         )
-        data = await VnstockFinancialsFetcher.fetch(params)
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         return StandardResponse(data=[], error=str(e))
@@ -521,40 +576,38 @@ async def get_income_statement(
 @router.get(
     "/{symbol}/balance-sheet", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=3600, key_prefix="balance_sheet")
+@cached(ttl=86400, key_prefix="balance_sheet")
 async def get_balance_sheet(
     symbol: str,
-    period: Literal["year", "quarter"] = Query("year"),
+    period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
     limit: int = Query(5, ge=1, le=20),
 ):
     try:
-        params = FinancialsQueryParams(
+        data = await get_financials_with_ttm(
             symbol=symbol,
-            statement_type=StatementType.BALANCE,
+            statement_type=StatementType.BALANCE.value,
             period=period,
             limit=limit,
         )
-        data = await VnstockFinancialsFetcher.fetch(params)
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         return StandardResponse(data=[], error=str(e))
 
 
 @router.get("/{symbol}/cash-flow", response_model=StandardResponse[List[FinancialStatementData]])
-@cached(ttl=3600, key_prefix="cash_flow")
+@cached(ttl=86400, key_prefix="cash_flow")
 async def get_cash_flow(
     symbol: str,
-    period: Literal["year", "quarter"] = Query("year"),
+    period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
     limit: int = Query(5, ge=1, le=20),
 ):
     try:
-        params = FinancialsQueryParams(
+        data = await get_financials_with_ttm(
             symbol=symbol,
-            statement_type=StatementType.CASHFLOW,
+            statement_type=StatementType.CASHFLOW.value,
             period=period,
             limit=limit,
         )
-        data = await VnstockFinancialsFetcher.fetch(params)
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         return StandardResponse(data=[], error=str(e))

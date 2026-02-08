@@ -8,6 +8,8 @@ class RatioCategory(str, Enum):
     PROFITABILITY = "profitability"
     EFFICIENCY = "efficiency"
     LEVERAGE = "leverage"
+    COVERAGE = "coverage"
+    OCF = "ocf"
 
 class ComparisonMetric(BaseModel):
     id: str
@@ -52,4 +54,23 @@ COMPARISON_METRICS = [
     # Leverage
     ComparisonMetric(id="debt_equity", name="Debt/Equity", category=RatioCategory.LEVERAGE),
     ComparisonMetric(id="debt_assets", name="Debt/Assets", category=RatioCategory.LEVERAGE, format="percent"),
+
+    # Coverage
+    ComparisonMetric(
+        id="interest_coverage",
+        name="Interest Coverage",
+        category=RatioCategory.COVERAGE,
+        format="ratio",
+    ),
+    ComparisonMetric(
+        id="debt_service_coverage",
+        name="Debt Service Coverage",
+        category=RatioCategory.COVERAGE,
+        format="ratio",
+    ),
+
+    # Operating Cash Flow
+    ComparisonMetric(id="ocf_debt", name="OCF/Debt", category=RatioCategory.OCF, format="ratio"),
+    ComparisonMetric(id="fcf_yield", name="FCF Yield", category=RatioCategory.OCF, format="percent"),
+    ComparisonMetric(id="ocf_sales", name="OCF/Sales", category=RatioCategory.OCF, format="percent"),
 ]

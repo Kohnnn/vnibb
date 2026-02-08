@@ -214,7 +214,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         import os
         import threading
 
-        if os.getenv("SKIP_WARMUP", "false").lower() == "true":
+        skip_warmup_default = "true" if settings.environment == "production" else "false"
+        skip_warmup = os.getenv("SKIP_WARMUP", skip_warmup_default).lower() == "true"
+        if skip_warmup:
             logger.info("Warmup skipped (SKIP_WARMUP=true)")
         else:
 

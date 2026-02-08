@@ -533,27 +533,95 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
     from vnibb.models.comparison import StockComparison
 
     results = []
+    ratio_period = "year" if period in {"FY", "year"} else "quarter"
+
+    def pick_value(*values: Optional[float]) -> Optional[float]:
+        for value in values:
+            if value is not None:
+                return value
+        return None
+
     for symbol in symbols:
         stock_metrics = await comparison_service.get_stock_metrics(symbol)
 
+        ratio_snapshot: dict[str, Any] = {}
+        backfill_needed = any(
+            stock_metrics.metrics.get(key) is None
+            for key in (
+                "interest_coverage",
+                "debt_service_coverage",
+                "ocf_debt",
+                "fcf_yield",
+                "ocf_sales",
+            )
+        )
+
+        if backfill_needed:
+            try:
+                from vnibb.providers.vnstock.financial_ratios import (
+                    VnstockFinancialRatiosFetcher,
+                    FinancialRatiosQueryParams,
+                )
+
+                ratios = await VnstockFinancialRatiosFetcher.fetch(
+                    FinancialRatiosQueryParams(symbol=symbol, period=ratio_period)
+                )
+                if ratios:
+                    latest = ratios[0]
+                    ratio_snapshot = latest.model_dump() if hasattr(latest, "model_dump") else {}
+            except Exception as ratio_err:
+                logger.warning(f"Ratio backfill failed for {symbol}: {ratio_err}")
+
         # Map existing metrics to the new structure
         metrics_map = {
-            "pe_ratio": stock_metrics.metrics.get("pe"),
-            "pb_ratio": stock_metrics.metrics.get("pb"),
-            "ps_ratio": stock_metrics.metrics.get("ps"),
-            "ev_ebitda": stock_metrics.metrics.get("ev_ebitda"),
+            "pe_ratio": pick_value(stock_metrics.metrics.get("pe"), ratio_snapshot.get("pe")),
+            "pb_ratio": pick_value(stock_metrics.metrics.get("pb"), ratio_snapshot.get("pb")),
+            "ps_ratio": pick_value(stock_metrics.metrics.get("ps"), ratio_snapshot.get("ps")),
+            "ev_ebitda": pick_value(stock_metrics.metrics.get("ev_ebitda"), ratio_snapshot.get("ev_ebitda")),
             "market_cap": stock_metrics.metrics.get("market_cap"),
-            "roe": stock_metrics.metrics.get("roe"),
-            "roa": stock_metrics.metrics.get("roa"),
-            "gross_margin": stock_metrics.metrics.get("gross_margin"),
-            "net_margin": stock_metrics.metrics.get("net_margin"),
-            "operating_margin": stock_metrics.metrics.get("operating_margin"),
-            "current_ratio": stock_metrics.metrics.get("current_ratio"),
-            "quick_ratio": stock_metrics.metrics.get("quick_ratio"),
-            "asset_turnover": stock_metrics.metrics.get("asset_turnover"),
-            "inventory_turnover": stock_metrics.metrics.get("inventory_turnover"),
-            "debt_equity": stock_metrics.metrics.get("debt_to_equity"),
-            "debt_assets": stock_metrics.metrics.get("debt_assets"),
+            "roe": pick_value(stock_metrics.metrics.get("roe"), ratio_snapshot.get("roe")),
+            "roa": pick_value(stock_metrics.metrics.get("roa"), ratio_snapshot.get("roa")),
+            "gross_margin": pick_value(stock_metrics.metrics.get("gross_margin"), ratio_snapshot.get("gross_margin")),
+            "net_margin": pick_value(stock_metrics.metrics.get("net_margin"), ratio_snapshot.get("net_margin")),
+            "operating_margin": pick_value(
+                stock_metrics.metrics.get("operating_margin"), ratio_snapshot.get("operating_margin")
+            ),
+            "current_ratio": pick_value(
+                stock_metrics.metrics.get("current_ratio"), ratio_snapshot.get("current_ratio")
+            ),
+            "quick_ratio": pick_value(
+                stock_metrics.metrics.get("quick_ratio"), ratio_snapshot.get("quick_ratio")
+            ),
+            "asset_turnover": pick_value(
+                stock_metrics.metrics.get("asset_turnover"), ratio_snapshot.get("asset_turnover")
+            ),
+            "inventory_turnover": pick_value(
+                stock_metrics.metrics.get("inventory_turnover"), ratio_snapshot.get("inventory_turnover")
+            ),
+            "debt_equity": pick_value(
+                stock_metrics.metrics.get("debt_to_equity"),
+                stock_metrics.metrics.get("debt_equity"),
+                ratio_snapshot.get("debt_equity"),
+            ),
+            "debt_assets": pick_value(
+                stock_metrics.metrics.get("debt_assets"),
+                stock_metrics.metrics.get("debt_to_asset"),
+                ratio_snapshot.get("debt_assets"),
+            ),
+            "interest_coverage": pick_value(
+                stock_metrics.metrics.get("interest_coverage"), ratio_snapshot.get("interest_coverage")
+            ),
+            "debt_service_coverage": pick_value(
+                stock_metrics.metrics.get("debt_service_coverage"),
+                ratio_snapshot.get("debt_service_coverage"),
+            ),
+            "ocf_debt": pick_value(
+                stock_metrics.metrics.get("ocf_debt"),
+                stock_metrics.metrics.get("ocf_to_debt"),
+                ratio_snapshot.get("ocf_debt"),
+            ),
+            "fcf_yield": pick_value(stock_metrics.metrics.get("fcf_yield"), ratio_snapshot.get("fcf_yield")),
+            "ocf_sales": pick_value(stock_metrics.metrics.get("ocf_sales"), ratio_snapshot.get("ocf_sales")),
         }
 
         results.append(

@@ -119,20 +119,52 @@ export interface FinancialRatioData {
   pe?: number;
   pb?: number;
   ps?: number;
+  ev_ebitda?: number;
+  ev_sales?: number;
   roe?: number;
   roa?: number;
   eps?: number;
   bvps?: number;
   debt_equity?: number;
+  debt_assets?: number;
+  equity_multiplier?: number;
   current_ratio?: number;
+  quick_ratio?: number;
+  cash_ratio?: number;
+  asset_turnover?: number;
+  inventory_turnover?: number;
+  receivables_turnover?: number;
   gross_margin?: number;
+  operating_margin?: number;
   net_margin?: number;
+  interest_coverage?: number;
+  debt_service_coverage?: number;
+  ocf_debt?: number;
+  fcf_yield?: number;
+  ocf_sales?: number;
 }
 
 export interface FinancialRatiosResponse {
   symbol: string;
   count: number;
   data: FinancialRatioData[];
+}
+
+export interface RatioHistoryPoint {
+  period: string;
+  pe?: number;
+  pb?: number;
+  ps?: number;
+  ev_ebitda?: number;
+  ev_sales?: number;
+}
+
+export interface RatioHistoryResponse {
+  data: RatioHistoryPoint[];
+  meta?: {
+    count: number;
+  };
+  error?: string | null;
 }
 
 export interface ForeignTradingData {
