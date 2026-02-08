@@ -28,6 +28,19 @@ set_python_env() {
     fi
 }
 
+ensure_venv() {
+    if [ ! -x "$VENV_PATH/bin/python" ]; then
+        python3 -m venv "$VENV_PATH"
+    fi
+}
+
+backup_has_vnstock() {
+    if [ -d "$PERSISTENT_BACKUP" ]; then
+        ls "$PERSISTENT_BACKUP"/vnstock_data* >/dev/null 2>&1 && return 0
+    fi
+    return 1
+}
+
 set_python_env
 
 # If key is provided but packages are missing (e.g. build arg was missed), install them now.
@@ -36,8 +49,10 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
     PERSISTENT_BACKUP="/root/.vnstock/backup_packages"
 
     # 2a. Restore Code: If we have a backup, restore it first
-    if [ -d "$PERSISTENT_BACKUP" ] && [ "$(ls -A $PERSISTENT_BACKUP)" ]; then
+    if backup_has_vnstock; then
         echo "VnStock Premium: Restoring packages from persistent volume..."
+        ensure_venv
+        set_python_env
         cp -rn "$PERSISTENT_BACKUP"/* "$SITE_PACKAGES/" || true
     fi
 
