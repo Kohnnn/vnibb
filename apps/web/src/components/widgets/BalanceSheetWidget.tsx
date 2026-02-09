@@ -24,6 +24,7 @@ import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { cn } from '@/lib/utils';
+import { Sparkline } from '@/components/ui/Sparkline';
 
 interface BalanceSheetWidgetProps {
     id: string;
@@ -99,19 +100,36 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                     {items.slice(0, 4).map((d, i) => (
                         <th key={i} className="text-right py-2 px-1 font-bold">{formatPeriodLabel(d.period)}</th>
                     ))}
+                    <th className="py-2 px-1 font-bold uppercase tracking-tighter text-center">Trend</th>
                 </tr>
             </thead>
             <tbody>
-                {['total_assets', 'equity', 'total_liabilities', 'cash', 'inventory'].map((key) => (
+                {['total_assets', 'equity', 'total_liabilities', 'cash', 'inventory'].map((key) => {
+                    const points = items
+                        .slice(0, 4)
+                        .slice()
+                        .reverse()
+                        .map((d) => Number(d[key as keyof typeof d]))
+                        .filter((value) => Number.isFinite(value));
+
+                    return (
                     <tr key={key} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors">
                         <td className="py-2 px-1 text-gray-400 font-medium">{labels[key] || key}</td>
                         {items.slice(0, 4).map((d, i) => (
-                            <td key={i} className="text-right py-2 px-1 text-white font-mono">
+                            <td key={i} data-type="number" className="text-right py-2 px-1 text-white font-mono">
                                 {formatUnitValue(d[key as keyof typeof d] as number, unitConfig)}
                             </td>
                         ))}
+                        <td className="py-2 px-1 text-center">
+                            {points.length < 2 ? (
+                                <span className="text-[10px] text-muted-foreground">-</span>
+                            ) : (
+                                <Sparkline data={points} width={70} height={18} />
+                            )}
+                        </td>
                     </tr>
-                ))}
+                    );
+                })}
             </tbody>
         </table>
     );

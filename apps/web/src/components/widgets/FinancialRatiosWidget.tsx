@@ -11,6 +11,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { cn } from '@/lib/utils';
+import { Sparkline } from '@/components/ui/Sparkline';
 
 interface FinancialRatiosWidgetProps {
     id: string;
@@ -172,26 +173,43 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                                             {r.period || '-'}
                                         </th>
                                     ))}
+                                    <th className="py-2 px-1 font-bold uppercase tracking-tighter text-center">Trend</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {categoryMetrics[activeCategory].map((key) => (
-                                    <tr key={key} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors group">
-                                        <td className="py-2 px-1 text-gray-400 font-medium group-hover:text-gray-200">
-                                            {ratioLabels[key] || key}
-                                        </td>
-                                        {ratios.slice(0, 4).map((r, i) => {
-                                            const value = r[key as keyof typeof r] as number | null;
-                                            const isPct = percentKeys.has(key);
+                                {categoryMetrics[activeCategory].map((key) => {
+                                    const points = ratios
+                                        .slice(0, 4)
+                                        .slice()
+                                        .reverse()
+                                        .map((r) => Number(r[key as keyof typeof r]))
+                                        .filter((value) => Number.isFinite(value));
 
-                                            return (
-                                                <td key={i} className="text-right py-2 px-1 text-white font-mono">
-                                                    {isPct ? formatPct(value) : formatRatio(value)}
-                                                </td>
-                                            );
-                                        })}
-                                    </tr>
-                                ))}
+                                    return (
+                                        <tr key={key} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors group">
+                                            <td className="py-2 px-1 text-gray-400 font-medium group-hover:text-gray-200">
+                                                {ratioLabels[key] || key}
+                                            </td>
+                                            {ratios.slice(0, 4).map((r, i) => {
+                                                const value = r[key as keyof typeof r] as number | null;
+                                                const isPct = percentKeys.has(key);
+
+                                                return (
+                                                    <td key={i} data-type="number" className="text-right py-2 px-1 text-white font-mono">
+                                                        {isPct ? formatPct(value) : formatRatio(value)}
+                                                    </td>
+                                                );
+                                            })}
+                                            <td className="py-2 px-1 text-center">
+                                                {points.length < 2 ? (
+                                                    <span className="text-[10px] text-muted-foreground">-</span>
+                                                ) : (
+                                                    <Sparkline data={points} width={70} height={18} />
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     )}
