@@ -115,6 +115,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
                     axisLine={false}
                     tickLine={false}
                     domain={['auto', 'auto']}
+                    label={{ value: 'Multiple', angle: -90, position: 'insideLeft', fill: '#9ca3af', fontSize: 10 }}
                   />
                   <Tooltip
                     contentStyle={{ background: '#0b1221', border: '1px solid #1f2937', fontSize: '11px' }}

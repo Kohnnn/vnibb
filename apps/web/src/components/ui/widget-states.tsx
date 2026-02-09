@@ -36,6 +36,7 @@ interface WidgetErrorProps {
 export function WidgetError({ error, onRetry, title = 'Failed to load data' }: WidgetErrorProps) {
     const message = error?.message || '';
     const lowerMessage = message.toLowerCase();
+    const isMixedContent = lowerMessage.includes('mixed content');
     const isNetworkError = lowerMessage.includes('fetch') || lowerMessage.includes('network') || lowerMessage.includes('offline');
     const isTimeout = lowerMessage.includes('timeout') || lowerMessage.includes('timed out');
     const isRateLimit = lowerMessage.includes('429') || lowerMessage.includes('too many requests');
@@ -45,27 +46,31 @@ export function WidgetError({ error, onRetry, title = 'Failed to load data' }: W
 
     const resolvedTitle = title !== 'Failed to load data'
         ? title
-        : isNetworkError
-            ? 'Connection Failed'
-            : isTimeout
-                ? 'Request Timed Out'
-                : isRateLimit
-                    ? 'Too Many Requests'
-                    : isUnauthorized
-                        ? 'Authentication Required'
-                        : isForbidden
-                            ? 'Access Denied'
-                            : isNotFound
-                                ? 'Data Not Found'
-                                : 'Something Went Wrong';
+        : isMixedContent
+            ? 'Mixed Content Blocked'
+            : isNetworkError
+                ? 'Connection Failed'
+                : isTimeout
+                    ? 'Request Timed Out'
+                    : isRateLimit
+                        ? 'Too Many Requests'
+                        : isUnauthorized
+                            ? 'Authentication Required'
+                            : isForbidden
+                                ? 'Access Denied'
+                                : isNotFound
+                                    ? 'Data Not Found'
+                                    : 'Something Went Wrong';
 
     const hint = isNetworkError
         ? 'Check your connection and try again.'
-        : isTimeout
-            ? 'The server took too long to respond.'
-            : isRateLimit
-                ? 'Please wait a moment before retrying.'
-                : null;
+        : isMixedContent
+            ? 'Ensure the API URL uses HTTPS and the backend supports TLS.'
+            : isTimeout
+                ? 'The server took too long to respond.'
+                : isRateLimit
+                    ? 'Please wait a moment before retrying.'
+                    : null;
 
     return (
         <div className="flex flex-col items-center justify-center h-full min-h-[140px] p-4 text-center">
@@ -179,6 +184,11 @@ export function NetworkStatus({ isOnline }: { isOnline: boolean }) {
  * Convert technical error messages to user-friendly ones
  */
 function getUserFriendlyErrorMessage(message: string): string {
+    // Mixed content errors
+    if (message.toLowerCase().includes('mixed content')) {
+        return 'Secure pages can only call HTTPS APIs. Update your API URL to https://.';
+    }
+
     // Network errors
     if (message.includes('fetch') || message.includes('NetworkError')) {
         return 'Unable to connect to the server. Please check your internet connection.';

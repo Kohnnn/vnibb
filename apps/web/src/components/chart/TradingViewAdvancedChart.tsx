@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 const TRADINGVIEW_SRC = 'https://s3.tradingview.com/tv.js';
@@ -34,6 +34,8 @@ interface TradingViewAdvancedChartProps {
   timezone?: string;
   theme?: 'light' | 'dark';
   className?: string;
+  fallback?: ReactNode;
+  onError?: (message: string) => void;
 }
 
 export function TradingViewAdvancedChart({
@@ -42,6 +44,8 @@ export function TradingViewAdvancedChart({
   timezone = 'Asia/Ho_Chi_Minh',
   theme = 'dark',
   className,
+  fallback,
+  onError,
 }: TradingViewAdvancedChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<{ remove?: () => void } | null>(null);
@@ -81,7 +85,10 @@ export function TradingViewAdvancedChart({
         });
       })
       .catch((error) => {
-        if (isActive) setLoadError(error.message || 'Failed to load TradingView');
+        if (!isActive) return;
+        const message = error.message || 'Failed to load TradingView';
+        setLoadError(message);
+        onError?.(message);
       });
 
     return () => {
@@ -99,12 +106,14 @@ export function TradingViewAdvancedChart({
 
   return (
     <div className={cn('relative h-full w-full', className)}>
-      <div id={containerIdRef.current} ref={containerRef} className="h-full w-full" />
-      {loadError && (
+      {!loadError && <div id={containerIdRef.current} ref={containerRef} className="h-full w-full" />}
+      {loadError && fallback ? (
+        <div className="h-full w-full">{fallback}</div>
+      ) : loadError ? (
         <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400 bg-black/50">
           {loadError}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

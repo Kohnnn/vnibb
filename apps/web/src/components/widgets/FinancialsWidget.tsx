@@ -11,6 +11,9 @@ import {
     ArrowUpRight, BarChart3, LayoutGrid
 } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { Sparkline } from '@/components/ui/Sparkline';
+import { useUnit } from '@/contexts/UnitContext';
+import { formatUnitValue, getUnitCaption } from '@/lib/units';
 
 type FinancialTab = 'balance_sheet' | 'income_statement' | 'cash_flow' | 'ratios';
 
@@ -38,6 +41,7 @@ const RATIO_METRIC_KEYS = ['pe', 'pb', 'roe', 'roa', 'eps', 'debt_equity', 'gros
 function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: FinancialsWidgetProps) {
     const [activeTab, setActiveTab] = useState<FinancialTab>('income_statement');
     const [period, setPeriod] = useState('FY');
+    const { config: unitConfig } = useUnit();
 
     const tabs = [
         { id: 'income_statement', label: 'Income', icon: ArrowUpRight },
@@ -268,7 +272,9 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                         </div>
                         <div className="flex items-center gap-1 text-[9px] font-bold text-muted-foreground uppercase">
                             <span className="hidden sm:inline">Units</span>
-                            <span className="px-1.5 py-0.5 rounded bg-muted/30 text-gray-300">B VND</span>
+                            <span className="px-1.5 py-0.5 rounded bg-muted/30 text-gray-300">
+                                {getUnitCaption(unitConfig)}
+                            </span>
                         </div>
                         <WidgetMeta
                             updatedAt={activeQuery.dataUpdatedAt}
@@ -294,13 +300,14 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                         />
                     ) : (
                         <div className="min-w-max">
-                            <table className="w-full text-[11px] border-collapse table-fixed">
+                            <table className="data-table w-full text-[11px] border-collapse table-fixed">
                                 <thead className="sticky top-0 bg-secondary/95 backdrop-blur-sm z-20">
                                     <tr className="border-b border-white/10 shadow-sm">
                                             <th className="text-left p-2 pl-2.5 text-muted-foreground font-black uppercase tracking-widest w-[152px] bg-secondary/95 backdrop-blur-sm sticky left-0 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">Metric</th>
                                         {tableData?.periods.map(p => (
                                             <th key={p} className="text-right p-2 text-muted-foreground font-black min-w-[96px]">{p}</th>
                                         ))}
+                                        <th className="text-center p-2 text-muted-foreground font-black min-w-[84px]">Trend</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-white/[0.03]">
@@ -321,13 +328,13 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                                 const growth = data?.growth;
 
                                                 return (
-                                                    <td key={p} className="p-2 text-right font-mono group-hover:bg-white/[0.01]">
+                                                    <td key={p} data-type="number" className="p-2 text-right font-mono group-hover:bg-white/[0.01]">
                                                         <div className="flex flex-col items-end">
                                                             <span className={cn(
                                                                 "font-medium",
                                                                 val < 0 ? "text-red-400" : "text-gray-200"
                                                             )}>
-                                                                {row.isPct ? formatPct(val) : formatValue(val)}
+                                                                {row.isPct ? formatPct(val) : formatUnitValue(val, unitConfig)}
                                                             </span>
                                                             {growth !== null && Math.abs(growth) > 1 && (
                                                                 <span className={cn(
@@ -342,6 +349,23 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                                     </td>
                                                 );
                                             })}
+                                            <td className="p-2 text-center">
+                                                {(() => {
+                                                    const points = tableData.periods
+                                                        .slice()
+                                                        .reverse()
+                                                        .map((p) => row.values[p]?.val)
+                                                        .filter((value): value is number =>
+                                                            typeof value === 'number' && Number.isFinite(value)
+                                                        );
+
+                                                    if (points.length < 2) {
+                                                        return <span className="text-[10px] text-muted-foreground">-</span>;
+                                                    }
+
+                                                    return <Sparkline data={points} width={70} height={18} />;
+                                                })()}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -350,20 +374,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                     )}
                 </div>
                 <div className="border-t border-white/5 px-2 py-1 text-[10px] text-muted-foreground">
-                    Values in Billions of VND except per-share values.
+                    Units: {getUnitCaption(unitConfig)}. Per-share values shown raw.
                 </div>
             </div>
         </WidgetContainer>
     );
-}
-
-function formatValue(value: number | null | undefined): string {
-    if (value === null || value === undefined) return '-';
-    const absVal = Math.abs(value);
-    if (absVal >= 1e12) return `${(value / 1e12).toFixed(2)}T`;
-    if (absVal >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
-    if (absVal >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
-    return value.toLocaleString();
 }
 
 function formatPct(value: number | null | undefined): string {

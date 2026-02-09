@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { X, Settings as SettingsIcon, Database, Bell, Palette, Server } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
+import { useUnit } from '@/contexts/UnitContext';
+import { formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -15,6 +17,7 @@ type SettingTab = 'general' | 'data' | 'notifications' | 'appearance';
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingTab>('general');
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
+  const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
   
   if (!isOpen) return null;
 
@@ -24,6 +27,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     { id: 'notifications' as const, label: 'Notifications', icon: Bell },
     { id: 'appearance' as const, label: 'Appearance', icon: Palette },
   ];
+
+  const unitOptions: Array<{ value: UnitDisplay; label: string }> = [
+    { value: 'auto', label: 'Auto' },
+    { value: 'K', label: 'K' },
+    { value: 'M', label: 'M' },
+    { value: 'B', label: 'B' },
+    { value: 'raw', label: 'Raw' },
+  ];
+
+  const decimalOptions = [0, 1, 2, 3];
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -111,6 +124,58 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     ))}
                   </div>
                   <p className="text-[10px] text-gray-500 mt-2">KBS is the recommended default for vnstock 3.4.0+</p>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-bold text-white mb-2 uppercase tracking-wider text-[10px] text-gray-500">Display Units</h4>
+                  <div className="grid grid-cols-5 gap-2">
+                    {unitOptions.map(option => (
+                      <button
+                        key={option.value}
+                        onClick={() => setUnit(option.value)}
+                        className={cn(
+                          "px-3 py-2 rounded-lg border text-[11px] font-bold transition-all",
+                          unitConfig.display === option.value
+                            ? "bg-blue-600/20 border-blue-500 text-blue-400"
+                            : "bg-gray-900 border-gray-800 text-gray-400 hover:border-gray-700"
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-2">Applies to financial values across all widgets.</p>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-bold text-white mb-2 uppercase tracking-wider text-[10px] text-gray-500">Decimal Places</h4>
+                  <div className="grid grid-cols-4 gap-2">
+                    {decimalOptions.map((value) => (
+                      <button
+                        key={value}
+                        onClick={() => setDecimalPlaces(value)}
+                        className={cn(
+                          "px-3 py-2 rounded-lg border text-[11px] font-bold transition-all",
+                          unitConfig.decimalPlaces === value
+                            ? "bg-blue-600/20 border-blue-500 text-blue-400"
+                            : "bg-gray-900 border-gray-800 text-gray-400 hover:border-gray-700"
+                        )}
+                      >
+                        {value}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Preview</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-400">1,234,567,890</span>
+                    <span className="text-sm font-mono text-blue-300">
+                      {formatUnitValue(1234567890, unitConfig)}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-2">Units: {getUnitCaption(unitConfig)}</p>
                 </div>
               </div>
             )}
