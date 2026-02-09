@@ -264,6 +264,14 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
                     ${isDragOver ? 'border-t border-blue-500' : ''}
                 `}
                 style={{ paddingLeft: `${6 + indent * 12}px` }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (!isEditing) setActiveDashboard(dashboard.id);
+                    }
+                }}
                 onClick={() => !isEditing && setActiveDashboard(dashboard.id)}
                 onContextMenu={(e) => handleContextMenu(e, dashboard.id, 'dashboard')}
             >
@@ -272,6 +280,7 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
                     <input
                         type="text"
                         value={editingName}
+                        aria-label="Dashboard name"
                         onChange={(e) => setEditingName(e.target.value)}
                         onBlur={submitRename}
                         onKeyDown={(e) => {
@@ -313,6 +322,14 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
                         text-gray-400 hover:text-gray-200 hover:bg-[#1e2a3b]/50 transition-colors text-xs
                         ${isDragOver ? 'bg-[#1e2a3b] ring-1 ring-blue-500' : ''}
                     `}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            if (!isEditing) toggleFolder(folder.id);
+                        }
+                    }}
                     onClick={() => !isEditing && toggleFolder(folder.id)}
                     onContextMenu={(e) => handleContextMenu(e, folder.id, 'folder')}
                     onDragOver={(e) => handleDragOver(e, folder.id, true)}
@@ -328,6 +345,7 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
                         <input
                             type="text"
                             value={editingName}
+                            aria-label="Folder name"
                             onChange={(e) => setEditingName(e.target.value)}
                             onBlur={submitRename}
                             onKeyDown={(e) => {
@@ -526,6 +544,15 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
                 <>
                     <div
                         className="fixed inset-0 z-[60]"
+                        role="button"
+                        tabIndex={0}
+                        aria-label="Close context menu"
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setContextMenu(null);
+                            }
+                        }}
                         onClick={() => setContextMenu(null)}
                     />
                     <div
@@ -619,6 +646,16 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
             {(showCreateMenu || showMoveSubmenu) && (
                 <div
                     className="fixed inset-0 z-40"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Close menus"
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setShowCreateMenu(false);
+                            setShowMoveSubmenu(false);
+                        }
+                    }}
                     onClick={() => {
                         setShowCreateMenu(false);
                         setShowMoveSubmenu(false);

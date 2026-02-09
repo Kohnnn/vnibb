@@ -105,20 +105,27 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         {/* Actions bar */}
         <div className="flex items-center justify-between p-3 border-b border-gray-800 bg-[#0a0a0a]">
           <div className="flex items-center gap-2">
-            <BrainCircuit size={16} className="text-purple-400" />
+            <BrainCircuit size={16} className="text-cyan-400" />
             <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Gemini Intelligence</span>
           </div>
           <div className="flex items-center gap-2">
             <WidgetMeta note="AI analysis" isFetching={isLoading} align="right" />
             <button
               onClick={runAnalysis}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  runAnalysis();
+                }
+              }}
               disabled={isLoading || !profile}
               className={cn(
                   "flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all",
                   isLoading 
                       ? "bg-gray-800 text-gray-500 cursor-not-allowed" 
-                      : "bg-purple-600 text-white hover:bg-purple-500 shadow-lg shadow-purple-900/20"
+                      : "bg-cyan-600 text-white hover:bg-cyan-500 shadow-lg shadow-cyan-900/20"
               )}
+              aria-label={analysis ? 'Re-analyze stock' : 'Analyze stock'}
             >
               {isLoading ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
               {analysis ? 'Re-Analyze' : 'Analyze Stock'}
@@ -131,7 +138,19 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
             <div className="flex flex-col items-center justify-center h-full text-red-500/60 gap-2 text-center p-6">
                 <AlertTriangle size={32} />
                 <p className="text-xs font-bold uppercase">{error}</p>
-                <button onClick={runAnalysis} className="mt-2 text-[10px] text-blue-400 underline uppercase">Retry Analysis</button>
+                <button
+                  onClick={runAnalysis}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      runAnalysis();
+                    }
+                  }}
+                  className="mt-2 text-[10px] text-blue-400 underline uppercase"
+                  aria-label="Retry analysis"
+                >
+                  Retry Analysis
+                </button>
             </div>
           ) : analysis ? (
             <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-headings:mb-2 prose-headings:mt-4 first:prose-headings:mt-0">
@@ -145,7 +164,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
                     <BrainCircuit size={48} strokeWidth={1} />
                     {isLoading && (
                         <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="w-12 h-12 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                            <div className="w-12 h-12 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
                         </div>
                     )}
                 </div>

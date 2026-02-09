@@ -134,7 +134,7 @@ export const DEFAULT_SYNC_GROUP_COLORS = [
     '#10B981', // Green
     '#F59E0B', // Amber
     '#EF4444', // Red
-    '#8B5CF6', // Purple
+    '#22D3EE', // Cyan Light
     '#EC4899', // Pink
     '#06B6D4', // Cyan
     '#F97316', // Orange

@@ -155,6 +155,15 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
             {/* Backdrop */}
             <div
                 className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
+                role="button"
+                tabIndex={0}
+                aria-label="Close command palette"
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onClose();
+                    }
+                }}
                 onClick={onClose}
             />
 
@@ -167,6 +176,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                         <input
                             ref={inputRef}
                             type="text"
+                            aria-label="Command palette search"
                             value={query}
                             onChange={(e) => {
                                 setQuery(e.target.value);

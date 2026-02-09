@@ -55,8 +55,15 @@ export function HealthDashboard() {
         </div>
         <button 
           onClick={fetchHealth} 
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              fetchHealth();
+            }
+          }}
           disabled={loading}
           className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+          aria-label="Refresh health status"
         >
           <RefreshCw className={`w-5 h-5 text-gray-400 ${loading ? 'animate-spin' : ''}`} />
         </button>

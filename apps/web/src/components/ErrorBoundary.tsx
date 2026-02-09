@@ -58,7 +58,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                     </p>
                     <button
                         onClick={this.handleReset}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                this.handleReset();
+                            }
+                        }}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 rounded-md transition-colors"
+                        aria-label="Try again"
                     >
                         <RefreshCw size={12} />
                         Try Again
@@ -90,7 +97,14 @@ export function WidgetErrorFallback({
             {onRetry && (
                 <button
                     onClick={onRetry}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onRetry();
+                        }
+                    }}
                     className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors"
+                    aria-label="Retry"
                 >
                     <RefreshCw size={10} />
                     Retry

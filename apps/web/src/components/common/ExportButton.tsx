@@ -72,9 +72,16 @@ export function ExportButton({
         <div className="relative inline-block text-left" ref={dropdownRef}>
             <button
                 onClick={() => setIsOpen(!isOpen)}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setIsOpen(!isOpen);
+                    }
+                }}
                 disabled={isLoading}
                 className={`${baseStyles} ${variantClass} ${sizeClass} ${className}`}
                 type="button"
+                aria-label="Export options"
             >
                 <Download className="mr-2 h-4 w-4" />
                 Export

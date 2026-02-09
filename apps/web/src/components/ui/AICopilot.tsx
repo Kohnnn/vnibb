@@ -228,6 +228,7 @@ export function AICopilot({ isOpen, onClose, currentSymbol, widgetContext }: AIC
                         onClick={handleExport}
                         className="p-1 text-gray-400 hover:text-white transition-colors"
                         title="Export chat as Markdown"
+                        aria-label="Export chat"
                     >
                         <Download size={14} />
                     </button>
@@ -350,6 +351,7 @@ export function AICopilot({ isOpen, onClose, currentSymbol, widgetContext }: AIC
                     <input
                         ref={inputRef}
                         type="text"
+                        aria-label="Copilot message"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
@@ -360,6 +362,7 @@ export function AICopilot({ isOpen, onClose, currentSymbol, widgetContext }: AIC
                         onClick={() => handleSend()}
                         disabled={!input.trim() || isLoading}
                         className="p-1 text-blue-400 hover:text-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                        aria-label="Send message"
                     >
                         <Send size={18} />
                     </button>

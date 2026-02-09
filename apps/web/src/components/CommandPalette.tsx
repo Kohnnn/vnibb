@@ -190,10 +190,21 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   value={search}
                   onValueChange={setSearch}
                   placeholder="Type a command or search..."
+                  aria-label="Command palette search"
                   className="flex-1 h-12 bg-transparent text-white placeholder-gray-500 focus:outline-none text-sm"
                   autoFocus
                 />
-                <button onClick={() => onOpenChange(false)} className="p-1 text-gray-500 hover:text-white rounded">
+                <button
+                  onClick={() => onOpenChange(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onOpenChange(false);
+                    }
+                  }}
+                  className="p-1 text-gray-500 hover:text-white rounded"
+                  aria-label="Close command palette"
+                >
                     <X size={16} />
                 </button>
               </div>

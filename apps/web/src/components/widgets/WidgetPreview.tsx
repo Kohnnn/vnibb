@@ -279,7 +279,7 @@ function TechnicalPreview() {
 function AIPreview() {
     return (
         <div className="h-full flex flex-col items-center justify-center p-2">
-            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/30 to-purple-500/30 flex items-center justify-center mb-1">
+            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/30 to-cyan-500/30 flex items-center justify-center mb-1">
                 <Activity size={10} className="text-blue-400" />
             </div>
             <div className="text-[6px] text-gray-500">AI Analysis</div>
@@ -298,7 +298,7 @@ function ComparisonPreview() {
             ].map((item, i) => (
                 <div key={i} className="flex-1 flex gap-px items-end">
                     <div className="flex-1 bg-blue-600/50 rounded-t" style={{ height: `${item.h1}%` }} />
-                    <div className="flex-1 bg-purple-600/50 rounded-t" style={{ height: `${item.h2}%` }} />
+                    <div className="flex-1 bg-cyan-600/50 rounded-t" style={{ height: `${item.h2}%` }} />
                 </div>
             ))}
         </div>

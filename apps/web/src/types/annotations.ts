@@ -35,7 +35,7 @@ export const ANNOTATION_COLORS = [
   '#ef4444', // red
   '#22c55e', // green
   '#f59e0b', // amber
-  '#8b5cf6', // violet
+  '#06b6d4', // cyan
   '#ec4899', // pink
   '#06b6d4', // cyan
   '#ffffff', // white

@@ -103,6 +103,15 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
             {/* Backdrop */}
             <div
                 className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100]"
+                role="button"
+                tabIndex={0}
+                aria-label="Close manage tabs"
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleCancel();
+                    }
+                }}
                 onClick={handleCancel}
             />
 
@@ -118,6 +127,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                         <button
                             onClick={handleCancel}
                             className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                            aria-label="Close manage tabs"
                         >
                             <X size={20} />
                         </button>
@@ -144,6 +154,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                                 <button
                                     className="p-1 cursor-grab active:cursor-grabbing text-gray-500 hover:text-gray-300"
                                     onMouseDown={(e) => e.stopPropagation()}
+                                    aria-label="Reorder tab"
                                 >
                                     <GripVertical size={18} />
                                 </button>
@@ -152,6 +163,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                                 <input
                                     type="text"
                                     value={tab.name}
+                                    aria-label="Tab name"
                                     onChange={(e) => handleNameChange(index, e.target.value)}
                                     className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                     placeholder="Tab name"
@@ -169,6 +181,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                                         }
                                     `}
                                     title={localTabs.length <= 1 ? 'Cannot delete the only tab' : 'Delete tab'}
+                                    aria-label={`Delete ${tab.name}`}
                                 >
                                     <Trash2 size={18} />
                                 </button>

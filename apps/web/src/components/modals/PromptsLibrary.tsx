@@ -68,7 +68,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
 const CATEGORY_COLORS: Record<string, string> = {
     analysis: '#3B82F6',
     comparison: '#10B981',
-    fundamentals: '#8B5CF6',
+    fundamentals: '#06B6D4',
     custom: '#F59E0B',
 };
 
@@ -140,7 +140,19 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
             {/* Backdrop */}
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+            <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                role="button"
+                tabIndex={0}
+                aria-label="Close prompts library"
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onClose();
+                    }
+                }}
+                onClick={onClose}
+            />
 
             {/* Modal */}
             <div className="relative w-full max-w-2xl max-h-[80vh] bg-[#0b1021] border border-[#1e2a3b] rounded-lg shadow-2xl overflow-hidden flex flex-col">
@@ -164,6 +176,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                         <button
                             onClick={onClose}
                             className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                            aria-label="Close prompts library"
                         >
                             <X size={18} />
                         </button>
@@ -179,6 +192,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                                 type="text"
                                 placeholder="Search prompts..."
                                 value={searchQuery}
+                                aria-label="Search prompts"
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="w-full pl-8 pr-3 py-1.5 rounded bg-[#0f1629] border border-[#1e2a3b] text-white text-xs placeholder-gray-500 focus:outline-none focus:border-blue-500/50"
                             />
@@ -208,6 +222,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                                 type="text"
                                 placeholder="Prompt name..."
                                 value={newPromptName}
+                                aria-label="Prompt name"
                                 onChange={(e) => setNewPromptName(e.target.value)}
                                 className="w-full px-3 py-1.5 rounded bg-[#0f1629] border border-[#1e2a3b] text-white text-xs placeholder-gray-500 focus:outline-none focus:border-blue-500/50"
                                 autoFocus
@@ -215,6 +230,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                             <textarea
                                 placeholder="Prompt content..."
                                 value={newPromptContent}
+                                aria-label="Prompt content"
                                 onChange={(e) => setNewPromptContent(e.target.value)}
                                 rows={3}
                                 className="w-full px-3 py-1.5 rounded bg-[#0f1629] border border-[#1e2a3b] text-white text-xs placeholder-gray-500 focus:outline-none focus:border-blue-500/50 resize-none"
@@ -244,6 +260,14 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                             <div
                                 key={prompt.id}
                                 className="group flex items-start gap-3 p-3 rounded-lg border border-[#1e2a3b] bg-[#0f1629]/30 hover:bg-[#1e2a3b]/30 hover:border-[#2e3a4b] transition-all cursor-pointer"
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        handleSelectPrompt(prompt);
+                                    }
+                                }}
                                 onClick={() => handleSelectPrompt(prompt)}
                             >
                                 {/* Category Icon */}
@@ -282,6 +306,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                                             handleDeletePrompt(prompt.id);
                                         }}
                                         className="p-1 rounded opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                                        aria-label={`Delete ${prompt.name}`}
                                     >
                                         <Trash2 size={14} />
                                     </button>

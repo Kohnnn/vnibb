@@ -52,7 +52,7 @@ const APP_TEMPLATES: AppTemplate[] = [
         description: 'Financial statements, key metrics, company filings, and ownership analysis',
         icon: <Briefcase size={24} />,
         category: 'research',
-        color: '#8B5CF6',
+        color: '#06B6D4',
         widgets: [
             { type: 'ticker_profile' },
             { type: 'key_metrics' },
@@ -157,7 +157,19 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
             {/* Backdrop */}
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+            <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                role="button"
+                tabIndex={0}
+                aria-label="Close apps library"
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onClose();
+                    }
+                }}
+                onClick={onClose}
+            />
 
                 {/* Modal */}
                 <div className="relative w-full max-w-3xl max-h-[80vh] bg-[#0b1021] border border-[#1e2a3b] rounded-lg shadow-2xl overflow-hidden flex flex-col">
@@ -170,6 +182,7 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
                         <button
                             onClick={onClose}
                             className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                            aria-label="Close apps library"
                         >
                             <X size={18} />
                         </button>
@@ -184,6 +197,7 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
                                     type="text"
                                     placeholder="Search templates..."
                                     value={searchQuery}
+                                    aria-label="Search templates"
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     className="w-full pl-8 pr-3 py-1.5 rounded bg-[#0f1629] border border-[#1e2a3b] text-white text-xs placeholder-gray-500 focus:outline-none focus:border-blue-500/50"
                                 />

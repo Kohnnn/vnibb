@@ -81,6 +81,7 @@ function RangeInput({
                     type="number"
                     step={step}
                     value={minValue ?? ''}
+                    aria-label={`${label} minimum`}
                     onChange={(e) => onMinChange(e.target.value ? parseFloat(e.target.value) : undefined)}
                     placeholder={placeholder.min}
                     className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -90,6 +91,7 @@ function RangeInput({
                     type="number"
                     step={step}
                     value={maxValue ?? ''}
+                    aria-label={`${label} maximum`}
                     onChange={(e) => onMaxChange(e.target.value ? parseFloat(e.target.value) : undefined)}
                     placeholder={placeholder.max}
                     className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -122,6 +124,7 @@ function MinInput({
                     type="number"
                     step={step}
                     value={value ?? ''}
+                    aria-label={`${label} minimum`}
                     onChange={(e) => onChange(e.target.value ? parseFloat(e.target.value) : undefined)}
                     placeholder={placeholder}
                     className="w-24 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -209,8 +212,15 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
                 <div className="flex items-center gap-2">
                     <button
                         onClick={resetFilters}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                resetFilters();
+                            }
+                        }}
                         className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-white transition-colors"
                         title="Reset filters"
+                        aria-label="Reset filters"
                     >
                         <RotateCcw size={12} />
                         Reset
@@ -364,6 +374,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
                         <input
                             type="text"
                             value={presetName}
+                            aria-label="Preset name"
                             onChange={(e) => setPresetName(e.target.value)}
                             placeholder="Preset name"
                             className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 mb-3"

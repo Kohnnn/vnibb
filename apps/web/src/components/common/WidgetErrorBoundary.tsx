@@ -55,7 +55,14 @@ export class WidgetErrorBoundary extends Component<Props, State> {
                     </p>
                     <button
                         onClick={this.handleReset}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                this.handleReset();
+                            }
+                        }}
                         className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 rounded transition-colors"
+                        aria-label="Retry"
                     >
                         <RefreshCw size={12} />
                         Retry

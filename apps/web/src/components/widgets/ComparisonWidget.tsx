@@ -24,7 +24,7 @@ interface ComparisonWidgetProps {
     onRemove?: () => void;
 }
 
-const CHART_COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6'];
+const CHART_COLORS = ['#3b82f6', '#10b981', '#ef4444', '#f59e0b', '#06b6d4'];
 
 export function ComparisonWidget({ id, initialSymbols = ['VNM', 'FPT'], hideHeader, onRemove }: ComparisonWidgetProps) {
     const [symbols, setSymbols] = useState<string[]>(initialSymbols);

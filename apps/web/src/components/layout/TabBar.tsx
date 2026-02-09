@@ -272,6 +272,14 @@ export function TabBar({ symbol }: TabBarProps) {
                                         ${isDragging ? 'opacity-50' : ''}
                                         ${isDragOver ? 'ring-2 ring-blue-500 ring-inset' : ''}
                                     `}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            handleTabClick(tab.id);
+                                        }
+                                    }}
                                     onClick={() => handleTabClick(tab.id)}
                                     onDoubleClick={() => handleDoubleClick(tab)}
                                 >
@@ -286,6 +294,7 @@ export function TabBar({ symbol }: TabBarProps) {
                                             ref={editInputRef}
                                             type="text"
                                             value={editingName}
+                                            aria-label="Tab name"
                                             onChange={(e) => setEditingName(e.target.value)}
                                             onBlur={handleRenameConfirm}
                                             onKeyDown={handleRenameKeyDown}

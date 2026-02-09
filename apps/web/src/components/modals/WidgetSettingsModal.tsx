@@ -74,6 +74,7 @@ export function WidgetSettingsModal({
                     <button
                         onClick={onClose}
                         className="p-2 text-gray-400 hover:text-white hover:bg-[#1e293b] rounded-lg transition-colors"
+                        aria-label="Close widget settings"
                     >
                         <X size={20} />
                     </button>
@@ -83,11 +84,15 @@ export function WidgetSettingsModal({
                 <div className="p-6 space-y-6">
                     {/* Common Settings */}
                     <div className="space-y-4">
-                        <label className="block text-sm font-medium text-gray-300">
+                        <label
+                            htmlFor="widget-refresh-interval"
+                            className="block text-sm font-medium text-gray-300"
+                        >
                             Auto-Refresh Interval (seconds)
                         </label>
                         <div className="flex items-center gap-4">
                             <input
+                                id="widget-refresh-interval"
                                 type="number"
                                 min="0"
                                 value={refreshInterval}
@@ -103,7 +108,10 @@ export function WidgetSettingsModal({
                     {/* Advanced Configuration (JSON) */}
                     <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                            <label className="block text-sm font-medium text-gray-300">
+                            <label
+                                htmlFor="widget-advanced-config"
+                                className="block text-sm font-medium text-gray-300"
+                            >
                                 Advanced Configuration (JSON)
                             </label>
                             <button
@@ -114,6 +122,7 @@ export function WidgetSettingsModal({
                             </button>
                         </div>
                         <textarea
+                            id="widget-advanced-config"
                             value={config}
                             onChange={(e) => {
                                 setConfig(e.target.value);

@@ -49,7 +49,11 @@ export function ColumnPicker({ selectedColumns, onColumnsChange }: ColumnPickerP
         <div className="absolute right-0 top-full mt-1 w-72 bg-[#0a0a0a] border border-gray-800 rounded-xl shadow-2xl z-50 overflow-hidden">
           <div className="p-3 border-b border-gray-800 flex items-center justify-between">
             <span className="text-xs font-bold text-white uppercase tracking-wider">Display Columns</span>
-            <button onClick={() => setIsOpen(false)} className="text-gray-500 hover:text-white">
+            <button
+              onClick={() => setIsOpen(false)}
+              className="text-gray-500 hover:text-white"
+              aria-label="Close column picker"
+            >
                 <X size={14} />
             </button>
           </div>

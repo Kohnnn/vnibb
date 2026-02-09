@@ -14,7 +14,7 @@ interface SectorBreakdownWidgetProps {
   onRemove?: () => void;
 }
 
-const COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4', '#f97316', '#22c55e'];
+const COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#22d3ee', '#ef4444', '#06b6d4', '#f97316', '#22c55e'];
 
 function SectorBreakdownWidgetComponent({ id, onRemove }: SectorBreakdownWidgetProps) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMarketHeatmap({

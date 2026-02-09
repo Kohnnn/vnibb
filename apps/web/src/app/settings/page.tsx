@@ -33,7 +33,14 @@ export default function SettingsPage() {
           <div className="flex items-center gap-4">
             <button 
               onClick={() => router.back()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  router.back();
+                }
+              }}
               className="p-2 hover:bg-white/5 rounded-lg transition-colors"
+              aria-label="Go back"
             >
               <ArrowLeft size={20} />
             </button>
@@ -129,14 +136,20 @@ export default function SettingsPage() {
             <section className="bg-[#0a0a0a] border border-[#222] rounded-xl overflow-hidden">
               <div className="p-4 border-b border-[#222] bg-[#0d0d0d]">
                 <h2 className="font-semibold flex items-center gap-2">
-                  <Globe size={18} className="text-purple-500" />
+                  <Globe size={18} className="text-cyan-500" />
                   Backend API
                 </h2>
               </div>
               <div className="p-6 space-y-4">
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-gray-400 uppercase tracking-wider">API Endpoint</label>
+                  <label
+                    htmlFor="settings-api-endpoint"
+                    className="text-xs font-medium text-gray-400 uppercase tracking-wider"
+                  >
+                    API Endpoint
+                  </label>
                   <input 
+                    id="settings-api-endpoint"
                     type="text" 
                     value={apiUrl}
                     onChange={(e) => setApiUrl(e.target.value)}

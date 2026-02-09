@@ -81,7 +81,7 @@ export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
             label: 'P/E Ratio',
             value: stock?.pe?.toFixed(1) || '-',
             icon: Activity,
-            color: 'text-purple-400',
+            color: 'text-cyan-400',
         },
     ];
 

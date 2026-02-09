@@ -378,7 +378,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                                                     {item.sectors.map(sector => (
                                                         <span
                                                             key={sector}
-                                                            className="text-[9px] px-1.5 py-0.5 bg-purple-500/10 text-purple-400 rounded"
+                                                            className="text-[9px] px-1.5 py-0.5 bg-cyan-500/10 text-cyan-400 rounded"
                                                         >
                                                             {sector}
                                                         </span>

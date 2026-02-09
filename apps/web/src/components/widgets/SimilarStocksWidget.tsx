@@ -49,7 +49,7 @@ export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidget
         <div className="h-full flex flex-col">
             <div className="flex items-center justify-between pb-2 border-b border-gray-800/50">
                 <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <Users size={12} className="text-purple-400" />
+                    <Users size={12} className="text-cyan-400" />
                     <span>Similar to {upperSymbol}</span>
                 </div>
                 <WidgetMeta

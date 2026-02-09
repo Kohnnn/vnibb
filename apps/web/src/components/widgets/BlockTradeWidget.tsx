@@ -96,8 +96,15 @@ export function BlockTradeWidget({ symbol }: BlockTradeWidgetProps) {
           />
           <button
             onClick={() => refetch()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                refetch();
+              }
+            }}
             disabled={isFetching}
             className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
+            aria-label="Refresh block trades"
           >
             <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
           </button>
@@ -175,7 +182,7 @@ export function BlockTradeWidget({ symbol }: BlockTradeWidgetProps) {
                         <Globe size={10} className="text-blue-400" />
                       )}
                       {trade.is_proprietary && (
-                        <Building2 size={10} className="text-purple-400" />
+                        <Building2 size={10} className="text-cyan-400" />
                       )}
                     </div>
                     <span className={`text-xs font-medium ${sideColor}`}>
@@ -208,7 +215,7 @@ export function BlockTradeWidget({ symbol }: BlockTradeWidgetProps) {
             <span>Foreign</span>
           </div>
           <div className="flex items-center gap-1">
-            <Building2 size={10} className="text-purple-400" />
+            <Building2 size={10} className="text-cyan-400" />
             <span>Proprietary</span>
           </div>
         </div>

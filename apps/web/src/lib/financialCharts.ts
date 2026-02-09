@@ -70,14 +70,14 @@ export const chartColors = {
     expense: '#EF4444',      // Red - Expenses/Costs
 
     // Balance sheet
-    assets: '#8B5CF6',       // Purple - Assets
+    assets: '#06B6D4',       // Cyan - Assets
     liabilities: '#F59E0B',  // Orange - Liabilities
     equity: '#06B6D4',       // Cyan - Equity
 
     // Cash flow
     operating: '#22C55E',    // Green - Operating CF
     investing: '#F97316',    // Orange - Investing CF
-    financing: '#A855F7',    // Purple - Financing CF
+    financing: '#22D3EE',    // Cyan Light - Financing CF
     freeCashFlow: '#14B8A6', // Teal - FCF
 
     // Margins

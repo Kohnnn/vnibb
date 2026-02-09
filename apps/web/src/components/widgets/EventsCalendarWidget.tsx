@@ -24,7 +24,7 @@ const eventTypeIcons: Record<string, typeof Calendar> = {
 
 const eventTypeColors: Record<string, string> = {
     DIVIDEND: 'text-green-400 bg-green-400/10',
-    SPLIT: 'text-purple-400 bg-purple-400/10',
+    SPLIT: 'text-cyan-400 bg-cyan-400/10',
     AGM: 'text-blue-400 bg-blue-400/10',
     DEFAULT: 'text-gray-400 bg-gray-400/10',
 };

@@ -44,7 +44,11 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
             </h2>
             <p className="text-xs text-gray-500 font-medium">Quickly setup your workspace with professional layouts</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors text-gray-400 hover:text-white">
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-white/5 rounded-full transition-colors text-gray-400 hover:text-white"
+            aria-label="Close template selector"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
