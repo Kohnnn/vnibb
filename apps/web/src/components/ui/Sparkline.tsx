@@ -1,4 +1,3 @@
-import { Area, AreaChart } from 'recharts';
 import { Area, AreaChart } from 'recharts'
 
 interface SparklineProps {

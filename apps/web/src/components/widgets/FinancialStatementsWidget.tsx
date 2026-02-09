@@ -10,6 +10,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useUnit } from '@/contexts/UnitContext';
 import { formatUnitValue, getUnitCaption } from '@/lib/units';
+import { Sparkline } from '@/components/ui/Sparkline';
 
 type StatementType = 'income' | 'balance' | 'cashflow';
 type Period = 'FY' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'TTM';
@@ -232,11 +233,17 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                                     <th key={label} className="text-right px-3 py-2 font-medium min-w-[80px]">{label}</th>
                                 ))}
                                 <th className="text-right px-3 py-2 font-medium min-w-[60px]">YoY %</th>
+                                <th className="text-center px-3 py-2 font-medium min-w-[70px]">Trend</th>
                             </tr>
                         </thead>
                         <tbody>
                             {rows.map((row, index) => {
                                 const yoyChange = getYoYChange(row.values[0], row.values[1]);
+                                const points = row.values
+                                    .slice()
+                                    .reverse()
+                                    .map((value) => Number(value))
+                                    .filter((value) => Number.isFinite(value));
                                 return (
                                     <tr
                                         key={index}
@@ -261,6 +268,13 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                                             className={`text-right px-3 py-2 font-mono ${yoyChange > 0 ? 'text-green-400' : yoyChange < 0 ? 'text-red-400' : 'text-gray-400'}`}
                                         >
                                             {yoyChange > 0 ? '+' : ''}{yoyChange.toFixed(1)}%
+                                        </td>
+                                        <td className="text-center px-3 py-2">
+                                            {points.length < 2 ? (
+                                                <span className="text-[10px] text-muted-foreground">-</span>
+                                            ) : (
+                                                <Sparkline data={points} width={70} height={18} />
+                                            )}
                                         </td>
                                     </tr>
                                 );
