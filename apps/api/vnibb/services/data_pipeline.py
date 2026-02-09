@@ -3415,9 +3415,14 @@ async def run_daily_trading_sync():
 
 async def run_hourly_news_sync():
     """Wrapper for scheduler to run hourly news sync."""
-    # TODO: Implement news sync in DataPipeline class
-    logger.info("Hourly news sync placeholder")
-    pass
+    from vnibb.services.news_crawler import news_crawler
+
+    count = await news_crawler.crawl_market_news(sources=None, limit=30, analyze_sentiment=True)
+    if count == 0:
+        fallback_symbols = ["VNM", "FPT", "VCB", "HPG", "VIC"]
+        count = await news_crawler.seed_from_company_news(fallback_symbols, limit_per_symbol=5)
+
+    logger.info(f"Hourly news sync completed with {count} articles")
 
 
 async def run_intraday_sync():

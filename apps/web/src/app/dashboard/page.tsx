@@ -23,6 +23,7 @@ import {
     WidgetWrapper,
     widgetRegistry
 } from '@/components/widgets';
+import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
 import {
     TIMEFRAME_OPTIONS,
     CHART_TYPE_OPTIONS,
@@ -135,6 +136,44 @@ function DashboardContent() {
             resetTabLayout(activeDashboard.id, activeTab.id);
         }
     }, [activeDashboard, activeTab, resetTabLayout]);
+
+    const handleAutoFitLayout = useCallback(() => {
+        if (!activeDashboard || !activeTab) return;
+
+        const cols = 24;
+        let cursorX = 0;
+        let cursorY = 0;
+        let rowHeight = 0;
+
+        const updatedWidgets = activeTab.widgets.map((widget) => {
+            const defaults = defaultWidgetLayouts[widget.type as WidgetType] || { w: 6, h: 4 };
+            const width = Math.min(defaults.w ?? 6, cols);
+            const height = defaults.h ?? 4;
+
+            if (cursorX + width > cols) {
+                cursorX = 0;
+                cursorY += rowHeight || height;
+                rowHeight = 0;
+            }
+
+            const nextLayout = {
+                ...widget.layout,
+                x: cursorX,
+                y: cursorY,
+                w: width,
+                h: height,
+                minW: defaults.minW ?? widget.layout.minW,
+                minH: defaults.minH ?? widget.layout.minH,
+            };
+
+            cursorX += width;
+            rowHeight = Math.max(rowHeight, height);
+
+            return { ...widget, layout: nextLayout };
+        });
+
+        updateTabLayout(activeDashboard.id, activeTab.id, updatedWidgets);
+    }, [activeDashboard, activeTab, updateTabLayout]);
 
     const handleWidgetConfigChange = useCallback((
         widgetId: string,
@@ -250,6 +289,7 @@ function DashboardContent() {
                     onEditToggle={handleEditToggle}
                     onAIClick={() => setShowAICopilot(!showAICopilot)}
                     onResetLayout={handleResetLayout}
+                    onAutoFitLayout={handleAutoFitLayout}
                 />
 
                 <TabBar symbol={globalSymbol} />

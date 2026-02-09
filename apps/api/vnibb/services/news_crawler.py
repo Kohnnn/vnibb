@@ -259,6 +259,57 @@ class NewsCrawlerService:
             logger.info(f"Successfully analyzed {count} articles")
             return count
     
+    async def seed_from_company_news(
+        self,
+        symbols: List[str],
+        limit_per_symbol: int = 5,
+    ) -> int:
+        """
+        Seed market news table using company news as a fallback.
+        """
+        if not symbols:
+            return 0
+
+        from vnibb.providers.vnstock.company_news import (
+            VnstockCompanyNewsFetcher,
+            CompanyNewsQueryParams,
+        )
+
+        total = 0
+        async with async_session_maker() as session:
+            for symbol in symbols:
+                try:
+                    items = await VnstockCompanyNewsFetcher.fetch(
+                        CompanyNewsQueryParams(symbol=symbol, limit=limit_per_symbol)
+                    )
+                except Exception as exc:
+                    logger.debug(f"Company news fallback failed for {symbol}: {exc}")
+                    continue
+
+                for item in items:
+                    try:
+                        await self._store_article(
+                            session,
+                            {
+                                "title": item.title,
+                                "summary": item.summary,
+                                "content": item.summary,
+                                "source": item.source or "vnstock",
+                                "url": item.url,
+                                "category": item.category,
+                                "pub_date": item.published_at,
+                                "symbols": [symbol],
+                            },
+                        )
+                        total += 1
+                    except Exception as exc:
+                        logger.debug(f"Failed to store company news article: {exc}")
+                        continue
+
+            await session.commit()
+
+        return total
+
     async def get_latest_news(
         self,
         source: Optional[str] = None,

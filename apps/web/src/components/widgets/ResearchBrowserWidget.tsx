@@ -9,6 +9,7 @@ import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 
 interface ResearchBrowserWidgetProps {
   id: string;
+  symbol?: string;
   onRemove?: () => void;
 }
 
@@ -29,7 +30,7 @@ function normalizeUrl(input: string): string {
   return `https://${trimmed}`;
 }
 
-export function ResearchBrowserWidget({ id, onRemove }: ResearchBrowserWidgetProps) {
+export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserWidgetProps) {
   const [sites, setSites] = useLocalStorage<SavedSite[]>(SITES_KEY, []);
   const [activeSiteId, setActiveSiteId] = useLocalStorage<string | null>(
     `vnibb_research_browser_active_${id}`,
@@ -37,19 +38,63 @@ export function ResearchBrowserWidget({ id, onRemove }: ResearchBrowserWidgetPro
   );
   const [urlInput, setUrlInput] = useState('');
   const [titleInput, setTitleInput] = useState('');
+  const [activeSourceId, setActiveSourceId] = useState<string | null>('google');
 
   const activeSite = useMemo(() => {
+    if (activeSourceId) return null;
     if (activeSiteId) {
       return sites.find((site) => site.id === activeSiteId) || null;
     }
     return sites[0] || null;
-  }, [activeSiteId, sites]);
+  }, [activeSiteId, activeSourceId, sites]);
+
+  const quickSources = useMemo(() => {
+    if (!symbol) return [];
+    const query = `${symbol} stock Vietnam`;
+    return [
+      {
+        id: 'google',
+        label: 'Google',
+        url: `https://www.google.com/search?igu=1&q=${encodeURIComponent(query)}`,
+      },
+      {
+        id: 'vietstock',
+        label: 'Vietstock',
+        url: `https://vietstock.vn/search/?q=${encodeURIComponent(symbol)}`,
+      },
+      {
+        id: 'cafef',
+        label: 'CafeF',
+        url: `https://search.cafef.vn/tim-kiem.chn?keywords=${encodeURIComponent(symbol)}`,
+      },
+      {
+        id: 'ndh',
+        label: 'NDH',
+        url: `https://ndh.vn/tim-kiem?q=${encodeURIComponent(symbol)}`,
+      },
+    ];
+  }, [symbol]);
+
+  const activeSource = useMemo(() => {
+    if (!activeSourceId) return null;
+    return quickSources.find((source) => source.id === activeSourceId) || null;
+  }, [activeSourceId, quickSources]);
 
   useEffect(() => {
-    if (!activeSiteId && sites.length > 0) {
+    if (!activeSiteId && sites.length > 0 && !activeSourceId) {
       setActiveSiteId(sites[0].id);
     }
-  }, [activeSiteId, setActiveSiteId, sites]);
+  }, [activeSiteId, activeSourceId, setActiveSiteId, sites]);
+
+  useEffect(() => {
+    if (!symbol) {
+      setActiveSourceId(null);
+      return;
+    }
+    if (!activeSiteId) {
+      setActiveSourceId((prev) => prev || 'google');
+    }
+  }, [symbol, activeSiteId]);
 
   const handleAddSite = () => {
     const normalized = normalizeUrl(urlInput);
@@ -73,12 +118,14 @@ export function ResearchBrowserWidget({ id, onRemove }: ResearchBrowserWidgetPro
 
     setSites((prev) => [newSite, ...prev]);
     setActiveSiteId(newSite.id);
+    setActiveSourceId(null);
     setUrlInput('');
     setTitleInput('');
   };
 
   const handleSelectSite = (site: SavedSite) => {
     setActiveSiteId(site.id);
+    setActiveSourceId(null);
     setSites((prev) =>
       prev.map((item) =>
         item.id === site.id ? { ...item, lastVisitedAt: new Date().toISOString() } : item
@@ -93,7 +140,14 @@ export function ResearchBrowserWidget({ id, onRemove }: ResearchBrowserWidgetPro
     }
   };
 
-  const canEmbed = Boolean(activeSite?.url);
+  const handleSelectQuickSource = (sourceId: string) => {
+    setActiveSourceId(sourceId);
+    setActiveSiteId(null);
+  };
+
+  const activeUrl = activeSite?.url || activeSource?.url || '';
+  const activeTitle = activeSite?.title || activeSource?.label || activeUrl;
+  const canEmbed = Boolean(activeUrl);
 
   return (
     <WidgetContainer
@@ -105,7 +159,7 @@ export function ResearchBrowserWidget({ id, onRemove }: ResearchBrowserWidgetPro
       <div className="h-full flex flex-col bg-[#0a0a0a]">
         <div className="px-3 py-2 border-b border-gray-800/60">
           <WidgetMeta
-            note="Local storage • Embedded iframe"
+            note={symbol ? `Researching ${symbol} • Embedded iframe` : 'Local storage • Embedded iframe'}
             align="right"
           />
         </div>
@@ -137,6 +191,32 @@ export function ResearchBrowserWidget({ id, onRemove }: ResearchBrowserWidgetPro
               <div className="text-[10px] text-gray-500">
                 Some sites block embedding. Use the open button if the page stays blank.
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-[10px] font-black uppercase tracking-widest text-gray-500">
+                Quick Search
+              </div>
+              {symbol ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {quickSources.map((source) => (
+                    <button
+                      key={source.id}
+                      type="button"
+                      onClick={() => handleSelectQuickSource(source.id)}
+                      className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                        activeSource?.id === source.id
+                          ? 'border-blue-500/40 bg-blue-500/10 text-blue-200'
+                          : 'border-gray-800/60 bg-black/20 text-gray-300 hover:bg-white/5'
+                      }`}
+                    >
+                      {source.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[10px] text-gray-500">Select a ticker to enable quick search.</div>
+              )}
             </div>
 
             {sites.length === 0 ? (
@@ -181,18 +261,18 @@ export function ResearchBrowserWidget({ id, onRemove }: ResearchBrowserWidgetPro
               <>
                 <div className="absolute top-2 right-2 z-10">
                   <a
-                    href={activeSite?.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded bg-black/60 px-2 py-1 text-[10px] text-gray-200 hover:text-white"
+                  href={activeUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded bg-black/60 px-2 py-1 text-[10px] text-gray-200 hover:text-white"
                   >
                     <ExternalLink size={10} />
                     Open
                   </a>
                 </div>
                 <iframe
-                  title={activeSite?.title || activeSite?.url}
-                  src={activeSite?.url}
+                  title={activeTitle || 'Research browser'}
+                  src={activeUrl}
                   className="h-full w-full border-0"
                   loading="lazy"
                 />

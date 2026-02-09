@@ -187,6 +187,13 @@ def apply_advanced_filters(
     return [ScreenerData(**row) for row in df.to_dict("records")]
 
 
+def fill_market_cap(rows: List[ScreenerData]) -> List[ScreenerData]:
+    for row in rows:
+        if row.market_cap is None and row.price is not None and row.shares_outstanding:
+            row.market_cap = row.price * row.shares_outstanding * 1_000_000
+    return rows
+
+
 @router.get(
     "/",
     response_model=StandardResponse[List[ScreenerData]],
@@ -231,6 +238,7 @@ async def get_screener(
             if cache_result.hit and cache_result.data:
                 data = [_to_screener_data_row(s) for s in cache_result.data]
                 data = await _hydrate_screener_rows(data, cache_manager, db)
+                data = fill_market_cap(data)
                 data = apply_advanced_filters(
                     data,
                     filters=filters,
@@ -259,6 +267,7 @@ async def get_screener(
                 if fallback_cache.hit and fallback_cache.data:
                     data = [_to_screener_data_row(s) for s in fallback_cache.data]
                     data = await _hydrate_screener_rows(data, cache_manager, db)
+                    data = fill_market_cap(data)
                     data = apply_advanced_filters(
                         data,
                         filters=filters,
@@ -291,6 +300,7 @@ async def get_screener(
         if not data:
             raise ProviderError(message="API returned empty data", provider="vnstock")
 
+        data = fill_market_cap(data)
         data = apply_advanced_filters(
             data,
             filters=filters,
@@ -324,6 +334,7 @@ async def get_screener(
             if cache_result.hit and cache_result.data:
                 data = [_to_screener_data_row(s) for s in cache_result.data]
                 data = await _hydrate_screener_rows(data, cache_manager, db)
+                data = fill_market_cap(data)
                 data = apply_advanced_filters(
                     data,
                     filters=filters,

@@ -3,7 +3,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Search, Bell, User, Edit, Check, Bot, RotateCcw, X, Link as LinkIcon } from 'lucide-react';
+import { Search, Bell, User, Edit, Check, Bot, RotateCcw, X, Link as LinkIcon, LayoutGrid } from 'lucide-react';
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel';
 import { ConnectionStatus } from '../ui/ConnectionStatus';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
@@ -16,6 +16,7 @@ interface HeaderProps {
     onEditToggle?: () => void;
     onAIClick?: () => void;
     onResetLayout?: () => void;
+    onAutoFitLayout?: () => void;
 }
 
 export function Header({
@@ -24,7 +25,8 @@ export function Header({
     isEditing = false,
     onEditToggle,
     onAIClick,
-    onResetLayout
+    onResetLayout,
+    onAutoFitLayout
 }: HeaderProps) {
     const [searchValue, setSearchValue] = useState(currentSymbol);
     const [isSearching, setIsSearching] = useState(false);
@@ -141,6 +143,18 @@ export function Header({
                         >
                             <RotateCcw size={14} />
                             <span className="hidden md:inline text-xs font-medium">Reset</span>
+                        </button>
+                    )}
+
+                    {/* Auto-fit Layout Button - only show in edit mode */}
+                    {isEditing && onAutoFitLayout && (
+                        <button
+                            onClick={onAutoFitLayout}
+                            className="flex items-center gap-1.5 px-2 md:px-2.5 py-1.5 rounded-md bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 border border-sky-500/20 transition-colors"
+                            title="Auto-arrange widgets into a neat grid"
+                        >
+                            <LayoutGrid size={14} />
+                            <span className="hidden md:inline text-xs font-medium">Auto-fit</span>
                         </button>
                     )}
 

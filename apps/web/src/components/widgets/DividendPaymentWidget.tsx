@@ -61,7 +61,7 @@ export function DividendPaymentWidget({ symbol }: DividendPaymentWidgetProps) {
                         icon={<Calendar size={18} />}
                     />
                 ) : (
-                    <table className="w-full text-sm">
+                    <table className="data-table w-full text-sm">
                         <thead>
                             <tr className="text-left text-xs text-gray-500 uppercase">
                                 <th className="pb-2 pr-3">Ex Date</th>

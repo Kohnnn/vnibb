@@ -186,7 +186,7 @@ function ComparisonAnalysisWidgetComponent({
           ) : !hasData ? (
             <WidgetEmpty message="No comparison data available." />
           ) : (
-            <table className="w-full text-[11px] text-left border-collapse">
+            <table className="data-table w-full text-[11px] text-left border-collapse">
               <thead className="sticky top-0 bg-[#0a0a0a] z-10">
                 <tr className="border-b border-gray-800">
                   <th className="p-3 text-gray-500 font-bold uppercase tracking-tighter">Metric</th>

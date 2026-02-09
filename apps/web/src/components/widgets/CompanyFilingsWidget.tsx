@@ -101,7 +101,7 @@ export function CompanyFilingsWidget({ symbol }: CompanyFilingsWidgetProps) {
                 ) : !hasData ? (
                     <WidgetEmpty message={`No corporate events for ${symbol}`} icon={<FileText size={18} />} />
                 ) : (
-                    <table className="w-full text-sm" aria-label="Corporate events">
+                    <table className="data-table w-full text-sm" aria-label="Corporate events">
                         <thead>
                             <tr className="text-left text-xs text-gray-500 uppercase">
                                 <th className="pb-2 pr-4">Date</th>

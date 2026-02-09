@@ -69,7 +69,7 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
                 ) : !hasData ? (
                     <WidgetEmpty message="No shareholders data" icon={<Users size={18} />} />
                 ) : (
-                    <table className="w-full text-xs">
+                    <table className="data-table w-full text-xs">
                         <thead className="text-gray-500">
                             <tr className="border-b border-gray-800">
                                 <th className="text-left py-1.5 px-1 font-medium">Shareholder</th>

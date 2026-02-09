@@ -542,7 +542,7 @@ export function PortfolioTrackerWidget({
                 ) : positions.length === 0 ? (
                     <WidgetEmpty message="Add holdings to track" icon={<Briefcase size={18} />} />
                 ) : (
-                    <table className="w-full text-xs">
+                    <table className="data-table w-full text-xs">
                         <thead className="text-zinc-500 sticky top-0 bg-zinc-900">
                             <tr className="border-b border-zinc-800">
                                 <th
