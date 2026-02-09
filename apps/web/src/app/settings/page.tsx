@@ -13,11 +13,12 @@ import {
 import { useRouter } from 'next/navigation';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { Button } from '@/components/ui/button';
+import { env } from '@/lib/env';
 
 export default function SettingsPage() {
   const router = useRouter();
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
-  const [apiUrl, setApiUrl] = useState(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000');
+  const [apiUrl, setApiUrl] = useState(env.apiUrl);
 
   const VNSTOCK_SOURCES: { value: VnstockSource; label: string; description: string }[] = [
     { value: 'KBS', label: 'KBS (Korea)', description: 'Recommended - New default in vnstock 3.4.0' },

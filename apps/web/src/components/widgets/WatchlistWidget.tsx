@@ -241,7 +241,7 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: Watc
                             action={{ label: 'Add symbol', onClick: () => setShowAddInput(true) }}
                         />
                     ) : (
-                        <table className="w-full text-[11px] text-left border-collapse">
+                        <table className="data-table w-full text-[11px] text-left border-collapse">
                             <thead className="sticky top-0 bg-[#0a0a0a] text-gray-500 z-10">
                                 <tr className="border-b border-gray-800">
                                     <th className="px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('symbol')}>

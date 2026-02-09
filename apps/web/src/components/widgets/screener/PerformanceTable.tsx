@@ -53,7 +53,7 @@ export function PerformanceTable({ data }: PerformanceTableProps) {
 
   return (
     <div className="h-full overflow-auto scrollbar-hide">
-      <table className="w-full text-[11px] border-separate border-spacing-0">
+      <table className="data-table w-full text-[11px] border-separate border-spacing-0">
         <thead className="sticky top-0 bg-secondary z-10 shadow-sm border-b border-gray-800">
           <tr>
             <th className="text-left px-4 py-2 text-gray-500 font-bold uppercase tracking-tighter w-[180px] bg-secondary border-b border-gray-800">Symbol</th>

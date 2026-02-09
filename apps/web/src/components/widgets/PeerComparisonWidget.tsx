@@ -217,7 +217,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
         
         return (
             <div className="flex-1 overflow-auto">
-                <table className="w-full text-[10px] border-collapse">
+                <table className="data-table w-full text-[10px] border-collapse">
                     <thead className="text-gray-500 sticky top-0 bg-gray-900 border-b border-gray-800">
                         <tr>
                             <th className="text-left py-2 px-2 font-medium bg-gray-900 z-10 w-32 border-r border-gray-800/50">Metric</th>

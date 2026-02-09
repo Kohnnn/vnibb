@@ -1,8 +1,9 @@
 // Environment variable validation and central configuration.
 // Prevents silent failures due to missing required environment variables.
 
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const isProdEnv = process.env.NODE_ENV === 'production';
+const defaultApiUrl = isProdEnv ? 'https://vnibb.zeabur.app' : 'http://localhost:8000';
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || defaultApiUrl;
 const shouldForceHttps = isProdEnv
   && rawApiUrl.startsWith('http://')
   && !/localhost|127\.0\.0\.1/.test(rawApiUrl);

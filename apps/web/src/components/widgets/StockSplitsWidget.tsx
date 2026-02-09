@@ -75,7 +75,7 @@ export function StockSplitsWidget({ symbol }: StockSplitsWidgetProps) {
                 ) : !hasData ? (
                     <WidgetEmpty message="No stock splits recorded" icon={<SplitSquareVertical size={18} />} />
                 ) : (
-                    <table className="w-full text-sm">
+                    <table className="data-table w-full text-sm">
                         <thead>
                             <tr className="text-left text-xs text-gray-500 uppercase">
                                 <th className="pb-2 pr-4">Execution Date</th>

@@ -45,9 +45,8 @@ export function useSyncStatus() {
   }, []);
 
   const triggerSync = useCallback(async (type: 'screener' | 'prices' | 'full') => {
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    const baseApiUrl = API_URL.replace(/\/$/, '');
-    
+    const baseApiUrl = config.apiBaseUrl;
+
     const response = await fetch(`${baseApiUrl}/api/v1/data/sync/${type}`, {
       method: 'POST',
     });

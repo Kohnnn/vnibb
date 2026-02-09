@@ -222,7 +222,7 @@ export function ComparisonWidget({ id, initialSymbols = ['VNM', 'FPT'], hideHead
                             </div>
 
                             <div className="flex-1 overflow-auto scrollbar-hide">
-                                <table className="w-full text-[11px] border-collapse">
+                                <table className="data-table w-full text-[11px] border-collapse">
                                     <thead>
                                         <tr className="sticky top-0 bg-secondary border-b border-white/10 shadow-sm z-10">
                                             <th className="text-left p-3 text-muted-foreground font-black uppercase tracking-widest w-1/3">Metric</th>

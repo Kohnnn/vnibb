@@ -75,7 +75,8 @@ export function formatUnitValue(
 }
 
 export function formatAxisValue(value: number, config: UnitConfig = DEFAULT_UNIT_CONFIG): string {
-  return formatUnitValue(value, { ...config, decimalPlaces: 0 })
+  const formatted = formatUnitValue(value, { ...config, decimalPlaces: 2 })
+  return formatted.replace(/([0-9])([KMB])$/, '$1 $2')
 }
 
 export function getUnitLabel(config: UnitConfig): string {

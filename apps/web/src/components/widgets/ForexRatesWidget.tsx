@@ -66,7 +66,7 @@ export function ForexRatesWidget({}: ForexRatesWidgetProps) {
                 {FOREX_PAIRS.length === 0 ? (
                     <WidgetEmpty message="No forex data available" icon={<DollarSign size={18} />} />
                 ) : (
-                    <table className="w-full text-xs">
+                    <table className="data-table w-full text-xs">
                         <thead className="text-gray-500 sticky top-0 bg-gray-900">
                             <tr className="border-b border-gray-800">
                                 <th className="text-left py-1.5 px-1 font-medium">Pair</th>

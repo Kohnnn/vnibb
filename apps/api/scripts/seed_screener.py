@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vnibb.core.database import async_session_maker
 from vnibb.core.config import settings
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.providers.vnstock.equity_screener import VnstockScreenerFetcher, ScreenerQueryParams
+from vnibb.providers.vnstock.equity_screener import VnstockScreenerFetcher, StockScreenerParams
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 logging.basicConfig(
@@ -46,7 +46,7 @@ async def seed_screener():
     
     for exchange in exchanges:
         logger.info(f"Processing exchange: {exchange}")
-        params = ScreenerQueryParams(
+        params = StockScreenerParams(
             exchange=exchange,
             limit=1700, # Large limit to get all
             source=settings.vnstock_source

@@ -8,6 +8,7 @@ import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/Virtua
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { env } from '@/lib/env';
 
 interface TableData {
   name: string;
@@ -22,7 +23,7 @@ interface DatabaseStats {
     last_sync?: string;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = env.apiUrl;
 
 async function fetchDatabaseStats(): Promise<DatabaseStats> {
     try {

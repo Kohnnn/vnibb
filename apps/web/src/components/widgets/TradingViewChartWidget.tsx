@@ -22,10 +22,15 @@ export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChar
   const [fallbackActive, setFallbackActive] = useState(false);
 
   const tvSymbol = useMemo(() => toTradingViewSymbol(symbol, exchange), [symbol, exchange]);
+  const isVietnamExchange = useMemo(() => {
+    if (!exchange) return false;
+    const normalized = exchange.toUpperCase();
+    return ['HOSE', 'HNX', 'UPCOM'].includes(normalized);
+  }, [exchange]);
 
   useEffect(() => {
-    setFallbackActive(false);
-  }, [symbol, exchange]);
+    setFallbackActive(isVietnamExchange);
+  }, [symbol, isVietnamExchange]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view TradingView" />;
@@ -51,12 +56,16 @@ export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChar
         <div className="flex-1">
           <ChartSizeBox className="h-full" minHeight={220}>
             {() => (
-              <TradingViewAdvancedChart
-                symbol={tvSymbol || symbol}
-                interval="D"
-                fallback={<HistoricalPriceChart symbol={symbol} />}
-                onError={() => setFallbackActive(true)}
-              />
+              fallbackActive ? (
+                <HistoricalPriceChart symbol={symbol} />
+              ) : (
+                <TradingViewAdvancedChart
+                  symbol={tvSymbol || symbol}
+                  interval="D"
+                  fallback={<HistoricalPriceChart symbol={symbol} />}
+                  onError={() => setFallbackActive(true)}
+                />
+              )
             )}
           </ChartSizeBox>
         </div>
