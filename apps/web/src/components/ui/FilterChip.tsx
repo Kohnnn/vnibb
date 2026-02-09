@@ -33,6 +33,14 @@ function FilterChipComponent({
   return (
     <div
       onClick={onToggle}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onToggle?.();
+        }
+      }}
       className={cn(
         "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all cursor-pointer select-none",
         active ? COLORS[color] : 'bg-transparent text-gray-600 border-gray-800 hover:border-gray-700 hover:text-gray-400',
@@ -46,6 +54,7 @@ function FilterChipComponent({
         <button 
           onClick={(e) => { e.stopPropagation(); onRemove(); }}
           className="ml-1 hover:text-white transition-colors"
+          aria-label={`Remove ${label} filter`}
         >
           <X className="w-3 h-3" />
         </button>

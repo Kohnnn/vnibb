@@ -85,6 +85,15 @@ export const DropdownMenuItem = ({ children, onClick, className }: any) => {
                 "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
                 className
             )}
+            role="menuitem"
+            tabIndex={0}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onClick?.(e);
+                    context?.setIsOpen(false);
+                }
+            }}
             onClick={(e) => {
                 e.stopPropagation();
                 onClick?.(e);
@@ -104,6 +113,15 @@ export const DropdownMenuCheckboxItem = ({ children, checked, onCheckedChange, c
                 "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground",
                 className
             )}
+            role="menuitemcheckbox"
+            tabIndex={0}
+            aria-checked={checked}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onCheckedChange?.(!checked);
+                }
+            }}
             onClick={(e) => {
                 e.stopPropagation();
                 onCheckedChange?.(!checked);

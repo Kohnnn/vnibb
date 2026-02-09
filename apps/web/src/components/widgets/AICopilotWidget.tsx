@@ -239,7 +239,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
             {/* Header */}
             <div className="flex items-center justify-between pb-2 mb-2 border-b border-gray-800">
                 <div className="flex items-center gap-2">
-                    <Sparkles size={16} className="text-purple-400" />
+                    <Sparkles size={16} className="text-cyan-400" />
                     <span className="text-sm font-medium text-gray-200">AI Copilot</span>
                     {context?.symbol && (
                         <span className="text-xs px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded">
@@ -253,6 +253,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                         onClick={exportChat}
                         className="p-1 text-gray-500 hover:text-gray-300 transition-colors"
                         title="Export chat"
+                        aria-label="Export chat"
                     >
                         <Download size={14} />
                     </button>
@@ -290,7 +291,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
 
                             {/* Streaming indicator */}
                             {message.isStreaming && (
-                                <span className="inline-block w-2 h-4 bg-purple-400 animate-pulse ml-1" />
+                                <span className="inline-block w-2 h-4 bg-cyan-400 animate-pulse ml-1" />
                             )}
 
                             {/* Copy button */}
@@ -314,11 +315,12 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                 <input
                     type="text"
                     value={input}
+                    aria-label="Copilot message"
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={context?.symbol ? `Ask about ${context.symbol}...` : 'Ask about stocks...'}
                     disabled={isLoading}
-                    className="flex-1 px-3 py-2 text-sm bg-gray-800/50 border border-gray-700 rounded-lg focus:border-purple-500 focus:outline-none text-white placeholder-gray-500 disabled:opacity-50"
+                    className="flex-1 px-3 py-2 text-sm bg-gray-800/50 border border-gray-700 rounded-lg focus:border-cyan-500 focus:outline-none text-white placeholder-gray-500 disabled:opacity-50"
                 />
                 {isLoading ? (
                     <button
@@ -332,7 +334,8 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                     <button
                         onClick={() => sendMessage()}
                         disabled={!input.trim()}
-                        className="p-2 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                        className="p-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                        aria-label="Send message"
                     >
                         <Send size={16} />
                     </button>

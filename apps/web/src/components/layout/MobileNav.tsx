@@ -32,6 +32,15 @@ export function MobileNav({
             {isOpen && (
                 <div
                     className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 transition-opacity"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Close menu"
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setIsOpen(false);
+                        }
+                    }}
                     onClick={() => setIsOpen(false)}
                 />
             )}

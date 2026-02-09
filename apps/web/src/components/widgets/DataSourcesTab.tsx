@@ -88,7 +88,7 @@ export function DataSourcesTab() {
             {/* Header Bar */}
             <div className="flex items-center justify-between p-4 border-b border-[#1e293b]">
                 <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+                    <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
                         <Database size={20} />
                     </div>
                     <div>
@@ -103,8 +103,15 @@ export function DataSourcesTab() {
                     {dataSources.length > 0 && (
                         <button
                             onClick={handleRefreshAll}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    handleRefreshAll();
+                                }
+                            }}
                             disabled={refreshing}
                             className="flex items-center gap-2 px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-[#1e293b] rounded-lg transition-colors disabled:opacity-50"
+                            aria-label="Refresh all connections"
                         >
                             <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
                             Refresh All
@@ -112,7 +119,14 @@ export function DataSourcesTab() {
                     )}
                     <button
                         onClick={() => setIsModalOpen(true)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setIsModalOpen(true);
+                            }
+                        }}
                         className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors shadow-lg shadow-blue-900/20"
+                        aria-label="Connect backend"
                     >
                         <Plus size={16} />
                         Connect Backend
@@ -137,7 +151,14 @@ export function DataSourcesTab() {
                         <div className="relative flex-1 max-w-xs">
                             <button
                                 onClick={() => setVnstockDropdownOpen(!vnstockDropdownOpen)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        setVnstockDropdownOpen(!vnstockDropdownOpen);
+                                    }
+                                }}
                                 className="w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-[#1e293b]/70 border border-[#334155] hover:border-[#475569] rounded-lg text-sm text-white transition-colors"
+                                aria-label="Select VnStock provider"
                             >
                                 <span className="font-medium">
                                     {VNSTOCK_SOURCES.find(s => s.value === preferredVnstockSource)?.label}
@@ -184,7 +205,14 @@ export function DataSourcesTab() {
                         </p>
                         <button
                             onClick={() => setIsModalOpen(true)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setIsModalOpen(true);
+                                }
+                            }}
                             className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors shadow-lg shadow-blue-900/20"
+                            aria-label="Connect your first backend"
                         >
                             <Plus size={18} />
                             Connect Your First Backend
@@ -248,15 +276,29 @@ export function DataSourcesTab() {
                                     <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button
                                             onClick={() => checkConnection(source.id)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.preventDefault();
+                                                    checkConnection(source.id);
+                                                }
+                                            }}
                                             className="p-2 text-gray-400 hover:text-white hover:bg-[#334155] rounded-lg transition-colors"
                                             title="Test Connection"
+                                            aria-label={`Test connection for ${source.name}`}
                                         >
                                             <RefreshCw size={16} />
                                         </button>
                                         <button
                                             onClick={() => removeDataSource(source.id)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.preventDefault();
+                                                    removeDataSource(source.id);
+                                                }
+                                            }}
                                             className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                                             title="Remove"
+                                            aria-label={`Remove ${source.name}`}
                                         >
                                             <Trash2 size={16} />
                                         </button>

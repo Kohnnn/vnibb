@@ -46,6 +46,7 @@ export function RightSidebar({
                 <button
                     onClick={onToggle}
                     className="p-1 hover:bg-[#1e293b] rounded text-gray-400 hover:text-white transition-colors"
+                    aria-label="Close Copilot"
                 >
                     <ChevronRight size={16} />
                 </button>
@@ -73,6 +74,7 @@ export function SidebarTrigger({ isOpen, onClick }: { isOpen: boolean; onClick: 
             onClick={onClick}
             className="p-2 text-gray-400 hover:text-blue-400 transition-colors"
             title="Open Copilot"
+            aria-label="Open Copilot"
         >
             <MessageSquare size={20} />
         </button>

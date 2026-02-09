@@ -43,6 +43,7 @@ export function AnnotationToolbar({
                     : "text-gray-500 hover:text-white hover:bg-gray-800"
             )}
             title={tool.label}
+            aria-label={tool.label}
           >
             <tool.icon size={14} />
           </button>
@@ -56,6 +57,7 @@ export function AnnotationToolbar({
         <button
           className="p-1.5 rounded hover:bg-gray-800 transition-colors flex items-center gap-1"
           title="Color"
+          aria-label="Annotation color"
         >
           <div 
             className="w-3.5 h-3.5 rounded-full border border-white/20"
@@ -75,6 +77,7 @@ export function AnnotationToolbar({
                 activeColor === color ? "border-white scale-125" : "hover:scale-110"
               )}
               style={{ backgroundColor: color }}
+              aria-label={`Set annotation color ${color}`}
             />
           ))}
         </div>
@@ -85,9 +88,16 @@ export function AnnotationToolbar({
       {/* Clear all */}
       <button
         onClick={onClearAll}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClearAll();
+          }
+        }}
         disabled={annotationCount === 0}
         className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         title="Clear all annotations"
+        aria-label="Clear all annotations"
       >
         <Trash2 size={12} />
         <span className="hidden sm:inline">Clear ({annotationCount})</span>

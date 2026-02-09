@@ -36,6 +36,12 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black text-white`}
         suppressHydrationWarning
       >
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-neutral-900 focus:px-4 focus:py-2 focus:text-white focus:ring-2 focus:ring-white"
+        >
+          Skip to main content
+        </a>
         <QueryProvider>
           <AuthProvider>
             <DashboardProvider>
@@ -43,7 +49,7 @@ export default function RootLayout({
                 <SymbolLinkProvider>
                   <DataSourcesProvider>
                     <UnitProvider>
-                      {children}
+                      <main id="main-content">{children}</main>
                       <CommandPaletteWrapper />
                     </UnitProvider>
                   </DataSourcesProvider>

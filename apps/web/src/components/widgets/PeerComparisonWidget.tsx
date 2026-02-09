@@ -587,7 +587,7 @@ const CHART_COLORS = [
     '#10B981', // Green
     '#F59E0B', // Amber
     '#EF4444', // Red
-    '#8B5CF6', // Violet
+    '#06B6D4', // Cyan
     '#EC4899', // Pink
 ];
 

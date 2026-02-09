@@ -71,7 +71,7 @@ const SECTOR_COLORS: Record<string, string> = {
     'Financials': '#10B981',
     'Real Estate': '#F59E0B',
     'Consumer Goods': '#EC4899',
-    'Materials': '#8B5CF6',
+    'Materials': '#06b6d4',
     'Energy': '#EF4444',
     'Industrials': '#06B6D4',
     'Utilities': '#F97316',
@@ -442,7 +442,7 @@ export function PortfolioTrackerWidget({
             {/* Header */}
             <div className="flex items-center justify-between px-2 py-1.5 border-b border-zinc-700">
                 <div className="flex items-center gap-2">
-                    <Briefcase size={14} className="text-purple-400" />
+                    <Briefcase size={14} className="text-cyan-400" />
                     <div className="text-xs">
                         <span className="text-zinc-400">Value: </span>
                         <span className="text-white font-medium">
@@ -476,12 +476,19 @@ export function PortfolioTrackerWidget({
                     </button>
                     <button
                         onClick={() => setViewMode(viewMode === 'positions' ? 'allocation' : 'positions')}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setViewMode(viewMode === 'positions' ? 'allocation' : 'positions');
+                            }
+                        }}
                         className={`p-1 rounded transition-colors ${
                             viewMode === 'allocation' 
-                                ? 'text-purple-400 bg-purple-400/10' 
+                                ? 'text-cyan-400 bg-cyan-400/10' 
                                 : 'text-zinc-500 hover:text-white hover:bg-zinc-700'
                         }`}
                         title="Sector allocation"
+                        aria-label="Toggle sector allocation"
                     >
                         <PieChart size={12} />
                     </button>

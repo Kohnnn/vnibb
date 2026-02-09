@@ -27,7 +27,7 @@ function getEventTypeColor(type: string): string {
         return 'text-yellow-400 bg-yellow-400/10';
     }
     if (typeLC.includes('bonus') || typeLC.includes('thưởng')) {
-        return 'text-purple-400 bg-purple-400/10';
+        return 'text-cyan-400 bg-cyan-400/10';
     }
     return 'text-gray-400 bg-gray-400/10';
 }
@@ -101,7 +101,7 @@ export function CompanyFilingsWidget({ symbol }: CompanyFilingsWidgetProps) {
                 ) : !hasData ? (
                     <WidgetEmpty message={`No corporate events for ${symbol}`} icon={<FileText size={18} />} />
                 ) : (
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm" aria-label="Corporate events">
                         <thead>
                             <tr className="text-left text-xs text-gray-500 uppercase">
                                 <th className="pb-2 pr-4">Date</th>

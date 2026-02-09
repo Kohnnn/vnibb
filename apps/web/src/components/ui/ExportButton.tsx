@@ -90,9 +90,16 @@ export function ExportButton({
     <div className={cn("relative", className)}>
       <button
         onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setIsOpen(!isOpen);
+          }
+        }}
         disabled={disabled}
         className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-gray-500 hover:text-white hover:bg-white/10 rounded transition-colors disabled:opacity-50"
         title="Export data"
+        aria-label="Export data"
       >
         {exported ? <Check className="w-3 h-3 text-green-500" /> : <Download className="w-3 h-3" />}
         <span>Export</span>

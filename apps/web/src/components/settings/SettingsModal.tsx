@@ -86,16 +86,30 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {activeTab === 'general' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-sm font-bold text-white mb-2 uppercase tracking-wider text-[10px] text-gray-500">Default Ticker</h4>
+                  <label
+                    htmlFor="settings-default-ticker"
+                    className="text-sm font-bold text-white mb-2 uppercase tracking-wider text-[10px] text-gray-500"
+                  >
+                    Default Ticker
+                  </label>
                   <input 
+                    id="settings-default-ticker"
                     type="text" 
                     defaultValue="VNM"
                     className="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-white focus:border-blue-500 outline-none"
                   />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-white mb-2 uppercase tracking-wider text-[10px] text-gray-500">Refresh Interval</h4>
-                  <select className="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-white outline-none">
+                  <label
+                    htmlFor="settings-refresh-interval"
+                    className="text-sm font-bold text-white mb-2 uppercase tracking-wider text-[10px] text-gray-500"
+                  >
+                    Refresh Interval
+                  </label>
+                  <select
+                    id="settings-refresh-interval"
+                    className="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-white outline-none"
+                  >
                     <option value="10">10 seconds</option>
                     <option value="30">30 seconds</option>
                     <option value="60">1 minute</option>

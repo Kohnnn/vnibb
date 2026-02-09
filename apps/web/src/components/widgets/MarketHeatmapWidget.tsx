@@ -21,7 +21,7 @@ interface MarketHeatmapWidgetProps {
 
 // Color scale based on Phase 20 MD
 function getHeatmapColor(change: number): string {
-    if (change >= 6.9) return 'rgb(168, 85, 247)'; // purple-500 (Ceiling)
+    if (change >= 6.9) return 'rgb(6, 182, 212)'; // cyan-500 (Ceiling)
     if (change >= 4) return 'rgb(34, 197, 94)';   // green-500
     if (change >= 2) return 'rgb(22, 163, 74)';   // green-600
     if (change >= 0.5) return 'rgb(21, 128, 61)'; // green-700
@@ -209,7 +209,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                             <div className="flex-1 bg-yellow-600" />
                             <div className="flex-1 bg-green-700" />
                             <div className="flex-1 bg-green-500" />
-                            <div className="flex-1 bg-purple-500" title="Ceiling" />
+                            <div className="flex-1 bg-cyan-500" title="Ceiling" />
                         </div>
                         <span className="text-[8px] font-black text-gray-500 uppercase tracking-tighter">-7% to +7%</span>
                     </div>

@@ -69,6 +69,7 @@ export function Header({
                         <input
                             ref={inputRef}
                             type="text"
+                            aria-label="Search symbol"
                             value={searchValue}
                             onChange={(e) => {
                                 setSearchValue(e.target.value.toUpperCase());
@@ -105,6 +106,7 @@ export function Header({
                                 }}
                                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
                                 title="Clear search"
+                                aria-label="Clear search"
                             >
                                 <X size={12} />
                             </button>

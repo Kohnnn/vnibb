@@ -113,7 +113,7 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
 
                     {/* Signal Indicator */}
                     <Card className="bg-gray-900/40 border-gray-800 p-3 flex flex-col items-center justify-center relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-purple-500/50 to-transparent opacity-30" />
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent opacity-30" />
                         <div className="text-[10px] text-gray-500 uppercase font-semibold mb-1 tracking-tighter">Overall Signal</div>
                         <Badge variant="outline" className={`text-sm py-0.5 px-3 font-bold border-none ${getSignalBg(overallSignal)} ${getSignalColor(overallSignal)}`}>
                             {overallSignal.replace('_', ' ').toUpperCase()}

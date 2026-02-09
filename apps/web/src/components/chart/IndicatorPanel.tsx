@@ -28,7 +28,17 @@ export function IndicatorPanel({ configs, onToggle, isOpen, onClose }: Indicator
             <Layers size={14} className="text-blue-500" />
             <span className="text-xs font-bold text-white uppercase tracking-wider">Indicators</span>
         </div>
-        <button onClick={onClose} className="text-gray-500 hover:text-white">
+        <button
+          onClick={onClose}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onClose();
+            }
+          }}
+          className="text-gray-500 hover:text-white"
+          aria-label="Close indicators panel"
+        >
             <X size={14} />
         </button>
       </div>
