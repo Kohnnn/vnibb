@@ -64,8 +64,18 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
         }
     }
 
+    const isBrowser = typeof window !== 'undefined';
+
+    if (isBrowser && window.location.protocol === 'https:' && API_BASE_URL.startsWith('http://')) {
+        throw new APIError(
+            'Mixed content blocked. API URL must use HTTPS for secure pages.',
+            0,
+            'MixedContent'
+        );
+    }
+
     // Network connectivity check
-    if (typeof window !== 'undefined' && !navigator.onLine) {
+    if (isBrowser && !navigator.onLine) {
         throw new APIError('You are offline. Please check your internet connection.', 0, 'Offline');
     }
 

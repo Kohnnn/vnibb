@@ -20,11 +20,8 @@ import {
     CartesianGrid,
     ReferenceLine,
 } from 'recharts';
-import {
-    formatFinancialValue,
-    formatAxisValue,
-    chartColors,
-} from '@/lib/financialCharts';
+import { formatAxisValue, formatUnitValue, getUnitCaption } from '@/lib/units';
+import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -38,12 +35,6 @@ interface CashFlowWidgetProps {
 }
 
 type ViewMode = 'table' | 'chart';
-
-function formatBillions(value: number | null | undefined): string {
-    if (value === null || value === undefined) return '-';
-    const prefix = value >= 0 ? '' : '-';
-    return `${prefix}${(Math.abs(value) / 1e9).toFixed(1)}B`;
-}
 
 function formatPeriodLabel(value: string | null | undefined): string {
     if (!value) return '-';
@@ -67,6 +58,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
         defaultPeriod: 'FY',
     });
     const [viewMode, setViewMode] = useState<ViewMode>('table');
+    const { config: unitConfig } = useUnit();
     
     const apiPeriod = period;
 
@@ -96,7 +88,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
     }, [items]);
 
     const renderTable = () => (
-        <table className="w-full text-[11px] text-left">
+        <table className="data-table w-full text-[11px] text-left">
             <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
                 <tr className="border-b border-gray-800">
                     <th className="py-2 px-1 font-bold uppercase tracking-tighter">Item</th>
@@ -113,7 +105,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                             const value = d[key as keyof typeof d] as number;
                             return (
                                 <td key={i} className={`text-right py-2 px-1 font-mono ${value && value >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                    {formatBillions(value)}
+                                    {formatUnitValue(value, unitConfig)}
                                 </td>
                             );
                         })}
@@ -154,7 +146,13 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                             <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
                                 <XAxis dataKey="period" tick={{ fill: '#666', fontSize: 9 }} axisLine={false} tickLine={false} />
-                                <YAxis tickFormatter={formatAxisValue} tick={{ fill: '#666', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                <YAxis
+                                    tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                    tick={{ fill: '#666', fontSize: 9 }}
+                                    axisLine={false}
+                                    tickLine={false}
+                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: '#666', fontSize: 9 }}
+                                />
                                 <ReferenceLine y={0} stroke="#333" />
                                 <Tooltip
                                     contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }}
@@ -168,7 +166,13 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                             <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
                                 <XAxis dataKey="period" tick={{ fill: '#666', fontSize: 9 }} axisLine={false} tickLine={false} />
-                                <YAxis tickFormatter={formatAxisValue} tick={{ fill: '#666', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                <YAxis
+                                    tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                    tick={{ fill: '#666', fontSize: 9 }}
+                                    axisLine={false}
+                                    tickLine={false}
+                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: '#666', fontSize: 9 }}
+                                />
                                 <ReferenceLine y={0} stroke="#333" />
                                 <Tooltip
                                     contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }}
@@ -231,7 +235,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period}
+                        note={`${period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period} • ${getUnitCaption(unitConfig)}`}
                         align="right"
                     />
                 </div>

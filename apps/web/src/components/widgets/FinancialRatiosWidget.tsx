@@ -163,7 +163,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                     ) : !hasData ? (
                         <WidgetEmpty message={`No ratio data for ${symbol}`} icon={<BarChart3 size={18} />} />
                     ) : (
-                        <table className="w-full text-[11px] text-left">
+                        <table className="data-table w-full text-[11px] text-left">
                             <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
                                 <tr className="border-b border-gray-800">
                                     <th className="py-2 px-1 font-bold uppercase tracking-tighter">Metric</th>

@@ -8,6 +8,8 @@ import { useFinancials } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useUnit } from '@/contexts/UnitContext';
+import { formatUnitValue, getUnitCaption } from '@/lib/units';
 
 type StatementType = 'income' | 'balance' | 'cashflow';
 type Period = 'FY' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'TTM';
@@ -45,14 +47,6 @@ const LABELS: Record<StatementType, { key: string; label: string; isHeader?: boo
         { key: 'free_cash_flow', label: 'Free Cash Flow', isHeader: true },
     ],
 };
-
-function formatNumber(num: number | null | undefined) {
-    if (num === null || num === undefined) return '-';
-    if (Math.abs(num) >= 1e9) return `${(num / 1e9).toFixed(1)}B`;
-    if (Math.abs(num) >= 1e6) return `${(num / 1e6).toFixed(1)}M`;
-    if (Math.abs(num) >= 1e3) return `${(num / 1e3).toFixed(1)}K`;
-    return num.toLocaleString();
-}
 
 function getYoYChange(current: number | null | undefined, previous: number | null | undefined) {
     if (!current || !previous || previous === 0) return 0;
@@ -109,6 +103,7 @@ function normalizePeriodLabel(row: any, index: number, total: number, mode: 'yea
 export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatementsWidgetProps) {
     const [statementType, setStatementType] = useState<StatementType>('income');
     const [period, setPeriod] = useState<Period>('FY');
+    const { config: unitConfig } = useUnit();
 
     const requestPeriod = period;
     const exportPeriod = period === 'FY' ? 'year' : 'quarter';
@@ -229,7 +224,7 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                 ) : !hasData ? (
                     <WidgetEmpty message={`No ${statementType} data for ${symbol}`} />
                 ) : (
-                    <table className="w-full text-xs">
+                    <table className="data-table w-full text-xs">
                         <thead className="sticky top-0 bg-[#0f172a]">
                             <tr className="text-gray-500">
                                 <th className="text-left px-3 py-2 font-medium min-w-[140px]">Item</th>
@@ -256,9 +251,10 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                                         {row.values.map((val, i) => (
                                             <td
                                                 key={i}
+                                                data-type="number"
                                                 className={`text-right px-3 py-2 font-mono ${val && val < 0 ? 'text-red-400' : row.isHeader ? 'text-white' : 'text-gray-300'}`}
                                             >
-                                                {formatNumber(val)}
+                                                {formatUnitValue(val, unitConfig)}
                                             </td>
                                         ))}
                                         <td
@@ -275,7 +271,7 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
             </div>
 
             <div className="px-3 py-2 border-t border-[#1e293b] text-[10px] text-gray-500">
-                Values in Billions of VND except per-share values. Data for {symbol}.
+                Units: {getUnitCaption(unitConfig)}. Per-share values shown raw. Data for {symbol}.
             </div>
         </div>
     );

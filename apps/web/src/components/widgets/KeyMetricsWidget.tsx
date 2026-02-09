@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import { useScreenerData, useMetricsHistory, useFinancialRatios } from '@/lib/queries';
-import { formatRatio, formatPercent, formatVND } from '@/lib/formatters';
+import { formatRatio, formatPercent } from '@/lib/formatters';
+import { formatUnitValue } from '@/lib/units';
+import { useUnit } from '@/contexts/UnitContext';
 import { TableSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -59,6 +61,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         isFetching,
         dataUpdatedAt,
     } = useScreenerData({ symbol, limit: 1, enabled: !!symbol });
+    const { config: unitConfig } = useUnit();
 
     const { data: history, isFetching: historyFetching } = useMetricsHistory(symbol, { enabled: !!symbol });
     const { data: ratiosData } = useFinancialRatios(symbol, { period: 'FY', enabled: !!symbol });
@@ -171,7 +174,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
 
                         {activeCategory === 'market' && (
                             <>
-                                <MetricRow label="Market Cap" value={formatVND(mergedStock?.market_cap)} />
+                                <MetricRow label="Market Cap" value={formatUnitValue(mergedStock?.market_cap, unitConfig)} />
                                 <MetricRow label="Dividend Yield" value={formatPercent(mergedStock?.dividend_yield)} />
                                 <MetricRow label="Beta" value={formatRatio(mergedStock?.beta)} />
                             </>

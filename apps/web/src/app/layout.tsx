@@ -4,6 +4,7 @@ import { QueryProvider } from "@/lib/QueryProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { DashboardProvider } from "@/contexts/DashboardContext";
 import { DataSourcesProvider } from "@/contexts/DataSourcesContext";
+import { UnitProvider } from "@/contexts/UnitContext";
 import { WidgetGroupProvider } from "@/contexts/WidgetGroupContext";
 import { SymbolLinkProvider } from "@/contexts/SymbolLinkContext";
 import { CommandPaletteWrapper } from "@/components/CommandPaletteWrapper";
@@ -41,8 +42,10 @@ export default function RootLayout({
               <WidgetGroupProvider>
                 <SymbolLinkProvider>
                   <DataSourcesProvider>
-                    {children}
-                    <CommandPaletteWrapper />
+                    <UnitProvider>
+                      {children}
+                      <CommandPaletteWrapper />
+                    </UnitProvider>
                   </DataSourcesProvider>
                 </SymbolLinkProvider>
               </WidgetGroupProvider>

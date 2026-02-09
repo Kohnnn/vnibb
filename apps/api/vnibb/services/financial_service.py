@@ -1,10 +1,11 @@
 import logging
-from typing import List, Optional, Literal
+import math
+
 from vnibb.providers.vnstock.financials import (
-    VnstockFinancialsFetcher,
     FinancialsQueryParams,
-    StatementType,
     FinancialStatementData,
+    StatementType,
+    VnstockFinancialsFetcher,
 )
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 async def get_financials_with_ttm(
     symbol: str, statement_type: str = "income", period: str = "year", limit: int = 5
-) -> List[FinancialStatementData]:
+) -> list[FinancialStatementData]:
     """
     Fetch financials with support for TTM.
     """
@@ -51,7 +52,7 @@ async def get_financials_with_ttm(
     return data
 
 
-async def calculate_ttm(symbol: str, statement_type: str) -> List[FinancialStatementData]:
+async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialStatementData]:
     """
     Calculate Trailing Twelve Months (TTM) by summing last 4 quarters.
     """
@@ -64,6 +65,28 @@ async def calculate_ttm(symbol: str, statement_type: str) -> List[FinancialState
     if len(quarters) < 4:
         logger.warning(f"Not enough quarterly data for TTM calculation for {symbol}")
         return quarters  # Return whatever we have or empty
+
+    def _safe_number(value: float | None) -> float:
+        if value is None:
+            return 0
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return 0
+        if math.isnan(number) or math.isinf(number):
+            return 0
+        return number
+
+    def _sanitize_optional(value: float | None) -> float | None:
+        if value is None:
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(number) or math.isinf(number):
+            return None
+        return number
 
     # Combine last 4 quarters
     ttm_data = FinancialStatementData(
@@ -87,15 +110,15 @@ async def calculate_ttm(symbol: str, statement_type: str) -> List[FinancialState
             "free_cash_flow",
         ]
         for metric in metrics:
-            total = sum(getattr(q, metric) or 0 for q in quarters)
+            total = sum(_safe_number(getattr(q, metric)) for q in quarters)
             setattr(ttm_data, metric, total)
 
     # For Balance Sheet, we usually take the most recent quarter instead of summing
     elif statement_type == "balance":
         most_recent = quarters[0]
-        ttm_data.total_assets = most_recent.total_assets
-        ttm_data.total_liabilities = most_recent.total_liabilities
-        ttm_data.total_equity = most_recent.total_equity
-        ttm_data.cash_and_equivalents = most_recent.cash_and_equivalents
+        ttm_data.total_assets = _sanitize_optional(most_recent.total_assets)
+        ttm_data.total_liabilities = _sanitize_optional(most_recent.total_liabilities)
+        ttm_data.total_equity = _sanitize_optional(most_recent.total_equity)
+        ttm_data.cash_and_equivalents = _sanitize_optional(most_recent.cash_and_equivalents)
 
     return [ttm_data]

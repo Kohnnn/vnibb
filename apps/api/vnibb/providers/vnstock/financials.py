@@ -11,13 +11,14 @@ import math
 import re
 from datetime import datetime
 from enum import Enum
-from typing import Any, List, Optional, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.retry import circuit_breaker, vnstock_cb
+from vnibb.providers.base import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -83,36 +84,33 @@ class FinancialStatementData(BaseModel):
     statement_type: str = Field(..., description="Statement type")
 
     # Common metrics (populated based on statement type)
-    revenue: Optional[float] = Field(None, description="Total Revenue")
-    gross_profit: Optional[float] = Field(None, description="Gross Profit")
-    operating_income: Optional[float] = Field(None, description="Operating Income")
-    net_income: Optional[float] = Field(None, description="Net Income")
-    ebitda: Optional[float] = Field(None, description="EBITDA")
-    eps: Optional[float] = Field(None, description="Earnings Per Share")
-    eps_diluted: Optional[float] = Field(None, description="Diluted EPS")
+    revenue: float | None = Field(None, description="Total Revenue")
+    gross_profit: float | None = Field(None, description="Gross Profit")
+    operating_income: float | None = Field(None, description="Operating Income")
+    net_income: float | None = Field(None, description="Net Income")
+    ebitda: float | None = Field(None, description="EBITDA")
+    eps: float | None = Field(None, description="Earnings Per Share")
+    eps_diluted: float | None = Field(None, description="Diluted EPS")
 
     # Balance Sheet specific
-    total_assets: Optional[float] = Field(None, description="Total Assets")
-    total_liabilities: Optional[float] = Field(None, description="Total Liabilities")
-    total_equity: Optional[float] = Field(None, description="Total Equity")
-    cash_and_equivalents: Optional[float] = Field(None, description="Cash & Equivalents")
-    equity: Optional[float] = Field(None, description="Equity")
-    cash: Optional[float] = Field(None, description="Cash")
-    inventory: Optional[float] = Field(None, description="Inventory")
+    total_assets: float | None = Field(None, description="Total Assets")
+    total_liabilities: float | None = Field(None, description="Total Liabilities")
+    total_equity: float | None = Field(None, description="Total Equity")
+    cash_and_equivalents: float | None = Field(None, description="Cash & Equivalents")
+    equity: float | None = Field(None, description="Equity")
+    cash: float | None = Field(None, description="Cash")
+    inventory: float | None = Field(None, description="Inventory")
 
     # Cash Flow specific
-    operating_cash_flow: Optional[float] = Field(None, description="Operating Cash Flow")
-    investing_cash_flow: Optional[float] = Field(None, description="Investing Cash Flow")
-    financing_cash_flow: Optional[float] = Field(None, description="Financing Cash Flow")
-    free_cash_flow: Optional[float] = Field(None, description="Free Cash Flow")
+    operating_cash_flow: float | None = Field(None, description="Operating Cash Flow")
+    investing_cash_flow: float | None = Field(None, description="Investing Cash Flow")
+    financing_cash_flow: float | None = Field(None, description="Financing Cash Flow")
+    free_cash_flow: float | None = Field(None, description="Free Cash Flow")
 
     # Raw data for flexibility
-    raw_data: Optional[dict[str, Any]] = Field(None, description="Full raw statement data")
+    raw_data: dict[str, Any] | None = Field(None, description="Full raw statement data")
 
-    updated_at: Optional[datetime] = Field(None, description="Data timestamp")
-
-
-from vnibb.core.retry import vnstock_cb, circuit_breaker
+    updated_at: datetime | None = Field(None, description="Data timestamp")
 
 
 class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialStatementData]):
@@ -139,12 +137,12 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
     @circuit_breaker(vnstock_cb)
     async def extract_data(
         query: dict[str, Any],
-        credentials: Optional[dict[str, str]] = None,
-    ) -> List[dict[str, Any]]:
+        credentials: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Fetch financial statement data from vnstock."""
         loop = asyncio.get_event_loop()
 
-        def _fetch_sync() -> List[dict]:
+        def _fetch_sync() -> list[dict]:
             try:
                 from vnstock import Vnstock
 
@@ -206,28 +204,28 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     message=str(e),
                     provider="vnstock",
                     details={"symbol": query["symbol"]},
-                )
+                ) from e
 
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(None, _fetch_sync),
                 timeout=settings.vnstock_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError as exc:
             raise ProviderTimeoutError(
                 provider="vnstock",
                 timeout=settings.vnstock_timeout,
-            )
+            ) from exc
 
     @staticmethod
     def transform_data(
         params: FinancialsQueryParams,
-        data: List[dict[str, Any]],
-    ) -> List[FinancialStatementData]:
+        data: list[dict[str, Any]],
+    ) -> list[FinancialStatementData]:
         """Transform raw financial data to standardized format."""
-        results: List[FinancialStatementData] = []
+        results: list[FinancialStatementData] = []
 
-        def _coerce_number(value: Any) -> Optional[float]:
+        def _coerce_number(value: Any) -> float | None:
             if value is None:
                 return None
             if isinstance(value, str) and value.strip().lower() in {"", "nan", "none", "null"}:
@@ -240,7 +238,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 return None
             return number
 
-        def _pick_number(*values: Any) -> Optional[float]:
+        def _pick_number(*values: Any) -> float | None:
             for value in values:
                 numeric = _coerce_number(value)
                 if numeric is not None:
@@ -257,7 +255,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             quarter = int(match_quarter.group(1)) if match_quarter else 0
             return year * 10 + quarter
 
-        def _extract_period_columns(rows: List[dict[str, Any]]) -> List[str]:
+        def _extract_period_columns(rows: list[dict[str, Any]]) -> list[str]:
             period_cols: set[str] = set()
             for row in rows:
                 for key in row.keys():
@@ -359,8 +357,8 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             }
 
         def _pivot_statement_rows(
-            rows: List[dict[str, Any]],
-        ) -> Optional[List[FinancialStatementData]]:
+            rows: list[dict[str, Any]],
+        ) -> list[FinancialStatementData] | None:
             if not rows:
                 return None
             period_cols = _extract_period_columns(rows)
@@ -375,7 +373,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 return None
 
             mapping = _metric_mapping(params.statement_type.value)
-            period_values: dict[str, dict[str, Optional[float]]] = {p: {} for p in period_cols}
+            period_values: dict[str, dict[str, float | None]] = {p: {} for p in period_cols}
 
             for row in item_rows:
                 row_keys = {str(k).strip().upper(): k for k in row.keys()}
@@ -404,7 +402,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             else:
                 ordered_periods = sorted(period_cols, key=_period_sort_key)
 
-            output: List[FinancialStatementData] = []
+            output: list[FinancialStatementData] = []
             for period in ordered_periods:
                 metrics = period_values.get(period, {})
                 total_equity = metrics.get("total_equity")
