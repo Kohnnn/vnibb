@@ -6,6 +6,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
+import { toTradingViewSymbol } from '@/lib/tradingView';
 
 interface ResearchBrowserWidgetProps {
   id: string;
@@ -36,9 +37,18 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
     `vnibb_research_browser_active_${id}`,
     null
   );
+  const [activeSourceId, setActiveSourceId] = useLocalStorage<string | null>(
+    `vnibb_research_source_${id}`,
+    'google'
+  );
+  const [viewMode, setViewMode] = useLocalStorage<'embed' | 'external'>(
+    `vnibb_research_mode_${id}`,
+    'embed'
+  );
   const [urlInput, setUrlInput] = useState('');
   const [titleInput, setTitleInput] = useState('');
-  const [activeSourceId, setActiveSourceId] = useState<string | null>('google');
+  const [embedStatus, setEmbedStatus] = useState<'idle' | 'loading' | 'ready' | 'blocked'>('idle');
+  const [history, setHistory] = useState<string[]>([]);
 
   const activeSite = useMemo(() => {
     if (activeSourceId) return null;
@@ -50,6 +60,8 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
 
   const quickSources = useMemo(() => {
     if (!symbol) return [];
+    const tvSymbol = toTradingViewSymbol(symbol, 'HOSE');
+    const tvSlug = tvSymbol.includes(':') ? tvSymbol.replace(':', '-') : tvSymbol;
     const query = `${symbol} cổ phiếu phân tích chứng khoán Việt Nam`;
     return [
       {
@@ -70,7 +82,7 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
       {
         id: 'tradingview',
         label: 'TradingView',
-        url: `https://www.tradingview.com/symbols/HOSE-${encodeURIComponent(symbol)}/`,
+        url: `https://www.tradingview.com/symbols/${encodeURIComponent(tvSlug)}/`,
       },
       {
         id: 'ndh',
@@ -92,13 +104,12 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
   }, [activeSiteId, activeSourceId, setActiveSiteId, sites]);
 
   useEffect(() => {
-    if (!symbol) {
+    // Keep selected source sticky across ticker changes.
+    // Only clear source mode if no ticker is available.
+    if (!symbol && activeSourceId && quickSources.length === 0) {
       setActiveSourceId(null);
-      return;
     }
-    setActiveSiteId(null);
-    setActiveSourceId('google');
-  }, [symbol, setActiveSiteId]);
+  }, [symbol, activeSourceId, quickSources.length, setActiveSourceId]);
 
   const handleAddSite = () => {
     const normalized = normalizeUrl(urlInput);
@@ -130,6 +141,7 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
   const handleSelectSite = (site: SavedSite) => {
     setActiveSiteId(site.id);
     setActiveSourceId(null);
+    setViewMode('embed');
     setSites((prev) =>
       prev.map((item) =>
         item.id === site.id ? { ...item, lastVisitedAt: new Date().toISOString() } : item
@@ -147,11 +159,36 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
   const handleSelectQuickSource = (sourceId: string) => {
     setActiveSourceId(sourceId);
     setActiveSiteId(null);
+    setViewMode('embed');
   };
 
   const activeUrl = activeSite?.url || activeSource?.url || '';
   const activeTitle = activeSite?.title || activeSource?.label || activeUrl;
-  const canEmbed = Boolean(activeUrl);
+  const canEmbed = Boolean(activeUrl) && viewMode === 'embed';
+
+  useEffect(() => {
+    if (!activeUrl) {
+      setEmbedStatus('idle');
+      return;
+    }
+
+    setHistory((prev) => {
+      if (prev[prev.length - 1] === activeUrl) return prev;
+      return [...prev.slice(-19), activeUrl];
+    });
+
+    if (viewMode !== 'embed') {
+      setEmbedStatus('idle');
+      return;
+    }
+
+    setEmbedStatus('loading');
+    const timeout = window.setTimeout(() => {
+      setEmbedStatus((current) => (current === 'ready' ? current : 'blocked'));
+    }, 9000);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeUrl, viewMode]);
 
   return (
     <WidgetContainer
@@ -263,7 +300,14 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
           <div className="relative flex-1 min-h-[320px]">
             {canEmbed ? (
               <>
-                <div className="absolute top-2 right-2 z-10">
+                <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('external')}
+                    className="inline-flex items-center gap-1 rounded bg-black/60 px-2 py-1 text-[10px] text-gray-200 hover:text-white"
+                  >
+                    External mode
+                  </button>
                   <a
                   href={activeUrl}
                   target="_blank"
@@ -279,8 +323,66 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
                   src={activeUrl}
                   className="h-full w-full border-0"
                   loading="lazy"
+                  onLoad={() => setEmbedStatus('ready')}
                 />
+                {embedStatus === 'loading' && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25 text-xs text-gray-300">
+                    Loading embedded page...
+                  </div>
+                )}
+                {embedStatus === 'blocked' && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/75 p-4 text-center">
+                    <div className="text-sm font-semibold text-white">This site may block embedding</div>
+                    <div className="text-[11px] text-gray-300">
+                      Switch to external mode or open directly in a new tab.
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('external')}
+                        className="rounded border border-blue-500/60 px-3 py-1 text-xs text-blue-200 hover:border-blue-300"
+                      >
+                        External mode
+                      </button>
+                      <a
+                        href={activeUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded border border-gray-500/60 px-3 py-1 text-xs text-gray-100 hover:border-gray-300"
+                      >
+                        Open in new tab
+                      </a>
+                    </div>
+                  </div>
+                )}
               </>
+            ) : viewMode === 'external' && activeUrl ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
+                <div className="text-xs text-gray-300">External mode enabled for this source.</div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={activeUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded border border-blue-500/60 px-3 py-1.5 text-xs text-blue-200 hover:border-blue-300"
+                  >
+                    <ExternalLink size={12} />
+                    Open site
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('embed')}
+                    className="rounded border border-gray-600 px-3 py-1.5 text-xs text-gray-200 hover:border-gray-300"
+                  >
+                    Try embed again
+                  </button>
+                </div>
+                {history.length > 0 && (
+                  <div className="max-w-full text-[10px] text-gray-500">
+                    Last visited: {history[history.length - 1]}
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="flex h-full items-center justify-center">
                 <WidgetEmpty message="Select a saved site to embed" icon={<Globe size={18} />} />

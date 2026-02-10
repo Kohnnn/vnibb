@@ -1,7 +1,9 @@
 """Admin API endpoints for database inspection and management."""
 
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks, Body
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,59 +14,127 @@ from vnibb.core.config import settings
 
 router = APIRouter(tags=["Admin"])
 
-# Expanded allowed tables for full database inspection
-ALL_TABLES = [
-    "stocks",
-    "stock_prices",
-    "stock_indices",
-    "companies",
-    "shareholders",
-    "officers",
-    "subsidiaries",
-    "income_statements",
-    "balance_sheets",
-    "cash_flows",
-    "financial_ratios",
-    "company_news",
-    "company_events",
-    "dividends",
-    "insider_deals",
-    "market_news",
-    "intraday_trades",
-    "orderbook_snapshots",
-    "foreign_trading",
-    "order_flow_daily",
-    "derivative_prices",
-    "market_sectors",
-    "sector_performances",
-    "screener_snapshots",
-    "technical_indicators",
-    "sync_status",
-    "user_dashboards",
-    "dashboard_widgets",
-    "block_trades",
-    "insider_alerts",
-    "alert_settings",
+TABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+TIMESTAMP_CANDIDATES = [
+    "updated_at",
+    "created_at",
+    "fetched_at",
+    "published_date",
+    "event_date",
+    "date",
+    "time",
 ]
+
+
+def _quote_identifier(table_name: str) -> str:
+    if not TABLE_NAME_PATTERN.fullmatch(table_name):
+        raise HTTPException(status_code=400, detail="Invalid table name")
+    return f'"{table_name}"'
+
+
+async def _discover_tables(db: AsyncSession) -> list[str]:
+    if engine.dialect.name == "postgresql":
+        result = await db.execute(
+            text(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                  AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+                """
+            )
+        )
+        return [row[0] for row in result.fetchall() if row[0]]
+
+    result = await db.execute(
+        text(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='table'
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+            """
+        )
+    )
+    return [row[0] for row in result.fetchall() if row[0]]
+
+
+async def _table_exists(db: AsyncSession, table_name: str) -> bool:
+    if engine.dialect.name == "postgresql":
+        result = await db.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                  AND table_name = :table_name
+                LIMIT 1
+                """
+            ),
+            {"table_name": table_name},
+        )
+        return result.first() is not None
+
+    result = await db.execute(
+        text(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type='table'
+              AND name = :table_name
+            LIMIT 1
+            """
+        ),
+        {"table_name": table_name},
+    )
+    return result.first() is not None
+
+
+async def _discover_timestamp_column(db: AsyncSession, table_name: str) -> Optional[str]:
+    if engine.dialect.name == "postgresql":
+        result = await db.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = :table_name
+                """
+            ),
+            {"table_name": table_name},
+        )
+        columns = {row[0] for row in result.fetchall()}
+    else:
+        result = await db.execute(text(f"PRAGMA table_info({_quote_identifier(table_name)})"))
+        columns = {row[1] for row in result.fetchall()}
+
+    for candidate in TIMESTAMP_CANDIDATES:
+        if candidate in columns:
+            return candidate
+
+    return None
 
 
 @router.get("/database/tables")
 async def list_all_tables(db: AsyncSession = Depends(get_db)):
     """List all database tables with row counts and freshness metadata."""
     tables_info = []
-    for table_name in ALL_TABLES:
+    table_names = await _discover_tables(db)
+
+    for table_name in table_names:
         try:
-            count_result = await db.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
+            quoted_table = _quote_identifier(table_name)
+            count_result = await db.execute(text(f"SELECT COUNT(*) FROM {quoted_table}"))
             count = count_result.scalar() or 0
             latest = None
-            for col in ["updated_at", "created_at", "fetched_at", "date", "time"]:
-                try:
-                    ts_result = await db.execute(text(f"SELECT MAX({col}) FROM {table_name}"))
-                    latest = ts_result.scalar()
-                    if latest:
-                        break
-                except:
-                    continue
+            updated_at_column = await _discover_timestamp_column(db, table_name)
+            if updated_at_column:
+                ts_result = await db.execute(
+                    text(f'SELECT MAX("{updated_at_column}") FROM {quoted_table}')
+                )
+                latest = ts_result.scalar()
 
             freshness = "stale"
             if latest:
@@ -84,6 +154,7 @@ async def list_all_tables(db: AsyncSession = Depends(get_db)):
                 {
                     "name": table_name,
                     "count": count,
+                    "updated_at_column": updated_at_column,
                     "last_updated": latest.isoformat()
                     if hasattr(latest, "isoformat")
                     else str(latest)
@@ -110,7 +181,8 @@ async def list_all_tables(db: AsyncSession = Depends(get_db)):
 @router.get("/database/table/{table_name}/schema")
 async def get_table_schema(table_name: str, db: AsyncSession = Depends(get_db)):
     """Get column metadata for a table."""
-    if table_name not in ALL_TABLES:
+    _quote_identifier(table_name)
+    if not await _table_exists(db, table_name):
         raise HTTPException(status_code=404, detail="Table not found")
     try:
         if engine.dialect.name == "postgresql":
@@ -163,7 +235,7 @@ async def get_table_schema(table_name: str, db: AsyncSession = Depends(get_db)):
                 ],
             }
 
-        result = await db.execute(text(f"PRAGMA table_info({table_name})"))
+        result = await db.execute(text(f"PRAGMA table_info({_quote_identifier(table_name)})"))
         columns = result.fetchall()
         return {
             "table": table_name,
@@ -192,11 +264,13 @@ async def get_table_sample(
     db: AsyncSession = Depends(get_db),
 ):
     """Get sample rows from a table with pagination and optional search."""
-    if table_name not in ALL_TABLES:
+    _quote_identifier(table_name)
+    if not await _table_exists(db, table_name):
         raise HTTPException(status_code=404, detail="Table not found")
     try:
+        quoted_table = _quote_identifier(table_name)
         where_clause = ""
-        params = {}
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
         if search:
             schema = await get_table_schema(table_name, db)
             text_cols = [
@@ -205,16 +279,17 @@ async def get_table_sample(
                 if "TEXT" in str(c["type"]).upper() or "CHAR" in str(c["type"]).upper()
             ]
             if text_cols:
-                where_clause = " WHERE " + " OR ".join([f"{col} LIKE :s" for col in text_cols])
-                params["s"] = f"%{search}%"
+                where_clause = " WHERE " + " OR ".join(
+                    [f'LOWER(CAST("{col}" AS TEXT)) LIKE :s' for col in text_cols]
+                )
+                params["s"] = f"%{search.lower()}%"
 
-        query = f"SELECT * FROM {table_name}{where_clause} LIMIT {limit} OFFSET {offset}"
+        query = f"SELECT * FROM {quoted_table}{where_clause} LIMIT :limit OFFSET :offset"
         result = await db.execute(text(query), params)
         rows = result.mappings().all()
 
-        count_res = await db.execute(
-            text(f"SELECT COUNT(*) FROM {table_name}{where_clause}"), params
-        )
+        count_params = {"s": params["s"]} if "s" in params else {}
+        count_res = await db.execute(text(f"SELECT COUNT(*) FROM {quoted_table}{where_clause}"), count_params)
         total = count_res.scalar()
 
         data = []
