@@ -3,9 +3,10 @@ Equity API Endpoints with Graceful Degradation.
 """
 
 import asyncio
+import logging
 import re
 from datetime import date, timedelta, datetime
-from typing import List, Optional, Literal, Any
+from typing import List, Optional, Literal, Any, Callable, Awaitable
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
@@ -32,6 +33,7 @@ from vnibb.providers.vnstock.equity_profile import (
 )
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.trading import FinancialRatio
 from vnibb.providers.vnstock.financials import (
     FinancialStatementData,
     StatementType,
@@ -49,6 +51,7 @@ from vnibb.providers.vnstock.intraday import VnstockIntradayFetcher, IntradayQue
 from vnibb.providers.vnstock.financial_ratios import (
     VnstockFinancialRatiosFetcher,
     FinancialRatiosQueryParams,
+    FinancialRatioData,
 )
 from vnibb.providers.vnstock.foreign_trading import (
     VnstockForeignTradingFetcher,
@@ -67,10 +70,29 @@ from vnibb.providers.vnstock.ownership import VnstockOwnershipFetcher
 from vnibb.providers.vnstock.general_rating import VnstockGeneralRatingFetcher
 
 # Models for Fallback
-from vnibb.models.stock import StockPrice
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+_REFRESH_LOCK = asyncio.Lock()
+_REFRESH_IN_FLIGHT: set[str] = set()
+
+
+async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]]) -> None:
+    async with _REFRESH_LOCK:
+        if key in _REFRESH_IN_FLIGHT:
+            return
+        _REFRESH_IN_FLIGHT.add(key)
+
+    async def runner() -> None:
+        try:
+            await refresh_fn()
+        finally:
+            async with _REFRESH_LOCK:
+                _REFRESH_IN_FLIGHT.discard(key)
+
+    asyncio.create_task(runner())
 
 
 class MetricsHistoryResponse(BaseModel):
@@ -80,6 +102,62 @@ class MetricsHistoryResponse(BaseModel):
     roa: List[float] = []
     pe_ratio: List[float] = []
     pb_ratio: List[float] = []
+
+
+async def _refresh_profile_cache(symbol: str) -> None:
+    cache_manager = CacheManager()
+    try:
+        params = EquityProfileQueryParams(symbol=symbol)
+        data = await asyncio.wait_for(
+            VnstockEquityProfileFetcher.fetch(params),
+            timeout=10,
+        )
+        profile_data = data[0] if data else None
+        if not profile_data:
+            logger.warning(f"Profile refresh returned empty data (symbol={symbol})")
+            return
+        await cache_manager.store_profile_data(symbol, profile_data.model_dump(mode="json"))
+        logger.info(f"Background profile refresh complete (symbol={symbol})")
+    except Exception as e:
+        logger.warning(f"Background profile refresh failed (symbol={symbol}): {e}")
+
+
+def _to_historical_data(row: StockPrice) -> EquityHistoricalData:
+    return EquityHistoricalData(
+        symbol=row.symbol,
+        time=row.time,
+        open=row.open,
+        high=row.high,
+        low=row.low,
+        close=row.close,
+        volume=row.volume,
+    )
+
+
+def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
+    return FinancialRatioData(
+        symbol=row.symbol,
+        period=row.period,
+        pe=row.pe_ratio,
+        pb=row.pb_ratio,
+        ps=row.ps_ratio,
+        ev_ebitda=row.ev_ebitda,
+        roe=row.roe,
+        roa=row.roa,
+        eps=row.eps,
+        bvps=row.bvps,
+        debt_equity=row.debt_to_equity,
+        debt_assets=row.debt_to_assets,
+        current_ratio=row.current_ratio,
+        quick_ratio=row.quick_ratio,
+        cash_ratio=row.cash_ratio,
+        gross_margin=row.gross_margin,
+        net_margin=row.net_margin,
+        operating_margin=row.operating_margin,
+        interest_coverage=row.interest_coverage,
+        revenue_growth=row.revenue_growth,
+        earnings_growth=row.earnings_growth,
+    )
 
 
 @router.get("/historical", response_model=StandardResponse[List[EquityHistoricalData]])
@@ -92,6 +170,19 @@ async def get_historical_prices(
     source: str = Query(default="VCI", pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
+    symbol_upper = symbol.upper()
+    cache_manager = CacheManager(db=db)
+    cache_result = await cache_manager.get_historical_prices(
+        symbol=symbol_upper,
+        start_date=start_date,
+        end_date=end_date,
+        interval=interval,
+        allow_stale=True,
+    )
+    if cache_result.hit and cache_result.data:
+        data = [_to_historical_data(r) for r in cache_result.data]
+        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+
     try:
         params = EquityHistoricalQueryParams(
             symbol=symbol,
@@ -104,37 +195,6 @@ async def get_historical_prices(
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         logger.warning(f"Live API failed for historical {symbol}, trying database fallback: {e}")
-        try:
-            # Database Fallback
-            stmt = (
-                select(StockPrice)
-                .where(
-                    StockPrice.symbol == symbol.upper(),
-                    StockPrice.time >= start_date,
-                    StockPrice.time <= end_date,
-                )
-                .order_by(StockPrice.time.asc())
-            )
-            res = await db.execute(stmt)
-            rows = res.scalars().all()
-            if rows:
-                data = [
-                    EquityHistoricalData(
-                        symbol=r.symbol,
-                        time=r.time,
-                        open=r.open,
-                        high=r.high,
-                        low=r.low,
-                        close=r.close,
-                        volume=r.volume,
-                    )
-                    for r in rows
-                ]
-                return StandardResponse(data=data, meta=MetaData(count=len(data)))
-        except Exception as db_err:
-            logger.error(f"Database fallback failed: {db_err}")
-
-        # Return empty list instead of 502 to prevent frontend crash
         return StandardResponse(data=[], error=f"Data unavailable: {str(e)}")
 
 
@@ -229,30 +289,36 @@ async def get_profile(
     symbol_upper = symbol.upper()
     cache_manager = CacheManager(db=db)
     try:
-        cache_result = await cache_manager.get_profile_data(symbol_upper)
-        if cache_result.hit:
-            company = cache_result.data
-            exchange = company.exchange
-            if not exchange:
-                result = await db.execute(
-                    select(Stock.exchange).where(Stock.symbol == symbol_upper)
+        if not refresh:
+            cache_result = await cache_manager.get_profile_data(symbol_upper)
+            if cache_result.hit:
+                company = cache_result.data
+                exchange = company.exchange
+                if not exchange:
+                    result = await db.execute(
+                        select(Stock.exchange).where(Stock.symbol == symbol_upper)
+                    )
+                    exchange = result.scalar_one_or_none()
+                if cache_result.is_stale:
+                    await _schedule_refresh(
+                        f"profile:{symbol_upper}",
+                        lambda: _refresh_profile_cache(symbol_upper),
+                    )
+                return StandardResponse(
+                    data=EquityProfileData(
+                        symbol=company.symbol,
+                        company_name=company.company_name,
+                        short_name=company.short_name,
+                        exchange=exchange,
+                        industry=company.industry,
+                        sector=company.sector,
+                        website=company.website,
+                        description=company.business_description,
+                        outstanding_shares=company.outstanding_shares,
+                        listed_shares=company.listed_shares,
+                    ),
+                    meta=MetaData(count=1),
                 )
-                exchange = result.scalar_one_or_none()
-            return StandardResponse(
-                data=EquityProfileData(
-                    symbol=company.symbol,
-                    company_name=company.company_name,
-                    short_name=company.short_name,
-                    exchange=exchange,
-                    industry=company.industry,
-                    sector=company.sector,
-                    website=company.website,
-                    description=company.business_description,
-                    outstanding_shares=company.outstanding_shares,
-                    listed_shares=company.listed_shares,
-                ),
-                meta=MetaData(count=1),
-            )
 
         fallback_profile: Optional[EquityProfileData] = None
         if not refresh:
@@ -269,6 +335,10 @@ async def get_profile(
                 )
 
         if fallback_profile and not refresh:
+            await _schedule_refresh(
+                f"profile:{symbol_upper}",
+                lambda: _refresh_profile_cache(symbol_upper),
+            )
             return StandardResponse(data=fallback_profile, meta=MetaData(count=1))
 
         params = EquityProfileQueryParams(symbol=symbol)
@@ -357,12 +427,6 @@ async def get_financials(
         return StandardResponse(data=[], error=f"Data unavailable: {str(e)}")
 
 
-# ... existing endpoints remain same or with similar try/except logic ...
-import logging
-
-logger = logging.getLogger(__name__)
-
-
 # Re-adding missing endpoints for completeness
 @router.get("/{symbol}/news", response_model=StandardResponse[List[Any]])
 @cached(ttl=settings.news_retention_days * 86400, key_prefix="company_news_v26")
@@ -406,15 +470,35 @@ async def get_officers(symbol: str):
         return StandardResponse(data=[], error=str(e))
 
 
-@router.get("/{symbol}/ratios", response_model=StandardResponse[List[Any]])
+@router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
+@cached(ttl=86400, key_prefix="ratios")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
+    db: AsyncSession = Depends(get_db),
 ):
+    symbol_upper = symbol.upper()
+    normalized_period = "year" if period in {"year", "FY"} else "quarter"
     try:
-        normalized_period = "year" if period in {"year", "FY"} else "quarter"
+        stmt = (
+            select(FinancialRatio)
+            .where(
+                FinancialRatio.symbol == symbol_upper,
+                FinancialRatio.period_type == normalized_period,
+            )
+            .order_by(desc(FinancialRatio.fiscal_year), desc(FinancialRatio.fiscal_quarter))
+        )
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+        if rows:
+            data = [_to_ratio_data(row) for row in rows]
+            return StandardResponse(data=data, meta=MetaData(count=len(data)))
+    except Exception as db_error:
+        logger.warning(f"Ratio DB lookup failed for {symbol_upper}: {db_error}")
+
+    try:
         data = await VnstockFinancialRatiosFetcher.fetch(
-            FinancialRatiosQueryParams(symbol=symbol, period=normalized_period)
+            FinancialRatiosQueryParams(symbol=symbol_upper, period=normalized_period)
         )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:

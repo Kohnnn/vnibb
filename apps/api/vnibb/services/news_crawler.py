@@ -99,28 +99,60 @@ class NewsCrawlerService:
         """Crawl using vnstock_news premium package."""
         
         def _sync_crawl():
-            from vnstock_news import EnhancedNewsCrawler
-            
+            from vnstock_news import EnhancedNewsCrawler, SITES_CONFIG
+
             all_articles = []
-            
+            crawler = EnhancedNewsCrawler()
+            source_aliases = {
+                "thesaigontimes": "ktsg",
+            }
+
             for source in sources:
                 try:
                     # Remove .vn/.net suffix for crawler
                     source_name = source.replace(".vn", "").replace(".net", "")
-                    
-                    crawler = EnhancedNewsCrawler(source_name=source_name)
-                    articles = crawler.get_latest(limit=limit)
-                    
-                    if articles:
-                        for article in articles:
-                            article["source"] = source
-                        all_articles.extend(articles)
-                        logger.debug(f"Crawled {len(articles)} articles from {source}")
-                    
+                    site_key = source_aliases.get(source_name, source_name)
+                    config = SITES_CONFIG.get(site_key)
+                    if not config:
+                        logger.warning(f"No crawler config found for source: {source_name}")
+                        continue
+
+                    source_urls = []
+                    sitemap_url = config.get("sitemap_url")
+                    if sitemap_url:
+                        source_urls.append(sitemap_url)
+
+                    rss_urls = config.get("rss", {}).get("urls", [])
+                    if rss_urls:
+                        source_urls.extend(rss_urls)
+
+                    if not source_urls:
+                        logger.warning(f"No URLs found for source: {source_name}")
+                        continue
+
+                    df = crawler.fetch_articles(
+                        sources=source_urls,
+                        max_articles=limit,
+                        time_frame="1d",
+                        site_name=site_key,
+                        sort_order="desc",
+                        clean_content=True,
+                    )
+
+                    if df is None or df.empty:
+                        logger.debug(f"No articles found for {source}")
+                        continue
+
+                    articles = df.to_dict("records")
+                    for article in articles:
+                        article["source"] = source
+                    all_articles.extend(articles)
+                    logger.debug(f"Crawled {len(articles)} articles from {source}")
+
                 except Exception as e:
                     logger.error(f"Failed to crawl {source}: {e}")
                     continue
-            
+
             return all_articles
         
         # Run crawling in thread pool

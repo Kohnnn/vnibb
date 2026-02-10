@@ -113,7 +113,12 @@ DATABASE_URL=postgresql+asyncpg://...
 VNSTOCK_API_KEY=vnstock_xxx
 CORS_ORIGINS=["https://vnibb.vercel.app"]
 ENVIRONMENT=production
+GEMINI_API_KEY=your_gemini_api_key
+# Alternative accepted key name:
+# GOOGLE_API_KEY=your_gemini_api_key
 ```
+
+If neither `GEMINI_API_KEY` nor `GOOGLE_API_KEY` is set, news sentiment falls back to rule-based scoring.
 
 ---
 

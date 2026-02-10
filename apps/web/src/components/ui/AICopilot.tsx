@@ -33,6 +33,7 @@ interface AICopilotProps {
     onClose: () => void;
     currentSymbol: string;
     widgetContext?: string;
+    widgetContextData?: Record<string, unknown>;
 }
 
 // Suggested prompts for quick actions
@@ -43,7 +44,13 @@ const SUGGESTED_PROMPTS = [
     { label: "Technical", icon: SearchIcon, prompt: "What is the technical outlook for this stock?" },
 ];
 
-export function AICopilot({ isOpen, onClose, currentSymbol, widgetContext }: AICopilotProps) {
+export function AICopilot({
+    isOpen,
+    onClose,
+    currentSymbol,
+    widgetContext,
+    widgetContextData,
+}: AICopilotProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -101,14 +108,15 @@ export function AICopilot({ isOpen, onClose, currentSymbol, widgetContext }: AIC
 
         try {
             // Construct context for widget
-            const widgetContextData = {
+            const requestContext = {
                 widgetType: widgetContext || 'Dashboard',
                 symbol: currentSymbol,
                 dataSnapshot: {
                     profile: profile?.data || null,
                     quote: quote || null,
                     ratios: ratios?.data || null,
-                }
+                },
+                widgetPayload: widgetContextData || null,
             };
 
             // Prepare messages for API
@@ -122,7 +130,7 @@ export function AICopilot({ isOpen, onClose, currentSymbol, widgetContext }: AIC
                 },
                 body: JSON.stringify({
                     message: messageText,
-                    context: widgetContextData,
+                    context: requestContext,
                     history: history
                 }),
             });

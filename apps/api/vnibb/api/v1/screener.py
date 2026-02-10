@@ -11,7 +11,7 @@ import logging
 import asyncio
 import math
 from datetime import datetime, date
-from typing import List, Optional
+from typing import List, Optional, Callable, Awaitable
 
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from pydantic import BaseModel
@@ -21,6 +21,7 @@ import pandas as pd
 
 from vnibb.core.database import get_db
 from vnibb.models.stock import Stock
+from vnibb.models.company import Company
 from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
     StockScreenerParams,
@@ -34,6 +35,25 @@ from vnibb.api.v1.schemas import StandardResponse, MetaData
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+_REFRESH_LOCK = asyncio.Lock()
+_REFRESH_IN_FLIGHT: set[str] = set()
+
+
+async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]]) -> None:
+    async with _REFRESH_LOCK:
+        if key in _REFRESH_IN_FLIGHT:
+            return
+        _REFRESH_IN_FLIGHT.add(key)
+
+    async def runner() -> None:
+        try:
+            await refresh_fn()
+        finally:
+            async with _REFRESH_LOCK:
+                _REFRESH_IN_FLIGHT.discard(key)
+
+    asyncio.create_task(runner())
 
 
 def _to_screener_data_row(row: object) -> ScreenerData:
@@ -68,7 +88,7 @@ def _to_screener_data_row(row: object) -> ScreenerData:
 
 
 async def _hydrate_screener_rows(
-    rows: List[ScreenerData], cache_manager: CacheManager, db: AsyncSession
+    rows: List[ScreenerData], db: AsyncSession
 ) -> List[ScreenerData]:
     def _is_missing(value: object) -> bool:
         if value is None:
@@ -82,75 +102,82 @@ async def _hydrate_screener_rows(
     missing_symbols = [
         row.symbol
         for row in rows
-        if _is_missing(row.organ_name)
-        or _is_missing(row.exchange)
-        or _is_missing(row.industry_name)
+        if row.symbol
+        and (
+            _is_missing(row.organ_name)
+            or _is_missing(row.exchange)
+            or _is_missing(row.industry_name)
+        )
     ]
+    symbols = sorted({symbol for symbol in missing_symbols if symbol})
     stock_map: dict[str, tuple[Optional[str], Optional[str], Optional[str]]] = {}
-    if missing_symbols:
-        result = await db.execute(
+    company_map: dict[str, tuple[Optional[str], Optional[str], Optional[str]]] = {}
+    if symbols:
+        stock_result = await db.execute(
             select(Stock.symbol, Stock.company_name, Stock.exchange, Stock.industry).where(
-                Stock.symbol.in_(missing_symbols)
+                Stock.symbol.in_(symbols)
             )
         )
         stock_map = {
             symbol: (company_name, exchange, industry)
-            for symbol, company_name, exchange, industry in result.fetchall()
+            for symbol, company_name, exchange, industry in stock_result.fetchall()
+        }
+        company_result = await db.execute(
+            select(Company.symbol, Company.company_name, Company.exchange, Company.industry).where(
+                Company.symbol.in_(symbols)
+            )
+        )
+        company_map = {
+            symbol: (company_name, exchange, industry)
+            for symbol, company_name, exchange, industry in company_result.fetchall()
         }
 
-    async def hydrate(row: ScreenerData) -> ScreenerData:
-        if row.symbol in stock_map:
-            company_name, exchange, industry = stock_map[row.symbol]
+    hydrated: List[ScreenerData] = []
+    for row in rows:
+        updates: dict[str, Optional[str]] = {}
+        symbol = row.symbol
+        company_name = None
+        exchange = None
+        industry = None
+
+        if symbol:
+            if symbol in company_map:
+                company_name, exchange, industry = company_map[symbol]
+            if symbol in stock_map:
+                stock_company, stock_exchange, stock_industry = stock_map[symbol]
+                if not company_name:
+                    company_name = stock_company
+                if not exchange:
+                    exchange = stock_exchange
+                if not industry:
+                    industry = stock_industry
+
+            if company_name and _is_missing(row.organ_name):
+                updates["organ_name"] = company_name
+            if exchange and _is_missing(row.exchange):
+                updates["exchange"] = exchange
+            if industry and _is_missing(row.industry_name):
+                updates["industry_name"] = industry
+
+        if updates:
+            row = row.model_copy(update=updates)
+
+        if (
+            _is_missing(row.organ_name)
+            or _is_missing(row.exchange)
+            or _is_missing(row.industry_name)
+        ):
             row = row.model_copy(
                 update={
-                    "organ_name": company_name if _is_missing(row.organ_name) else row.organ_name,
-                    "exchange": exchange if _is_missing(row.exchange) else row.exchange,
-                    "industry_name": industry
-                    if _is_missing(row.industry_name)
-                    else row.industry_name,
+                    "organ_name": row.symbol if _is_missing(row.organ_name) else row.organ_name,
+                    "exchange": "UNKNOWN" if _is_missing(row.exchange) else row.exchange,
+                    "industry_name": "Unknown" if _is_missing(row.industry_name) else row.industry_name,
                 }
             )
 
-        if (
-            not _is_missing(row.organ_name)
-            and not _is_missing(row.exchange)
-            and not _is_missing(row.industry_name)
-        ):
-            return row
-        try:
-            profile = await cache_manager.get_profile_data(row.symbol, allow_stale=True)
-            if profile.hit and profile.data:
-                row = row.model_copy(
-                    update={
-                        "organ_name": profile.data.company_name
-                        if _is_missing(row.organ_name)
-                        else row.organ_name,
-                        "exchange": profile.data.exchange
-                        if _is_missing(row.exchange)
-                        else row.exchange,
-                        "industry_name": profile.data.industry
-                        if _is_missing(row.industry_name)
-                        else row.industry_name,
-                    }
-                )
-                if (
-                    not _is_missing(row.organ_name)
-                    and not _is_missing(row.exchange)
-                    and not _is_missing(row.industry_name)
-                ):
-                    return row
-        except Exception:
-            pass
+        hydrated.append(row)
 
-        return row.model_copy(
-            update={
-                "organ_name": row.symbol if _is_missing(row.organ_name) else row.organ_name,
-                "exchange": "UNKNOWN" if _is_missing(row.exchange) else row.exchange,
-                "industry_name": "Unknown" if _is_missing(row.industry_name) else row.industry_name,
-            }
-        )
-
-    return await asyncio.gather(*(hydrate(row) for row in rows))
+    return hydrated
 
 
 def apply_advanced_filters(
@@ -192,6 +219,23 @@ def fill_market_cap(rows: List[ScreenerData]) -> List[ScreenerData]:
         if row.market_cap is None and row.price is not None and row.shares_outstanding:
             row.market_cap = row.price * row.shares_outstanding * 1_000_000
     return rows
+
+
+async def _refresh_screener_cache(params: StockScreenerParams) -> None:
+    cache_manager = CacheManager()
+    try:
+        data = await asyncio.wait_for(VnstockScreenerFetcher.fetch(params), timeout=20.0)
+        if not data:
+            logger.warning(f"Screener refresh returned empty data (source={params.source})")
+            return
+        data = fill_market_cap(data)
+        await cache_manager.store_screener_data(
+            data=[d.model_dump() for d in data],
+            source=params.source,
+        )
+        logger.info(f"Background screener refresh complete (source={params.source})")
+    except Exception as e:
+        logger.warning(f"Background screener refresh failed (source={params.source}): {e}")
 
 
 @router.get(
@@ -237,7 +281,7 @@ async def get_screener(
             )
             if cache_result.hit and cache_result.data:
                 data = [_to_screener_data_row(s) for s in cache_result.data]
-                data = await _hydrate_screener_rows(data, cache_manager, db)
+                data = await _hydrate_screener_rows(data, db)
                 data = fill_market_cap(data)
                 data = apply_advanced_filters(
                     data,
@@ -258,6 +302,19 @@ async def get_screener(
                     sort_by=sort_by,
                     sort_order=sort_order,
                 )[:limit]
+                if cache_result.is_stale and not refresh:
+                    refresh_key = f"screener:{source}:full"
+                    refresh_params = StockScreenerParams(
+                        symbol=None,
+                        exchange="ALL",
+                        industry=None,
+                        limit=2000,
+                        source=source,
+                    )
+                    await _schedule_refresh(
+                        refresh_key,
+                        lambda: _refresh_screener_cache(refresh_params),
+                    )
                 return StandardResponse(data=data, meta=MetaData(count=len(data)))
 
             if source:
@@ -266,7 +323,7 @@ async def get_screener(
                 )
                 if fallback_cache.hit and fallback_cache.data:
                     data = [_to_screener_data_row(s) for s in fallback_cache.data]
-                    data = await _hydrate_screener_rows(data, cache_manager, db)
+                    data = await _hydrate_screener_rows(data, db)
                     data = fill_market_cap(data)
                     data = apply_advanced_filters(
                         data,
@@ -321,7 +378,7 @@ async def get_screener(
             sort_order=sort_order,
         )[:limit]
 
-        data = await _hydrate_screener_rows(data, cache_manager, db)
+        data = await _hydrate_screener_rows(data, db)
 
         await cache_manager.store_screener_data(data=[d.model_dump() for d in data], source=source)
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
@@ -333,7 +390,7 @@ async def get_screener(
             )
             if cache_result.hit and cache_result.data:
                 data = [_to_screener_data_row(s) for s in cache_result.data]
-                data = await _hydrate_screener_rows(data, cache_manager, db)
+                data = await _hydrate_screener_rows(data, db)
                 data = fill_market_cap(data)
                 data = apply_advanced_filters(
                     data,

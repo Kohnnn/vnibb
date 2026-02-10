@@ -36,6 +36,7 @@ dependencies = [
     # Data Providers
     "vnstock>=3.4.0",  # Vietnam stock data - requires Golden Sponsor API key for 10x rate limits
     "vnai>=2.3.9",     # Required for device fingerprinting in vnstock installer
+    "vnii>=0.1.5",
     # Premium packages (vnstock_data, vnstock_ta, vnstock_news, vnstock_pipeline)
     # are installed via CLI installer, not pip
 
