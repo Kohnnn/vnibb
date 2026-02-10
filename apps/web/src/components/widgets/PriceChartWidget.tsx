@@ -220,7 +220,12 @@ export function PriceChartWidget({
               </ChartSizeBox>
             )
           ) : (
-            <TradingViewAdvancedChart symbol={tvSymbol || symbol} interval={interval} />
+            <div className="relative h-full w-full">
+              <TradingViewAdvancedChart symbol={tvSymbol || symbol} interval={interval} />
+              <div className="pointer-events-none absolute bottom-1 left-2 text-[9px] text-gray-500">
+                Powered by TradingView
+              </div>
+            </div>
           )}
         </div>
         <div className="border-t border-gray-800/60">

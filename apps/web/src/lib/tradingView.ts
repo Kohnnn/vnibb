@@ -69,10 +69,13 @@ export function buildTradingViewSymbolCandidates(symbol: string, exchange?: stri
   const normalizedExchange = normalizeExchange(exchange)
   if (normalizedExchange) {
     candidates.push(`${normalizedExchange}:${normalizedSymbol}`)
+    if (normalizedExchange === 'HOSE') {
+      candidates.push(`HSX:${normalizedSymbol}`)
+    }
   }
 
   // VN-first fallback chain
-  for (const exchangeCandidate of ['HOSE', 'HNX', 'UPCOM']) {
+  for (const exchangeCandidate of ['HOSE', 'HSX', 'HNX', 'UPCOM']) {
     candidates.push(`${exchangeCandidate}:${normalizedSymbol}`)
   }
 

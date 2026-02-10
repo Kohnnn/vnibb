@@ -33,7 +33,7 @@ export function TradingViewAdvancedChart({
   height = 400,
   allowSymbolChange = true,
 }: TradingViewAdvancedChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const widgetMountRef = useRef<HTMLDivElement>(null);
   const [candidateIndex, setCandidateIndex] = useState(0);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
 
@@ -52,9 +52,10 @@ export function TradingViewAdvancedChart({
   }, [candidates]);
 
   useEffect(() => {
-    if (!containerRef.current || !tvSymbol) return;
+    if (!widgetMountRef.current || !tvSymbol) return;
 
-    containerRef.current.innerHTML = '';
+    const mountNode = widgetMountRef.current;
+    mountNode.innerHTML = '';
     setStatus('loading');
 
     const wrapper = document.createElement('div');
@@ -82,8 +83,8 @@ export function TradingViewAdvancedChart({
       support_host: 'https://www.tradingview.com',
     });
 
-    containerRef.current.appendChild(wrapper);
-    containerRef.current.appendChild(script);
+    mountNode.appendChild(wrapper);
+    mountNode.appendChild(script);
     let disposed = false;
     let resolved = false;
 
@@ -94,7 +95,7 @@ export function TradingViewAdvancedChart({
       persistResolvedTradingViewSymbol(symbol, tvSymbol);
     };
 
-    const hasIframe = () => !!containerRef.current?.querySelector('iframe');
+    const hasIframe = () => !!mountNode.querySelector('iframe');
 
     const observer = new MutationObserver(() => {
       if (hasIframe()) {
@@ -102,7 +103,7 @@ export function TradingViewAdvancedChart({
         markReady();
       }
     });
-    observer.observe(containerRef.current, { childList: true, subtree: true });
+    observer.observe(mountNode, { childList: true, subtree: true });
 
     const pollId = window.setInterval(() => {
       if (hasIframe()) {
@@ -129,8 +130,8 @@ export function TradingViewAdvancedChart({
       observer.disconnect();
       window.clearInterval(pollId);
       window.clearTimeout(timeoutId);
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
+      if (mountNode.isConnected) {
+        mountNode.replaceChildren();
       }
     };
   }, [tvSymbol, interval, timezone, theme, allowSymbolChange, candidates.length, candidateIndex, symbol]);
@@ -145,10 +146,10 @@ export function TradingViewAdvancedChart({
 
   return (
     <div
-      ref={containerRef}
       className={cn('tradingview-widget-container relative h-full w-full', className)}
       style={{ minHeight: height }}
     >
+      <div ref={widgetMountRef} className="absolute inset-0 h-full w-full" />
       {status !== 'ready' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 p-4 text-center text-[11px] text-gray-300">
           {status === 'failed' ? (

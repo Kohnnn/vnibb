@@ -14,7 +14,9 @@
         "dev:web": "pnpm --filter web dev",
         "dev:api": "pnpm --filter api dev",
         "build:web": "pnpm --filter web build",
-        "build:api": "pnpm --filter api build"
+        "build:api": "pnpm --filter api build",
+        "gate:no502": "cd apps/api && python scripts/widget_health_matrix.py --base-url https://vnibb.zeabur.app --repeats 5 --timeout 10 --fail-on-error --output-json scripts/v34_widget_health_after.json",
+        "gate:widgets:strict": "cd apps/api && python scripts/widget_health_matrix.py --base-url https://vnibb.zeabur.app --repeats 5 --timeout 10 --fail-on-error --strict-widget-state --output-json scripts/v34_widget_health_strict.json"
     },
     "devDependencies": {
         "@typescript-eslint/parser": "^8.54.0",

@@ -1,16 +1,12 @@
 // Backend sync hooks for dashboard persistence
 
 import { useEffect, useRef, useCallback } from 'react';
-import { env } from '@/lib/env';
+import { probeBackendReadiness } from '@/lib/backendHealth'
 import * as api from '@/lib/api';
 import type { Dashboard, DashboardState } from '@/types/dashboard';
 
 // Debounce delay for auto-save (ms)
 const SYNC_DEBOUNCE_MS = 2000;
-
-// Backend API URL check
-const BACKEND_URL = env.apiUrl;
-
 
 interface UseDashboardSyncOptions {
     enabled?: boolean;
@@ -22,12 +18,8 @@ interface UseDashboardSyncOptions {
  * Check if backend is available
  */
 export async function checkBackendHealth(): Promise<boolean> {
-    try {
-        const response = await fetch(`${BACKEND_URL.replace('/api/v1', '')}/health`);
-        return response.ok;
-    } catch {
-        return false;
-    }
+    const { liveOk, readyOk } = await probeBackendReadiness(8000)
+    return liveOk && readyOk
 }
 
 /**

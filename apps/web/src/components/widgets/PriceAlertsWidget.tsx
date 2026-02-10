@@ -45,6 +45,7 @@ interface PriceAlertsWidgetProps {
 const STORAGE_KEY = 'vnibb_price_alerts';
 const PERMISSION_KEY = 'vnibb_notification_permission';
 const WS_URL = config.wsPriceUrl;
+const MAX_WS_RECONNECT_ATTEMPTS = config.isProd ? 10 : 5;
 
 // ============ Notification Service ============
 
@@ -177,6 +178,9 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
 
     const wsRef = useRef<WebSocket | null>(null);
     const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const reconnectAttemptRef = useRef(0);
+    const shouldReconnectRef = useRef(true);
     const priceCacheRef = useRef<Record<string, number>>({});
     const notificationServiceRef = useRef(NotificationService.getInstance());
 
@@ -200,22 +204,44 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
 
     // WebSocket connection for real-time price updates
     useEffect(() => {
+        shouldReconnectRef.current = true;
+
         if (activeSymbols.length === 0) {
             // No active alerts, close WebSocket
             if (wsRef.current) {
                 wsRef.current.close();
                 wsRef.current = null;
             }
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+                reconnectTimeoutRef.current = null;
+            }
+            reconnectAttemptRef.current = 0;
             setWsConnected(false);
             return;
         }
 
         const connectWebSocket = () => {
+            if (!shouldReconnectRef.current) return;
+            if (!WS_URL) {
+                setWsConnected(false);
+                return;
+            }
+            if (reconnectAttemptRef.current >= MAX_WS_RECONNECT_ATTEMPTS) {
+                setWsConnected(false);
+                return;
+            }
+
             try {
                 const ws = new WebSocket(WS_URL);
 
                 ws.onopen = () => {
                     setWsConnected(true);
+                    reconnectAttemptRef.current = 0;
+                    if (reconnectTimeoutRef.current) {
+                        clearTimeout(reconnectTimeoutRef.current);
+                        reconnectTimeoutRef.current = null;
+                    }
                     // Subscribe to all active alert symbols
                     ws.send(JSON.stringify({
                         action: 'subscribe',
@@ -239,8 +265,16 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
 
                 ws.onclose = () => {
                     setWsConnected(false);
-                    // Attempt reconnect after 5 seconds
-                    setTimeout(connectWebSocket, 5000);
+                    if (!shouldReconnectRef.current) return;
+                    const attempt = reconnectAttemptRef.current;
+                    if (attempt >= MAX_WS_RECONNECT_ATTEMPTS) return;
+
+                    const delayMs = Math.min(1000 * Math.pow(2, attempt), 30000);
+                    reconnectAttemptRef.current = attempt + 1;
+
+                    reconnectTimeoutRef.current = setTimeout(() => {
+                        connectWebSocket();
+                    }, delayMs);
                 };
 
                 ws.onerror = () => {
@@ -257,6 +291,11 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
         connectWebSocket();
 
         return () => {
+            shouldReconnectRef.current = false;
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
+                reconnectTimeoutRef.current = null;
+            }
             if (wsRef.current) {
                 wsRef.current.close();
                 wsRef.current = null;

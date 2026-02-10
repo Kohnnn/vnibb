@@ -41,6 +41,7 @@ import { AICopilot } from '@/components/ui/AICopilot';
 import { MarketRibbon } from '@/components/ui/MarketRibbon';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
+import { useUnit } from '@/contexts/UnitContext';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
 import type { DashboardTemplate } from '@/types/dashboard-templates';
 
@@ -68,6 +69,7 @@ function DashboardContent() {
 
     const { setGlobalSymbol: setContextGlobalSymbol } = useWidgetGroups();
     const { globalSymbol, setGlobalSymbol } = useSymbolLink();
+    const { config: unitConfig, setUnit } = useUnit();
 
     const [isEditing, setIsEditing] = useState(false);
     const [isWidgetLibraryOpen, setIsWidgetLibraryOpen] = useState(false);
@@ -144,33 +146,44 @@ function DashboardContent() {
         if (!activeDashboard || !activeTab) return;
 
         const cols = 24;
-        let cursorX = 0;
-        let cursorY = 0;
-        let rowHeight = 0;
+        const columnHeights = new Array(cols).fill(0);
+
+        const findBestPosition = (width: number) => {
+            let bestX = 0;
+            let bestY = Number.MAX_SAFE_INTEGER;
+
+            for (let x = 0; x <= cols - width; x += 1) {
+                const candidateY = Math.max(...columnHeights.slice(x, x + width));
+                if (candidateY < bestY) {
+                    bestY = candidateY;
+                    bestX = x;
+                }
+            }
+
+            return { x: bestX, y: bestY };
+        };
 
         const updatedWidgets = activeTab.widgets.map((widget) => {
-            const defaults = defaultWidgetLayouts[widget.type as WidgetType] || { w: 6, h: 4 };
-            const width = Math.min(defaults.w ?? 6, cols);
-            const height = defaults.h ?? 4;
+            const defaults = defaultWidgetLayouts[widget.type as WidgetType] || { w: 6, h: 4, minW: 3, minH: 2 };
+            const minW = defaults.minW ?? widget.layout.minW ?? 3;
+            const minH = defaults.minH ?? widget.layout.minH ?? 2;
+            const width = Math.min(Math.max(widget.layout.w || defaults.w || 6, minW), cols);
+            const height = Math.max(widget.layout.h || defaults.h || 4, minH);
+            const { x, y } = findBestPosition(width);
 
-            if (cursorX + width > cols) {
-                cursorX = 0;
-                cursorY += rowHeight || height;
-                rowHeight = 0;
+            for (let col = x; col < x + width; col += 1) {
+                columnHeights[col] = y + height;
             }
 
             const nextLayout = {
                 ...widget.layout,
-                x: cursorX,
-                y: cursorY,
+                x,
+                y,
                 w: width,
                 h: height,
-                minW: defaults.minW ?? widget.layout.minW,
-                minH: defaults.minH ?? widget.layout.minH,
+                minW,
+                minH,
             };
-
-            cursorX += width;
-            rowHeight = Math.max(rowHeight, height);
 
             return { ...widget, layout: nextLayout };
         });
@@ -323,6 +336,8 @@ function DashboardContent() {
                     onAutoFitLayout={handleAutoFitLayout}
                     onCollapseAll={handleCollapseAll}
                     onExpandAll={handleExpandAll}
+                    unitDisplay={unitConfig.display}
+                    onUnitDisplayChange={setUnit}
                 />
 
                 <DashboardTopTabs />

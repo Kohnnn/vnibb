@@ -7,6 +7,7 @@ import { Search, Bell, User, Edit, Check, Bot, RotateCcw, X, Link as LinkIcon, L
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel';
 import { ConnectionStatus } from '../ui/ConnectionStatus';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
+import type { UnitDisplay } from '@/lib/units';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -26,6 +27,8 @@ interface HeaderProps {
     onAutoFitLayout?: () => void;
     onCollapseAll?: () => void;
     onExpandAll?: () => void;
+    unitDisplay?: UnitDisplay;
+    onUnitDisplayChange?: (value: UnitDisplay) => void;
 }
 
 export function Header({
@@ -37,7 +40,9 @@ export function Header({
     onResetLayout,
     onAutoFitLayout,
     onCollapseAll,
-    onExpandAll
+    onExpandAll,
+    unitDisplay = 'auto',
+    onUnitDisplayChange
 }: HeaderProps) {
     const [searchValue, setSearchValue] = useState(currentSymbol);
     const [isSearching, setIsSearching] = useState(false);
@@ -178,6 +183,26 @@ export function Header({
                                     <DropdownMenuItem onClick={onExpandAll} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
                                         Expand all widgets
                                     </DropdownMenuItem>
+                                )}
+                                {onUnitDisplayChange && (
+                                    <>
+                                        <DropdownMenuSeparator className="bg-[#1e2a3b]" />
+                                        <DropdownMenuItem className="text-[10px] uppercase tracking-wider text-gray-500 focus:bg-transparent focus:text-gray-500">
+                                            Unit display ({unitDisplay})
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('auto')} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                            Auto scale
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('raw')} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                            Raw values
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('M')} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                            Million
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('B')} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                            Billion
+                                        </DropdownMenuItem>
+                                    </>
                                 )}
                                 {onEditToggle && (
                                     <>

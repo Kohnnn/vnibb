@@ -1,5 +1,6 @@
 # backend/vnibb/api/v1/health.py
 
+import asyncio
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -16,8 +17,10 @@ _BASIC_HEALTH_TTL_SECONDS = 30
 
 
 @router.get("/")
-async def basic_health(db: AsyncSession = Depends(get_db)):
+@router.get("")
+async def basic_health():
     """Basic health check reporting DB status."""
+    from vnibb.core.database import check_database_connection
     from vnibb.core.cache import redis_client
 
     now = time.time()
@@ -34,21 +37,23 @@ async def basic_health(db: AsyncSession = Depends(get_db)):
         "timestamp": datetime.utcnow().isoformat()
     }
     
-    # Database check
+    # Database check (bounded by timeout to avoid gateway timeouts)
     try:
-        await db.execute(text("SELECT 1"))
+        db_ok = await asyncio.wait_for(check_database_connection(max_retries=1), timeout=2.0)
+        if not db_ok:
+            health["db"] = "disconnected"
     except Exception:
         health["db"] = "disconnected"
-        # We keep status "ok" if the app is still running, 
-        # but the specific component status is updated.
-        # Alternatively, set status to "degraded"
-        # health["status"] = "degraded"
         
-    # Redis check
+    # Redis check (optional and bounded)
     try:
         if settings.redis_url:
-            await redis_client.client.ping()
-            health["cache"] = "connected"
+            await asyncio.wait_for(redis_client.connect(), timeout=1.0)
+            if redis_client.client:
+                await asyncio.wait_for(redis_client.client.ping(), timeout=1.0)
+                health["cache"] = "connected"
+            else:
+                health["cache"] = "unavailable"
         else:
             health["cache"] = "not_configured"
     except Exception:

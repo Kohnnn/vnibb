@@ -6,6 +6,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
+import { useProfile } from '@/lib/queries';
 import { toTradingViewSymbol } from '@/lib/tradingView';
 
 interface ResearchBrowserWidgetProps {
@@ -22,13 +23,50 @@ interface SavedSite {
   lastVisitedAt?: string;
 }
 
+interface QuickSource {
+  id: string;
+  label: string;
+  url: string;
+  preferredMode?: 'embed' | 'external';
+}
+
 const SITES_KEY = 'vnibb_research_sites';
+const NON_EMBEDDABLE_HOSTS: Record<string, string> = {
+  'google.com': 'Google blocks iframe embedding for search pages.',
+  'tradingview.com': 'TradingView pages are designed to open directly in a browser tab.',
+  'cafef.vn': 'CafeF blocks embedding in most contexts.',
+  'ndh.vn': 'NDH blocks embedding in most contexts.',
+};
 
 function normalizeUrl(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) return '';
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
   return `https://${trimmed}`;
+}
+
+function getHost(url: string): string | null {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function getEmbedPolicy(url: string): { canEmbed: boolean; reason?: string; host?: string } {
+  const host = getHost(url);
+  if (!host) return { canEmbed: false, reason: 'Invalid URL' };
+
+  const blocked = Object.entries(NON_EMBEDDABLE_HOSTS).find(([domain]) =>
+    host === domain || host.endsWith(`.${domain}`)
+  );
+  if (!blocked) return { canEmbed: true, host };
+
+  return {
+    canEmbed: false,
+    reason: blocked[1],
+    host,
+  };
 }
 
 export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserWidgetProps) {
@@ -49,6 +87,8 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
   const [titleInput, setTitleInput] = useState('');
   const [embedStatus, setEmbedStatus] = useState<'idle' | 'loading' | 'ready' | 'blocked'>('idle');
   const [history, setHistory] = useState<string[]>([]);
+  const { data: profileData } = useProfile(symbol || '', Boolean(symbol));
+  const symbolExchange = profileData?.data?.exchange?.trim().toUpperCase() || 'HOSE';
 
   const activeSite = useMemo(() => {
     if (activeSourceId) return null;
@@ -58,39 +98,49 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
     return sites[0] || null;
   }, [activeSiteId, activeSourceId, sites]);
 
-  const quickSources = useMemo(() => {
+  const quickSources = useMemo<QuickSource[]>(() => {
     if (!symbol) return [];
-    const tvSymbol = toTradingViewSymbol(symbol, 'HOSE');
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    const tvSymbol = toTradingViewSymbol(normalizedSymbol, symbolExchange);
     const tvSlug = tvSymbol.includes(':') ? tvSymbol.replace(':', '-') : tvSymbol;
-    const query = `${symbol} cổ phiếu phân tích chứng khoán Việt Nam`;
+    const exchangeHint = ['HOSE', 'HSX', 'HNX', 'UPCOM'].includes(symbolExchange)
+      ? symbolExchange === 'HSX'
+        ? 'HOSE'
+        : symbolExchange
+      : 'VN';
+    const query = `${normalizedSymbol} ${exchangeHint} cổ phiếu phân tích chứng khoán Việt Nam`;
     return [
       {
         id: 'google',
         label: 'Google',
         url: `https://www.google.com/search?igu=1&q=${encodeURIComponent(query)}`,
+        preferredMode: 'external',
       },
       {
         id: 'vietstock',
         label: 'Vietstock',
-        url: `https://vietstock.vn/search/?q=${encodeURIComponent(symbol)}`,
+        url: `https://vietstock.vn/tim-kiem.htm?keyword=${encodeURIComponent(normalizedSymbol)}`,
       },
       {
         id: 'cafef',
         label: 'CafeF',
-        url: `https://search.cafef.vn/tim-kiem.chn?keywords=${encodeURIComponent(symbol)}`,
+        url: `https://search.cafef.vn/tim-kiem.chn?keywords=${encodeURIComponent(normalizedSymbol)}`,
+        preferredMode: 'external',
       },
       {
         id: 'tradingview',
         label: 'TradingView',
         url: `https://www.tradingview.com/symbols/${encodeURIComponent(tvSlug)}/`,
+        preferredMode: 'external',
       },
       {
         id: 'ndh',
         label: 'NDH',
-        url: `https://ndh.vn/tim-kiem?q=${encodeURIComponent(symbol)}`,
+        url: `https://ndh.vn/tim-kiem?q=${encodeURIComponent(normalizedSymbol)}`,
+        preferredMode: 'external',
       },
     ];
-  }, [symbol]);
+  }, [symbol, symbolExchange]);
 
   const activeSource = useMemo(() => {
     if (!activeSourceId) return null;
@@ -157,14 +207,16 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
   };
 
   const handleSelectQuickSource = (sourceId: string) => {
+    const source = quickSources.find((item) => item.id === sourceId);
     setActiveSourceId(sourceId);
     setActiveSiteId(null);
-    setViewMode('embed');
+    setViewMode(source?.preferredMode || 'embed');
   };
 
   const activeUrl = activeSite?.url || activeSource?.url || '';
   const activeTitle = activeSite?.title || activeSource?.label || activeUrl;
-  const canEmbed = Boolean(activeUrl) && viewMode === 'embed';
+  const embedPolicy = useMemo(() => getEmbedPolicy(activeUrl), [activeUrl]);
+  const canEmbed = Boolean(activeUrl) && viewMode === 'embed' && embedPolicy.canEmbed;
 
   useEffect(() => {
     if (!activeUrl) {
@@ -182,13 +234,18 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
       return;
     }
 
+    if (!embedPolicy.canEmbed) {
+      setEmbedStatus('blocked');
+      return;
+    }
+
     setEmbedStatus('loading');
     const timeout = window.setTimeout(() => {
       setEmbedStatus((current) => (current === 'ready' ? current : 'blocked'));
     }, 9000);
 
     return () => window.clearTimeout(timeout);
-  }, [activeUrl, viewMode]);
+  }, [activeUrl, viewMode, embedPolicy]);
 
   return (
     <WidgetContainer
@@ -200,7 +257,11 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
       <div className="h-full flex flex-col bg-[#0a0a0a]">
         <div className="px-3 py-2 border-b border-gray-800/60">
           <WidgetMeta
-            note={symbol ? `Researching ${symbol} • Embedded iframe` : 'Local storage • Embedded iframe'}
+            note={
+              symbol
+                ? `Researching ${symbol} • ${viewMode === 'embed' ? 'Embed mode' : 'External mode'}`
+                : 'Local storage'
+            }
             align="right"
           />
         </div>
@@ -334,7 +395,7 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/75 p-4 text-center">
                     <div className="text-sm font-semibold text-white">This site may block embedding</div>
                     <div className="text-[11px] text-gray-300">
-                      Switch to external mode or open directly in a new tab.
+                      {embedPolicy.reason || 'Switch to external mode or open directly in a new tab.'}
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -356,6 +417,30 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
                   </div>
                 )}
               </>
+            ) : viewMode === 'embed' && activeUrl && !embedPolicy.canEmbed ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
+                <div className="text-sm font-semibold text-white">Embed blocked for this source</div>
+                <div className="text-[11px] text-gray-300">
+                  {embedPolicy.reason || 'This website blocks iframe embedding.'}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('external')}
+                    className="rounded border border-blue-500/60 px-3 py-1.5 text-xs text-blue-200 hover:border-blue-300"
+                  >
+                    Switch to external mode
+                  </button>
+                  <a
+                    href={activeUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded border border-gray-500/60 px-3 py-1.5 text-xs text-gray-100 hover:border-gray-300"
+                  >
+                    Open in new tab
+                  </a>
+                </div>
+              </div>
             ) : viewMode === 'external' && activeUrl ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
                 <div className="text-xs text-gray-300">External mode enabled for this source.</div>
