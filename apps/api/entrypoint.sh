@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 export PYTHONUNBUFFERED=1
 echo "ENTRYPOINT STARTED: User $(whoami)"
@@ -58,7 +58,8 @@ backup_has_vnstock() {
 }
 
 runtime_install_enabled() {
-    case "${VNSTOCK_RUNTIME_INSTALL,,}" in
+    runtime_install_flag=$(printf "%s" "$VNSTOCK_RUNTIME_INSTALL" | tr '[:upper:]' '[:lower:]')
+    case "$runtime_install_flag" in
         1|true|yes|on) return 0 ;;
         *) return 1 ;;
     esac
