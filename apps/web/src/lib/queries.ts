@@ -7,6 +7,7 @@ import * as api from './api';
 import type { DashboardCreate, WidgetCreate } from '@/types/dashboard';
 import type { AlertSettings } from '@/types/insider';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from './pollingPolicy';
 
 // Helper hook to get the preferred VnStock source
 export function useVnstockSource(): VnstockSource {
@@ -504,6 +505,8 @@ export function usePriceBoard(
         enabled: options?.enabled !== false && symbols.length > 0,
         staleTime: 10 * 1000, // 10 seconds - real-time data
         refetchInterval: options?.refetchInterval ?? 15000, // Auto-refresh every 15s
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
     });
 }
 
@@ -523,7 +526,11 @@ export function useTopMovers(options?: {
         queryFn: () => api.getTopMovers({ type, index, limit }),
         enabled: options?.enabled !== false,
         staleTime: 60 * 1000, // 1 minute
-        refetchInterval: options?.refetchInterval ?? 60000, // Auto-refresh every 1 min
+        refetchInterval:
+            options?.refetchInterval ??
+            (() => getAdaptiveRefetchInterval(POLLING_PRESETS.movers)),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
     });
 }
 
@@ -541,7 +548,11 @@ export function useSectorTopMovers(options?: {
         queryFn: () => api.getSectorTopMovers({ type, limit }),
         enabled: options?.enabled !== false,
         staleTime: 60 * 1000, // 1 minute
-        refetchInterval: options?.refetchInterval ?? 60000, // Auto-refresh every 1 min
+        refetchInterval:
+            options?.refetchInterval ??
+            (() => getAdaptiveRefetchInterval(POLLING_PRESETS.movers)),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
     });
 }
 
@@ -556,7 +567,11 @@ export function useSectorPerformance(options?: {
         queryFn: () => api.getSectorPerformance(),
         enabled: options?.enabled !== false,
         staleTime: 60 * 1000, // 1 minute
-        refetchInterval: options?.refetchInterval ?? 60000, // Auto-refresh every 1 min
+        refetchInterval:
+            options?.refetchInterval ??
+            (() => getAdaptiveRefetchInterval(POLLING_PRESETS.movers)),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
         retry: 2,
     });
 }
@@ -637,7 +652,11 @@ export function useBlockTrades(
         queryFn: () => api.getBlockTrades({ symbol: options?.symbol, limit: options?.limit }),
         enabled: options?.enabled !== false,
         staleTime: 30 * 1000,
-        refetchInterval: options?.refetchInterval ?? 30000,
+        refetchInterval:
+            options?.refetchInterval ??
+            (() => getAdaptiveRefetchInterval(POLLING_PRESETS.alerts)),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
     });
 }
 
@@ -707,6 +726,33 @@ export function useTradingStats(symbol: string, enabled = true) {
  */
 export const quoteQueryKey = (symbol: string) => ['quote', symbol] as const;
 
+export interface StockQuoteView {
+    symbol: string;
+    price: number | null;
+    change: number | null;
+    changePct: number | null;
+    volume: number | null;
+    high: number | null;
+    low: number | null;
+    open: number | null;
+    cached: boolean;
+}
+
+export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Promise<StockQuoteView> {
+    const response = await api.getQuote(symbol, signal);
+    return {
+        symbol: response.symbol || response.data?.symbol || symbol,
+        price: response.data.price,
+        change: response.data.change,
+        changePct: response.data.changePct,
+        volume: response.data.volume,
+        high: response.data.high,
+        low: response.data.low,
+        open: response.data.open,
+        cached: response.cached,
+    };
+}
+
 /**
  * Hook to fetch current stock quote from dedicated quote endpoint.
  * Uses 30-second cache for real-time freshness.
@@ -716,19 +762,7 @@ export function useStockQuote(symbol: string, enabled = true) {
         queryKey: quoteQueryKey(symbol),
         queryFn: async ({ signal }) => {
             try {
-                const response = await api.getQuote(symbol, signal);
-                // Transform to consistent interface
-                return {
-                    symbol: response.symbol || response.data?.symbol || symbol,
-                    price: response.data.price,
-                    change: response.data.change,
-                    changePct: response.data.changePct,
-                    volume: response.data.volume,
-                    high: response.data.high,
-                    low: response.data.low,
-                    open: response.data.open,
-                    cached: response.cached,
-                };
+                return await fetchStockQuote(symbol, signal);
             } catch (error) {
                 if ((error as Error)?.name === 'AbortError') {
                     throw error;
@@ -740,7 +774,9 @@ export function useStockQuote(symbol: string, enabled = true) {
         enabled: enabled && !!symbol,
 
         staleTime: 30 * 1000,  // 30 seconds - real-time needs freshness
-        refetchInterval: 30000, // Auto-refresh every 30 seconds
+        refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.quotes),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
         retry: 2,
     });
 }

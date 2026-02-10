@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/lib/api';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 
 interface StockPerformance {
   symbol: string;
@@ -43,7 +44,9 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
       if (!res.ok) throw new Error('Sector data failed');
       return res.json();
     },
-    refetchInterval: 60000,
+    refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.movers),
+    refetchIntervalInBackground: false,
+    networkMode: 'online',
   });
 
   const scroll = (direction: 'left' | 'right') => {

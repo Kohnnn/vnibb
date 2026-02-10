@@ -7,6 +7,7 @@ import { Bell, X, TrendingUp, TrendingDown, Users, AlertCircle } from 'lucide-re
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getInsiderAlerts, markAlertRead } from '@/lib/api';
 import type { InsiderAlert, AlertType, AlertSeverity } from '@/types/insider';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 
 interface AlertNotificationPanelProps {
   userId?: number;
@@ -65,7 +66,9 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
   const { data: alerts = [], isLoading } = useQuery({
     queryKey: ['insider-alerts', userId, showUnreadOnly],
     queryFn: () => getInsiderAlerts({ userId, unreadOnly: showUnreadOnly, limit: 50 }),
-    refetchInterval: 30000, // Refresh every 30 seconds
+    refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.alerts),
+    refetchIntervalInBackground: false,
+    networkMode: 'online',
   });
 
   const markReadMutation = useMutation({
