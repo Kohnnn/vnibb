@@ -166,6 +166,90 @@ class PerformanceLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class ResponseCacheControlMiddleware(BaseHTTPMiddleware):
+    """
+    Apply consistent cache headers by endpoint class for GET/HEAD responses.
+
+    Classes:
+    - real_time: never cached
+    - near_real_time: short caching with stale-while-revalidate
+    - staticish: longer caching with stale-while-revalidate
+    """
+
+    REAL_TIME_PATTERNS = (
+        re.compile(r"^/health(/|$)"),
+        re.compile(r"^/live/?$"),
+        re.compile(r"^/ready/?$"),
+        re.compile(r"^/api/v1/equity/[^/]+/quote/?$"),
+        re.compile(r"^/api/v1/ws(/|$)"),
+    )
+
+    NEAR_REAL_TIME_PATTERNS = (
+        re.compile(r"^/api/v1/screener(/|$)"),
+        re.compile(r"^/api/v1/alerts(/|$)"),
+        re.compile(r"^/api/v1/sectors(/|$)"),
+        re.compile(r"^/api/v1/equity/[^/]+/(historical|intraday|metrics/history)(/|$)"),
+    )
+
+    STATICISH_PATTERNS = (
+        re.compile(
+            r"^/api/v1/equity/[^/]+/"
+            r"(profile|ratios|income-statement|balance-sheet|cash-flow|dividends|"
+            r"events|shareholders|officers|ownership|rating|news)(/|$)"
+        ),
+        re.compile(r"^/api/v1/listings?(/|$)"),
+        re.compile(r"^/api/v1/comparison(/|$)"),
+        re.compile(r"^/api/v1/compare(/|$)"),
+    )
+
+    CACHE_HEADERS = {
+        "real_time": "no-store, max-age=0",
+        "near_real_time": "public, max-age=30, stale-while-revalidate=90",
+        "staticish": "public, max-age=300, stale-while-revalidate=1800",
+    }
+
+    @classmethod
+    def _resolve_policy(cls, path: str) -> str | None:
+        if any(pattern.match(path) for pattern in cls.REAL_TIME_PATTERNS):
+            return "real_time"
+
+        if any(pattern.match(path) for pattern in cls.NEAR_REAL_TIME_PATTERNS):
+            return "near_real_time"
+
+        if any(pattern.match(path) for pattern in cls.STATICISH_PATTERNS):
+            return "staticish"
+
+        return None
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+
+        if request.method not in {"GET", "HEAD"}:
+            return response
+
+        if response.status_code < 200 or response.status_code >= 300:
+            return response
+
+        if response.headers.get("Cache-Control"):
+            return response
+
+        policy = self._resolve_policy(request.url.path)
+        if policy is None:
+            return response
+
+        response.headers["Cache-Control"] = self.CACHE_HEADERS[policy]
+
+        if policy != "real_time":
+            existing_vary = response.headers.get("Vary")
+            response.headers["Vary"] = (
+                "Accept-Encoding"
+                if not existing_vary
+                else f"{existing_vary}, Accept-Encoding"
+            )
+
+        return response
+
+
 async def _safe_warmup():
     """Fire-and-forget warmup with delay."""
     await asyncio.sleep(5)  # Wait for server ready
@@ -409,6 +493,9 @@ def create_app() -> FastAPI:
 
     # Add Performance Logging Middleware
     app.add_middleware(PerformanceLoggingMiddleware)
+
+    # Add response cache policy middleware for GET/HEAD endpoints
+    app.add_middleware(ResponseCacheControlMiddleware)
 
     # Add CORS Error Middleware to catch exceptions before CORS middleware
     # Middleware order: Request -> CORSErrorMiddleware -> CORSMiddleware -> Route

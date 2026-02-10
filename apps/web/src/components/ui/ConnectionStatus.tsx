@@ -8,21 +8,32 @@ export function ConnectionStatus() {
   const [status, setStatus] = useState<'online' | 'offline' | 'degraded'>('offline');
   const [isChecking, setIsChecking] = useState(false);
 
+  const fetchWithTimeout = async (url: string, timeoutMs = 8000): Promise<Response> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, { method: 'GET', signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   const checkConnection = async () => {
     setIsChecking(true);
     try {
       const baseApiUrl = env.apiUrl.replace(/\/$/, '');
-      const [healthRes, apiRes] = await Promise.allSettled([
-        fetch(`${baseApiUrl}/health/`, { method: 'GET', cache: 'no-store' }),
-        fetch(`${baseApiUrl}/api/v1/screener/?limit=1`, { method: 'GET', cache: 'no-store' })
+      const [liveRes, readyRes] = await Promise.allSettled([
+        fetchWithTimeout(`${baseApiUrl}/live`),
+        fetchWithTimeout(`${baseApiUrl}/ready`)
       ]);
 
-      const healthOk = healthRes.status === 'fulfilled' && healthRes.value.ok;
-      const apiOk = apiRes.status === 'fulfilled' && apiRes.value.ok;
+      const liveOk = liveRes.status === 'fulfilled' && liveRes.value.ok;
+      const readyOk = readyRes.status === 'fulfilled' && readyRes.value.ok;
 
-      if (healthOk && apiOk) {
+      if (liveOk && readyOk) {
         setStatus('online');
-      } else if (healthOk) {
+      } else if (liveOk) {
         setStatus('degraded');
       } else {
         setStatus('offline');
@@ -36,7 +47,7 @@ export function ConnectionStatus() {
 
   useEffect(() => {
     checkConnection();
-    const interval = setInterval(checkConnection, 30000);
+    const interval = setInterval(checkConnection, 60000);
     return () => clearInterval(interval);
   }, []);
 

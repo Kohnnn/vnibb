@@ -13,6 +13,7 @@ SYSTEM_SITE_PACKAGES="/usr/local/lib/python3.12/site-packages"
 VENV_SITE_PACKAGES="$VENV_PATH/lib/python3.12/site-packages"
 PYTHON_BIN="python3"
 SITE_PACKAGES="$SYSTEM_SITE_PACKAGES"
+VNSTOCK_RUNTIME_INSTALL="${VNSTOCK_RUNTIME_INSTALL:-0}"
 
 venv_ready() {
     if [ -x "$VENV_PATH/bin/python" ]; then
@@ -56,6 +57,13 @@ backup_has_vnstock() {
     return 1
 }
 
+runtime_install_enabled() {
+    case "${VNSTOCK_RUNTIME_INSTALL,,}" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 set_python_env
 
 # If key is provided but packages are missing (e.g. build arg was missed), install them now.
@@ -73,43 +81,49 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
 
     # 2b. Check Execution: Now check if it works
     if ! "$PYTHON_BIN" -c "import vnstock_data" 2>/dev/null; then
-        echo "----------------------------------------------------------------"
-        echo "VnStock Premium: Key found but packages missing."
-        echo "Installing premium packages at runtime..."
-        echo "----------------------------------------------------------------"
-
-        # Ensure installer exists
-        if [ ! -f /app/vnstock-cli-installer.run ]; then
-            wget -q https://vnstocks.com/files/vnstock-cli-installer.run -O /app/vnstock-cli-installer.run
-            chmod +x /app/vnstock-cli-installer.run
-        fi
-
-        # Run installer (non-fatal if it fails)
-        activate_venv_for_installer
-        set +e
-        /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY"
-        INSTALL_STATUS=$?
-        set -e
-        set_python_env
-
-        if [ "$INSTALL_STATUS" -ne 0 ]; then
-            echo "WARNING: VNStock installer failed (exit=$INSTALL_STATUS). Continuing without premium packages."
+        if ! runtime_install_enabled; then
+            echo "WARNING: VNStock premium packages missing and VNSTOCK_RUNTIME_INSTALL=0."
+            echo "         Use prebuilt premium image (Dockerfile.premium) or set VNSTOCK_RUNTIME_INSTALL=1 for one-time bootstrap."
+            echo "         Continuing in free mode."
         else
-            # Ensure vnii is up to date for premium checks
-            if [ -x "$VENV_PATH/bin/python" ]; then
-                "$VENV_PATH/bin/python" -m pip install --upgrade --extra-index-url https://vnstocks.com/api/simple vnii >/dev/null 2>&1 || true
-            else
-                "$PYTHON_BIN" -m pip install --upgrade --extra-index-url https://vnstocks.com/api/simple vnii >/dev/null 2>&1 || true
+            echo "----------------------------------------------------------------"
+            echo "VnStock Premium: Key found but packages missing."
+            echo "Installing premium packages at runtime..."
+            echo "----------------------------------------------------------------"
+
+            # Ensure installer exists
+            if [ ! -f /app/vnstock-cli-installer.run ]; then
+                wget -q https://vnstocks.com/files/vnstock-cli-installer.run -O /app/vnstock-cli-installer.run
+                chmod +x /app/vnstock-cli-installer.run
             fi
 
-            # 2c. Backup Code: Save the newly installed packages to volume
-            echo "VnStock Premium: Backing up packages to persistent volume..."
-            mkdir -p "$PERSISTENT_BACKUP"
-            # Copy vnstock related packages AND vnii to avoid bloating
-            cp -r "$SITE_PACKAGES"/vnstock* "$PERSISTENT_BACKUP/" 2>/dev/null || true
-            cp -r "$SITE_PACKAGES"/vnii* "$PERSISTENT_BACKUP/" 2>/dev/null || true
+            # Run installer (non-fatal if it fails)
+            activate_venv_for_installer
+            set +e
+            /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY"
+            INSTALL_STATUS=$?
+            set -e
+            set_python_env
 
-            echo "VnStock Premium: Installation and backup complete."
+            if [ "$INSTALL_STATUS" -ne 0 ]; then
+                echo "WARNING: VNStock installer failed (exit=$INSTALL_STATUS). Continuing without premium packages."
+            else
+                # Ensure vnii is up to date for premium checks
+                if [ -x "$VENV_PATH/bin/python" ]; then
+                    "$VENV_PATH/bin/python" -m pip install --upgrade --extra-index-url https://vnstocks.com/api/simple vnii >/dev/null 2>&1 || true
+                else
+                    "$PYTHON_BIN" -m pip install --upgrade --extra-index-url https://vnstocks.com/api/simple vnii >/dev/null 2>&1 || true
+                fi
+
+                # 2c. Backup Code: Save the newly installed packages to volume
+                echo "VnStock Premium: Backing up packages to persistent volume..."
+                mkdir -p "$PERSISTENT_BACKUP"
+                # Copy vnstock related packages AND vnii to avoid bloating
+                cp -r "$SITE_PACKAGES"/vnstock* "$PERSISTENT_BACKUP/" 2>/dev/null || true
+                cp -r "$SITE_PACKAGES"/vnii* "$PERSISTENT_BACKUP/" 2>/dev/null || true
+
+                echo "VnStock Premium: Installation and backup complete."
+            fi
         fi
     else
         echo "VnStock Premium: Packages checked and ready."

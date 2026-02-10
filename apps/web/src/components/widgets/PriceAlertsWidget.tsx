@@ -4,10 +4,12 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Bell, Plus, X, ArrowUp, ArrowDown, Check, Percent, BellOff, BellRing, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
-import { API_BASE_URL } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
 import { config } from '@/lib/config';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetEmpty } from '@/components/ui/widget-states';
+import { fetchStockQuote, quoteQueryKey } from '@/lib/queries';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 
 // ============ Types ============
 
@@ -43,7 +45,6 @@ interface PriceAlertsWidgetProps {
 const STORAGE_KEY = 'vnibb_price_alerts';
 const PERMISSION_KEY = 'vnibb_notification_permission';
 const WS_URL = config.wsPriceUrl;
-const POLL_INTERVAL = 30000; // 30 seconds fallback polling
 
 // ============ Notification Service ============
 
@@ -163,6 +164,7 @@ function formatThreshold(alert: PriceAlert): string {
 // ============ Component ============
 
 export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetProps) {
+    const queryClient = useQueryClient();
     const [alerts, setAlerts] = useState<PriceAlert[]>([]);
     const [showAdd, setShowAdd] = useState(false);
     const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
@@ -174,7 +176,7 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
     const [wsConnected, setWsConnected] = useState(false);
 
     const wsRef = useRef<WebSocket | null>(null);
-    const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const priceCacheRef = useRef<Record<string, number>>({});
     const notificationServiceRef = useRef(NotificationService.getInstance());
 
@@ -266,21 +268,31 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
     useEffect(() => {
         if (wsConnected || activeSymbols.length === 0) {
             if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current);
+                clearTimeout(pollIntervalRef.current);
                 pollIntervalRef.current = null;
             }
             return;
         }
 
         const pollPrices = async () => {
+            if (typeof document !== 'undefined' && document.hidden) {
+                return;
+            }
+
+            if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                return;
+            }
+
             for (const symbol of activeSymbols) {
                 try {
-                    const response = await fetch(`${API_BASE_URL}/equity/${symbol}/quote`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.data?.price) {
-                            handlePriceUpdate(symbol, data.data.price);
-                        }
+                    const quote = await queryClient.fetchQuery({
+                        queryKey: quoteQueryKey(symbol),
+                        queryFn: ({ signal }) => fetchStockQuote(symbol, signal),
+                        staleTime: 30 * 1000,
+                    });
+
+                    if (quote.price) {
+                        handlePriceUpdate(symbol, quote.price);
                     }
                 } catch (error) {
                     console.debug(`Failed to poll price for ${symbol}:`, error);
@@ -288,19 +300,26 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
             }
         };
 
-        // Initial poll
-        pollPrices();
+        const scheduleNextPoll = () => {
+            const nextInterval = getAdaptiveRefetchInterval(POLLING_PRESETS.alerts);
+            const delay = nextInterval === false ? 60_000 : nextInterval;
 
-        // Set up interval
-        pollIntervalRef.current = setInterval(pollPrices, POLL_INTERVAL);
+            pollIntervalRef.current = setTimeout(async () => {
+                await pollPrices();
+                scheduleNextPoll();
+            }, delay);
+        };
+
+        pollPrices();
+        scheduleNextPoll();
 
         return () => {
             if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current);
+                clearTimeout(pollIntervalRef.current);
                 pollIntervalRef.current = null;
             }
         };
-    }, [wsConnected, activeSymbols.join(',')]);
+    }, [wsConnected, activeSymbols.join(','), queryClient]);
 
     // Trigger browser notification for alert
     const triggerAlertNotification = useCallback((alert: PriceAlert, currentPrice: number) => {

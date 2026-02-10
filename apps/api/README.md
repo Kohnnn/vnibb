@@ -111,6 +111,7 @@ railway up
 ```env
 DATABASE_URL=postgresql+asyncpg://...
 VNSTOCK_API_KEY=vnstock_xxx
+VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
 CORS_ORIGINS=["https://vnibb.vercel.app"]
 ENVIRONMENT=production
 GEMINI_API_KEY=your_gemini_api_key
@@ -119,6 +120,10 @@ GEMINI_API_KEY=your_gemini_api_key
 ```
 
 If neither `GEMINI_API_KEY` nor `GOOGLE_API_KEY` is set, news sentiment falls back to rule-based scoring.
+
+Premium package strategy:
+- Default `Dockerfile` keeps runtime installer disabled (`VNSTOCK_RUNTIME_INSTALL=0`) to avoid cold-start CPU spikes.
+- Use `Dockerfile.premium` for prebuilt premium layers when `VNSTOCK_API_KEY` is available at build time.
 
 ---
 

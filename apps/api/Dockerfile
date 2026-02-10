@@ -19,6 +19,7 @@ ENV PYTHONPATH=/usr/local/lib/python3.12/site-packages
 # Environment for non-interactive vnstock installation
 ENV VNSTOCK_LANGUAGE=2 \
     VNSTOCK_INTERACTIVE=0 \
+    VNSTOCK_RUNTIME_INSTALL=0 \
     PYTHONUNBUFFERED=1
 
 # Create directories
@@ -38,9 +39,9 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
 RUN pip install --no-cache-dir "vnai>=2.3.9" && \
     python3 -c "import vnai; print(f'vnai installed at {vnai.__file__}')"
 
-# Install vnstock premium packages via CLI installer
-# MOVED TO RUNTIME (entrypoint.sh) to avoid build timeouts/failures
-# The API key is passed as build arg for installation
+# Premium runtime bootstrap is disabled by default (VNSTOCK_RUNTIME_INSTALL=0).
+# Preferred strategy: build/deploy using Dockerfile.premium so premium packages
+# are already present and startup avoids installer CPU/network overhead.
 ARG VNSTOCK_API_KEY
 # RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
 #     echo "Installing vnstock premium packages with API key..."; \

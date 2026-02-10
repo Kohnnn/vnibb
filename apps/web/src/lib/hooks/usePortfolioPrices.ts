@@ -2,7 +2,8 @@
 'use client';
 
 import { useQueries } from '@tanstack/react-query';
-import { getQuote, type QuoteResponse } from '@/lib/api';
+import { fetchStockQuote, quoteQueryKey, type StockQuoteView } from '@/lib/queries';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 
 export interface PositionWithPrice {
     symbol: string;
@@ -27,10 +28,12 @@ export interface PortfolioPricesResult {
 export function usePortfolioPrices(symbols: string[]): PortfolioPricesResult {
     const queries = useQueries({
         queries: symbols.map(symbol => ({
-            queryKey: ['quote', symbol],
-            queryFn: () => getQuote(symbol),
-            staleTime: 60 * 1000, // 1 minute
-            refetchInterval: 60 * 1000, // Auto-refresh every minute
+            queryKey: quoteQueryKey(symbol),
+            queryFn: ({ signal }) => fetchStockQuote(symbol, signal),
+            staleTime: 30 * 1000, // Align with shared quote cache policy
+            refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.quotes),
+            refetchIntervalInBackground: false,
+            networkMode: 'online' as const,
             retry: 2,
             enabled: !!symbol,
         })),
@@ -43,13 +46,13 @@ export function usePortfolioPrices(symbols: string[]): PortfolioPricesResult {
         const symbol = symbols[idx];
         if (!symbol) return;
 
-        const data = query.data as QuoteResponse | undefined;
+        const data = query.data as StockQuoteView | undefined;
         
         prices.set(symbol, {
             symbol,
-            currentPrice: data?.data?.price ?? null,
-            change: data?.data?.change ?? null,
-            changePct: data?.data?.changePct ?? null,
+            currentPrice: data?.price ?? null,
+            change: data?.change ?? null,
+            changePct: data?.changePct ?? null,
             isLoading: query.isLoading,
             error: query.error as Error | null,
         });
