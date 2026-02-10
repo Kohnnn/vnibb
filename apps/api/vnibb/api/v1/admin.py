@@ -24,6 +24,19 @@ TIMESTAMP_CANDIDATES = [
     "date",
     "time",
 ]
+FRESHNESS_THRESHOLDS_HOURS = {
+    "fresh": 6,
+    "recent": 24,
+    "stale": 72,
+}
+FRESHNESS_TABLES = [
+    "stocks",
+    "screener_snapshots",
+    "stock_prices",
+    "financial_ratios",
+    "company_news",
+    "company_events",
+]
 
 
 def _quote_identifier(table_name: str) -> str:
@@ -117,6 +130,33 @@ async def _discover_timestamp_column(db: AsyncSession, table_name: str) -> Optio
     return None
 
 
+def _normalize_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            return None
+    return None
+
+
+def _classify_freshness(latest: Optional[datetime]) -> tuple[str, Optional[int]]:
+    if not latest:
+        return "unknown", None
+
+    age_seconds = int((datetime.utcnow() - latest).total_seconds())
+    if age_seconds < FRESHNESS_THRESHOLDS_HOURS["fresh"] * 3600:
+        return "fresh", age_seconds
+    if age_seconds < FRESHNESS_THRESHOLDS_HOURS["recent"] * 3600:
+        return "recent", age_seconds
+    if age_seconds < FRESHNESS_THRESHOLDS_HOURS["stale"] * 3600:
+        return "stale", age_seconds
+    return "critical", age_seconds
+
+
 @router.get("/database/tables")
 async def list_all_tables(db: AsyncSession = Depends(get_db)):
     """List all database tables with row counts and freshness metadata."""
@@ -136,31 +176,17 @@ async def list_all_tables(db: AsyncSession = Depends(get_db)):
                 )
                 latest = ts_result.scalar()
 
-            freshness = "stale"
-            if latest:
-                if isinstance(latest, str):
-                    try:
-                        latest = datetime.fromisoformat(latest.replace("Z", "+00:00"))
-                    except:
-                        pass
-                if isinstance(latest, datetime):
-                    age = datetime.utcnow() - latest.replace(tzinfo=None)
-                    if age.total_seconds() < 3600:
-                        freshness = "fresh"
-                    elif age.total_seconds() < 86400:
-                        freshness = "recent"
+            latest_dt = _normalize_datetime(latest)
+            freshness, age_seconds = _classify_freshness(latest_dt)
 
             tables_info.append(
                 {
                     "name": table_name,
                     "count": count,
                     "updated_at_column": updated_at_column,
-                    "last_updated": latest.isoformat()
-                    if hasattr(latest, "isoformat")
-                    else str(latest)
-                    if latest
-                    else None,
+                    "last_updated": latest_dt.isoformat() if latest_dt else str(latest) if latest else None,
                     "freshness": freshness,
+                    "age_seconds": age_seconds,
                 }
             )
         except Exception as e:
@@ -175,6 +201,71 @@ async def list_all_tables(db: AsyncSession = Depends(get_db)):
         "total_tables": len(tables_info),
         "timestamp": datetime.utcnow().isoformat(),
         "last_checked": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/database/freshness-summary")
+async def get_freshness_summary(db: AsyncSession = Depends(get_db)):
+    """
+    Summarize dataset freshness for key tables with warning buckets.
+
+    Status buckets:
+    - fresh: <= 6h
+    - recent: <= 24h
+    - stale: <= 72h
+    - critical: > 72h
+    - unknown: no timestamp signal
+    """
+    available_tables = set(await _discover_tables(db))
+    targets = [table for table in FRESHNESS_TABLES if table in available_tables]
+    entries = []
+
+    for table_name in targets:
+        quoted_table = _quote_identifier(table_name)
+        count_result = await db.execute(text(f"SELECT COUNT(*) FROM {quoted_table}"))
+        row_count = int(count_result.scalar() or 0)
+
+        updated_at_column = await _discover_timestamp_column(db, table_name)
+        latest_value = None
+        if updated_at_column:
+            ts_result = await db.execute(text(f'SELECT MAX("{updated_at_column}") FROM {quoted_table}'))
+            latest_value = ts_result.scalar()
+
+        latest_dt = _normalize_datetime(latest_value)
+        freshness, age_seconds = _classify_freshness(latest_dt)
+
+        entries.append(
+            {
+                "table": table_name,
+                "count": row_count,
+                "updated_at_column": updated_at_column,
+                "last_updated": latest_dt.isoformat()
+                if latest_dt
+                else str(latest_value)
+                if latest_value
+                else None,
+                "freshness": freshness,
+                "age_seconds": age_seconds,
+            }
+        )
+
+    summary: dict[str, int] = {"fresh": 0, "recent": 0, "stale": 0, "critical": 0, "unknown": 0}
+    for entry in entries:
+        key = entry["freshness"]
+        summary[key] = summary.get(key, 0) + 1
+
+    warning_tables = [
+        entry
+        for entry in entries
+        if entry["freshness"] in {"stale", "critical", "unknown"}
+    ]
+
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "thresholds_hours": FRESHNESS_THRESHOLDS_HOURS,
+        "summary": summary,
+        "tables": entries,
+        "warning_tables": warning_tables,
     }
 
 

@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-02-10T18:45:05.795029+00:00",
+  "stages": [
+    "ratios_year",
+    "company_news",
+    "company_events"
+  ],
+  "limit": 1,
+  "batch_size": 1,
+  "total_symbols": 1,
+  "completed_symbols": 3,
+  "failed_symbols_count": 0,
+  "failed_symbols": [],
+  "stage_stats": {
+    "ratios_year": {
+      "success_symbols": 1,
+      "failed_symbols": 0,
+      "completed_batches": 1
+    },
+    "company_news": {
+      "success_symbols": 1,
+      "failed_symbols": 0,
+      "completed_batches": 1
+    },
+    "company_events": {
+      "success_symbols": 1,
+      "failed_symbols": 0,
+      "completed_batches": 1
+    }
+  },
+  "checkpoint_file": "scripts\\v34_backfill_fundamentals_checkpoint_smoke.json"
+}

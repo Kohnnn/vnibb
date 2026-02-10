@@ -1,0 +1,33 @@
+name: Reliability Gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 * * * *"
+
+jobs:
+  no-502-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install API dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "apps/api[dev]"
+
+      - name: Run core endpoint gate
+        working-directory: apps/api
+        run: |
+          python scripts/widget_health_matrix.py \
+            --base-url https://vnibb.zeabur.app \
+            --repeats 5 \
+            --timeout 10 \
+            --fail-on-error \
+            --output-json scripts/v34_widget_health_after.json

@@ -62,7 +62,12 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3002",
         "http://localhost:4000",
         "http://127.0.0.1:4000",
+        "https://vnibb-web.vercel.app",
+        "https://vnibb.vercel.app",
     ]
+    cors_origin_regex: str = (
+        r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://[a-z0-9-]+\.vercel\.app$"
+    )
 
     # ==========================================================================
     # Database (PostgreSQL / Supabase)

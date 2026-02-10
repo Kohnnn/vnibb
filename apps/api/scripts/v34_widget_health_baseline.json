@@ -1,0 +1,110 @@
+{
+  "generated_at": "2026-02-10T18:04:39.895299+00:00",
+  "base_url": "https://vnibb.zeabur.app",
+  "repeats": 5,
+  "rows": [
+    {
+      "widget": "health",
+      "path": "/health/",
+      "attempts": 5,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502,
+        502,
+        502,
+        502
+      ],
+      "avg_latency_ms": 2908.9,
+      "max_latency_ms": 3544.78,
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "screener",
+      "path": "/api/v1/screener/?limit=20",
+      "attempts": 5,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502,
+        502,
+        502,
+        502
+      ],
+      "avg_latency_ms": 2904.42,
+      "max_latency_ms": 3273.41,
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "profile",
+      "path": "/api/v1/equity/VNM/profile",
+      "attempts": 5,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502,
+        502,
+        502,
+        502
+      ],
+      "avg_latency_ms": 3686.03,
+      "max_latency_ms": 6144.36,
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "quote",
+      "path": "/api/v1/equity/VNM/quote",
+      "attempts": 5,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        null,
+        502,
+        502,
+        502
+      ],
+      "avg_latency_ms": 3980.61,
+      "max_latency_ms": 10102.85,
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "ratios",
+      "path": "/api/v1/equity/VNM/ratios?period=year",
+      "attempts": 5,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502,
+        502,
+        502,
+        502
+      ],
+      "avg_latency_ms": 3073.77,
+      "max_latency_ms": 3083.08,
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "historical",
+      "path": "/api/v1/equity/historical?symbol=VNM&period=1Y",
+      "attempts": 5,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502,
+        502,
+        502,
+        502
+      ],
+      "avg_latency_ms": 3071.82,
+      "max_latency_ms": 3085.81,
+      "last_error": "HTTP Error 502: Bad Gateway"
+    }
+  ],
+  "overall_ok": false
+}

@@ -78,10 +78,20 @@ def get_cors_headers(request: Request) -> dict[str, str]:
     origin = request.headers.get("origin", "")
 
     localhost_pattern = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    vercel_preview_pattern = r"^https://[a-z0-9-]+\.vercel\.app$"
+    configured_pattern = settings.cors_origin_regex
     is_localhost_origin = bool(origin and re.match(localhost_pattern, origin))
+    is_vercel_preview_origin = bool(origin and re.match(vercel_preview_pattern, origin))
+    is_configured_regex_origin = bool(origin and configured_pattern and re.match(configured_pattern, origin))
 
     # Check if origin is allowed
-    if origin in settings.cors_origins or "*" in settings.cors_origins or is_localhost_origin:
+    if (
+        origin in settings.cors_origins
+        or "*" in settings.cors_origins
+        or is_localhost_origin
+        or is_vercel_preview_origin
+        or is_configured_regex_origin
+    ):
         return {
             "Access-Control-Allow-Origin": origin or settings.cors_origins[0],
             "Access-Control-Allow-Credentials": "true",
@@ -482,10 +492,16 @@ def create_app() -> FastAPI:
 
     # CORS Middleware (must be added AFTER CORSErrorMiddleware for proper order)
 
+    logger.info(
+        "CORS configuration loaded: origins=%s regex=%s",
+        settings.cors_origins,
+        settings.cors_origin_regex,
+    )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_origin_regex=settings.cors_origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -676,7 +692,13 @@ def create_app() -> FastAPI:
         """
         from vnibb.core.database import check_database_connection
 
-        db_ok = await check_database_connection()
+        try:
+            db_ok = await asyncio.wait_for(check_database_connection(max_retries=1), timeout=2.5)
+        except asyncio.TimeoutError:
+            return JSONResponse(
+                status_code=503,
+                content={"ready": False, "reason": "Database readiness check timed out"},
+            )
 
         if not db_ok:
             return JSONResponse(

@@ -2,34 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { AlertTriangle, WifiOff } from 'lucide-react';
-import { env } from '@/lib/env';
+import { probeBackendReadiness } from '@/lib/backendHealth'
 
 export function ConnectionStatus() {
   const [status, setStatus] = useState<'online' | 'offline' | 'degraded'>('offline');
   const [isChecking, setIsChecking] = useState(false);
 
-  const fetchWithTimeout = async (url: string, timeoutMs = 8000): Promise<Response> => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      return await fetch(url, { method: 'GET', signal: controller.signal });
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-
   const checkConnection = async () => {
     setIsChecking(true);
     try {
-      const baseApiUrl = env.apiUrl.replace(/\/$/, '');
-      const [liveRes, readyRes] = await Promise.allSettled([
-        fetchWithTimeout(`${baseApiUrl}/live`),
-        fetchWithTimeout(`${baseApiUrl}/ready`)
-      ]);
-
-      const liveOk = liveRes.status === 'fulfilled' && liveRes.value.ok;
-      const readyOk = readyRes.status === 'fulfilled' && readyRes.value.ok;
+      const { liveOk, readyOk } = await probeBackendReadiness(8000)
 
       if (liveOk && readyOk) {
         setStatus('online');

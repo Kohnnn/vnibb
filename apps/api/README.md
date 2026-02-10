@@ -113,6 +113,7 @@ DATABASE_URL=postgresql+asyncpg://...
 VNSTOCK_API_KEY=vnstock_xxx
 VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
 CORS_ORIGINS=["https://vnibb.vercel.app"]
+CORS_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$|^https://[a-z0-9-]+\\.vercel\\.app$
 ENVIRONMENT=production
 GEMINI_API_KEY=your_gemini_api_key
 # Alternative accepted key name:
@@ -140,6 +141,24 @@ Premium package strategy:
 | `/api/v1/sectors/top-movers` | GET | Sector performance |
 
 **Full Docs:** `/docs` (Swagger UI)
+
+---
+
+## Sprint V34 Ops Scripts
+
+```bash
+# 1) Core endpoint + widget health gate (returns non-zero on failure)
+python scripts/widget_health_matrix.py --base-url https://vnibb.zeabur.app --repeats 5 --timeout 10 --fail-on-error --output-json scripts/v34_widget_health_after.json
+
+# 2) Resumable historical backfill (top 200, 5 years)
+python scripts/backfill_historical_v34.py --years 5 --limit 200 --batch-size 25
+
+# 3) Resumable fundamentals/news/events recovery
+python scripts/backfill_fundamentals_v34.py --limit 200 --batch-size 25 --include-quarterly-ratios
+
+# 4) Coverage delta vs V34 baseline
+python scripts/v34_coverage_delta.py --run-current-audit --min-5y-improvement 1 --fail-on-miss
+```
 
 ---
 

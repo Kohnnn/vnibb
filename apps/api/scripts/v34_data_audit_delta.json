@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-02-10T18:44:44.108076+00:00",
+  "baseline_file": "scripts\\v34_data_audit_baseline.json",
+  "current_file": "scripts\\v34_data_audit_after.json",
+  "metrics": {
+    "top_with_prices": {
+      "baseline": 199,
+      "current": 199,
+      "delta": 0
+    },
+    "top_with_5y_prices": {
+      "baseline": 0,
+      "current": 0,
+      "delta": 0
+    },
+    "top_with_ratios": {
+      "baseline": 38,
+      "current": 38,
+      "delta": 0
+    },
+    "top_with_company_news": {
+      "baseline": 0,
+      "current": 0,
+      "delta": 0
+    },
+    "top_with_company_events": {
+      "baseline": 0,
+      "current": 0,
+      "delta": 0
+    }
+  },
+  "notes": [
+    "5Y coverage improvement below target: +0 (min required 1)"
+  ],
+  "sla_passed": false,
+  "requirements": {
+    "min_5y_improvement": 1,
+    "allow_regression": false
+  }
+}

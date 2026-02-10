@@ -1,0 +1,144 @@
+{
+  "generated_at": "2026-02-10T18:39:36.656044+00:00",
+  "base_url": "https://vnibb.zeabur.app",
+  "repeats": 2,
+  "rows": [
+    {
+      "widget": "health",
+      "path": "/health/",
+      "attempts": 2,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        null
+      ],
+      "avg_latency_ms": 4905.85,
+      "max_latency_ms": 8115.4,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": "The read operation timed out"
+    },
+    {
+      "widget": "live",
+      "path": "/live",
+      "attempts": 2,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502
+      ],
+      "avg_latency_ms": 1218.14,
+      "max_latency_ms": 1263.83,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "ready",
+      "path": "/ready",
+      "attempts": 2,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502
+      ],
+      "avg_latency_ms": 1213.59,
+      "max_latency_ms": 1214.02,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "screener",
+      "path": "/api/v1/screener/?limit=20",
+      "attempts": 2,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502
+      ],
+      "avg_latency_ms": 3232.04,
+      "max_latency_ms": 3253.05,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "profile",
+      "path": "/api/v1/equity/VNM/profile",
+      "attempts": 2,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502
+      ],
+      "avg_latency_ms": 4261.89,
+      "max_latency_ms": 7306.22,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "quote",
+      "path": "/api/v1/equity/VNM/quote",
+      "attempts": 2,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502
+      ],
+      "avg_latency_ms": 2238.55,
+      "max_latency_ms": 3272.63,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "ratios",
+      "path": "/api/v1/equity/VNM/ratios?period=year",
+      "attempts": 2,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        null,
+        502
+      ],
+      "avg_latency_ms": 4670.06,
+      "max_latency_ms": 8122.07,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": "HTTP Error 502: Bad Gateway"
+    },
+    {
+      "widget": "historical",
+      "path": "/api/v1/equity/historical?symbol=VNM&period=1Y",
+      "attempts": 2,
+      "ok_attempts": 0,
+      "all_ok": false,
+      "statuses": [
+        502,
+        502
+      ],
+      "avg_latency_ms": 1219.74,
+      "max_latency_ms": 1231.79,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": "HTTP Error 502: Bad Gateway"
+    }
+  ],
+  "state_counts": {
+    "loaded": 0,
+    "empty": 0,
+    "error": 0,
+    "unknown": 8
+  },
+  "endpoint_ok": false,
+  "widget_state_ok": true,
+  "overall_ok": false
+}
