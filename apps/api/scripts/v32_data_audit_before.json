@@ -1,0 +1,78 @@
+{
+  "generated_at": "2026-02-10T17:19:08.733446",
+  "top_limit": 200,
+  "table_counts": {
+    "stocks": 1738,
+    "stock_prices": 470835,
+    "income_statements": 13842,
+    "balance_sheets": 64494,
+    "cash_flows": 27777,
+    "financial_ratios": 2162,
+    "market_news": 8,
+    "company_news": 1,
+    "company_events": 0
+  },
+  "top_symbol_coverage": {
+    "total_stocks": 1738,
+    "top_symbols": 200,
+    "top_with_prices": 199,
+    "top_with_5y_prices": 0,
+    "top_with_ratios": 38,
+    "top_with_company_news": 0,
+    "top_with_company_events": 0,
+    "oldest_price_in_top": "2025-01-06",
+    "latest_price_in_top": "2026-02-10",
+    "latest_ratio_update": "2026-01-31T09:21:13.024237",
+    "latest_company_news": null,
+    "latest_company_event": null
+  },
+  "core_symbol_spans": [
+    {
+      "symbol": "FPT",
+      "min_date": "2025-02-03",
+      "max_date": "2026-02-10",
+      "rows": 253
+    },
+    {
+      "symbol": "HPG",
+      "min_date": "2025-02-03",
+      "max_date": "2026-02-10",
+      "rows": 253
+    },
+    {
+      "symbol": "VCB",
+      "min_date": "2025-02-03",
+      "max_date": "2026-02-10",
+      "rows": 253
+    },
+    {
+      "symbol": "VIC",
+      "min_date": "2025-02-03",
+      "max_date": "2026-02-10",
+      "rows": 253
+    },
+    {
+      "symbol": "VNM",
+      "min_date": "2021-01-04",
+      "max_date": "2026-02-10",
+      "rows": 1274
+    }
+  ],
+  "top_symbols_sample": [
+    "BCP",
+    "MDC",
+    "BFC",
+    "QST",
+    "SSI",
+    "IPA",
+    "SMC",
+    "PIV",
+    "VKC",
+    "V12",
+    "TCB",
+    "BDT",
+    "DPP",
+    "TV3",
+    "SBR"
+  ]
+}

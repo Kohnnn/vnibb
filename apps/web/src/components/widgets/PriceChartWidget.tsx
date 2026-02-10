@@ -10,6 +10,7 @@ import { useFinancialRatios, useHistoricalPrices, useProfile, useScreenerData } 
 import { toTradingViewSymbol } from '@/lib/tradingView';
 import { TradingViewAdvancedChart } from '@/components/chart/TradingViewAdvancedChart';
 import { formatPercent, formatRatio } from '@/lib/formatters';
+import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 import {
   CartesianGrid,
   Line,
@@ -20,6 +21,7 @@ import {
 } from 'recharts';
 
 export type TimeframeType = '1D' | '5D' | '1M' | '3M' | '6M' | '1Y' | '5Y' | 'ALL';
+type ChartSourceMode = 'tradingview' | 'local';
 
 const TIMEFRAME_INTERVAL_MAP: Record<TimeframeType, string> = {
   '1D': 'D',
@@ -70,6 +72,11 @@ export function PriceChartWidget({
 
   const normalizedExchange = exchange?.trim().toUpperCase() || '';
   const isVietnamExchange = !normalizedExchange || ['HOSE', 'HNX', 'UPCOM'].includes(normalizedExchange);
+  const [sourceMode, setSourceMode] = useLocalStorage<ChartSourceMode>(
+    `vnibb_price_chart_source_${id}`,
+    'tradingview'
+  );
+  const shouldUseLocalHistory = isVietnamExchange && sourceMode === 'local';
 
   const tvSymbol = useMemo(() => {
     return toTradingViewSymbol(symbol, exchange);
@@ -104,7 +111,7 @@ export function PriceChartWidget({
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
     interval: '1D',
-    enabled: Boolean(symbol) && isVietnamExchange,
+    enabled: Boolean(symbol) && shouldUseLocalHistory,
   });
 
   const historicalData = historicalQuery.data?.data || [];
@@ -135,16 +142,44 @@ export function PriceChartWidget({
     >
       <div className="h-full flex flex-col bg-[#0a0a0a]">
         <div className="px-3 py-2 border-b border-gray-800/60">
-          <WidgetMeta
-            sourceLabel={isVietnamExchange ? 'VNIBB' : 'TradingView'}
-            note={isVietnamExchange ? 'Local historical data' : 'Streaming via TradingView'}
-            updatedAt={isVietnamExchange ? historyUpdatedAt : undefined}
-            isFetching={isVietnamExchange ? historicalQuery.isFetching && hasHistory : undefined}
-            align="right"
-          />
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setSourceMode('tradingview')}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  !shouldUseLocalHistory
+                    ? 'border-blue-500/50 bg-blue-500/15 text-blue-200'
+                    : 'border-gray-700 bg-black/20 text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                TradingView
+              </button>
+              <button
+                type="button"
+                disabled={!isVietnamExchange}
+                onClick={() => setSourceMode('local')}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  shouldUseLocalHistory
+                    ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
+                    : 'border-gray-700 bg-black/20 text-gray-400 hover:text-gray-200'
+                } disabled:cursor-not-allowed disabled:opacity-50`}
+                title={isVietnamExchange ? 'Use VNIBB historical prices' : 'Local mode is available for VN exchanges only'}
+              >
+                Local
+              </button>
+            </div>
+            <WidgetMeta
+              sourceLabel={shouldUseLocalHistory ? 'VNIBB' : 'TradingView'}
+              note={shouldUseLocalHistory ? 'Local historical data (optional)' : 'TradingView data (default)'}
+              updatedAt={shouldUseLocalHistory ? historyUpdatedAt : undefined}
+              isFetching={shouldUseLocalHistory ? historicalQuery.isFetching && hasHistory : undefined}
+              align="right"
+            />
+          </div>
         </div>
         <div className="relative flex-1 w-full">
-          {isVietnamExchange ? (
+          {shouldUseLocalHistory ? (
             historyLoading && !hasHistory ? (
               <WidgetSkeleton lines={6} />
             ) : historyError && !hasHistory ? (
