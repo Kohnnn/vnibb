@@ -102,6 +102,7 @@ export interface WidgetConfig {
     timeframe?: string;
     indicators?: string[];
     refreshInterval?: number;
+    collapsed?: boolean;
     [key: string]: unknown;
 }
 

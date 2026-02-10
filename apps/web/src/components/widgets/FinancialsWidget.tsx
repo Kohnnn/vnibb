@@ -13,7 +13,7 @@ import {
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { useUnit } from '@/contexts/UnitContext';
-import { formatUnitValue, getUnitCaption } from '@/lib/units';
+import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 
 type FinancialTab = 'balance_sheet' | 'income_statement' | 'cash_flow' | 'ratios';
 
@@ -218,6 +218,16 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
     const hasData = Boolean(tableData && tableData.periods.length > 0);
     const isFallback = Boolean(activeQuery?.error && hasData);
 
+    const tableScale = useMemo(() => {
+        if (!tableData || activeTab === 'ratios') return resolveUnitScale([], unitConfig);
+        const values = tableData.rows.flatMap((row) =>
+            tableData.periods.map((period) => row.values[period]?.val)
+        );
+        return resolveUnitScale(values, unitConfig);
+    }, [tableData, activeTab, unitConfig]);
+
+    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+
     return (
         <WidgetContainer
             title="Financials"
@@ -270,12 +280,6 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                 </button>
                             ))}
                         </div>
-                        <div className="flex items-center gap-1 text-[9px] font-bold text-muted-foreground uppercase">
-                            <span className="hidden sm:inline">Units</span>
-                            <span className="px-1.5 py-0.5 rounded bg-muted/30 text-gray-300">
-                                {getUnitCaption(unitConfig)}
-                            </span>
-                        </div>
                         <WidgetMeta
                             updatedAt={activeQuery.dataUpdatedAt}
                             isFetching={activeQuery.isFetching && hasData}
@@ -300,6 +304,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                         />
                     ) : (
                         <div className="min-w-max">
+                            {activeTab !== 'ratios' && (
+                                <div className="px-2 pb-1 text-[10px] text-muted-foreground italic">
+                                    {unitLegend}
+                                </div>
+                            )}
                             <table className="data-table w-full text-[11px] border-collapse table-fixed">
                                 <thead className="sticky top-0 bg-secondary/95 backdrop-blur-sm z-20">
                                     <tr className="border-b border-white/10 shadow-sm">
@@ -326,6 +335,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                                 const data = row.values[p];
                                                 const val = data?.val;
                                                 const growth = data?.growth;
+                                                const displayValue = row.isPct
+                                                    ? formatPct(val)
+                                                    : activeTab === 'ratios'
+                                                        ? formatRatio(val)
+                                                        : formatUnitValuePlain(val, tableScale, unitConfig);
 
                                                 return (
                                                     <td key={p} data-type="number" className="p-2 text-right font-mono group-hover:bg-white/[0.01]">
@@ -334,7 +348,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                                                 "font-medium",
                                                                 val < 0 ? "text-red-400" : "text-gray-200"
                                                             )}>
-                                                                {row.isPct ? formatPct(val) : formatUnitValue(val, unitConfig)}
+                                                                {displayValue}
                                                             </span>
                                                             {growth !== null && Math.abs(growth) > 1 && (
                                                                 <span className={cn(
@@ -373,12 +387,15 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                         </div>
                     )}
                 </div>
-                <div className="border-t border-white/5 px-2 py-1 text-[10px] text-muted-foreground">
-                    Units: {getUnitCaption(unitConfig)}. Per-share values shown raw.
-                </div>
             </div>
         </WidgetContainer>
     );
+}
+
+function formatRatio(value: number | null | undefined): string {
+    if (value === null || value === undefined) return '-';
+    if (!Number.isFinite(value)) return '-';
+    return value.toFixed(2);
 }
 
 function formatPct(value: number | null | undefined): string {

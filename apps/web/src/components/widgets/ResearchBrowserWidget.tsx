@@ -50,7 +50,7 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
 
   const quickSources = useMemo(() => {
     if (!symbol) return [];
-    const query = `${symbol} stock Vietnam`;
+    const query = `${symbol} cổ phiếu phân tích chứng khoán Việt Nam`;
     return [
       {
         id: 'google',
@@ -66,6 +66,11 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
         id: 'cafef',
         label: 'CafeF',
         url: `https://search.cafef.vn/tim-kiem.chn?keywords=${encodeURIComponent(symbol)}`,
+      },
+      {
+        id: 'tradingview',
+        label: 'TradingView',
+        url: `https://www.tradingview.com/symbols/HOSE-${encodeURIComponent(symbol)}/`,
       },
       {
         id: 'ndh',
@@ -91,10 +96,9 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
       setActiveSourceId(null);
       return;
     }
-    if (!activeSiteId) {
-      setActiveSourceId((prev) => prev || 'google');
-    }
-  }, [symbol, activeSiteId]);
+    setActiveSiteId(null);
+    setActiveSourceId('google');
+  }, [symbol, setActiveSiteId]);
 
   const handleAddSite = () => {
     const normalized = normalizeUrl(urlInput);

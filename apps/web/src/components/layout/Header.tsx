@@ -3,10 +3,17 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Search, Bell, User, Edit, Check, Bot, RotateCcw, X, Link as LinkIcon, LayoutGrid } from 'lucide-react';
+import { Search, Bell, User, Edit, Check, Bot, RotateCcw, X, Link as LinkIcon, LayoutGrid, MoreHorizontal } from 'lucide-react';
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel';
 import { ConnectionStatus } from '../ui/ConnectionStatus';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 
 interface HeaderProps {
@@ -17,6 +24,8 @@ interface HeaderProps {
     onAIClick?: () => void;
     onResetLayout?: () => void;
     onAutoFitLayout?: () => void;
+    onCollapseAll?: () => void;
+    onExpandAll?: () => void;
 }
 
 export function Header({
@@ -26,11 +35,14 @@ export function Header({
     onEditToggle,
     onAIClick,
     onResetLayout,
-    onAutoFitLayout
+    onAutoFitLayout,
+    onCollapseAll,
+    onExpandAll
 }: HeaderProps) {
     const [searchValue, setSearchValue] = useState(currentSymbol);
     const [isSearching, setIsSearching] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
+    const hasActionMenu = Boolean(onAutoFitLayout || onResetLayout || onCollapseAll || onExpandAll || onEditToggle);
 
     // Sync searchValue when currentSymbol changes externally (e.g., widget ticker click)
     useEffect(() => {
@@ -134,6 +146,50 @@ export function Header({
 
                 {/* Actions */}
                 <div className="flex items-center gap-1 md:gap-2">
+                    {hasActionMenu && (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button
+                                    className="flex items-center gap-1.5 px-2 md:px-2.5 py-1.5 rounded-md bg-[#1e2a3b]/50 text-gray-300 hover:bg-[#1e2a3b] transition-colors"
+                                    title="Dashboard actions"
+                                >
+                                    <MoreHorizontal size={14} />
+                                    <span className="hidden md:inline text-xs font-medium">Actions</span>
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="bg-[#0b1021] border border-[#1e2a3b] min-w-[180px]">
+                                {onAutoFitLayout && (
+                                    <DropdownMenuItem onClick={onAutoFitLayout} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                        Auto-fit layout
+                                    </DropdownMenuItem>
+                                )}
+                                {onResetLayout && (
+                                    <DropdownMenuItem onClick={onResetLayout} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                        Reset layout
+                                    </DropdownMenuItem>
+                                )}
+                                {(onCollapseAll || onExpandAll) && <DropdownMenuSeparator className="bg-[#1e2a3b]" />}
+                                {onCollapseAll && (
+                                    <DropdownMenuItem onClick={onCollapseAll} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                        Collapse all widgets
+                                    </DropdownMenuItem>
+                                )}
+                                {onExpandAll && (
+                                    <DropdownMenuItem onClick={onExpandAll} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                        Expand all widgets
+                                    </DropdownMenuItem>
+                                )}
+                                {onEditToggle && (
+                                    <>
+                                        <DropdownMenuSeparator className="bg-[#1e2a3b]" />
+                                        <DropdownMenuItem onClick={onEditToggle} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                            {isEditing ? 'Lock Editing' : 'Unlock Editing'}
+                                        </DropdownMenuItem>
+                                    </>
+                                )}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
                     {/* Reset Layout Button - only show in edit mode */}
                     {isEditing && onResetLayout && (
                         <button
@@ -146,8 +202,8 @@ export function Header({
                         </button>
                     )}
 
-                    {/* Auto-fit Layout Button - only show in edit mode */}
-                    {isEditing && onAutoFitLayout && (
+                    {/* Auto-fit Layout Button */}
+                    {onAutoFitLayout && (
                         <button
                             onClick={onAutoFitLayout}
                             className="flex items-center gap-1.5 px-2 md:px-2.5 py-1.5 rounded-md bg-sky-500/15 text-sky-300 hover:bg-sky-500/25 border border-sky-500/20 transition-colors"

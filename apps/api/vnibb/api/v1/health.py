@@ -7,14 +7,25 @@ from vnibb.core.database import get_db
 from vnibb.core.config import settings
 import redis.asyncio as redis
 from datetime import datetime
+import time
 
 router = APIRouter()
+
+_BASIC_HEALTH_CACHE: dict[str, object] = {}
+_BASIC_HEALTH_TTL_SECONDS = 30
+
 
 @router.get("/")
 async def basic_health(db: AsyncSession = Depends(get_db)):
     """Basic health check reporting DB status."""
     from vnibb.core.cache import redis_client
-    
+
+    now = time.time()
+    cached_data = _BASIC_HEALTH_CACHE.get("data")
+    cached_at = _BASIC_HEALTH_CACHE.get("timestamp", 0)
+    if cached_data and now - cached_at < _BASIC_HEALTH_TTL_SECONDS:
+        return cached_data
+
     health = {
         "status": "ok",
         "db": "connected",
@@ -43,6 +54,8 @@ async def basic_health(db: AsyncSession = Depends(get_db)):
     except Exception:
         health["cache"] = "unavailable"
         
+    _BASIC_HEALTH_CACHE["data"] = health
+    _BASIC_HEALTH_CACHE["timestamp"] = now
     return health
 
 

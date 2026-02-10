@@ -74,6 +74,56 @@ export function formatUnitValue(
   }
 }
 
+export interface UnitScale {
+  divisor: number
+  suffix: '' | 'K' | 'M' | 'B'
+}
+
+export function resolveUnitScale(values: Array<number | null | undefined>, config: UnitConfig): UnitScale {
+  const finite = values.filter((value) => Number.isFinite(value as number)) as number[]
+  const maxAbs = finite.length ? Math.max(...finite.map((value) => Math.abs(value))) : 0
+
+  if (config.display === 'raw') return { divisor: 1, suffix: '' }
+  if (config.display === 'K') return { divisor: 1e3, suffix: 'K' }
+  if (config.display === 'M') return { divisor: 1e6, suffix: 'M' }
+  if (config.display === 'B') return { divisor: 1e9, suffix: 'B' }
+
+  if (maxAbs >= 1e9) return { divisor: 1e9, suffix: 'B' }
+  if (maxAbs >= 1e6) return { divisor: 1e6, suffix: 'M' }
+  if (maxAbs >= 1e3) return { divisor: 1e3, suffix: 'K' }
+  return { divisor: 1, suffix: '' }
+}
+
+export function formatUnitValuePlain(
+  value: number | null | undefined,
+  scale: UnitScale,
+  config: UnitConfig = DEFAULT_UNIT_CONFIG
+): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '-'
+
+  const locale = config.locale || 'en-US'
+  const decimals = config.decimalPlaces
+  const scaled = value / scale.divisor
+
+  return scaled.toLocaleString(locale, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  })
+}
+
+export function getUnitLegend(scale: UnitScale, config: UnitConfig): string {
+  const currency = config.currency ? ` ${config.currency}` : ''
+  if (!scale.suffix) return `Values in${currency}`.trim()
+
+  const label = scale.suffix === 'K'
+    ? 'Thousands'
+    : scale.suffix === 'M'
+      ? 'Millions'
+      : 'Billions'
+
+  return `Values in ${label}${currency}`
+}
+
 export function formatAxisValue(value: number, config: UnitConfig = DEFAULT_UNIT_CONFIG): string {
   const formatted = formatUnitValue(value, { ...config, decimalPlaces: 2 })
   return formatted.replace(/([0-9])([KMB])$/, '$1 $2')

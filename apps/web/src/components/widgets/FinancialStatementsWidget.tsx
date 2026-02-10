@@ -9,7 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useUnit } from '@/contexts/UnitContext';
-import { formatUnitValue, getUnitCaption } from '@/lib/units';
+import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { Sparkline } from '@/components/ui/Sparkline';
 
 type StatementType = 'income' | 'balance' | 'cashflow';
@@ -159,6 +159,14 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
         }));
     }, [recent, statementType]);
 
+    const tableScale = useMemo(() => {
+        const metricKeys = (LABELS[statementType] || []).map((metric) => metric.key);
+        const values = recent.flatMap((row: any) => metricKeys.map((key) => row[key]));
+        return resolveUnitScale(values, unitConfig);
+    }, [recent, statementType, unitConfig]);
+
+    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view financials" />;
     }
@@ -225,67 +233,70 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                 ) : !hasData ? (
                     <WidgetEmpty message={`No ${statementType} data for ${symbol}`} />
                 ) : (
-                    <table className="data-table w-full text-xs">
-                        <thead className="sticky top-0 bg-[#0f172a]">
-                            <tr className="text-gray-500">
-                                <th className="text-left px-3 py-2 font-medium min-w-[140px]">Item</th>
-                                {periodLabels.map((label) => (
-                                    <th key={label} className="text-right px-3 py-2 font-medium min-w-[80px]">{label}</th>
-                                ))}
-                                <th className="text-right px-3 py-2 font-medium min-w-[60px]">YoY %</th>
-                                <th className="text-center px-3 py-2 font-medium min-w-[70px]">Trend</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {rows.map((row, index) => {
-                                const yoyChange = getYoYChange(row.values[0], row.values[1]);
-                                const points = row.values
-                                    .slice()
-                                    .reverse()
-                                    .map((value) => Number(value))
-                                    .filter((value) => Number.isFinite(value));
-                                return (
-                                    <tr
-                                        key={index}
-                                        className={`border-b border-[#1e293b]/30 hover:bg-[#1e293b]/20 ${row.isHeader ? 'bg-[#1e293b]/10' : ''}`}
-                                    >
-                                        <td
-                                            className={`px-3 py-2 ${row.isHeader ? 'font-semibold text-white' : 'text-gray-300'}`}
-                                            style={{ paddingLeft: row.indent ? `${12 + row.indent * 16}px` : '12px' }}
+                    <div className="space-y-1">
+                        <div className="px-3 text-[10px] text-gray-500 italic">{unitLegend}</div>
+                        <table className="data-table w-full text-xs">
+                            <thead className="sticky top-0 bg-[#0f172a]">
+                                <tr className="text-gray-500">
+                                    <th className="text-left px-3 py-2 font-medium min-w-[140px]">Item</th>
+                                    {periodLabels.map((label) => (
+                                        <th key={label} className="text-right px-3 py-2 font-medium min-w-[80px]">{label}</th>
+                                    ))}
+                                    <th className="text-right px-3 py-2 font-medium min-w-[60px]">YoY %</th>
+                                    <th className="text-center px-3 py-2 font-medium min-w-[70px]">Trend</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rows.map((row, index) => {
+                                    const yoyChange = getYoYChange(row.values[0], row.values[1]);
+                                    const points = row.values
+                                        .slice()
+                                        .reverse()
+                                        .map((value) => Number(value))
+                                        .filter((value) => Number.isFinite(value));
+                                    return (
+                                        <tr
+                                            key={index}
+                                            className={`border-b border-[#1e293b]/30 hover:bg-[#1e293b]/20 ${row.isHeader ? 'bg-[#1e293b]/10' : ''}`}
                                         >
-                                            {row.label}
-                                        </td>
-                                        {row.values.map((val, i) => (
                                             <td
-                                                key={i}
-                                                data-type="number"
-                                                className={`text-right px-3 py-2 font-mono ${val && val < 0 ? 'text-red-400' : row.isHeader ? 'text-white' : 'text-gray-300'}`}
+                                                className={`px-3 py-2 ${row.isHeader ? 'font-semibold text-white' : 'text-gray-300'}`}
+                                                style={{ paddingLeft: row.indent ? `${12 + row.indent * 16}px` : '12px' }}
                                             >
-                                                {formatUnitValue(val, unitConfig)}
+                                                {row.label}
                                             </td>
-                                        ))}
-                                        <td
-                                            className={`text-right px-3 py-2 font-mono ${yoyChange > 0 ? 'text-green-400' : yoyChange < 0 ? 'text-red-400' : 'text-gray-400'}`}
-                                        >
-                                            {yoyChange > 0 ? '+' : ''}{yoyChange.toFixed(1)}%
-                                        </td>
-                                        <td className="text-center px-3 py-2">
-                                            {points.length < 2 ? (
-                                                <span className="text-[10px] text-muted-foreground">-</span>
-                                            ) : (
-                                                <Sparkline data={points} width={70} height={18} />
-                                            )}
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+                                            {row.values.map((val, i) => (
+                                                <td
+                                                    key={i}
+                                                    data-type="number"
+                                                    className={`text-right px-3 py-2 font-mono ${val && val < 0 ? 'text-red-400' : row.isHeader ? 'text-white' : 'text-gray-300'}`}
+                                                >
+                                                    {formatUnitValuePlain(val, tableScale, unitConfig)}
+                                                </td>
+                                            ))}
+                                            <td
+                                                className={`text-right px-3 py-2 font-mono ${yoyChange > 0 ? 'text-green-400' : yoyChange < 0 ? 'text-red-400' : 'text-gray-400'}`}
+                                            >
+                                                {yoyChange > 0 ? '+' : ''}{yoyChange.toFixed(1)}%
+                                            </td>
+                                            <td className="text-center px-3 py-2">
+                                                {points.length < 2 ? (
+                                                    <span className="text-[10px] text-muted-foreground">-</span>
+                                                ) : (
+                                                    <Sparkline data={points} width={70} height={18} />
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
 
             <div className="px-3 py-2 border-t border-[#1e293b] text-[10px] text-gray-500">
-                Units: {getUnitCaption(unitConfig)}. Per-share values shown raw. Data for {symbol}.
+                Per-share values shown raw. Data for {symbol}.
             </div>
         </div>
     );

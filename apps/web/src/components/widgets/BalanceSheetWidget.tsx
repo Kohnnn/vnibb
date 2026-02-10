@@ -18,7 +18,7 @@ import {
     Legend,
     CartesianGrid,
 } from 'recharts';
-import { formatAxisValue, formatUnitValue, getUnitCaption } from '@/lib/units';
+import { formatAxisValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
@@ -92,46 +92,62 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
         }));
     }, [items]);
 
-    const renderTable = () => (
-        <table className="data-table w-full text-[11px] text-left">
-            <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
-                <tr className="border-b border-gray-800">
-                    <th className="py-2 px-1 font-bold uppercase tracking-tighter">Item</th>
-                    {items.slice(0, 4).map((d, i) => (
-                        <th key={i} className="text-right py-2 px-1 font-bold">{formatPeriodLabel(d.period)}</th>
-                    ))}
-                    <th className="py-2 px-1 font-bold uppercase tracking-tighter text-center">Trend</th>
-                </tr>
-            </thead>
-            <tbody>
-                {['total_assets', 'equity', 'total_liabilities', 'cash', 'inventory'].map((key) => {
-                    const points = items
-                        .slice(0, 4)
-                        .slice()
-                        .reverse()
-                        .map((d) => Number(d[key as keyof typeof d]))
-                        .filter((value) => Number.isFinite(value));
+    const tableScale = useMemo(() => {
+        const values = items.flatMap((item) => [
+            item.total_assets,
+            item.total_liabilities,
+            item.equity,
+            item.cash,
+            item.inventory,
+        ]);
+        return resolveUnitScale(values, unitConfig);
+    }, [items, unitConfig]);
 
-                    return (
-                    <tr key={key} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors">
-                        <td className="py-2 px-1 text-gray-400 font-medium">{labels[key] || key}</td>
+    const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+
+    const renderTable = () => (
+        <div className="space-y-1">
+            <div className="px-1 text-[10px] text-gray-500 italic">{unitLegend}</div>
+            <table className="data-table w-full text-[11px] text-left">
+                <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
+                    <tr className="border-b border-gray-800">
+                        <th className="py-2 px-1 font-bold uppercase tracking-tighter">Item</th>
                         {items.slice(0, 4).map((d, i) => (
-                            <td key={i} data-type="number" className="text-right py-2 px-1 text-white font-mono">
-                                {formatUnitValue(d[key as keyof typeof d] as number, unitConfig)}
-                            </td>
+                            <th key={i} className="text-right py-2 px-1 font-bold">{formatPeriodLabel(d.period)}</th>
                         ))}
-                        <td className="py-2 px-1 text-center">
-                            {points.length < 2 ? (
-                                <span className="text-[10px] text-muted-foreground">-</span>
-                            ) : (
-                                <Sparkline data={points} width={70} height={18} />
-                            )}
-                        </td>
+                        <th className="py-2 px-1 font-bold uppercase tracking-tighter text-center">Trend</th>
                     </tr>
-                    );
-                })}
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    {['total_assets', 'equity', 'total_liabilities', 'cash', 'inventory'].map((key) => {
+                        const points = items
+                            .slice(0, 4)
+                            .slice()
+                            .reverse()
+                            .map((d) => Number(d[key as keyof typeof d]))
+                            .filter((value) => Number.isFinite(value));
+
+                        return (
+                        <tr key={key} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors">
+                            <td className="py-2 px-1 text-gray-400 font-medium">{labels[key] || key}</td>
+                            {items.slice(0, 4).map((d, i) => (
+                                <td key={i} data-type="number" className="text-right py-2 px-1 text-white font-mono">
+                                    {formatUnitValuePlain(d[key as keyof typeof d] as number, tableScale, unitConfig)}
+                                </td>
+                            ))}
+                            <td className="py-2 px-1 text-center">
+                                {points.length < 2 ? (
+                                    <span className="text-[10px] text-muted-foreground">-</span>
+                                ) : (
+                                    <Sparkline data={points} width={70} height={18} />
+                                )}
+                            </td>
+                        </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
     );
 
     const [chartType, setChartType] = useState<'overview' | 'debt'>('overview');
@@ -262,7 +278,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={`${period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period} • ${getUnitCaption(unitConfig)}`}
+                        note={`${period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period}`}
                         align="right"
                     />
                 </div>

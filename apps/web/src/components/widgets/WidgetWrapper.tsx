@@ -65,6 +65,7 @@ export interface WidgetWrapperProps {
     syncGroupId?: number;
     widgetGroup?: WidgetGroupId;
     isEditing?: boolean;
+    isCollapsed?: boolean;
 
     showTickerSelector?: boolean;
     showGroupLabels?: boolean; // Controls visibility of sync badge
@@ -101,11 +102,13 @@ export function WidgetWrapper({
     onRefresh,
     onSymbolChange,
     onSettingsClick,
-    onCopilotClick
+    onCopilotClick,
+    isCollapsed: initialCollapsed = false,
 }: WidgetWrapperProps) {
     const { updateWidget } = useDashboard();
     const { getColorForGroup, getSymbolForGroup, groups, setGroupSymbol } = useWidgetGroups();
     const [isMaximized, setIsMaximized] = useState(false);
+    const [isCollapsed, setIsCollapsed] = useState(initialCollapsed);
     const [isTickerDropdownOpen, setIsTickerDropdownOpen] = useState(false);
     const [widgetGroup, setWidgetGroup] = useState<WidgetGroupId>(initialWidgetGroup);
     const [internalData, setInternalData] = useState<any>(widgetData);
@@ -119,6 +122,10 @@ export function WidgetWrapper({
     useEffect(() => {
         if (widgetData) setInternalData(widgetData);
     }, [widgetData]);
+
+    useEffect(() => {
+        setIsCollapsed(initialCollapsed);
+    }, [initialCollapsed]);
 
     // Get current group details if assigned
     const effectiveSymbol = getSymbolForGroup(widgetGroup);
@@ -181,6 +188,27 @@ export function WidgetWrapper({
                 await exportToPNG(id, filename);
                 break;
         }
+    };
+
+    const buildCopilotContext = (): Record<string, unknown> => {
+        const sourceData = internalData ?? widgetData;
+        let dataSample: unknown = null;
+
+        if (Array.isArray(sourceData)) {
+            dataSample = sourceData.slice(0, 5);
+        } else if (sourceData && typeof sourceData === 'object') {
+            dataSample = Object.fromEntries(Object.entries(sourceData).slice(0, 20));
+        } else if (sourceData !== undefined) {
+            dataSample = sourceData;
+        }
+
+        return {
+            widgetId: id,
+            widgetType: title,
+            symbol: displaySymbol,
+            widgetGroup,
+            dataSample,
+        };
     };
 
 
@@ -274,7 +302,7 @@ export function WidgetWrapper({
                     onMaximize={handleMaximize}
                     onRefresh={onRefresh}
                     onSettings={onSettingsClick}
-                    onCopilot={() => onCopilotClick?.()}
+                    onCopilot={() => onCopilotClick?.(buildCopilotContext())}
                     onClose={onRemove}
                     actions={
                         <DropdownMenu>
@@ -318,20 +346,26 @@ export function WidgetWrapper({
 
                 {/* Content */}
                 <div id={id} className="flex-1 overflow-auto relative bg-secondary p-3 sm:p-4">
-                    <WidgetHeaderVisibilityProvider hideHeader>
-                        <WidgetErrorBoundary
-                            onError={(error) => console.error(`Widget ${id} (${title}) crashed:`, error)}
-                        >
-                            {React.isValidElement(children)
-                                ? React.cloneElement(children as React.ReactElement<any>, {
-                                    id: id,
-                                    symbol: displaySymbol,
-                                    widgetGroup,
-                                    onDataChange: setInternalData,
-                                })
-                                : children}
-                        </WidgetErrorBoundary>
-                    </WidgetHeaderVisibilityProvider>
+                    {isCollapsed ? (
+                        <div className="h-full flex items-center justify-center text-[10px] text-muted-foreground uppercase tracking-[0.2em]">
+                            Collapsed
+                        </div>
+                    ) : (
+                        <WidgetHeaderVisibilityProvider hideHeader>
+                            <WidgetErrorBoundary
+                                onError={(error) => console.error(`Widget ${id} (${title}) crashed:`, error)}
+                            >
+                                {React.isValidElement(children)
+                                    ? React.cloneElement(children as React.ReactElement<any>, {
+                                        id: id,
+                                        symbol: displaySymbol,
+                                        widgetGroup,
+                                        onDataChange: setInternalData,
+                                    })
+                                    : children}
+                            </WidgetErrorBoundary>
+                        </WidgetHeaderVisibilityProvider>
+                    )}
                 </div>
 
             </div>

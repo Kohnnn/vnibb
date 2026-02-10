@@ -4,6 +4,7 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Sidebar, Header, TabBar, RightSidebar, MobileNav } from '@/components/layout';
+import { DashboardTopTabs } from '@/components/dashboard/DashboardTopTabs';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
@@ -74,6 +75,8 @@ function DashboardContent() {
     const [isPromptsLibraryOpen, setIsPromptsLibraryOpen] = useState(false);
     const [isTemplateSelectorOpen, setIsTemplateSelectorOpen] = useState(false);
     const [showAICopilot, setShowAICopilot] = useState(false);
+    const [copilotWidgetContext, setCopilotWidgetContext] = useState<string | undefined>(undefined);
+    const [copilotWidgetData, setCopilotWidgetData] = useState<Record<string, unknown> | undefined>(undefined);
     const [sidebarWidth, setSidebarWidth] = useState(208);
     const [mounted, setMounted] = useState(false);
     const [widgetSettingsState, setWidgetSettingsState] = useState<{
@@ -172,6 +175,30 @@ function DashboardContent() {
             return { ...widget, layout: nextLayout };
         });
 
+        updateTabLayout(activeDashboard.id, activeTab.id, updatedWidgets);
+    }, [activeDashboard, activeTab, updateTabLayout]);
+
+    const handleCollapseAll = useCallback(() => {
+        if (!activeDashboard || !activeTab) return;
+        const updatedWidgets = activeTab.widgets.map((widget) => ({
+            ...widget,
+            config: {
+                ...widget.config,
+                collapsed: true,
+            },
+        }));
+        updateTabLayout(activeDashboard.id, activeTab.id, updatedWidgets);
+    }, [activeDashboard, activeTab, updateTabLayout]);
+
+    const handleExpandAll = useCallback(() => {
+        if (!activeDashboard || !activeTab) return;
+        const updatedWidgets = activeTab.widgets.map((widget) => ({
+            ...widget,
+            config: {
+                ...widget.config,
+                collapsed: false,
+            },
+        }));
         updateTabLayout(activeDashboard.id, activeTab.id, updatedWidgets);
     }, [activeDashboard, activeTab, updateTabLayout]);
 
@@ -287,11 +314,18 @@ function DashboardContent() {
                     onSymbolChange={handleSymbolChange}
                     isEditing={isEditing}
                     onEditToggle={handleEditToggle}
-                    onAIClick={() => setShowAICopilot(!showAICopilot)}
+                    onAIClick={() => {
+                        setCopilotWidgetContext(undefined);
+                        setCopilotWidgetData(undefined);
+                        setShowAICopilot(!showAICopilot);
+                    }}
                     onResetLayout={handleResetLayout}
                     onAutoFitLayout={handleAutoFitLayout}
+                    onCollapseAll={handleCollapseAll}
+                    onExpandAll={handleExpandAll}
                 />
 
+                <DashboardTopTabs />
                 <TabBar symbol={globalSymbol} />
 
                 <div className="flex-1 p-3 sm:p-4 overflow-hidden bg-[#0a0a0a]">
@@ -322,9 +356,17 @@ function DashboardContent() {
                                                     dashboardId={activeDashboard.id}
                                                     widgetGroup={widget.widgetGroup}
                                                     isEditing={isEditing}
+                                                    isCollapsed={Boolean(widget.config?.collapsed)}
                                                     onRemove={() => deleteWidget(activeDashboard.id, activeTab.id, widget.id)}
                                                     onSymbolChange={handleSymbolChange}
-                                                    onCopilotClick={() => setShowAICopilot(true)}
+                                                    onCopilotClick={(context) => {
+                                                        const contextName = typeof context?.widgetType === 'string'
+                                                            ? context.widgetType
+                                                            : widgetType.replace(/_/g, ' ');
+                                                        setCopilotWidgetContext(contextName);
+                                                        setCopilotWidgetData(context || undefined);
+                                                        setShowAICopilot(true);
+                                                    }}
                                                     onSettingsClick={() => handleOpenWidgetSettings(widget.id)}
                                                     parameters={parameters}
                                                 >
@@ -369,7 +411,9 @@ function DashboardContent() {
                     <AICopilot 
                         isOpen={showAICopilot} 
                         onClose={() => setShowAICopilot(false)} 
-                        currentSymbol={globalSymbol} 
+                        currentSymbol={globalSymbol}
+                        widgetContext={copilotWidgetContext}
+                        widgetContextData={copilotWidgetData}
                     />
                 </RightSidebar>
             </main>
