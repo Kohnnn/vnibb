@@ -112,6 +112,7 @@ railway up
 DATABASE_URL=postgresql+asyncpg://...
 VNSTOCK_API_KEY=vnstock_xxx
 VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
+ALEMBIC_STRICT=0  # 1 = fail startup on migration error, 0 = continue startup with warning
 CORS_ORIGINS=["https://vnibb.vercel.app"]
 CORS_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$|^https://[a-z0-9-]+\\.vercel\\.app$
 ENVIRONMENT=production
