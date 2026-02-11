@@ -5,7 +5,22 @@ echo "ENTRYPOINT STARTED: User $(whoami)"
 
 # 1. Database Migrations
 echo "Running database migrations..."
-alembic upgrade head
+ALEMBIC_STRICT="${ALEMBIC_STRICT:-0}"
+
+if alembic upgrade head; then
+    echo "Database migrations completed."
+else
+    strict_flag=$(printf "%s" "$ALEMBIC_STRICT" | tr '[:upper:]' '[:lower:]')
+    case "$strict_flag" in
+        1|true|yes|on)
+            echo "ERROR: alembic migration failed and ALEMBIC_STRICT=1. Exiting."
+            exit 1
+            ;;
+        *)
+            echo "WARNING: alembic migration failed. Continuing startup (ALEMBIC_STRICT=0)."
+            ;;
+    esac
+fi
 
 # 2. Check for VnStock Premium Packages
 VENV_PATH="/root/.venv"
