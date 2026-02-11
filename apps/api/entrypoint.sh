@@ -32,7 +32,9 @@ VNSTOCK_RUNTIME_INSTALL="${VNSTOCK_RUNTIME_INSTALL:-0}"
 
 venv_ready() {
     if [ -x "$VENV_PATH/bin/python" ]; then
-        "$VENV_PATH/bin/python" -c "import uvicorn" >/dev/null 2>&1 && return 0
+        # Ignore inherited PYTHONPATH when probing venv health; otherwise system
+        # site-packages can cause false positives for modules not installed in venv.
+        PYTHONPATH="" "$VENV_PATH/bin/python" -c "import uvicorn" >/dev/null 2>&1 && return 0
     fi
     return 1
 }
@@ -150,4 +152,9 @@ fi
 
 # 3. Start Application
 echo "Starting VNIBB API..."
-exec "$PYTHON_BIN" -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port 8000
+if "$PYTHON_BIN" -c "import uvicorn" >/dev/null 2>&1; then
+    exec "$PYTHON_BIN" -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port 8000
+fi
+
+echo "WARNING: Selected interpreter ($PYTHON_BIN) missing uvicorn. Falling back to system python3."
+exec python3 -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port 8000
