@@ -45,6 +45,12 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir .
 
+# Optional pre-install for vnii from VNStock index.
+# The premium installer can still proceed even if this step fails.
+ARG VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple
+RUN pip install --no-cache-dir --extra-index-url "${VNSTOCK_EXTRA_INDEX_URL}" "vnii>=0.1.5" || \
+    echo "INFO: vnii unavailable from extra index; continuing with premium bootstrap."
+
 # Install vnstock premium packages via CLI installer
 # The API key is passed as build arg for installation
 ARG VNSTOCK_API_KEY

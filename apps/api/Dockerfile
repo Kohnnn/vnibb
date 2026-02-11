@@ -35,6 +35,12 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir .
 
+# Optional: install vnii from VNStock index for premium checks.
+# Do not fail the image build if index/package is unavailable.
+ARG VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple
+RUN pip install --no-cache-dir --extra-index-url "${VNSTOCK_EXTRA_INDEX_URL}" "vnii>=0.1.5" || \
+    echo "INFO: vnii unavailable from extra index; continuing in free-compatible mode."
+
 # Explicitly install vnai to ensure it's available for the installer
 RUN pip install --no-cache-dir "vnai>=2.3.9" && \
     python3 -c "import vnai; print(f'vnai installed at {vnai.__file__}')"
