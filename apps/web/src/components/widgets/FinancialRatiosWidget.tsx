@@ -12,6 +12,8 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { cn } from '@/lib/utils';
 import { Sparkline } from '@/components/ui/Sparkline';
+import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatNumber, formatPercent } from '@/lib/units';
 
 interface FinancialRatiosWidgetProps {
     id: string;
@@ -21,13 +23,11 @@ interface FinancialRatiosWidgetProps {
 }
 
 function formatRatio(value: number | null | undefined, decimals = 2): string {
-    if (value === null || value === undefined) return '-';
-    return value.toFixed(decimals);
+    return formatNumber(value, { decimals });
 }
 
 function formatPct(value: number | null | undefined): string {
-    if (value === null || value === undefined) return '-';
-    return `${value.toFixed(2)}%`;
+    return formatPercent(value, { decimals: 2, input: 'percent' });
 }
 
 const ratioLabels: Record<string, string> = {
@@ -64,6 +64,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
     });
     
     const apiPeriod = period;
+    const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
 
     const {
         data,
@@ -164,13 +165,17 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                     ) : !hasData ? (
                         <WidgetEmpty message={`No ratio data for ${symbol}`} icon={<BarChart3 size={18} />} />
                     ) : (
-                        <table className="data-table w-full text-[11px] text-left">
+                        <table className="data-table financial-dense freeze-first-col w-full text-[11px] text-left">
                             <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
                                 <tr className="border-b border-gray-800">
                                     <th className="py-2 px-1 font-bold uppercase tracking-tighter">Metric</th>
                                     {ratios.slice(0, 4).map((r, i) => (
-                                        <th key={i} className="text-right py-2 px-1 font-bold">
-                                            {r.period || '-'}
+                                        <th key={`${r.period ?? i}-${i}`} className="text-right py-2 px-1 font-bold">
+                                            {formatFinancialPeriodLabel(r.period, {
+                                                mode: periodMode,
+                                                index: i,
+                                                total: Math.min(ratios.length, 4),
+                                            })}
                                         </th>
                                     ))}
                                     <th className="py-2 px-1 font-bold uppercase tracking-tighter text-center">Trend</th>
@@ -202,7 +207,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                                             })}
                                             <td className="py-2 px-1 text-center">
                                                 {points.length < 2 ? (
-                                                    <span className="text-[10px] text-muted-foreground">-</span>
+                                                    <span className="text-[10px] text-muted-foreground">—</span>
                                                 ) : (
                                                     <Sparkline data={points} width={70} height={18} />
                                                 )}

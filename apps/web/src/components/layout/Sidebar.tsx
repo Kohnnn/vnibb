@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
     LayoutDashboard,
@@ -38,9 +38,16 @@ interface SidebarProps {
     onOpenAppsLibrary?: () => void;
     onOpenPromptsLibrary?: () => void;
     onOpenTemplateSelector?: () => void;
+    mobileMode?: boolean;
 }
 
-export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsLibrary, onOpenTemplateSelector }: SidebarProps) {
+export function Sidebar({
+    onOpenWidgetLibrary,
+    onOpenAppsLibrary,
+    onOpenPromptsLibrary,
+    onOpenTemplateSelector,
+    mobileMode = false,
+}: SidebarProps) {
 
     const [collapsed, setCollapsed] = useState(false);
     const [showCreateMenu, setShowCreateMenu] = useState(false);
@@ -48,6 +55,12 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
     const [settingsOpen, setSettingsOpen] = useState(false);
+
+    useEffect(() => {
+        if (mobileMode) {
+            setCollapsed(false);
+        }
+    }, [mobileMode]);
 
 
     const {
@@ -98,9 +111,32 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
         return `Dashboard ${nextNumber}`;
     };
 
+    const withUniqueDashboardName = (rawName: string, currentDashboardId?: string) => {
+        const baseName = rawName.trim() || nextDashboardName();
+        const normalize = (value: string) => value.trim().toLowerCase();
+        const existing = new Set(
+            state.dashboards
+                .filter((dashboard) => dashboard.id !== currentDashboardId)
+                .map((dashboard) => normalize(dashboard.name))
+        );
+
+        if (!existing.has(normalize(baseName))) {
+            return baseName;
+        }
+
+        let suffix = 2;
+        let candidate = `${baseName} (${suffix})`;
+        while (existing.has(normalize(candidate))) {
+            suffix += 1;
+            candidate = `${baseName} (${suffix})`;
+        }
+
+        return candidate;
+    };
+
     const handleCreateDashboard = (folderId?: string) => {
         const dashboard = createDashboard({
-            name: nextDashboardName(),
+            name: withUniqueDashboardName(nextDashboardName()),
             folderId,
         });
         setActiveDashboard(dashboard.id);
@@ -154,7 +190,7 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
         const dashboard = state.dashboards.find(d => d.id === contextMenu.id);
         if (dashboard) {
             createDashboard({
-                name: `${dashboard.name} (Copy)`,
+                name: withUniqueDashboardName(`${dashboard.name} (Copy)`),
                 folderId: dashboard.folderId,
             });
         }
@@ -169,7 +205,9 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
 
         const dashboard = state.dashboards.find(d => d.id === editingId);
         if (dashboard) {
-            updateDashboard(editingId, { name: editingName.trim() });
+            updateDashboard(editingId, {
+                name: withUniqueDashboardName(editingName, editingId),
+            });
         } else {
             const folder = state.folders.find(f => f.id === editingId);
             if (folder) {
@@ -391,10 +429,14 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
     return (
         <>
             <aside
+                data-mobile-sidebar={mobileMode ? 'true' : 'false'}
                 className={`
-                    fixed left-0 top-0 h-screen bg-[#0b1021] border-r border-[#1e2a3b]
-                    transition-[width] duration-300 z-50 flex flex-col
-                    ${collapsed ? 'w-14' : 'w-52'}
+                    bg-[#0b1021] border-r border-[#1e2a3b]
+                    transition-[width] duration-300 flex flex-col
+                    ${mobileMode
+                        ? 'relative h-full w-full'
+                        : `hidden lg:flex fixed left-0 top-0 h-screen z-50 ${collapsed ? 'w-14' : 'w-52'}`
+                    }
                 `}
             >
 
@@ -407,12 +449,14 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
                             </span>
                         </Link>
                     )}
-                    <button
-                        onClick={() => setCollapsed(!collapsed)}
-                        className="p-1 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
-                    >
-                        {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-                    </button>
+                    {!mobileMode && (
+                        <button
+                            onClick={() => setCollapsed(!collapsed)}
+                            className="p-1 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                        >
+                            {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+                        </button>
+                    )}
                 </div>
 
                 {/* Global Search */}

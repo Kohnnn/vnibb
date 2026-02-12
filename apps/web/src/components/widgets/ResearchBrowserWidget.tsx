@@ -77,7 +77,7 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
   );
   const [activeSourceId, setActiveSourceId] = useLocalStorage<string | null>(
     `vnibb_research_source_${id}`,
-    'google'
+    'vietstock'
   );
   const [viewMode, setViewMode] = useLocalStorage<'embed' | 'external'>(
     `vnibb_research_mode_${id}`,
@@ -160,6 +160,19 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
       setActiveSourceId(null);
     }
   }, [symbol, activeSourceId, quickSources.length, setActiveSourceId]);
+
+  useEffect(() => {
+    if (!symbol || quickSources.length === 0) return;
+
+    const selectedSource = quickSources.find((source) => source.id === activeSourceId);
+    if (selectedSource) return;
+
+    const preferred = quickSources.find((source) => source.preferredMode !== 'external') || quickSources[0];
+    setActiveSourceId(preferred.id);
+    if ((preferred.preferredMode || 'embed') === 'embed') {
+      setViewMode('embed');
+    }
+  }, [symbol, quickSources, activeSourceId, setActiveSourceId, setViewMode]);
 
   const handleAddSite = () => {
     const normalized = normalizeUrl(urlInput);

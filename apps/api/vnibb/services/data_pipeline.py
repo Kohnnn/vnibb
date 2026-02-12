@@ -42,6 +42,10 @@ from vnibb.models.market_news import MarketNews
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.sync_status import SyncStatus
 from vnibb.core.retry import with_retry
+from vnibb.providers.vnstock.financial_ratios import (
+    FinancialRatiosQueryParams,
+    VnstockFinancialRatiosFetcher,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1353,93 +1357,73 @@ class DataPipeline:
             )
 
         total = 0
-
-        def _safe_finance_call(method, **kwargs):
-            try:
-                return method(**kwargs)
-            except TypeError as exc:
-                if "lang" in str(exc):
-                    kwargs.pop("lang", None)
-                    return method(**kwargs)
-                raise
+        normalized_period = "year" if period in {"year", "FY"} else "quarter"
 
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             await self.rate_limiters["financials"].wait()
             try:
-                from vnstock import Vnstock
-
-                stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
-
-                ratio_df = _safe_finance_call(stock.finance.ratio, period=period)
-                if ratio_df is None or ratio_df.empty:
+                params = FinancialRatiosQueryParams(symbol=symbol, period=normalized_period)
+                ratio_items = await VnstockFinancialRatiosFetcher.fetch(params)
+                if not ratio_items:
                     if progress is not None:
                         progress["error_count"] = progress.get("error_count", 0) + 1
                         progress["stage_stats"]["financial_ratios"]["errors"] += 1
                     continue
 
                 async with async_session_maker() as session:
-                    for _, row in ratio_df.iterrows():
-                        row_data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
-                        period_str = str(row_data.get("period", row.name))
+                    for ratio in ratio_items:
+                        period_str = str(ratio.period or "").strip()
                         period_upper = period_str.upper()
-                        fiscal_year = None
+                        fiscal_year = datetime.utcnow().year
                         fiscal_quarter = None
-                        if "-" in period_upper:
-                            head, tail = period_upper.split("-", 1)
-                            try:
-                                fiscal_year = int(tail)
-                            except ValueError:
-                                fiscal_year = datetime.utcnow().year
-                            if head.startswith("Q"):
-                                try:
-                                    fiscal_quarter = int(head.replace("Q", ""))
-                                except ValueError:
-                                    fiscal_quarter = None
-                        else:
-                            try:
-                                fiscal_year = int(period_upper)
-                            except ValueError:
-                                fiscal_year = datetime.utcnow().year
+
+                        year_match = re.search(r"(20\d{2})", period_upper)
+                        if year_match:
+                            fiscal_year = int(year_match.group(1))
+                        elif period_upper.isdigit() and int(period_upper) >= 1900:
+                            fiscal_year = int(period_upper)
+
+                        quarter_match = re.search(r"Q([1-4])", period_upper)
+                        if quarter_match:
+                            fiscal_quarter = int(quarter_match.group(1))
+
+                        if not period_str:
+                            period_str = (
+                                f"Q{fiscal_quarter}-{fiscal_year}"
+                                if fiscal_quarter
+                                else str(fiscal_year)
+                            )
 
                         values = {
                             "symbol": symbol,
                             "period": period_str,
-                            "period_type": period,
+                            "period_type": normalized_period,
                             "fiscal_year": fiscal_year,
                             "fiscal_quarter": fiscal_quarter,
-                            "pe_ratio": row_data.get("pe") or row_data.get("pe_ratio"),
-                            "pb_ratio": row_data.get("pb") or row_data.get("pb_ratio"),
-                            "ps_ratio": row_data.get("ps") or row_data.get("ps_ratio"),
-                            "peg_ratio": row_data.get("peg") or row_data.get("peg_ratio"),
-                            "ev_ebitda": row_data.get("ev_ebitda") or row_data.get("evEbitda"),
-                            "roe": row_data.get("roe"),
-                            "roa": row_data.get("roa"),
-                            "roic": row_data.get("roic"),
-                            "gross_margin": row_data.get("gross_margin")
-                            or row_data.get("grossMargin"),
-                            "operating_margin": row_data.get("operating_margin")
-                            or row_data.get("operatingMargin"),
-                            "net_margin": row_data.get("net_margin") or row_data.get("netMargin"),
-                            "current_ratio": row_data.get("current_ratio")
-                            or row_data.get("currentRatio"),
-                            "quick_ratio": row_data.get("quick_ratio")
-                            or row_data.get("quickRatio"),
-                            "cash_ratio": row_data.get("cash_ratio") or row_data.get("cashRatio"),
-                            "debt_to_equity": row_data.get("debt_to_equity")
-                            or row_data.get("debtToEquity"),
-                            "debt_to_assets": row_data.get("debt_to_assets")
-                            or row_data.get("debtToAssets"),
-                            "interest_coverage": row_data.get("interest_coverage")
-                            or row_data.get("interestCoverage"),
-                            "eps": row_data.get("eps"),
-                            "bvps": row_data.get("bvps"),
-                            "dps": row_data.get("dps"),
-                            "revenue_growth": row_data.get("revenue_growth")
-                            or row_data.get("revenueGrowth"),
-                            "earnings_growth": row_data.get("earnings_growth")
-                            or row_data.get("earningsGrowth"),
-                            "raw_data": row_data,
+                            "pe_ratio": ratio.pe,
+                            "pb_ratio": ratio.pb,
+                            "ps_ratio": ratio.ps,
+                            "peg_ratio": None,
+                            "ev_ebitda": ratio.ev_ebitda,
+                            "roe": ratio.roe,
+                            "roa": ratio.roa,
+                            "roic": None,
+                            "gross_margin": ratio.gross_margin,
+                            "operating_margin": ratio.operating_margin,
+                            "net_margin": ratio.net_margin,
+                            "current_ratio": ratio.current_ratio,
+                            "quick_ratio": ratio.quick_ratio,
+                            "cash_ratio": ratio.cash_ratio,
+                            "debt_to_equity": ratio.debt_equity,
+                            "debt_to_assets": ratio.debt_assets,
+                            "interest_coverage": ratio.interest_coverage,
+                            "eps": ratio.eps,
+                            "bvps": ratio.bvps,
+                            "dps": None,
+                            "revenue_growth": None,
+                            "earnings_growth": None,
+                            "raw_data": ratio.model_dump(mode="json"),
                             "source": "vnstock",
                             "updated_at": datetime.utcnow(),
                         }

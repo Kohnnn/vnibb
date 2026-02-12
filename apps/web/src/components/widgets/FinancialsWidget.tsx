@@ -13,7 +13,13 @@ import {
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { useUnit } from '@/contexts/UnitContext';
-import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import {
+    formatNumber,
+    formatPercent,
+    formatUnitValuePlain,
+    getUnitLegend,
+    resolveUnitScale,
+} from '@/lib/units';
 
 type FinancialTab = 'balance_sheet' | 'income_statement' | 'cash_flow' | 'ratios';
 
@@ -44,9 +50,9 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
     const { config: unitConfig } = useUnit();
 
     const tabs = [
-        { id: 'income_statement', label: 'Income', icon: ArrowUpRight },
-        { id: 'balance_sheet', label: 'Balance', icon: LayoutGrid },
-        { id: 'cash_flow', label: 'Cash Flow', icon: BarChart3 },
+        { id: 'income_statement', label: 'Income Statement', icon: ArrowUpRight },
+        { id: 'balance_sheet', label: 'Balance Sheet', icon: LayoutGrid },
+        { id: 'cash_flow', label: 'Cash Flow Statement', icon: BarChart3 },
         { id: 'ratios', label: 'Ratios', icon: Info },
     ];
 
@@ -309,7 +315,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                     {unitLegend}
                                 </div>
                             )}
-                            <table className="data-table w-full text-[11px] border-collapse table-fixed">
+                            <table className="data-table financial-dense freeze-first-col w-full text-[11px] border-collapse table-fixed">
                                 <thead className="sticky top-0 bg-secondary/95 backdrop-blur-sm z-20">
                                     <tr className="border-b border-white/10 shadow-sm">
                                             <th className="text-left p-2 pl-2.5 text-muted-foreground font-black uppercase tracking-widest w-[152px] bg-secondary/95 backdrop-blur-sm sticky left-0 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">Metric</th>
@@ -374,7 +380,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                                         );
 
                                                     if (points.length < 2) {
-                                                        return <span className="text-[10px] text-muted-foreground">-</span>;
+                                                        return <span className="text-[10px] text-muted-foreground">—</span>;
                                                     }
 
                                                     return <Sparkline data={points} width={70} height={18} />;
@@ -393,14 +399,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
 }
 
 function formatRatio(value: number | null | undefined): string {
-    if (value === null || value === undefined) return '-';
-    if (!Number.isFinite(value)) return '-';
-    return value.toFixed(2);
+    return formatNumber(value, { decimals: 2 });
 }
 
 function formatPct(value: number | null | undefined): string {
-    if (value === null || value === undefined) return '-';
-    return `${value.toFixed(2)}%`;
+    return formatPercent(value, { decimals: 2, input: 'percent' });
 }
 
 function periodSortKey(period?: string): number {

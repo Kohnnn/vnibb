@@ -23,7 +23,7 @@ QueryT = TypeVar("QueryT", bound=BaseModel)
 DataT = TypeVar("DataT", bound=BaseModel)
 
 logger = logging.getLogger(__name__)
-_LOG_THROTTLE_SECONDS = 60.0
+_LOG_THROTTLE_SECONDS = 300.0
 _last_log_times: dict[tuple[str, str], float] = {}
 
 
@@ -170,7 +170,7 @@ class BaseFetcher(ABC, Generic[QueryT, DataT]):
         except RuntimeError as e:
             if "Circuit breaker is OPEN" in str(e):
                 _log_throttled(
-                    logging.INFO,
+                    logging.DEBUG,
                     (cls.__name__, "circuit_open"),
                     "Graceful degradation: %s skipped by circuit breaker",
                     cls.__name__,

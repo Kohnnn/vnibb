@@ -152,15 +152,22 @@ Premium package strategy:
 # 1) Core endpoint + widget health gate (returns non-zero on failure)
 python scripts/widget_health_matrix.py --base-url https://vnibb.zeabur.app --repeats 5 --timeout 10 --fail-on-error --output-json scripts/v34_widget_health_after.json
 
-# 2) Resumable historical backfill (top 200, 5 years)
-python scripts/backfill_historical_v34.py --years 5 --limit 200 --batch-size 25
+# 2) Resumable historical backfill (top 200, 5 years) - always timebox this run
+python scripts/backfill_historical_v34.py --years 5 --limit 200 --batch-size 10 --max-runtime-minutes 20 --call-timeout-seconds 90 --hard-timeout-grace-seconds 30 --report-json scripts/v36_price_backfill_run.json
 
-# 3) Resumable fundamentals/news/events recovery
-python scripts/backfill_fundamentals_v34.py --limit 200 --batch-size 25 --include-quarterly-ratios
+# 3) Resumable fundamentals/news/events recovery (timeboxed)
+python scripts/backfill_fundamentals_v34.py --limit 200 --batch-size 10 --types ratios --max-runtime-minutes 15 --call-timeout-seconds 60 --report-json scripts/v36_ratios_backfill_run.json
 
 # 4) Coverage delta vs V34 baseline
 python scripts/v34_coverage_delta.py --run-current-audit --min-5y-improvement 1 --fail-on-miss
+
+# 5) Daily coverage + freshness quality check
+python scripts/data_quality_check.py --top-limit 200 --max-stale-days 7 --output-json scripts/data_quality_report.json
 ```
+
+Notes:
+- Never run unbounded backfills in shared/dev sessions; use `--max-runtime-minutes` on every run.
+- `backfill_historical_v34.py` now includes a hard-timeout watchdog that force-exits after the runtime window + grace period and still writes checkpoint/report.
 
 ---
 

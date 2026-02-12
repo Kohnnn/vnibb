@@ -88,6 +88,20 @@ uvicorn vnibb.api.main:app --reload
 
 ---
 
+## Quality Gate
+
+Run lint, build, and tests for both apps with one command:
+
+```bash
+# macOS/Linux
+pnpm ci:gate
+
+# Windows PowerShell
+pnpm ci:gate:win
+```
+
+---
+
 ## 📦 Packages
 
 ### NPM Packages

@@ -195,6 +195,11 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif !important;
 }
 
+/* Suppress TradingView symbol-change modal that blocks chart interaction */
+.tv-dialog__modal-container {
+  display: none !important;
+}
+
 /* OpenBB Pro Tables */
 .data-table {
   width: 100%;
@@ -241,6 +246,44 @@ body {
 .data-table td[data-type="number"] {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.data-table.financial-dense th {
+  padding: 0.3rem 0.45rem;
+  font-size: 0.63rem;
+  letter-spacing: 0.04em;
+  height: 28px;
+}
+
+.data-table.financial-dense td {
+  padding: 0.28rem 0.45rem;
+  font-size: 0.7rem;
+  line-height: 1.15;
+  height: 28px;
+}
+
+.data-table.freeze-first-col th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 12;
+  background: #0a0a0a;
+  box-shadow: 2px 0 0 rgba(30, 41, 59, 0.6);
+}
+
+.data-table.freeze-first-col td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 8;
+  background: rgba(10, 10, 10, 0.96);
+  box-shadow: 2px 0 0 rgba(30, 41, 59, 0.35);
+}
+
+.data-table.freeze-first-col tbody tr:nth-child(even) td:first-child {
+  background: rgba(13, 13, 13, 0.98);
+}
+
+.data-table.freeze-first-col tbody tr:hover td:first-child {
+  background: rgba(17, 24, 39, 0.95);
 }
 
 /* Tab animations */
@@ -363,6 +406,10 @@ body {
 
   .data-table {
     min-width: 600px;
+  }
+
+  .data-table.financial-dense {
+    min-width: 720px;
   }
 }
 

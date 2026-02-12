@@ -82,7 +82,9 @@ def get_cors_headers(request: Request) -> dict[str, str]:
     configured_pattern = settings.cors_origin_regex
     is_localhost_origin = bool(origin and re.match(localhost_pattern, origin))
     is_vercel_preview_origin = bool(origin and re.match(vercel_preview_pattern, origin))
-    is_configured_regex_origin = bool(origin and configured_pattern and re.match(configured_pattern, origin))
+    is_configured_regex_origin = bool(
+        origin and configured_pattern and re.match(configured_pattern, origin)
+    )
 
     # Check if origin is allowed
     if (
@@ -252,9 +254,7 @@ class ResponseCacheControlMiddleware(BaseHTTPMiddleware):
         if policy != "real_time":
             existing_vary = response.headers.get("Vary")
             response.headers["Vary"] = (
-                "Accept-Encoding"
-                if not existing_vary
-                else f"{existing_vary}, Accept-Encoding"
+                "Accept-Encoding" if not existing_vary else f"{existing_vary}, Accept-Encoding"
             )
 
         return response
@@ -576,7 +576,7 @@ def create_app() -> FastAPI:
 
         return JSONResponse(
             status_code=422,
-            content=response.model_dump(),
+            content=jsonable_encoder(response.model_dump()),
             headers=headers,
         )
 

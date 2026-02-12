@@ -8,12 +8,14 @@ interface MobileNavProps {
     onOpenWidgetLibrary: () => void;
     onOpenAppsLibrary: () => void;
     onOpenPromptsLibrary: () => void;
+    onOpenTemplateSelector?: () => void;
 }
 
 export function MobileNav({
     onOpenWidgetLibrary,
     onOpenAppsLibrary,
     onOpenPromptsLibrary,
+    onOpenTemplateSelector,
 }: MobileNavProps) {
     const [isOpen, setIsOpen] = useState(false);
 
@@ -48,7 +50,7 @@ export function MobileNav({
             {/* Mobile Drawer */}
             <div
                 className={`
-                    lg:hidden fixed top-0 left-0 h-full w-64 bg-[#0a1628] border-r border-gray-800 z-50
+                    lg:hidden fixed top-0 left-0 h-full w-72 bg-[#0a1628] border-r border-gray-800 z-50
                     transform transition-transform duration-300 ease-in-out
                     ${isOpen ? 'translate-x-0' : '-translate-x-full'}
                 `}
@@ -64,6 +66,7 @@ export function MobileNav({
 
                 {/* Sidebar Content */}
                 <Sidebar
+                    mobileMode
                     onOpenWidgetLibrary={() => {
                         onOpenWidgetLibrary();
                         setIsOpen(false);
@@ -74,6 +77,10 @@ export function MobileNav({
                     }}
                     onOpenPromptsLibrary={() => {
                         onOpenPromptsLibrary();
+                        setIsOpen(false);
+                    }}
+                    onOpenTemplateSelector={() => {
+                        onOpenTemplateSelector?.();
                         setIsOpen(false);
                     }}
                 />
