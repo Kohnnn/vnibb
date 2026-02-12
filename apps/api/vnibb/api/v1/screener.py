@@ -32,6 +32,7 @@ from vnibb.services.cache_manager import CacheManager
 from vnibb.services.screener_filter_service import ScreenerFilterService
 from vnibb.core.cache import cached
 from vnibb.api.v1.schemas import StandardResponse, MetaData
+from vnibb.core.retry import vnstock_cb
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -87,9 +88,7 @@ def _to_screener_data_row(row: object) -> ScreenerData:
     )
 
 
-async def _hydrate_screener_rows(
-    rows: List[ScreenerData], db: AsyncSession
-) -> List[ScreenerData]:
+async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> List[ScreenerData]:
     def _is_missing(value: object) -> bool:
         if value is None:
             return True
@@ -171,7 +170,9 @@ async def _hydrate_screener_rows(
                 update={
                     "organ_name": row.symbol if _is_missing(row.organ_name) else row.organ_name,
                     "exchange": "UNKNOWN" if _is_missing(row.exchange) else row.exchange,
-                    "industry_name": "Unknown" if _is_missing(row.industry_name) else row.industry_name,
+                    "industry_name": "Unknown"
+                    if _is_missing(row.industry_name)
+                    else row.industry_name,
                 }
             )
 
@@ -224,6 +225,10 @@ def fill_market_cap(rows: List[ScreenerData]) -> List[ScreenerData]:
 async def _refresh_screener_cache(params: StockScreenerParams) -> None:
     cache_manager = CacheManager()
     try:
+        if not vnstock_cb.is_available():
+            logger.info("Skipping screener background refresh while circuit breaker is open")
+            return
+
         data = await asyncio.wait_for(VnstockScreenerFetcher.fetch(params), timeout=20.0)
         if not data:
             logger.warning(f"Screener refresh returned empty data (source={params.source})")
@@ -308,7 +313,7 @@ async def get_screener(
                         symbol=None,
                         exchange="ALL",
                         industry=None,
-                        limit=2000,
+                        limit=120,
                         source=source,
                     )
                     await _schedule_refresh(

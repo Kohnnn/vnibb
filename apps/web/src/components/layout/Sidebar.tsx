@@ -87,9 +87,20 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
     const sortedFolders = [...state.folders].sort((a, b) => a.order - b.order);
     const rootDashboards = (dashboardsByFolder.get(undefined) || []).sort((a, b) => a.order - b.order);
 
+    const nextDashboardName = () => {
+        const existing = new Set(
+            state.dashboards.map((dashboard) => dashboard.name.trim().toLowerCase())
+        );
+        let nextNumber = 1;
+        while (existing.has(`dashboard ${nextNumber}`)) {
+            nextNumber += 1;
+        }
+        return `Dashboard ${nextNumber}`;
+    };
+
     const handleCreateDashboard = (folderId?: string) => {
         const dashboard = createDashboard({
-            name: 'New Dashboard',
+            name: nextDashboardName(),
             folderId,
         });
         setActiveDashboard(dashboard.id);
@@ -273,6 +284,10 @@ export function Sidebar({ onOpenWidgetLibrary, onOpenAppsLibrary, onOpenPromptsL
                     }
                 }}
                 onClick={() => !isEditing && setActiveDashboard(dashboard.id)}
+                onDoubleClick={() => {
+                    setEditingId(dashboard.id);
+                    setEditingName(dashboard.name);
+                }}
                 onContextMenu={(e) => handleContextMenu(e, dashboard.id, 'dashboard')}
             >
                 <FileText size={14} className="shrink-0" />

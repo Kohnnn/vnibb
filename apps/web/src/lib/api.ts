@@ -346,12 +346,17 @@ export async function getSubsidiaries(symbol: string): Promise<SubsidiariesRespo
     return fetchAPI<SubsidiariesResponse>(`/equity/${symbol}/subsidiaries`);
 }
 
+function normalizeFinancialStatementPeriod(period?: string): string | undefined {
+    if (!period) return undefined;
+    return period === 'FY' ? 'year' : period;
+}
+
 export async function getBalanceSheet(
     symbol: string,
     options?: { period?: string }
 ): Promise<BalanceSheetResponse> {
     return fetchAPI<BalanceSheetResponse>(`/equity/${symbol}/balance-sheet`, {
-        params: { period: options?.period },
+        params: { period: normalizeFinancialStatementPeriod(options?.period) },
     });
 }
 
@@ -360,7 +365,7 @@ export async function getIncomeStatement(
     options?: { period?: string }
 ): Promise<IncomeStatementResponse> {
     return fetchAPI<IncomeStatementResponse>(`/equity/${symbol}/income-statement`, {
-        params: { period: options?.period },
+        params: { period: normalizeFinancialStatementPeriod(options?.period) },
     });
 }
 
@@ -369,7 +374,7 @@ export async function getCashFlow(
     options?: { period?: string }
 ): Promise<CashFlowResponse> {
     return fetchAPI<CashFlowResponse>(`/equity/${symbol}/cash-flow`, {
-        params: { period: options?.period },
+        params: { period: normalizeFinancialStatementPeriod(options?.period) },
     });
 }
 
@@ -1275,5 +1280,4 @@ export async function getRSHistory(symbol: string, limit: number = 250): Promise
         params: { limit }
     });
 }
-
 

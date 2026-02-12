@@ -36,7 +36,7 @@ export function ConnectBackendModal({ isOpen, onClose, onConnect }: ConnectBacke
         }
 
         if (!validateUrl(endpoint)) {
-            setError('Please enter a valid URL (e.g., http://localhost:8000/api/v1)');
+            setError('Please enter a valid URL (e.g., https://vnibb.zeabur.app/api/v1)');
             return;
         }
 
@@ -70,7 +70,7 @@ export function ConnectBackendModal({ isOpen, onClose, onConnect }: ConnectBacke
         }
 
         if (!validateUrl(endpoint)) {
-            setError('Please enter a valid URL (e.g., http://localhost:8000/api/v1)');
+            setError('Please enter a valid URL (e.g., https://vnibb.zeabur.app/api/v1)');
             return;
         }
 
@@ -126,7 +126,7 @@ export function ConnectBackendModal({ isOpen, onClose, onConnect }: ConnectBacke
                                 setError('');
                                 setTestResult(null);
                             }}
-                            placeholder="http://localhost:8000/api/v1"
+                            placeholder="https://vnibb.zeabur.app/api/v1"
                             className="w-full bg-[#1e293b] border border-[#334155] text-white px-4 py-3 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-gray-500 transition-all"
                             autoFocus
                         />

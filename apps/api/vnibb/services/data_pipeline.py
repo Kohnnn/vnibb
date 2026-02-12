@@ -1371,7 +1371,7 @@ class DataPipeline:
 
                 stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
 
-                ratio_df = _safe_finance_call(stock.finance.ratio, period=period, lang="en")
+                ratio_df = _safe_finance_call(stock.finance.ratio, period=period)
                 if ratio_df is None or ratio_df.empty:
                     if progress is not None:
                         progress["error_count"] = progress.get("error_count", 0) + 1
@@ -1564,6 +1564,7 @@ class DataPipeline:
             VnstockCompanyEventsFetcher,
             CompanyEventsQueryParams,
         )
+        from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
 
         def _parse_float(value: Any) -> Optional[float]:
             if value is None:
@@ -1598,24 +1599,64 @@ class DataPipeline:
             try:
                 params = CompanyEventsQueryParams(symbol=symbol, limit=limit)
                 items = await VnstockCompanyEventsFetcher.fetch(params)
-                if not items:
+                payloads: List[Dict[str, Any]] = []
+
+                if items:
+                    payloads = [item.model_dump() for item in items]
+                else:
+                    dividend_items = await VnstockDividendsFetcher.fetch(symbol)
+                    for dividend in dividend_items[:limit]:
+                        div_payload = dividend.model_dump()
+                        payloads.append(
+                            {
+                                "event_type": "dividend",
+                                "event_name": div_payload.get("dividend_type") or "Dividend",
+                                "event_date": div_payload.get("ex_date")
+                                or div_payload.get("record_date")
+                                or div_payload.get("payment_date"),
+                                "ex_date": div_payload.get("ex_date"),
+                                "record_date": div_payload.get("record_date"),
+                                "payment_date": div_payload.get("payment_date"),
+                                "value": div_payload.get("cash_dividend")
+                                or div_payload.get("dividend_ratio"),
+                                "description": div_payload.get("content")
+                                or "Dividend event synthesized from dividend history",
+                                "raw_data": div_payload,
+                            }
+                        )
+
+                if not payloads:
+                    logger.info(f"No events data for {symbol}")
                     continue
 
                 async with async_session_maker() as session:
-                    for item in items:
-                        payload = item.model_dump()
+                    for payload in payloads:
+                        event_type = str(payload.get("event_type") or "event").strip()
+                        event_name = str(payload.get("event_name") or "").strip()
                         event_date = self._parse_date_value(payload.get("event_date"))
+                        ex_date = self._parse_date_value(payload.get("ex_date"))
+                        record_date = self._parse_date_value(payload.get("record_date"))
+                        payment_date = self._parse_date_value(payload.get("payment_date"))
+                        if event_date is None:
+                            event_date = ex_date or record_date or payment_date
+
+                        description = payload.get("description")
+                        if event_name:
+                            if description and event_name.lower() not in str(description).lower():
+                                description = f"{event_name}: {description}"
+                            elif not description:
+                                description = event_name
+
                         values = {
                             "symbol": symbol,
-                            "event_type": payload.get("event_type"),
-                            "event_name": payload.get("event_name"),
+                            "event_type": event_type,
                             "event_date": event_date,
-                            "ex_date": self._parse_date_value(payload.get("ex_date")),
-                            "record_date": self._parse_date_value(payload.get("record_date")),
-                            "payment_date": self._parse_date_value(payload.get("payment_date")),
+                            "ex_date": ex_date,
+                            "record_date": record_date,
+                            "payment_date": payment_date,
                             "value": _parse_float(payload.get("value")),
-                            "description": payload.get("description"),
-                            "raw_data": payload,
+                            "description": description,
+                            "raw_data": payload.get("raw_data") or payload,
                             "updated_at": datetime.utcnow(),
                         }
                         stmt = get_upsert_stmt(
@@ -1631,7 +1672,7 @@ class DataPipeline:
                     progress["success_count"] = progress.get("success_count", 0) + 1
                     progress["stage_stats"]["company_events"]["success"] += 1
             except Exception as exc:
-                logger.debug(f"Company events sync failed for {symbol}: {exc}")
+                logger.warning(f"Company events sync failed for {symbol}: {exc}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["company_events"]["errors"] += 1
@@ -2089,7 +2130,10 @@ class DataPipeline:
         if not symbols:
             return 0
 
-        if settings.intraday_symbols_per_run > 0 and len(symbols) > settings.intraday_symbols_per_run:
+        if (
+            settings.intraday_symbols_per_run > 0
+            and len(symbols) > settings.intraday_symbols_per_run
+        ):
             symbols = symbols[: settings.intraday_symbols_per_run]
 
         symbol_exchange: Dict[str, str] = {}
@@ -2224,7 +2268,10 @@ class DataPipeline:
         trade_date = trade_date or self._get_market_date()
         limit = limit or settings.intraday_limit
 
-        if settings.environment == "production" and not settings.intraday_allow_out_of_hours_in_prod:
+        if (
+            settings.environment == "production"
+            and not settings.intraday_allow_out_of_hours_in_prod
+        ):
             if not self._is_market_hours() and not (
                 settings.orderflow_at_close_only and self._is_after_market_close()
             ):
@@ -2302,7 +2349,10 @@ class DataPipeline:
         if not symbols:
             return 0
 
-        if settings.intraday_symbols_per_run > 0 and len(symbols) > settings.intraday_symbols_per_run:
+        if (
+            settings.intraday_symbols_per_run > 0
+            and len(symbols) > settings.intraday_symbols_per_run
+        ):
             symbols = symbols[: settings.intraday_symbols_per_run]
 
         symbol_exchange: Dict[str, str] = {}

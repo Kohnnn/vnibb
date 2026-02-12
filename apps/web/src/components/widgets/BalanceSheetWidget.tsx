@@ -20,11 +20,12 @@ import {
 } from 'recharts';
 import { formatAxisValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
-import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle';
+import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { cn } from '@/lib/utils';
 import { Sparkline } from '@/components/ui/Sparkline';
+import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
 
 interface BalanceSheetWidgetProps {
     id: string;
@@ -34,13 +35,6 @@ interface BalanceSheetWidgetProps {
 }
 
 type ViewMode = 'table' | 'chart';
-
-function formatPeriodLabel(value: string | null | undefined): string {
-    if (!value) return '-';
-    const cleaned = value.trim();
-    if (!cleaned || cleaned.toLowerCase() === 'unknown' || cleaned.toLowerCase() === 'nan') return '-';
-    return cleaned;
-}
 
 const labels: Record<string, string> = {
     total_assets: 'Total Assets',
@@ -63,7 +57,8 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
     const [viewMode, setViewMode] = useState<ViewMode>('table');
     const { config: unitConfig } = useUnit();
     
-    const apiPeriod = period;
+    const apiPeriod = period === 'FY' ? 'year' : period;
+    const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
 
     const {
         data,
@@ -80,8 +75,13 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
 
     const chartData = useMemo(() => {
         if (!items.length) return [];
-        return [...items].slice(0, 5).reverse().map((d) => ({
-            period: formatPeriodLabel(d.period),
+        const recentItems = [...items].slice(0, 5).reverse();
+        return recentItems.map((d, index) => ({
+            period: formatFinancialPeriodLabel(d.period, {
+                mode: periodMode,
+                index,
+                total: recentItems.length,
+            }),
             totalAssets: d.total_assets || 0,
             totalLiabilities: d.total_liabilities || 0,
             equity: d.equity || 0,
@@ -90,7 +90,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                 ? (d.total_liabilities / d.equity)
                 : 0,
         }));
-    }, [items]);
+    }, [items, periodMode]);
 
     const tableScale = useMemo(() => {
         const values = items.flatMap((item) => [
@@ -104,16 +104,22 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
     }, [items, unitConfig]);
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+    const unitNote = useMemo(() => `Note: ${unitLegend}`, [unitLegend]);
 
     const renderTable = () => (
         <div className="space-y-1">
-            <div className="px-1 text-[10px] text-gray-500 italic">{unitLegend}</div>
             <table className="data-table w-full text-[11px] text-left">
                 <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
                     <tr className="border-b border-gray-800">
                         <th className="py-2 px-1 font-bold uppercase tracking-tighter">Item</th>
                         {items.slice(0, 4).map((d, i) => (
-                            <th key={i} className="text-right py-2 px-1 font-bold">{formatPeriodLabel(d.period)}</th>
+                            <th key={`${d.period ?? i}-${i}`} className="text-right py-2 px-1 font-bold">
+                                {formatFinancialPeriodLabel(d.period, {
+                                    mode: periodMode,
+                                    index: i,
+                                    total: Math.min(items.length, 4),
+                                })}
+                            </th>
                         ))}
                         <th className="py-2 px-1 font-bold uppercase tracking-tighter text-center">Trend</th>
                     </tr>
@@ -131,7 +137,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                         <tr key={key} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors">
                             <td className="py-2 px-1 text-gray-400 font-medium">{labels[key] || key}</td>
                             {items.slice(0, 4).map((d, i) => (
-                                <td key={i} data-type="number" className="text-right py-2 px-1 text-white font-mono">
+                                <td key={`${d.period ?? i}-${i}`} data-type="number" className="text-right py-2 px-1 text-white font-mono">
                                     {formatUnitValuePlain(d[key as keyof typeof d] as number, tableScale, unitConfig)}
                                 </td>
                             ))}
@@ -147,6 +153,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                     })}
                 </tbody>
             </table>
+            <div className="px-1 pt-1 text-[10px] text-gray-500 italic">{unitNote}</div>
         </div>
     );
 
@@ -288,7 +295,11 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
-                        <WidgetEmpty message={`No balance sheet data for ${symbol}`} icon={<Scale size={18} />} />
+                        <WidgetEmpty
+                            message={`No balance sheet data for ${symbol}. Try switching period or refresh.`}
+                            icon={<Scale size={18} />}
+                            action={{ label: 'Retry', onClick: () => refetch() }}
+                        />
                     ) : viewMode === 'table' ? (
                         renderTable()
                     ) : (

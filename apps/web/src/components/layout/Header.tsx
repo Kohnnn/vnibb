@@ -8,6 +8,7 @@ import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel';
 import { ConnectionStatus } from '../ui/ConnectionStatus';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import type { UnitDisplay } from '@/lib/units';
+import { cn } from '@/lib/utils';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -15,6 +16,14 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+
+const UNIT_OPTIONS: Array<{ value: UnitDisplay; label: string }> = [
+    { value: 'auto', label: 'Auto' },
+    { value: 'K', label: 'K' },
+    { value: 'M', label: 'M' },
+    { value: 'B', label: 'B' },
+    { value: 'raw', label: 'Raw' },
+];
 
 
 interface HeaderProps {
@@ -147,6 +156,33 @@ export function Header({
                     <div className="h-4 w-[1px] bg-gray-800" />
                     <ConnectionStatus />
                 </div>
+
+                {onUnitDisplayChange && (
+                    <div className="hidden lg:flex items-center gap-1.5 rounded-md border border-[#1e2a3b] bg-[#0f1629] px-1 py-1">
+                        <span className="px-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                            Unit
+                        </span>
+                        {UNIT_OPTIONS.map((option) => {
+                            const isActive = unitDisplay === option.value;
+                            return (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    onClick={() => onUnitDisplayChange(option.value)}
+                                    className={cn(
+                                        'rounded px-1.5 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors',
+                                        isActive
+                                            ? 'bg-blue-600/20 text-blue-300 border border-blue-500/30'
+                                            : 'text-gray-500 hover:text-gray-300 hover:bg-[#1e2a3b]/70 border border-transparent'
+                                    )}
+                                    title={`Display numbers as ${option.label}`}
+                                >
+                                    {option.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
 
 
                 {/* Actions */}

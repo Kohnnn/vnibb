@@ -16,7 +16,7 @@ import json
 import os
 import sys
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -77,18 +77,49 @@ async def get_top_symbols(limit: int) -> list[str]:
         latest = await session.execute(select(func.max(ScreenerSnapshot.snapshot_date)))
         snapshot_date = latest.scalar()
         if snapshot_date:
+            non_null_market_caps = await session.execute(
+                select(func.count())
+                .select_from(ScreenerSnapshot)
+                .where(
+                    ScreenerSnapshot.snapshot_date == snapshot_date,
+                    ScreenerSnapshot.market_cap.is_not(None),
+                )
+            )
+            non_null_count = int(non_null_market_caps.scalar() or 0)
             rows = await session.execute(
                 select(ScreenerSnapshot.symbol)
-                .where(ScreenerSnapshot.snapshot_date == snapshot_date)
+                .where(
+                    ScreenerSnapshot.snapshot_date == snapshot_date,
+                    ScreenerSnapshot.market_cap.is_not(None),
+                )
                 .order_by(ScreenerSnapshot.market_cap.desc().nullslast())
                 .limit(limit)
             )
             symbols = [row[0] for row in rows.fetchall() if row[0]]
-            if symbols:
+            if non_null_count >= max(20, limit // 2) and symbols:
                 return symbols
 
+        recent_cutoff = date.today() - timedelta(days=60)
+        liquidity_rows = await session.execute(
+            select(StockPrice.symbol)
+            .where(StockPrice.interval == "1D", StockPrice.time >= recent_cutoff)
+            .group_by(StockPrice.symbol)
+            .order_by(
+                func.avg(StockPrice.close * StockPrice.volume).desc().nullslast(),
+                func.max(StockPrice.time).desc(),
+                StockPrice.symbol.asc(),
+            )
+            .limit(limit)
+        )
+        liquidity_symbols = [row[0] for row in liquidity_rows.fetchall() if row[0]]
+        if liquidity_symbols:
+            return liquidity_symbols
+
         rows = await session.execute(
-            select(Stock.symbol).where(Stock.is_active == 1).order_by(Stock.symbol.asc()).limit(limit)
+            select(Stock.symbol)
+            .where(Stock.is_active == 1)
+            .order_by(Stock.symbol.asc())
+            .limit(limit)
         )
         return [row[0] for row in rows.fetchall() if row[0]]
 
@@ -110,7 +141,9 @@ async def coverage_for_symbols(symbols: list[str]) -> CoverageSummary:
             latest_company_event=None,
         )
 
-    total_stocks = int(await scalar(select(func.count()).select_from(Stock).where(Stock.is_active == 1)) or 0)
+    total_stocks = int(
+        await scalar(select(func.count()).select_from(Stock).where(Stock.is_active == 1)) or 0
+    )
 
     async with async_session_maker() as session:
         price_rows = await session.execute(
@@ -146,10 +179,13 @@ async def coverage_for_symbols(symbols: list[str]) -> CoverageSummary:
         event_cov = event_rows.fetchall()
 
     threshold_5y = date.today().replace(year=date.today().year - 5)
+    threshold_5y_with_grace = threshold_5y + timedelta(days=30)
     min_dates = [row.min_date for row in price_span if row.min_date is not None]
     max_dates = [row.max_date for row in price_span if row.max_date is not None]
 
-    top_with_5y = sum(1 for row in price_span if row.min_date and row.min_date <= threshold_5y)
+    top_with_5y = sum(
+        1 for row in price_span if row.min_date and row.min_date <= threshold_5y_with_grace
+    )
 
     latest_ratio_update = max((row[1] for row in ratio_cov if row[1] is not None), default=None)
     latest_company_news = max((row[1] for row in news_cov if row[1] is not None), default=None)
@@ -250,10 +286,7 @@ def print_report(report: dict[str, Any]) -> None:
     print("")
     print("## Core Symbol Price Spans")
     for row in report["core_symbol_spans"]:
-        print(
-            f"- {row['symbol']}: {row['min_date']} -> {row['max_date']} "
-            f"({row['rows']} rows)"
-        )
+        print(f"- {row['symbol']}: {row['min_date']} -> {row['max_date']} ({row['rows']} rows)")
 
 
 def parse_args() -> argparse.Namespace:

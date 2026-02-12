@@ -21,10 +21,11 @@ import {
 } from 'recharts';
 import { formatAxisValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
-import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle';
+import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { Sparkline } from '@/components/ui/Sparkline';
+import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
 
 interface IncomeStatementWidgetProps {
     id: string;
@@ -34,13 +35,6 @@ interface IncomeStatementWidgetProps {
 }
 
 type ViewMode = 'table' | 'chart';
-
-function formatPeriodLabel(value: string | null | undefined): string {
-    if (!value) return '-';
-    const cleaned = value.trim();
-    if (!cleaned || cleaned.toLowerCase() === 'unknown' || cleaned.toLowerCase() === 'nan') return '-';
-    return cleaned;
-}
 
 const labels: Record<string, string> = {
     revenue: 'Revenue',
@@ -59,7 +53,8 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
     const [viewMode, setViewMode] = useState<ViewMode>('table');
     const { config: unitConfig } = useUnit();
     
-    const apiPeriod = period;
+    const apiPeriod = period === 'FY' ? 'year' : period;
+    const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
 
     const {
         data,
@@ -76,8 +71,13 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
 
     const chartData = useMemo(() => {
         if (!items.length) return [];
-        return [...items].slice(0, 5).reverse().map((d) => ({
-            period: formatPeriodLabel(d.period),
+        const recentItems = [...items].slice(0, 5).reverse();
+        return recentItems.map((d, index) => ({
+            period: formatFinancialPeriodLabel(d.period, {
+                mode: periodMode,
+                index,
+                total: recentItems.length,
+            }),
             revenue: d.revenue || 0,
             grossProfit: d.gross_profit || 0,
             operatingIncome: d.operating_income || 0,
@@ -86,7 +86,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
             operatingMargin: d.revenue && d.operating_income ? (d.operating_income / d.revenue) * 100 : 0,
             netMargin: d.revenue && d.net_income ? (d.net_income / d.revenue) * 100 : 0,
         }));
-    }, [items]);
+    }, [items, periodMode]);
 
     const tableScale = useMemo(() => {
         const values = items.flatMap((item) => [
@@ -99,16 +99,25 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
     }, [items, unitConfig]);
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+    const unitNote = useMemo(
+        () => `Note: ${unitLegend} except per-share values`,
+        [unitLegend]
+    );
 
     const renderTable = () => (
         <div className="space-y-1">
-            <div className="px-1 text-[10px] text-gray-500 italic">{unitLegend}</div>
             <table className="data-table w-full text-[11px] text-left">
                 <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
                     <tr className="border-b border-gray-800">
                         <th className="py-2 px-1 font-bold uppercase tracking-tighter">Item</th>
                         {items.slice(0, 4).map((d, i) => (
-                            <th key={i} className="text-right py-2 px-1 font-bold">{formatPeriodLabel(d.period)}</th>
+                            <th key={`${d.period ?? i}-${i}`} className="text-right py-2 px-1 font-bold">
+                                {formatFinancialPeriodLabel(d.period, {
+                                    mode: periodMode,
+                                    index: i,
+                                    total: Math.min(items.length, 4),
+                                })}
+                            </th>
                         ))}
                         <th className="py-2 px-1 font-bold uppercase tracking-tighter text-center">Trend</th>
                     </tr>
@@ -126,7 +135,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                             <tr key={key} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors">
                                 <td className="py-2 px-1 text-gray-400 font-medium">{labels[key] || key}</td>
                                 {items.slice(0, 4).map((d, i) => (
-                                    <td key={i} data-type="number" className="text-right py-2 px-1 text-white font-mono">
+                                    <td key={`${d.period ?? i}-${i}`} data-type="number" className="text-right py-2 px-1 text-white font-mono">
                                         {key === 'eps'
                                             ? (d.eps?.toLocaleString() || '-')
                                             : formatUnitValuePlain(d[key as keyof typeof d] as number, tableScale, unitConfig)}
@@ -144,6 +153,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                     })}
                 </tbody>
             </table>
+            <div className="px-1 pt-1 text-[10px] text-gray-500 italic">{unitNote}</div>
         </div>
     );
 
