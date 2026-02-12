@@ -40,8 +40,8 @@ const METRIC_TABS: Array<{ id: MetricsCategory; label: string }> = [
 function MetricRow({ label, value, sparklineData }: MetricRowProps) {
     return (
         <div className="flex items-center justify-between py-1.5 border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-            <span className="text-gray-400 text-xs">{label}</span>
-            <div className="flex items-center gap-2">
+            <span className="text-gray-400 text-xs leading-tight pr-2 flex-1">{label}</span>
+            <div className="flex items-center gap-2 shrink-0">
                 {sparklineData && sparklineData.length > 0 && (
                     <Sparkline data={sparklineData} width={40} height={16} />
                 )}

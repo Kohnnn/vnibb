@@ -11,6 +11,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useUnit } from '@/contexts/UnitContext';
 import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { Sparkline } from '@/components/ui/Sparkline';
+import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
 
 type StatementType = 'income' | 'balance' | 'cashflow';
 type Period = 'FY' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'TTM';
@@ -54,53 +55,6 @@ function getYoYChange(current: number | null | undefined, previous: number | nul
     return ((current - previous) / Math.abs(previous)) * 100;
 }
 
-function periodSortKey(period?: string) {
-    if (!period) return 0;
-    const upper = String(period).toUpperCase();
-    const yearMatch = upper.match(/(20\d{2})/);
-    const year = yearMatch ? Number(yearMatch[1]) : 0;
-    const quarterMatch = upper.match(/Q([1-4])/);
-    const quarter = quarterMatch ? Number(quarterMatch[1]) : 0;
-    return year * 10 + quarter;
-}
-
-function normalizePeriodLabel(row: any, index: number, total: number, mode: 'year' | 'quarter' | 'ttm') {
-    const candidate = row?.period || row?.fiscal_year || row?.fiscalYear || row?.year || '-';
-    const label = String(candidate).trim();
-    if (!label || label.toLowerCase() === 'unknown' || label.toLowerCase() === 'nan') {
-        return '-';
-    }
-
-    if (mode === 'year') {
-        const yearMatch = label.match(/(20\d{2})/);
-        return yearMatch ? yearMatch[1] : label;
-    }
-
-    if (mode === 'ttm') {
-        const upper = label.toUpperCase();
-        return upper.includes('TTM') ? 'TTM' : upper;
-    }
-
-    const upper = label.toUpperCase();
-    const quarterMatch = upper.match(/Q([1-4])/);
-    if (quarterMatch) {
-        const yearMatch = upper.match(/(20\d{2})/);
-        const year = yearMatch
-            ? Number(yearMatch[1])
-            : new Date().getFullYear() - Math.floor((Math.max(1, total) - index - 1) / 4);
-        return `Q${quarterMatch[1]}-${year}`;
-    }
-
-    const numeric = Number(upper);
-    if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
-        const quarter = ((Math.max(1, numeric) - 1) % 4) + 1;
-        const year = new Date().getFullYear() - Math.floor((Math.max(1, total) - Math.max(1, numeric)) / 4);
-        return `Q${quarter}-${year}`;
-    }
-
-    return upper;
-}
-
 export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatementsWidgetProps) {
     const [statementType, setStatementType] = useState<StatementType>('income');
     const [period, setPeriod] = useState<Period>('FY');
@@ -127,7 +81,10 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
         const normalizedRows = rawData
             .map((row: any, index: number) => ({
                 ...row,
-                __period: normalizePeriodLabel(row, index, rawData.length, periodMode),
+                __period: formatFinancialPeriodLabel(
+                    row?.period || row?.fiscal_year || row?.fiscalYear || row?.year,
+                    { mode: periodMode, index, total: rawData.length }
+                ),
             }))
             .filter((row: any) => row.__period && row.__period !== '-');
 
@@ -143,7 +100,7 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
             .filter((row: any) => String(row.__period).startsWith('Q'))
             .sort((a: any, b: any) => periodSortKey(b.__period) - periodSortKey(a.__period));
 
-        return quarterRows.filter((row: any) => String(row.__period).startsWith(`${period}-`));
+        return quarterRows.filter((row: any) => String(row.__period).startsWith(`${period} `));
     }, [rawData, periodMode, period, statementType]);
 
     const recent = useMemo(() => displayRows.slice(0, 4), [displayRows]);
@@ -295,8 +252,8 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                 )}
             </div>
 
-            <div className="px-3 py-2 border-t border-[#1e293b] text-[10px] text-gray-500">
-                Per-share values shown raw. Data for {symbol}.
+            <div className="px-3 py-2 border-t border-[#1e293b] text-[10px] text-gray-500 italic">
+                Note: {unitLegend} except per-share values. Data for {symbol}.
             </div>
         </div>
     );

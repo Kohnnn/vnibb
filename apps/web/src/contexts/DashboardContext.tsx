@@ -142,6 +142,28 @@ const TECHNICAL_TEMPLATE: TemplateWidget[] = [
     }
 ];
 
+// Comparison Analysis Tab: Multi-ticker comparison toolkit
+const COMPARISON_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'comparison_analysis',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 24, h: 8, minW: 12, minH: 6 }
+    },
+    {
+        type: 'peer_comparison',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 8, w: 12, h: 6, minW: 6, minH: 4 }
+    },
+    {
+        type: 'sector_performance',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 8, w: 12, h: 6, minW: 6, minH: 4 }
+    }
+];
+
 // Ownership Tab: Major Shareholders, Officers, Foreign Trading, Insider Deals
 const OWNERSHIP_TEMPLATE: TemplateWidget[] = [
     {
@@ -197,6 +219,7 @@ const DASHBOARD_TEMPLATES: Record<string, TemplateWidget[]> = {
     overview: OVERVIEW_TEMPLATE,
     financials: FINANCIALS_TEMPLATE,
     technical: TECHNICAL_TEMPLATE,
+    comparison: COMPARISON_TEMPLATE,
     ownership: OWNERSHIP_TEMPLATE,
     calendar: CALENDAR_TEMPLATE,
 };
@@ -207,6 +230,8 @@ const TAB_NAME_TO_TEMPLATE: Record<string, string> = {
     'financials': 'financials',
     'technical analysis': 'technical',
     'technical': 'technical',
+    'comparison analysis': 'comparison',
+    'comparison': 'comparison',
     'ownership': 'ownership',
     'calendar': 'calendar',
 };
@@ -284,8 +309,9 @@ const createDefaultDashboard = (): Dashboard => {
     tabs.push(createTabWithTemplate('Overview', 0, 'overview'));
     tabs.push(createTabWithTemplate('Financials', 1, 'financials'));
     tabs.push(createTabWithTemplate('Technical Analysis', 2, 'technical'));
-    tabs.push(createTabWithTemplate('Ownership', 3, 'ownership'));
-    tabs.push(createTabWithTemplate('Calendar', 4, 'calendar'));
+    tabs.push(createTabWithTemplate('Comparison Analysis', 3, 'comparison'));
+    tabs.push(createTabWithTemplate('Ownership', 4, 'ownership'));
+    tabs.push(createTabWithTemplate('Calendar', 5, 'calendar'));
 
     return {
         id: `dash-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,

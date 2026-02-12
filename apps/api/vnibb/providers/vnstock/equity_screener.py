@@ -9,6 +9,7 @@ providing comprehensive fundamental data for stock screening.
 import asyncio
 import logging
 import math
+import re
 from datetime import datetime
 from typing import Any, List, Optional
 
@@ -22,8 +23,21 @@ from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
+
+class _VnstockNoiseFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage().lower()
+        return "charmap codec can't encode" not in message
+
+
+_vnstock_data_logger = logging.getLogger("vnstock.common.data")
+if not any(isinstance(f, _VnstockNoiseFilter) for f in _vnstock_data_logger.filters):
+    _vnstock_data_logger.addFilter(_VnstockNoiseFilter())
+
+logging.getLogger("vnstock.core.utils.field.mapper").setLevel(logging.WARNING)
+
 # Shared thread pool for parallel fetching across requests
-_executor = ThreadPoolExecutor(max_workers=20)
+_executor = ThreadPoolExecutor(max_workers=12)
 
 
 def _is_rate_limit_error(error: Exception) -> bool:
@@ -35,6 +49,35 @@ def _is_rate_limit_error(error: Exception) -> bool:
         or "429" in error_msg
         or "too many requests" in error_msg
     )
+
+
+def _is_recoverable_screener_error(error: Exception) -> bool:
+    error_msg = str(error).lower()
+    if isinstance(error, UnicodeEncodeError):
+        return True
+    recoverable_markers = (
+        "nonetype' object has no attribute 'ratio'",
+        "invalid derivative or bond symbol",
+        "retryerror",
+        "gateway timeout",
+        "connection reset by peer",
+        "charmap codec can't encode",
+        "timed out",
+    )
+    return any(marker in error_msg for marker in recoverable_markers)
+
+
+def _is_equity_symbol(symbol: Any) -> bool:
+    if not isinstance(symbol, str):
+        return False
+    normalized = symbol.strip().upper()
+    if not normalized or len(normalized) > 5:
+        return False
+    if not normalized.isalnum():
+        return False
+    if re.match(r"^(VN|GB)\d+F\d+M?$", normalized):
+        return False
+    return True
 
 
 class StockScreenerParams(BaseModel):
@@ -388,7 +431,22 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
 
                 def _extract_ratio_snapshot(stock_obj: Any) -> dict[str, Any]:
                     """Extract latest ratio snapshot from vnstock finance.ratio output."""
-                    ratio_df = stock_obj.finance.ratio(period="year")
+                    finance_obj = getattr(stock_obj, "finance", None)
+                    if finance_obj is None:
+                        logger.debug("Missing finance object for stock screener item")
+                        return {}
+
+                    ratio_method = getattr(finance_obj, "ratio", None)
+                    if not callable(ratio_method):
+                        logger.debug("Missing finance.ratio() for stock screener item")
+                        return {}
+
+                    try:
+                        ratio_df = ratio_method(period="year")
+                    except Exception as ratio_err:
+                        logger.debug("finance.ratio() failed: %s", ratio_err)
+                        return {}
+
                     if ratio_df is None or ratio_df.empty:
                         return {}
 
@@ -499,6 +557,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                     return []
 
                 symbols = all_symbols_df["symbol"].tolist()
+                symbols = [symbol for symbol in symbols if _is_equity_symbol(symbol)]
                 limit = query.get("limit", 100)
                 symbols = symbols[:limit]  # Limit the number of symbols
 
@@ -575,6 +634,10 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 if _is_rate_limit_error(e):
                     logger.warning(f"VNStock rate limit hit in _fetch_sync: {e}")
                     raise ProviderRateLimitError(provider="vnstock", retry_after=60)
+
+                if _is_recoverable_screener_error(e):
+                    logger.warning("Recoverable vnstock screener issue: %s", e)
+                    return []
 
                 logger.error(f"vnstock screener fetch error: {e}")
                 raise ProviderError(

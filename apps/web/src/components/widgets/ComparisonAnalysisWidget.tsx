@@ -55,7 +55,7 @@ function ComparisonAnalysisWidgetComponent({
 
   const addSymbol = () => {
     const cleaned = newSymbol.trim().toUpperCase();
-    if (cleaned && symbols.length < 5 && !symbols.includes(cleaned)) {
+    if (cleaned && symbols.length < 10 && !symbols.includes(cleaned)) {
       setSymbols([...symbols, cleaned]);
       setNewSymbol('');
       setShowAddInput(false);
@@ -109,7 +109,7 @@ function ComparisonAnalysisWidgetComponent({
             />
           ))}
 
-          {symbols.length < 5 && (
+          {symbols.length < 10 && (
             <div className="flex items-center gap-1 ml-1">
               {showAddInput ? (
                 <>
