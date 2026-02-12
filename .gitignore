@@ -88,3 +88,5 @@ api_test_results.json
 DEPLOYMENT.md
 
 DEPLOYMENT_GUIDE_V2.md
+.vercel
+.env*.local
