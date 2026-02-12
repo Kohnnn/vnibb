@@ -184,7 +184,11 @@ async def list_all_tables(db: AsyncSession = Depends(get_db)):
                     "name": table_name,
                     "count": count,
                     "updated_at_column": updated_at_column,
-                    "last_updated": latest_dt.isoformat() if latest_dt else str(latest) if latest else None,
+                    "last_updated": latest_dt.isoformat()
+                    if latest_dt
+                    else str(latest)
+                    if latest
+                    else None,
                     "freshness": freshness,
                     "age_seconds": age_seconds,
                 }
@@ -217,7 +221,9 @@ async def get_freshness_summary(db: AsyncSession = Depends(get_db)):
     - unknown: no timestamp signal
     """
     available_tables = set(await _discover_tables(db))
-    targets = [table for table in FRESHNESS_TABLES if table in available_tables]
+    prioritized_targets = [table for table in FRESHNESS_TABLES if table in available_tables]
+    remaining_targets = sorted(table for table in available_tables if table not in FRESHNESS_TABLES)
+    targets = prioritized_targets + remaining_targets
     entries = []
 
     for table_name in targets:
@@ -228,7 +234,9 @@ async def get_freshness_summary(db: AsyncSession = Depends(get_db)):
         updated_at_column = await _discover_timestamp_column(db, table_name)
         latest_value = None
         if updated_at_column:
-            ts_result = await db.execute(text(f'SELECT MAX("{updated_at_column}") FROM {quoted_table}'))
+            ts_result = await db.execute(
+                text(f'SELECT MAX("{updated_at_column}") FROM {quoted_table}')
+            )
             latest_value = ts_result.scalar()
 
         latest_dt = _normalize_datetime(latest_value)
@@ -255,15 +263,14 @@ async def get_freshness_summary(db: AsyncSession = Depends(get_db)):
         summary[key] = summary.get(key, 0) + 1
 
     warning_tables = [
-        entry
-        for entry in entries
-        if entry["freshness"] in {"stale", "critical", "unknown"}
+        entry for entry in entries if entry["freshness"] in {"stale", "critical", "unknown"}
     ]
 
     return {
         "timestamp": datetime.utcnow().isoformat(),
         "thresholds_hours": FRESHNESS_THRESHOLDS_HOURS,
         "summary": summary,
+        "entries": entries,
         "tables": entries,
         "warning_tables": warning_tables,
     }
@@ -380,7 +387,9 @@ async def get_table_sample(
         rows = result.mappings().all()
 
         count_params = {"s": params["s"]} if "s" in params else {}
-        count_res = await db.execute(text(f"SELECT COUNT(*) FROM {quoted_table}{where_clause}"), count_params)
+        count_res = await db.execute(
+            text(f"SELECT COUNT(*) FROM {quoted_table}{where_clause}"), count_params
+        )
         total = count_res.scalar()
 
         data = []

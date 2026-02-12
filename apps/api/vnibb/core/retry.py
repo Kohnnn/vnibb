@@ -99,7 +99,7 @@ def circuit_breaker(cb: CircuitBreaker):
                     cb.last_open_log_time is None
                     or (now - cb.last_open_log_time) >= cb.open_log_interval
                 ):
-                    logger.info(
+                    logger.debug(
                         "Circuit breaker is OPEN for %s. Skipping for up to %ss.",
                         func.__name__,
                         cb.reset_timeout,

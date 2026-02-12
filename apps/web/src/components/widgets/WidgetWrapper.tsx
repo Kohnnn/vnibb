@@ -33,6 +33,7 @@ import { WidgetHeaderVisibilityProvider } from '@/components/ui/WidgetContainer'
 import { WidgetToolbar } from '@/components/ui/WidgetToolbar';
 import { WidgetErrorBoundary } from './ErrorBoundary';
 import { MaximizedWidgetPortal } from './MaximizedWidgetPortal';
+import { useProfile } from '@/lib/queries';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -136,6 +137,9 @@ export function WidgetWrapper({
     const displaySymbol = (widgetGroup !== 'global')
         ? effectiveSymbol
         : (symbol || effectiveSymbol);
+
+    const { data: profileData } = useProfile(displaySymbol || '', Boolean(displaySymbol));
+    const exchangeBadge = profileData?.data?.exchange?.toString().toUpperCase() || 'VN';
 
 
 
@@ -266,13 +270,18 @@ export function WidgetWrapper({
                         </DropdownMenu>
                     }
                     tickerSelector={
-                        <div className="relative flex items-center min-w-[40px]">
-                            <span
+                        <div className="relative flex items-center min-w-[68px]">
+                            <button
+                                type="button"
                                 onClick={() => setIsTickerDropdownOpen(true)}
-                                className="text-xs font-bold text-blue-400 hover:text-blue-300 hover:bg-white/5 px-1 py-0.5 rounded cursor-pointer transition-colors"
+                                className="inline-flex items-center gap-1 rounded border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-blue-300 transition-colors hover:bg-blue-500/20 hover:text-blue-200"
+                                title="Select widget ticker"
                             >
-                                {displaySymbol}
-                            </span>
+                                <span>{displaySymbol}</span>
+                                <span className="rounded bg-blue-900/30 px-1 text-[9px] text-blue-200/80">
+                                    {exchangeBadge}
+                                </span>
+                            </button>
                             <TickerCombobox
                                 isOpen={isTickerDropdownOpen}
                                 onClose={() => setIsTickerDropdownOpen(false)}

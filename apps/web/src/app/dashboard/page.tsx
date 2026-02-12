@@ -59,6 +59,7 @@ function DashboardContent() {
     const {
         activeDashboard,
         activeTab,
+        setActiveTab,
         updateSyncGroupSymbol,
         deleteWidget,
         updateTabLayout,
@@ -88,7 +89,12 @@ function DashboardContent() {
 
     const updateSidebarWidth = useCallback(() => {
         if (typeof window !== 'undefined') {
-            const sidebar = document.querySelector('aside');
+            if (window.innerWidth < 1024) {
+                setSidebarWidth(0);
+                return;
+            }
+
+            const sidebar = document.querySelector('aside[data-mobile-sidebar="false"]');
             const sidebarW = sidebar?.clientWidth || 208;
             setSidebarWidth(sidebarW);
         }
@@ -100,6 +106,63 @@ function DashboardContent() {
         window.addEventListener('resize', updateSidebarWidth);
         return () => window.removeEventListener('resize', updateSidebarWidth);
     }, [updateSidebarWidth]);
+
+    useEffect(() => {
+        if (!mounted) return;
+
+        const isEditableTarget = (target: EventTarget | null) => {
+            if (!(target instanceof HTMLElement)) return false;
+            const tag = target.tagName;
+            if (target.isContentEditable) return true;
+            return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+        };
+
+        const handleKeyboardNavigation = (event: KeyboardEvent) => {
+            if (isEditableTarget(event.target)) return;
+
+            if (event.key === 'Escape') {
+                setIsWidgetLibraryOpen(false);
+                setIsAppsLibraryOpen(false);
+                setIsPromptsLibraryOpen(false);
+                setIsTemplateSelectorOpen(false);
+                setWidgetSettingsState(null);
+                setShowAICopilot(false);
+                return;
+            }
+
+            if (!event.metaKey && !event.ctrlKey && !event.altKey) {
+                const numeric = Number(event.key);
+                if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 9 && activeDashboard?.tabs?.length) {
+                    const orderedTabs = [...activeDashboard.tabs].sort((a, b) => a.order - b.order);
+                    const nextTab = orderedTabs[numeric - 1];
+                    if (nextTab) {
+                        event.preventDefault();
+                        setActiveTab(nextTab.id);
+                    }
+                    return;
+                }
+
+                if (event.key === 'Tab' && activeTab?.widgets?.length) {
+                    const focusableWidgets = Array.from(
+                        document.querySelectorAll<HTMLElement>('[data-widget-focus="true"]')
+                    );
+                    if (!focusableWidgets.length) return;
+
+                    event.preventDefault();
+                    const currentIndex = focusableWidgets.findIndex((node) => node === document.activeElement);
+                    const direction = event.shiftKey ? -1 : 1;
+                    const fallbackIndex = event.shiftKey ? focusableWidgets.length - 1 : 0;
+                    const nextIndex = currentIndex === -1
+                        ? fallbackIndex
+                        : (currentIndex + direction + focusableWidgets.length) % focusableWidgets.length;
+                    focusableWidgets[nextIndex]?.focus();
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyboardNavigation);
+        return () => window.removeEventListener('keydown', handleKeyboardNavigation);
+    }, [activeDashboard?.tabs, activeTab?.widgets, mounted, setActiveTab]);
 
     const handleLayoutChange = useCallback((newLayout: LayoutItem[]) => {
         if (!activeDashboard || !activeTab) return;
@@ -313,6 +376,13 @@ function DashboardContent() {
                 onOpenTemplateSelector={() => setIsTemplateSelectorOpen(true)}
             />
 
+            <MobileNav
+                onOpenWidgetLibrary={() => setIsWidgetLibraryOpen(true)}
+                onOpenAppsLibrary={() => setIsAppsLibraryOpen(true)}
+                onOpenPromptsLibrary={() => setIsPromptsLibraryOpen(true)}
+                onOpenTemplateSelector={() => setIsTemplateSelectorOpen(true)}
+            />
+
             <main
                 className="flex-1 flex flex-col relative transition-all duration-300"
                 style={{
@@ -362,7 +432,12 @@ function DashboardContent() {
                                         );
                                         
                                         return (
-                                            <div key={widget.id} className="h-full">
+                                            <div
+                                                key={widget.id}
+                                                className="h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-black rounded"
+                                                data-widget-focus="true"
+                                                tabIndex={0}
+                                            >
                                                 <WidgetWrapper
                                                     id={widget.id}
                                                     title={widgetType.replace(/_/g, ' ')}
@@ -429,6 +504,7 @@ function DashboardContent() {
                         currentSymbol={globalSymbol}
                         widgetContext={copilotWidgetContext}
                         widgetContextData={copilotWidgetData}
+                        activeTabName={activeTab?.name}
                     />
                 </RightSidebar>
             </main>

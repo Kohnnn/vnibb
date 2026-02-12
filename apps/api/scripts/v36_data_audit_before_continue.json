@@ -1,0 +1,78 @@
+{
+  "generated_at": "2026-02-12T16:35:09.641452",
+  "top_limit": 200,
+  "table_counts": {
+    "stocks": 1738,
+    "stock_prices": 795154,
+    "income_statements": 13842,
+    "balance_sheets": 64494,
+    "cash_flows": 27777,
+    "financial_ratios": 22374,
+    "market_news": 14,
+    "company_news": 367,
+    "company_events": 1826
+  },
+  "top_symbol_coverage": {
+    "total_stocks": 1738,
+    "top_symbols": 200,
+    "top_with_prices": 200,
+    "top_with_5y_prices": 37,
+    "top_with_ratios": 72,
+    "top_with_company_news": 50,
+    "top_with_company_events": 36,
+    "oldest_price_in_top": "2021-02-17",
+    "latest_price_in_top": "2026-02-12",
+    "latest_ratio_update": "2026-02-12T15:21:30.418297",
+    "latest_company_news": "2026-02-12T00:00:00",
+    "latest_company_event": "2026-02-05"
+  },
+  "core_symbol_spans": [
+    {
+      "symbol": "FPT",
+      "min_date": "2021-02-17",
+      "max_date": "2026-02-12",
+      "rows": 1249
+    },
+    {
+      "symbol": "HPG",
+      "min_date": "2021-02-17",
+      "max_date": "2026-02-12",
+      "rows": 1249
+    },
+    {
+      "symbol": "VCB",
+      "min_date": "2021-02-17",
+      "max_date": "2026-02-12",
+      "rows": 1249
+    },
+    {
+      "symbol": "VIC",
+      "min_date": "2021-02-17",
+      "max_date": "2026-02-12",
+      "rows": 1249
+    },
+    {
+      "symbol": "VNM",
+      "min_date": "2021-02-17",
+      "max_date": "2026-02-12",
+      "rows": 1249
+    }
+  ],
+  "top_symbols_sample": [
+    "HPG",
+    "SHB",
+    "VIC",
+    "SCL",
+    "JVC",
+    "DSC",
+    "DP3",
+    "VHM",
+    "LBM",
+    "PBC",
+    "VIX",
+    "HVA",
+    "DHT",
+    "BIG",
+    "PDB"
+  ]
+}

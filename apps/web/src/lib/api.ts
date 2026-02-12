@@ -2,7 +2,33 @@
 
 import { env } from './env';
 
-export const API_BASE_URL = `${env.apiUrl.replace(/\/$/, '')}/api/v1`;
+const LOCALHOST_OR_LOOPBACK_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i
+
+function getRuntimeApiBaseUrl(rawValue: string): string {
+    const trimmed = rawValue.replace(/\/$/, '')
+    if (!trimmed) return trimmed
+
+    if (typeof window === 'undefined') {
+        return trimmed
+    }
+
+    const pageIsHttps = window.location.protocol === 'https:'
+    const pageIsLocal = /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
+    const targetIsHttp = trimmed.startsWith('http://')
+    const targetIsLocal = LOCALHOST_OR_LOOPBACK_RE.test(trimmed)
+
+    if (!pageIsHttps || !targetIsHttp) {
+        return trimmed
+    }
+
+    if (targetIsLocal && !pageIsLocal) {
+        return 'https://vnibb.zeabur.app'
+    }
+
+    return targetIsLocal ? trimmed : trimmed.replace(/^http:/, 'https:')
+}
+
+export const API_BASE_URL = `${getRuntimeApiBaseUrl(env.apiUrl)}/api/v1`;
 
 
 interface FetchOptions extends RequestInit {
@@ -1280,4 +1306,3 @@ export async function getRSHistory(symbol: string, limit: number = 250): Promise
         params: { limit }
     });
 }
-

@@ -8,7 +8,7 @@ import re
 from datetime import date, timedelta, datetime
 from typing import List, Optional, Literal, Any, Callable, Awaitable
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Path
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
@@ -135,9 +135,16 @@ def _to_historical_data(row: StockPrice) -> EquityHistoricalData:
 
 
 def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
+    period_value = (row.period or "").strip()
+    if period_value.isdigit() and int(period_value) < 1900 and row.fiscal_year >= 1900:
+        if row.fiscal_quarter and 1 <= row.fiscal_quarter <= 4:
+            period_value = f"Q{row.fiscal_quarter}-{row.fiscal_year}"
+        else:
+            period_value = str(row.fiscal_year)
+
     return FinancialRatioData(
         symbol=row.symbol,
-        period=row.period,
+        period=period_value,
         pe=row.pe_ratio,
         pb=row.pb_ratio,
         ps=row.ps_ratio,
@@ -158,6 +165,38 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
         revenue_growth=row.revenue_growth,
         earnings_growth=row.earnings_growth,
     )
+
+
+def _ratio_has_metric_value(item: FinancialRatioData) -> bool:
+    metric_values = (
+        item.pe,
+        item.pb,
+        item.ps,
+        item.ev_ebitda,
+        item.ev_sales,
+        item.roe,
+        item.roa,
+        item.eps,
+        item.bvps,
+        item.debt_equity,
+        item.debt_assets,
+        item.equity_multiplier,
+        item.current_ratio,
+        item.quick_ratio,
+        item.cash_ratio,
+        item.asset_turnover,
+        item.inventory_turnover,
+        item.receivables_turnover,
+        item.gross_margin,
+        item.net_margin,
+        item.operating_margin,
+        item.interest_coverage,
+        item.debt_service_coverage,
+        item.ocf_debt,
+        item.fcf_yield,
+        item.ocf_sales,
+    )
+    return any(value is not None for value in metric_values)
 
 
 @router.get("/historical", response_model=StandardResponse[List[EquityHistoricalData]])
@@ -282,7 +321,7 @@ async def get_quote(
 @router.get("/{symbol}/profile", response_model=StandardResponse[Optional[EquityProfileData]])
 @cached(ttl=604800, key_prefix="profile")
 async def get_profile(
-    symbol: str,
+    symbol: str = Path(..., min_length=1, max_length=10, pattern=r"^[A-Za-z0-9._-]+$"),
     refresh: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
@@ -492,7 +531,14 @@ async def get_financial_ratios(
         rows = result.scalars().all()
         if rows:
             data = [_to_ratio_data(row) for row in rows]
-            return StandardResponse(data=data, meta=MetaData(count=len(data)))
+            usable_data = [item for item in data if _ratio_has_metric_value(item)]
+            if usable_data:
+                return StandardResponse(data=usable_data, meta=MetaData(count=len(usable_data)))
+
+            logger.warning(
+                "Ratio DB rows for %s are empty placeholders; falling back to provider",
+                symbol_upper,
+            )
     except Exception as db_error:
         logger.warning(f"Ratio DB lookup failed for {symbol_upper}: {db_error}")
 
@@ -500,7 +546,9 @@ async def get_financial_ratios(
         data = await VnstockFinancialRatiosFetcher.fetch(
             FinancialRatiosQueryParams(symbol=symbol_upper, period=normalized_period)
         )
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        usable_data = [item for item in data if _ratio_has_metric_value(item)]
+        payload = usable_data if usable_data else data
+        return StandardResponse(data=payload, meta=MetaData(count=len(payload)))
     except Exception as e:
         return StandardResponse(data=[], error=str(e))
 

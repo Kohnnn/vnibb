@@ -9,7 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useUnit } from '@/contexts/UnitContext';
-import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import { formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
 
@@ -192,7 +192,7 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                 ) : (
                     <div className="space-y-1">
                         <div className="px-3 text-[10px] text-gray-500 italic">{unitLegend}</div>
-                        <table className="data-table w-full text-xs">
+                        <table className="data-table financial-dense freeze-first-col w-full text-xs">
                             <thead className="sticky top-0 bg-[#0f172a]">
                                 <tr className="text-gray-500">
                                     <th className="text-left px-3 py-2 font-medium min-w-[140px]">Item</th>
@@ -234,11 +234,11 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                                             <td
                                                 className={`text-right px-3 py-2 font-mono ${yoyChange > 0 ? 'text-green-400' : yoyChange < 0 ? 'text-red-400' : 'text-gray-400'}`}
                                             >
-                                                {yoyChange > 0 ? '+' : ''}{yoyChange.toFixed(1)}%
+                                                {yoyChange > 0 ? '+' : ''}{formatPercent(yoyChange, { decimals: 1, input: 'percent' })}
                                             </td>
                                             <td className="text-center px-3 py-2">
                                                 {points.length < 2 ? (
-                                                    <span className="text-[10px] text-muted-foreground">-</span>
+                                                    <span className="text-[10px] text-muted-foreground">—</span>
                                                 ) : (
                                                     <Sparkline data={points} width={70} height={18} />
                                                 )}

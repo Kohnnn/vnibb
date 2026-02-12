@@ -31,7 +31,7 @@ export function TradingViewAdvancedChart({
   theme = 'dark',
   className,
   height = 400,
-  allowSymbolChange = true,
+  allowSymbolChange = false,
 }: TradingViewAdvancedChartProps) {
   const widgetMountRef = useRef<HTMLDivElement>(null);
   const [candidateIndex, setCandidateIndex] = useState(0);
@@ -73,9 +73,10 @@ export function TradingViewAdvancedChart({
       timezone,
       theme,
       style: '1',
-      locale: 'vi_VN',
+      locale: 'en',
       allow_symbol_change: allowSymbolChange,
       enable_publishing: false,
+      hide_side_toolbar: false,
       hide_top_toolbar: false,
       hide_legend: false,
       save_image: true,

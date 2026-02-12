@@ -8,6 +8,7 @@ Features:
 - JSON checkpoint for resume/restart safety
 - batch fallback to per-symbol retries
 - optional time-boxing (`--max-runtime-minutes`, `--max-batches`) for fast feedback runs
+- hard-timeout watchdog (`--hard-timeout-grace-seconds`) to force exit if runtime hangs
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ import argparse
 import asyncio
 import json
 import logging
+import os
+import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -129,6 +132,7 @@ async def run_backfill(
     max_runtime_minutes: float | None,
     max_batches: int | None,
     call_timeout_seconds: float | None,
+    hard_timeout_grace_seconds: float,
     report_json: Path | None,
 ) -> int:
     symbols = await get_top_symbols(limit)
@@ -156,6 +160,51 @@ async def run_backfill(
     run_started_at = time.monotonic()
     processed_batches = 0
     stop_reason = "completed"
+
+    def write_report(reason: str, elapsed_seconds: float) -> None:
+        if report_json is None:
+            return
+
+        report = {
+            "generated_at": datetime.now(UTC).isoformat(),
+            "years": years,
+            "limit": limit,
+            "batch_size": batch_size,
+            "max_runtime_minutes": max_runtime_minutes,
+            "max_batches": max_batches,
+            "call_timeout_seconds": call_timeout_seconds,
+            "hard_timeout_grace_seconds": hard_timeout_grace_seconds,
+            "processed_batches": processed_batches,
+            "elapsed_seconds": elapsed_seconds,
+            "stop_reason": reason,
+            "checkpoint_file": str(checkpoint_file),
+            "checkpoint": asdict(checkpoint),
+        }
+        report_json.parent.mkdir(parents=True, exist_ok=True)
+        report_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        logger.info("Wrote report: %s", report_json)
+
+    hard_timeout_seconds: float | None = None
+    watchdog_timer: threading.Timer | None = None
+    if max_runtime_minutes is not None and max_runtime_minutes > 0:
+        hard_timeout_seconds = (max_runtime_minutes * 60) + max(0.0, hard_timeout_grace_seconds)
+
+        def _force_exit() -> None:
+            forced_elapsed = round(time.monotonic() - run_started_at, 2)
+            checkpoint.updated_at = datetime.now(UTC).isoformat()
+            save_checkpoint(checkpoint_file, checkpoint)
+            write_report("hard_timeout_forced_exit", forced_elapsed)
+            logger.error(
+                "Hard timeout reached after %.2fs (max_runtime_minutes=%s, grace=%ss). Forcing process exit.",
+                forced_elapsed,
+                max_runtime_minutes,
+                hard_timeout_grace_seconds,
+            )
+            os._exit(124)
+
+        watchdog_timer = threading.Timer(hard_timeout_seconds, _force_exit)
+        watchdog_timer.daemon = True
+        watchdog_timer.start()
 
     def remaining_runtime_seconds() -> float | None:
         if max_runtime_minutes is None or max_runtime_minutes <= 0:
@@ -200,7 +249,7 @@ async def run_backfill(
         )
 
     logger.info(
-        "Starting historical backfill: symbols=%s years=%s batches=%s start_batch=%s max_runtime_minutes=%s max_batches=%s call_timeout_seconds=%s",
+        "Starting historical backfill: symbols=%s years=%s batches=%s start_batch=%s max_runtime_minutes=%s max_batches=%s call_timeout_seconds=%s hard_timeout_seconds=%s",
         len(symbols),
         years,
         len(all_batches),
@@ -208,6 +257,7 @@ async def run_backfill(
         max_runtime_minutes,
         max_batches,
         call_timeout_seconds,
+        hard_timeout_seconds,
     )
 
     for batch_idx in range(start_batch, len(all_batches)):
@@ -269,25 +319,10 @@ async def run_backfill(
             await asyncio.sleep(sleep_seconds)
 
     elapsed_seconds = round(time.monotonic() - run_started_at, 2)
+    if watchdog_timer is not None:
+        watchdog_timer.cancel()
 
-    if report_json is not None:
-        report = {
-            "generated_at": datetime.now(UTC).isoformat(),
-            "years": years,
-            "limit": limit,
-            "batch_size": batch_size,
-            "max_runtime_minutes": max_runtime_minutes,
-            "max_batches": max_batches,
-            "call_timeout_seconds": call_timeout_seconds,
-            "processed_batches": processed_batches,
-            "elapsed_seconds": elapsed_seconds,
-            "stop_reason": stop_reason,
-            "checkpoint_file": str(checkpoint_file),
-            "checkpoint": asdict(checkpoint),
-        }
-        report_json.parent.mkdir(parents=True, exist_ok=True)
-        report_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        logger.info("Wrote report: %s", report_json)
+    write_report(stop_reason, elapsed_seconds)
 
     logger.info(
         "Historical backfill finished: completed=%s failed=%s checkpoint=%s stop_reason=%s elapsed_seconds=%s",
@@ -325,6 +360,12 @@ def parse_args() -> argparse.Namespace:
         help="Timeout for each sync call (0 disables the limit)",
     )
     parser.add_argument(
+        "--hard-timeout-grace-seconds",
+        type=float,
+        default=30,
+        help="Additional seconds after max-runtime before force exit (0 disables grace)",
+    )
+    parser.add_argument(
         "--checkpoint-file",
         type=Path,
         default=Path("scripts/v34_backfill_historical_checkpoint.json"),
@@ -351,6 +392,7 @@ async def _main() -> int:
         max_runtime_minutes=args.max_runtime_minutes if args.max_runtime_minutes > 0 else None,
         max_batches=args.max_batches if args.max_batches > 0 else None,
         call_timeout_seconds=args.call_timeout_seconds if args.call_timeout_seconds > 0 else None,
+        hard_timeout_grace_seconds=max(0.0, args.hard_timeout_grace_seconds),
         report_json=args.report_json,
     )
 

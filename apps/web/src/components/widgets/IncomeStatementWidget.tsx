@@ -19,7 +19,14 @@ import {
     Legend,
     CartesianGrid,
 } from 'recharts';
-import { formatAxisValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import {
+    formatAxisValue,
+    formatNumber,
+    formatUnitValuePlain,
+    getUnitCaption,
+    getUnitLegend,
+    resolveUnitScale,
+} from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
@@ -106,7 +113,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
 
     const renderTable = () => (
         <div className="space-y-1">
-            <table className="data-table w-full text-[11px] text-left">
+            <table className="data-table financial-dense freeze-first-col w-full text-[11px] text-left">
                 <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
                     <tr className="border-b border-gray-800">
                         <th className="py-2 px-1 font-bold uppercase tracking-tighter">Item</th>
@@ -137,13 +144,13 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                                 {items.slice(0, 4).map((d, i) => (
                                     <td key={`${d.period ?? i}-${i}`} data-type="number" className="text-right py-2 px-1 text-white font-mono">
                                         {key === 'eps'
-                                            ? (d.eps?.toLocaleString() || '-')
+                                            ? formatNumber(d.eps, { decimals: 2 })
                                             : formatUnitValuePlain(d[key as keyof typeof d] as number, tableScale, unitConfig)}
                                     </td>
                                 ))}
                                 <td className="py-2 px-1 text-center">
                                     {points.length < 2 ? (
-                                        <span className="text-[10px] text-muted-foreground">-</span>
+                                        <span className="text-[10px] text-muted-foreground">—</span>
                                     ) : (
                                         <Sparkline data={points} width={70} height={18} />
                                     )}

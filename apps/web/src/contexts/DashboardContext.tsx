@@ -92,31 +92,13 @@ const OVERVIEW_TEMPLATE: TemplateWidget[] = [
 ];
 
 
-// Financials Tab: Income, Balance, CashFlow, Ratios
+// Financials Tab: unified OpenBB-style statement controls
 const FINANCIALS_TEMPLATE: TemplateWidget[] = [
     {
-        type: 'income_statement',
+        type: 'unified_financials',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 12, h: 7, minW: 8, minH: 4 }
-    },
-    {
-        type: 'balance_sheet',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 12, y: 0, w: 12, h: 7, minW: 8, minH: 4 }
-    },
-    {
-        type: 'cash_flow',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 7, w: 12, h: 7, minW: 8, minH: 4 }
-    },
-    {
-        type: 'financial_ratios',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 12, y: 7, w: 12, h: 7, minW: 8, minH: 4 }
+        layout: { x: 0, y: 0, w: 24, h: 10, minW: 12, minH: 8 }
     }
 ];
 

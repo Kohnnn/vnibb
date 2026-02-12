@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete
+from sqlalchemy.orm import selectinload
 
 from vnibb.api.deps import DatabaseDep
 from vnibb.models.dashboard import UserDashboard, DashboardWidget
@@ -26,11 +27,12 @@ from vnibb.services.dashboard_service import dashboard_service
 router = APIRouter()
 
 
-
 # ============ Request/Response Models ============
+
 
 class WidgetLayout(BaseModel):
     """Widget position and size for React-Grid-Layout."""
+
     x: int = Field(..., ge=0, description="Grid column position")
     y: int = Field(..., ge=0, description="Grid row position")
     w: int = Field(..., ge=1, description="Width in grid units")
@@ -41,6 +43,7 @@ class WidgetLayout(BaseModel):
 
 class WidgetConfig(BaseModel):
     """Widget-specific configuration."""
+
     symbol: Optional[str] = None
     timeframe: Optional[str] = None
     indicators: Optional[List[str]] = None
@@ -49,6 +52,7 @@ class WidgetConfig(BaseModel):
 
 class WidgetCreate(BaseModel):
     """Request body for creating a widget."""
+
     widget_id: str = Field(..., description="Unique widget ID within dashboard")
     widget_type: str = Field(..., description="Widget type (price_chart, screener, etc)")
     layout: WidgetLayout
@@ -57,6 +61,7 @@ class WidgetCreate(BaseModel):
 
 class WidgetResponse(BaseModel):
     """Widget response model."""
+
     id: int
     widget_id: str
     widget_type: str
@@ -66,6 +71,7 @@ class WidgetResponse(BaseModel):
 
 class DashboardCreate(BaseModel):
     """Request body for creating a dashboard."""
+
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     is_default: bool = False
@@ -74,6 +80,7 @@ class DashboardCreate(BaseModel):
 
 class DashboardUpdate(BaseModel):
     """Request body for updating a dashboard."""
+
     name: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     is_default: Optional[bool] = None
@@ -82,6 +89,7 @@ class DashboardUpdate(BaseModel):
 
 class DashboardResponse(BaseModel):
     """Dashboard response model."""
+
     id: int
     user_id: str
     name: str
@@ -96,18 +104,21 @@ class DashboardResponse(BaseModel):
 
 class DashboardListResponse(BaseModel):
     """List of dashboards response."""
+
     count: int
     data: List[DashboardResponse]
 
 
 class MarketOverviewResponse(BaseModel):
     """Market overview response model."""
+
     indices: List[MarketIndexData]
     timestamp: str
 
 
 class TopMoversResponse(BaseModel):
     """Top movers response model."""
+
     type: str
     index: str
     data: List[TopMoverData]
@@ -130,11 +141,12 @@ async def list_dashboards(
     """Get all dashboards for a user."""
     result = await db.execute(
         select(UserDashboard)
+        .options(selectinload(UserDashboard.widgets))
         .where(UserDashboard.user_id == user_id)
         .order_by(UserDashboard.is_default.desc(), UserDashboard.name)
     )
     dashboards = result.scalars().all()
-    
+
     return DashboardListResponse(
         count=len(dashboards),
         data=[_to_response(d) for d in dashboards],
@@ -150,7 +162,7 @@ async def list_dashboards(
 async def get_market_overview() -> MarketOverviewResponse:
     """Get market overview data."""
     from datetime import datetime
-    
+
     indices = await dashboard_service.get_market_overview()
     return MarketOverviewResponse(
         indices=indices,
@@ -169,6 +181,7 @@ async def get_top_gainers(
 ) -> TopMoversResponse:
     """Get market top gainers."""
     from datetime import datetime
+
     data = await dashboard_service.get_top_movers("gainer", index, limit)
     return TopMoversResponse(
         type="gainer",
@@ -189,6 +202,7 @@ async def get_top_losers(
 ) -> TopMoversResponse:
     """Get market top losers."""
     from datetime import datetime
+
     data = await dashboard_service.get_top_movers("loser", index, limit)
     return TopMoversResponse(
         type="loser",
@@ -209,6 +223,7 @@ async def get_most_active(
 ) -> TopMoversResponse:
     """Get market most active stocks (by volume)."""
     from datetime import datetime
+
     data = await dashboard_service.get_top_movers("volume", index, limit)
     return TopMoversResponse(
         type="volume",
@@ -220,7 +235,6 @@ async def get_most_active(
 
 @router.get(
     "/{dashboard_id}",
-
     response_model=DashboardResponse,
     summary="Get Dashboard",
     description="Get a specific dashboard by ID.",
@@ -231,16 +245,18 @@ async def get_dashboard(
 ) -> DashboardResponse:
     """Get a dashboard by ID."""
     result = await db.execute(
-        select(UserDashboard).where(UserDashboard.id == dashboard_id)
+        select(UserDashboard)
+        .options(selectinload(UserDashboard.widgets))
+        .where(UserDashboard.id == dashboard_id)
     )
     dashboard = result.scalar_one_or_none()
-    
+
     if not dashboard:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Dashboard {dashboard_id} not found",
         )
-    
+
     return _to_response(dashboard)
 
 
@@ -256,17 +272,15 @@ async def update_dashboard(
     db: DatabaseDep,
 ) -> DashboardResponse:
     """Update a dashboard."""
-    result = await db.execute(
-        select(UserDashboard).where(UserDashboard.id == dashboard_id)
-    )
+    result = await db.execute(select(UserDashboard).where(UserDashboard.id == dashboard_id))
     dashboard = result.scalar_one_or_none()
-    
+
     if not dashboard:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Dashboard {dashboard_id} not found",
         )
-    
+
     # Update fields if provided
     if data.name is not None:
         dashboard.name = data.name
@@ -284,10 +298,10 @@ async def update_dashboard(
                 .values(is_default=0)
             )
         dashboard.is_default = 1 if data.is_default else 0
-    
+
     await db.flush()
     await db.refresh(dashboard)
-    
+
     return _to_response(dashboard)
 
 
@@ -302,21 +316,20 @@ async def delete_dashboard(
     db: DatabaseDep,
 ) -> None:
     """Delete a dashboard."""
-    result = await db.execute(
-        select(UserDashboard).where(UserDashboard.id == dashboard_id)
-    )
+    result = await db.execute(select(UserDashboard).where(UserDashboard.id == dashboard_id))
     dashboard = result.scalar_one_or_none()
-    
+
     if not dashboard:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Dashboard {dashboard_id} not found",
         )
-    
+
     await db.delete(dashboard)
 
 
 # ============ Widget Endpoints ============
+
 
 @router.post(
     "/{dashboard_id}/widgets",
@@ -332,15 +345,13 @@ async def add_widget(
 ) -> WidgetResponse:
     """Add a widget to a dashboard."""
     # Verify dashboard exists
-    result = await db.execute(
-        select(UserDashboard).where(UserDashboard.id == dashboard_id)
-    )
+    result = await db.execute(select(UserDashboard).where(UserDashboard.id == dashboard_id))
     if not result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Dashboard {dashboard_id} not found",
         )
-    
+
     widget = DashboardWidget(
         dashboard_id=dashboard_id,
         widget_id=data.widget_id,
@@ -351,7 +362,7 @@ async def add_widget(
     db.add(widget)
     await db.flush()
     await db.refresh(widget)
-    
+
     return WidgetResponse(
         id=widget.id,
         widget_id=widget.widget_id,
@@ -379,17 +390,18 @@ async def remove_widget(
         .where(DashboardWidget.id == widget_id)
     )
     widget = result.scalar_one_or_none()
-    
+
     if not widget:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Widget {widget_id} not found",
         )
-    
+
     await db.delete(widget)
 
 
 # ============ Helper Functions ============
+
 
 def _to_response(dashboard: UserDashboard) -> DashboardResponse:
     """Convert ORM model to response model."""

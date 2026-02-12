@@ -54,8 +54,9 @@ export function DashboardTopTabs() {
   return (
     <div className="border-b border-[#1e2a3b] bg-[#0b1021]/70 backdrop-blur">
       <div className="flex items-center gap-1 px-3 h-10">
-        {tabs.map((tab) => {
+        {tabs.map((tab, index) => {
           const isActive = activeTab?.id === tab.id;
+          const shortcutHint = index < 9 ? ` (${index + 1})` : '';
           return (
             <button
               key={tab.id}
@@ -70,8 +71,10 @@ export function DashboardTopTabs() {
                   ? 'bg-white/10 text-white border border-white/10'
                   : 'text-gray-500 hover:text-gray-200 hover:bg-white/5'
               )}
+              title={`Switch to ${tab.name}${shortcutHint}`}
             >
               {tab.name}
+              {index < 9 && <span className="ml-1 text-[10px] text-gray-500">{index + 1}</span>}
             </button>
           );
         })}

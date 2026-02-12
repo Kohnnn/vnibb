@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import { compareStocks } from '@/lib/api';
 import { Plus, TrendingUp, TrendingDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 
 const CATEGORY_DEFINITIONS = [
   { id: 'valuation', name: 'Valuation Multiples', metricIds: ['pe_ratio', 'pb_ratio', 'ps_ratio', 'ev_ebitda', 'market_cap'] },
@@ -36,9 +37,12 @@ function ComparisonAnalysisWidgetComponent({
   initialSymbols = ['VNM', 'FPT'],
   onRemove,
 }: ComparisonAnalysisWidgetProps) {
-  const [symbols, setSymbols] = useState<string[]>(() => Array.from(
-    new Set(initialSymbols.map((s) => s.trim().toUpperCase()).filter(Boolean))
-  ));
+  const [symbols, setSymbols] = useState<string[]>(() => {
+    const seeded = [symbol, ...initialSymbols]
+      .map((item) => item?.trim().toUpperCase())
+      .filter((item): item is string => Boolean(item));
+    return Array.from(new Set(seeded)).slice(0, 10);
+  });
   const [period, setPeriod] = useState<Period>('FY');
   const [activeCategory, setActiveCategory] = useState('valuation');
   const [newSymbol, setNewSymbol] = useState('');
@@ -186,31 +190,33 @@ function ComparisonAnalysisWidgetComponent({
           ) : !hasData ? (
             <WidgetEmpty message="No comparison data available." />
           ) : (
-            <table className="data-table w-full text-[11px] text-left border-collapse">
+            <table className="data-table financial-dense freeze-first-col w-full text-[11px] text-left border-collapse">
               <thead className="sticky top-0 bg-[#0a0a0a] z-10">
                 <tr className="border-b border-gray-800">
-                  <th className="p-3 text-gray-500 font-bold uppercase tracking-tighter">Metric</th>
-                  {data?.stocks?.map((stock: any, index: number) => (
-                    <th key={`${stock.symbol}-${index}`} className="text-right p-3 text-white font-black uppercase">
-                      <div className="flex items-center justify-end gap-2">
-                         <CompanyLogo symbol={stock.symbol} name={stock.company_name || stock.name || stock.symbol} size={18} />
-                        <span>{stock.symbol}</span>
-                      </div>
+                  <th className="p-3 text-gray-500 font-bold uppercase tracking-tighter">Ticker</th>
+                  {filteredMetrics.map((metric: any) => (
+                    <th key={metricId(metric)} className="text-right p-3 text-white font-black uppercase">
+                      {metricName(metric)}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {filteredMetrics.map((metric: any) => {
-                  const id = metricId(metric);
-                  const { best, worst } = getBestWorst(id);
+                {data?.stocks?.map((stock: any, stockIndex: number) => {
                   return (
-                    <tr key={id} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors group">
-                      <td className="p-3 text-gray-400 font-medium group-hover:text-gray-200">{metricName(metric)}</td>
-                      {data?.stocks?.map((stock: any, index: number) => {
+                    <tr key={`${stock.symbol}-${stockIndex}`} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors group">
+                      <td className="p-3 text-gray-200 font-semibold group-hover:text-white">
+                        <div className="flex items-center gap-2">
+                          <CompanyLogo symbol={stock.symbol} name={stock.company_name || stock.name || stock.symbol} size={18} />
+                          <span>{stock.symbol}</span>
+                        </div>
+                      </td>
+                      {filteredMetrics.map((metric: any) => {
+                        const id = metricId(metric);
                         const value = stock.metrics[id];
-                        const isBest = value !== null && value === best && data.stocks.length > 1;
-                        const isWorst = value !== null && value === worst && data.stocks.length > 1;
+                        const { best, worst } = getBestWorst(id);
+                        const isBest = value !== null && value === best && (data?.stocks?.length || 0) > 1;
+                        const isWorst = value !== null && value === worst && (data?.stocks?.length || 0) > 1;
 
                         const isLowerBetter = (id.includes('ratio') || id.includes('debt'))
                           && !higherBetterOverrides.has(id);
@@ -218,18 +224,22 @@ function ComparisonAnalysisWidgetComponent({
                           ? (isWorst ? 'text-green-400' : isBest ? 'text-red-400' : 'text-white')
                           : (isBest ? 'text-green-400' : isWorst ? 'text-red-400' : 'text-white');
 
+                        const cellText = formatValue(value, metricFormat(metric));
+                        const isMissing = cellText === EMPTY_VALUE;
+
                         return (
                           <td
-                            key={`${stock.symbol}-${index}`}
+                            key={`${stock.symbol}-${id}`}
                             className={cn(
                               "text-right p-3 font-mono",
-                              highlightColor
+                              isMissing ? 'text-gray-500' : highlightColor
                             )}
+                            title={isMissing ? `${stock.symbol} has no ${metricName(metric)} for ${period}` : undefined}
                           >
                             <div className="flex items-center justify-end gap-1">
-                              {value !== null && value !== undefined ? formatValue(value, metricFormat(metric)) : '—'}
-                              {isBest && !isLowerBetter && <TrendingUp size={10} className="opacity-50" />}
-                              {isWorst && isLowerBetter && <TrendingDown size={10} className="opacity-50 text-green-400" />}
+                              {cellText}
+                              {!isMissing && isBest && !isLowerBetter && <TrendingUp size={10} className="opacity-50" />}
+                              {!isMissing && isWorst && isLowerBetter && <TrendingDown size={10} className="opacity-50 text-green-400" />}
                             </div>
                           </td>
                         );
@@ -239,7 +249,7 @@ function ComparisonAnalysisWidgetComponent({
                 })}
                 {filteredMetrics.length === 0 && (
                   <tr>
-                    <td colSpan={(data?.stocks?.length || 0) + 1} className="p-4">
+                    <td colSpan={Math.max(2, filteredMetrics.length + 1)} className="p-4">
                       <WidgetEmpty message="No metrics available in this category for selected symbols." />
                     </td>
                   </tr>
@@ -253,15 +263,18 @@ function ComparisonAnalysisWidgetComponent({
   );
 }
 
-function formatValue(value: number, format: string): string {
+function formatValue(value: number | null | undefined, format: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return EMPTY_VALUE;
+  }
+
   switch (format) {
-    case 'percent': return `${(value * 100).toFixed(2)}%`;
-    case 'currency': 
-        if (Math.abs(value) >= 1e12) return `${(value / 1e12).toFixed(2)}T`;
-        if (Math.abs(value) >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
-        if (Math.abs(value) >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
-        return value.toLocaleString();
-    default: return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    case 'percent':
+      return formatPercent(value, { decimals: 2, input: 'ratio' });
+    case 'currency':
+      return formatNumber(value, { decimals: 2 });
+    default:
+      return formatNumber(value, { decimals: 2 });
   }
 }
 

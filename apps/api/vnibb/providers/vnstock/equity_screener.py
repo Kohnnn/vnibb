@@ -636,7 +636,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                     raise ProviderRateLimitError(provider="vnstock", retry_after=60)
 
                 if _is_recoverable_screener_error(e):
-                    logger.warning("Recoverable vnstock screener issue: %s", e)
+                    logger.debug("Recoverable vnstock screener issue: %s", e)
                     return []
 
                 logger.error(f"vnstock screener fetch error: {e}")

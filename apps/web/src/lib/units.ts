@@ -7,6 +7,8 @@ export interface UnitConfig {
   locale?: string
 }
 
+export const EMPTY_VALUE = '—'
+
 export const DEFAULT_UNIT_CONFIG: UnitConfig = {
   display: 'auto',
   decimalPlaces: 2,
@@ -149,4 +151,74 @@ export function getUnitCaption(config: UnitConfig): string {
   const label = getUnitLabel(config)
   const currency = config.currency ? ` ${config.currency}` : ''
   return `${label}${currency}`.trim()
+}
+
+interface NumberFormatOptions {
+  decimals?: number
+  locale?: string
+  useGrouping?: boolean
+}
+
+interface PercentFormatOptions {
+  decimals?: number
+  locale?: string
+  input?: 'auto' | 'ratio' | 'percent'
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+export function formatNumber(
+  value: number | null | undefined,
+  options: NumberFormatOptions = {}
+): string {
+  if (!isFiniteNumber(value)) return EMPTY_VALUE
+
+  const decimals = options.decimals ?? 2
+  return value.toLocaleString(options.locale ?? 'en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+    useGrouping: options.useGrouping ?? true,
+  })
+}
+
+export function formatPercent(
+  value: number | null | undefined,
+  options: PercentFormatOptions = {}
+): string {
+  if (!isFiniteNumber(value)) return EMPTY_VALUE
+
+  const mode = options.input ?? 'auto'
+  const normalized = mode === 'ratio'
+    ? value * 100
+    : mode === 'percent'
+      ? value
+      : Math.abs(value) <= 1
+        ? value * 100
+        : value
+
+  const decimals = options.decimals ?? 2
+  const body = normalized.toLocaleString(options.locale ?? 'en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+    useGrouping: true,
+  })
+  return `${body}%`
+}
+
+export function formatCurrency(
+  value: number | null | undefined,
+  currency = 'VND',
+  options: NumberFormatOptions = {}
+): string {
+  if (!isFiniteNumber(value)) return EMPTY_VALUE
+
+  const decimals = options.decimals ?? 0
+  return value.toLocaleString(options.locale ?? 'en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  })
 }

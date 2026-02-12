@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
     X,
     Send,
@@ -13,7 +13,8 @@ import {
     Sparkles,
     Search as SearchIcon,
     Download,
-    Terminal
+    Terminal,
+    type LucideIcon,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -34,15 +35,58 @@ interface AICopilotProps {
     currentSymbol: string;
     widgetContext?: string;
     widgetContextData?: Record<string, unknown>;
+    activeTabName?: string;
 }
 
-// Suggested prompts for quick actions
-const SUGGESTED_PROMPTS = [
+type PromptSuggestion = {
+    label: string;
+    icon: LucideIcon;
+    prompt: string;
+};
+
+const DEFAULT_PROMPTS: PromptSuggestion[] = [
     { label: "Analyze", icon: Sparkles, prompt: "Analyze the financial health of this company" },
     { label: "Compare", icon: Bot, prompt: "Compare with industry peers" },
     { label: "Financials", icon: Terminal, prompt: "Summarize recent earnings performance" },
     { label: "Technical", icon: SearchIcon, prompt: "What is the technical outlook for this stock?" },
 ];
+
+const TAB_PROMPTS: Record<string, PromptSuggestion[]> = {
+    financials: [
+        { label: 'Revenue', icon: Terminal, prompt: 'Analyze revenue growth trend and margin sustainability over the last periods' },
+        { label: 'Quality', icon: Sparkles, prompt: 'Assess earnings quality, cash conversion, and balance sheet risk' },
+        { label: 'Valuation', icon: Bot, prompt: 'Evaluate whether valuation multiples are justified by fundamentals' },
+        { label: 'Risks', icon: SearchIcon, prompt: 'List top fundamental downside risks for this company' },
+    ],
+    comparison: [
+        { label: 'Valuation', icon: Bot, prompt: 'Compare valuations of selected tickers and identify the outlier' },
+        { label: 'Profitability', icon: Sparkles, prompt: 'Rank selected tickers by profitability and explain key drivers' },
+        { label: 'Quality', icon: Terminal, prompt: 'Which compared ticker has the best quality of earnings and why?' },
+        { label: 'Best Pick', icon: SearchIcon, prompt: 'Recommend one ticker from this comparison with clear thesis and risks' },
+    ],
+    overview: [
+        { label: 'Key Risks', icon: SearchIcon, prompt: 'What are the key risks for this stock over the next 6-12 months?' },
+        { label: 'Catalysts', icon: Sparkles, prompt: 'What near-term catalysts could move this stock materially?' },
+        { label: 'Positioning', icon: Bot, prompt: 'How should I position this stock in a balanced portfolio?' },
+        { label: 'Checklist', icon: Terminal, prompt: 'Create a due-diligence checklist before buying this stock' },
+    ],
+    technical: [
+        { label: 'Trend', icon: SearchIcon, prompt: 'Summarize trend, momentum, and volatility context from current setup' },
+        { label: 'Levels', icon: Terminal, prompt: 'Identify key support/resistance levels and invalidation points' },
+        { label: 'Signals', icon: Sparkles, prompt: 'Explain which technical signals are strongest right now' },
+        { label: 'Plan', icon: Bot, prompt: 'Draft a risk-managed trade plan with entry, stop, and target' },
+    ],
+};
+
+function normalizeTabKey(tabName?: string): string {
+    if (!tabName) return 'overview';
+    const key = tabName.toLowerCase();
+    if (key.includes('financial')) return 'financials';
+    if (key.includes('comparison')) return 'comparison';
+    if (key.includes('technical')) return 'technical';
+    if (key.includes('overview')) return 'overview';
+    return 'overview';
+}
 
 export function AICopilot({
     isOpen,
@@ -50,6 +94,7 @@ export function AICopilot({
     currentSymbol,
     widgetContext,
     widgetContextData,
+    activeTabName,
 }: AICopilotProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
@@ -68,6 +113,12 @@ export function AICopilot({
     const { data: profile } = useProfile(currentSymbol);
     const { data: quote } = useStockQuote(currentSymbol);
     const { data: ratios } = useFinancialRatios(currentSymbol);
+
+    const activeTabKey = useMemo(() => normalizeTabKey(activeTabName), [activeTabName]);
+    const suggestedPrompts = useMemo(
+        () => TAB_PROMPTS[activeTabKey] || DEFAULT_PROMPTS,
+        [activeTabKey]
+    );
 
     // Scroll to bottom when new messages arrive
     useEffect(() => {
@@ -110,6 +161,7 @@ export function AICopilot({
             // Construct context for widget
             const requestContext = {
                 widgetType: widgetContext || 'Dashboard',
+                activeTab: activeTabName || null,
                 symbol: currentSymbol,
                 dataSnapshot: {
                     profile: profile?.data || null,
@@ -229,7 +281,9 @@ export function AICopilot({
             {/* Context Badge */}
             <div className="px-4 py-2 border-b border-[#1e3a5f] bg-blue-600/10 flex items-center justify-between">
                 <span className="text-xs text-blue-400">
-                    {widgetContext ? `Context: @${widgetContext} · ` : ''}{currentSymbol}
+                    {widgetContext ? `Context: @${widgetContext} · ` : ''}
+                    {activeTabName ? `${activeTabName} · ` : ''}
+                    {currentSymbol}
                 </span>
                 {messages.length > 0 && (
                     <button
@@ -255,7 +309,7 @@ export function AICopilot({
                         {/* Suggested Prompts */}
                         <div className="space-y-2">
                             <div className="grid grid-cols-2 gap-2">
-                                {SUGGESTED_PROMPTS.map((item, i) => (
+                                {suggestedPrompts.map((item, i) => (
                                     <button
                                         key={i}
                                         onClick={() => handleSend(item.prompt)}
