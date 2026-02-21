@@ -134,6 +134,40 @@ export function Sidebar({
         return candidate;
     };
 
+    const nextFolderName = () => {
+        const existing = new Set(
+            state.folders.map((folder) => folder.name.trim().toLowerCase())
+        );
+        let nextNumber = 1;
+        while (existing.has(`folder ${nextNumber}`)) {
+            nextNumber += 1;
+        }
+        return `Folder ${nextNumber}`;
+    };
+
+    const withUniqueFolderName = (rawName: string, currentFolderId?: string) => {
+        const baseName = rawName.trim() || nextFolderName();
+        const normalize = (value: string) => value.trim().toLowerCase();
+        const existing = new Set(
+            state.folders
+                .filter((folder) => folder.id !== currentFolderId)
+                .map((folder) => normalize(folder.name))
+        );
+
+        if (!existing.has(normalize(baseName))) {
+            return baseName;
+        }
+
+        let suffix = 2;
+        let candidate = `${baseName} (${suffix})`;
+        while (existing.has(normalize(candidate))) {
+            suffix += 1;
+            candidate = `${baseName} (${suffix})`;
+        }
+
+        return candidate;
+    };
+
     const handleCreateDashboard = (folderId?: string) => {
         const dashboard = createDashboard({
             name: withUniqueDashboardName(nextDashboardName()),
@@ -146,7 +180,7 @@ export function Sidebar({
     };
 
     const handleCreateFolder = () => {
-        const folder = createFolder('New Folder');
+        const folder = createFolder(withUniqueFolderName(nextFolderName()));
         setEditingId(folder.id);
         setEditingName(folder.name);
         setShowCreateMenu(false);
@@ -198,20 +232,24 @@ export function Sidebar({
     };
 
     const submitRename = () => {
-        if (!editingId || !editingName.trim()) {
+        if (!editingId) {
             setEditingId(null);
             return;
         }
 
+        const trimmedName = editingName.trim();
+
         const dashboard = state.dashboards.find(d => d.id === editingId);
         if (dashboard) {
             updateDashboard(editingId, {
-                name: withUniqueDashboardName(editingName, editingId),
+                name: withUniqueDashboardName(trimmedName || nextDashboardName(), editingId),
             });
         } else {
             const folder = state.folders.find(f => f.id === editingId);
             if (folder) {
-                updateFolder(editingId, { name: editingName.trim() });
+                updateFolder(editingId, {
+                    name: withUniqueFolderName(trimmedName, editingId),
+                });
             }
         }
         setEditingId(null);
@@ -307,7 +345,7 @@ export function Sidebar({
                     transition-colors text-xs
                     ${isActive
                         ? 'bg-blue-500/15 text-blue-400 border-l-2 border-blue-500'
-                        : 'text-gray-400 hover:text-gray-200 hover:bg-[#1e2a3b]/50'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60'
                     }
                     ${isDragging ? 'opacity-50' : ''}
                     ${isDragOver ? 'border-t border-blue-500' : ''}
@@ -340,7 +378,7 @@ export function Sidebar({
                             if (e.key === 'Enter') submitRename();
                             if (e.key === 'Escape') setEditingId(null);
                         }}
-                        className="flex-1 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white text-sm focus:outline-none focus:border-blue-500"
+                        className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500"
                         autoFocus
                         onClick={(e) => e.stopPropagation()}
                     />
@@ -348,7 +386,7 @@ export function Sidebar({
                     <>
                         <span className="flex-1 truncate">{dashboard.name}</span>
                         <button
-                            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-gray-700 rounded transition-opacity"
+                            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 handleContextMenu(e, dashboard.id, 'dashboard');
@@ -370,10 +408,10 @@ export function Sidebar({
         return (
             <div key={folder.id}>
                 <div
-                    className={`
+                        className={`
                         group flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer 
-                        text-gray-400 hover:text-gray-200 hover:bg-[#1e2a3b]/50 transition-colors text-xs
-                        ${isDragOver ? 'bg-[#1e2a3b] ring-1 ring-blue-500' : ''}
+                        text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60 transition-colors text-xs
+                        ${isDragOver ? 'bg-[var(--bg-tertiary)] ring-1 ring-blue-500' : ''}
                     `}
                     role="button"
                     tabIndex={0}
@@ -405,14 +443,14 @@ export function Sidebar({
                                 if (e.key === 'Enter') submitRename();
                                 if (e.key === 'Escape') setEditingId(null);
                             }}
-                            className="flex-1 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white text-sm focus:outline-none focus:border-blue-500"
+                            className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500"
                             autoFocus
                             onClick={(e) => e.stopPropagation()}
                         />
                     ) : (
                         <>
                             <span className="flex-1 truncate">{folder.name}</span>
-                            <span className="text-[10px] text-gray-600">{folderDashboards.length}</span>
+                            <span className="text-[10px] text-[var(--text-muted)]">{folderDashboards.length}</span>
                             {folder.isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                         </>
                     )}
@@ -431,7 +469,7 @@ export function Sidebar({
             <aside
                 data-mobile-sidebar={mobileMode ? 'true' : 'false'}
                 className={`
-                    bg-[#0b1021] border-r border-[#1e2a3b]
+                    bg-[var(--bg-secondary)] border-r border-[var(--border-color)]
                     transition-[width] duration-300 flex flex-col
                     ${mobileMode
                         ? 'relative h-full w-full'
@@ -441,7 +479,7 @@ export function Sidebar({
             >
 
                 {/* Logo */}
-                <div className="h-10 flex items-center justify-between px-3 border-b border-[#1e2a3b] shrink-0">
+                <div className="h-10 flex items-center justify-between px-3 border-b border-[var(--border-color)] shrink-0">
                     {!collapsed && (
                         <Link href="/" className="flex items-center gap-2">
                             <span className="text-lg font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
@@ -452,7 +490,7 @@ export function Sidebar({
                     {!mobileMode && (
                         <button
                             onClick={() => setCollapsed(!collapsed)}
-                            className="p-1 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                            className="p-1 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                         >
                             {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
                         </button>
@@ -461,9 +499,9 @@ export function Sidebar({
 
                 {/* Global Search */}
                 {!collapsed && (
-                    <div className="px-2 py-1.5 border-b border-[#1e2a3b]">
+                    <div className="px-2 py-1.5 border-b border-[var(--border-color)]">
                         <button
-                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded bg-[#0f1629] border border-[#1e2a3b] text-gray-500 hover:text-gray-300 hover:border-[#2e3a4b] transition-colors text-xs"
+                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--border-strong)] transition-colors text-xs"
                             onClick={() => {
                                 // Trigger command palette with Ctrl+K
                                 const event = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true });
@@ -472,20 +510,20 @@ export function Sidebar({
                         >
                             <Search size={12} />
                             <span className="flex-1 text-left">Search</span>
-                            <span className="text-[10px] text-gray-600 bg-gray-800 px-1 rounded">⌘K</span>
+                            <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bg-elevated)] px-1 rounded">⌘K</span>
                         </button>
                     </div>
                 )}
 
                 {/* Library Section */}
                 {!collapsed && (
-                    <div className="px-2 py-1 border-b border-[#1e2a3b] shrink-0">
-                        <h3 className="px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                    <div className="px-2 py-1 border-b border-[var(--border-color)] shrink-0">
+                        <h3 className="px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                             Library
                         </h3>
                         <button
                             onClick={onOpenTemplateSelector}
-                            className="w-full flex items-center gap-2 px-2 py-1 rounded text-gray-400 hover:text-gray-200 hover:bg-[#1e2a3b]/50 transition-colors text-xs"
+                            className="w-full flex items-center gap-2 px-2 py-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60 transition-colors text-xs"
                         >
                             <AppWindow size={14} />
                             <span>Templates</span>
@@ -493,14 +531,14 @@ export function Sidebar({
 
                         <button
                             onClick={onOpenWidgetLibrary}
-                            className="w-full flex items-center gap-2 px-2 py-1 rounded text-gray-400 hover:text-gray-200 hover:bg-[#1e2a3b]/50 transition-colors text-xs"
+                            className="w-full flex items-center gap-2 px-2 py-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60 transition-colors text-xs"
                         >
                             <Grid3X3 size={14} />
                             <span>Widgets</span>
                         </button>
                         <button
                             onClick={onOpenPromptsLibrary}
-                            className="w-full flex items-center gap-2 px-2 py-1 rounded text-gray-400 hover:text-gray-200 hover:bg-[#1e2a3b]/50 transition-colors text-xs"
+                            className="w-full flex items-center gap-2 px-2 py-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60 transition-colors text-xs"
                         >
                             <MessageSquareText size={14} />
                             <span>Prompts</span>
@@ -513,28 +551,28 @@ export function Sidebar({
                     {!collapsed && (
                         <>
                             <div className="flex items-center justify-between px-1.5 py-0.5 mb-0.5">
-                                <h3 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                                <h3 className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                                     My Dashboards
                                 </h3>
                                 <div className="relative">
                                     <button
                                         onClick={() => setShowCreateMenu(!showCreateMenu)}
-                                        className="p-0.5 rounded hover:bg-gray-800 text-gray-500 hover:text-white transition-colors"
+                                        className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                                     >
                                         <Plus size={14} />
                                     </button>
                                     {showCreateMenu && (
-                                        <div className="absolute right-0 top-full mt-1 w-44 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 z-50">
+                                        <div className="absolute right-0 top-full mt-1 w-44 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded-lg shadow-xl py-1 z-50">
                                             <button
                                                 onClick={() => handleCreateDashboard()}
-                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-white"
+                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                             >
                                                 <LayoutDashboard size={14} />
-                                                <span>New Dashboard</span>
+                                                <span>Create Dashboard</span>
                                             </button>
                                             <button
                                                 onClick={handleCreateFolder}
-                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-white"
+                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                             >
                                                 <Folder size={14} />
                                                 <span>New Folder</span>
@@ -557,7 +595,7 @@ export function Sidebar({
                         <div className="space-y-1">
                             <button
                                 onClick={() => setCollapsed(false)}
-                                className="w-full flex justify-center p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800/80 transition-colors"
+                                className="w-full flex justify-center p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/80 transition-colors"
                                 title="Dashboards"
                             >
                                 <Layers size={18} />
@@ -567,12 +605,12 @@ export function Sidebar({
                 </div>
 
                 {/* Footer with Settings and Version */}
-                <div className="px-2 py-1 border-t border-[#1e2a3b] shrink-0">
+                <div className="px-2 py-1 border-t border-[var(--border-color)] shrink-0">
                     <button
                         onClick={() => setSettingsOpen(true)}
                         className={`
                             flex items-center gap-2 px-2 py-1 rounded w-full
-                            text-gray-400 hover:text-gray-200 hover:bg-[#1e2a3b]/50
+                            text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60
                             transition-colors text-xs
                         `}
                     >
@@ -581,14 +619,14 @@ export function Sidebar({
                             <div className="flex items-center justify-between flex-1">
                                 <span>Settings</span>
                                 <div className="flex items-center gap-1 opacity-40">
-                                    <kbd className="px-1 text-[8px] bg-gray-800 rounded font-sans">⌘</kbd>
-                                    <kbd className="px-1 text-[8px] bg-gray-800 rounded font-sans">K</kbd>
+                                    <kbd className="px-1 text-[8px] bg-[var(--bg-elevated)] rounded font-sans">⌘</kbd>
+                                    <kbd className="px-1 text-[8px] bg-[var(--bg-elevated)] rounded font-sans">K</kbd>
                                 </div>
                             </div>
                         )}
                     </button>
                     {!collapsed && (
-                        <div className="px-2 py-1 text-[10px] text-gray-600">
+                        <div className="px-2 py-1 text-[10px] text-[var(--text-muted)]">
                             v1.0.0
                         </div>
                     )}
@@ -615,12 +653,12 @@ export function Sidebar({
                         onClick={() => setContextMenu(null)}
                     />
                     <div
-                        className="fixed bg-[#0f1629] border border-[#1e2a3b] rounded shadow-xl py-0.5 z-[70] min-w-[140px]"
+                        className="fixed bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded shadow-xl py-0.5 z-[70] min-w-[140px]"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
                         <button
                             onClick={handleRename}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-300 hover:bg-[#1e2a3b] hover:text-white"
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                         >
                             <Edit2 size={12} />
                             <span>Rename</span>
@@ -629,7 +667,7 @@ export function Sidebar({
                             <>
                                 <button
                                     onClick={handleDuplicate}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-300 hover:bg-[#1e2a3b] hover:text-white"
+                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                 >
                                     <Copy size={12} />
                                     <span>Duplicate</span>
@@ -642,7 +680,7 @@ export function Sidebar({
                                         }
                                         setContextMenu(null);
                                     }}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-300 hover:bg-[#1e2a3b] hover:text-white"
+                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                 >
                                     {state.dashboards.find(d => d.id === contextMenu.id)?.showGroupLabels !== false ? (
                                         <>
@@ -659,17 +697,17 @@ export function Sidebar({
                                 <div className="relative">
                                     <button
                                         onClick={() => setShowMoveSubmenu(!showMoveSubmenu)}
-                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-300 hover:bg-[#1e2a3b] hover:text-white"
+                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                     >
                                         <FolderInput size={12} />
                                         <span>Move to Folder</span>
                                         <ChevronRight size={12} className="ml-auto" />
                                     </button>
                                     {showMoveSubmenu && (
-                                        <div className="absolute left-full top-0 ml-1 w-40 bg-[#0f1629] border border-[#1e2a3b] rounded shadow-xl py-0.5 z-[80]">
+                                        <div className="absolute left-full top-0 ml-1 w-40 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded shadow-xl py-0.5 z-[80]">
                                             <button
                                                 onClick={() => handleMoveToFolder(undefined)}
-                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-300 hover:bg-[#1e2a3b] hover:text-white"
+                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                             >
                                                 <FolderX size={12} />
                                                 <span>No Folder (Root)</span>
@@ -678,7 +716,7 @@ export function Sidebar({
                                                 <button
                                                     key={folder.id}
                                                     onClick={() => handleMoveToFolder(folder.id)}
-                                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-300 hover:bg-[#1e2a3b] hover:text-white"
+                                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                                 >
                                                     <Folder size={12} className="text-yellow-500/80" />
                                                     <span className="truncate">{folder.name}</span>
@@ -689,10 +727,10 @@ export function Sidebar({
                                 </div>
                             </>
                         )}
-                        <div className="border-t border-[#1e2a3b] my-0.5" />
+                        <div className="border-t border-[var(--border-color)] my-0.5" />
                         <button
                             onClick={handleDelete}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-red-400 hover:bg-[#1e2a3b] hover:text-red-300"
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-red-400 hover:bg-[var(--bg-tertiary)] hover:text-red-300"
                         >
                             <Trash2 size={12} />
                             <span>Delete</span>

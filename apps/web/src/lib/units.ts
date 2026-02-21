@@ -42,7 +42,7 @@ export function formatUnitValue(
   value: number | null | undefined,
   config: UnitConfig = DEFAULT_UNIT_CONFIG
 ): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '-'
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE
 
   const abs = Math.abs(value)
   const sign = value < 0 ? '-' : ''
@@ -101,7 +101,7 @@ export function formatUnitValuePlain(
   scale: UnitScale,
   config: UnitConfig = DEFAULT_UNIT_CONFIG
 ): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '-'
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE
 
   const locale = config.locale || 'en-US'
   const decimals = config.decimalPlaces
@@ -220,5 +220,49 @@ export function formatCurrency(
     currency,
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
+  })
+}
+
+export function formatVND(
+  value: number | null | undefined,
+  options: NumberFormatOptions = {}
+): string {
+  if (!isFiniteNumber(value)) return EMPTY_VALUE
+
+  const decimals = options.decimals ?? 0
+  return `${formatNumber(value, { ...options, decimals })} ₫`
+}
+
+export function formatLargeNumber(
+  value: number | null | undefined,
+  options: NumberFormatOptions = {}
+): string {
+  if (!isFiniteNumber(value)) return EMPTY_VALUE
+
+  const abs = Math.abs(value)
+  const sign = value < 0 ? '-' : ''
+  const decimals = options.decimals ?? 1
+
+  if (abs >= 1e12) return `${sign}${(abs / 1e12).toFixed(decimals)}T`
+  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(decimals)}B`
+  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(decimals)}M`
+  if (abs >= 1e3) return `${sign}${(abs / 1e3).toFixed(decimals)}K`
+
+  return formatNumber(value, { ...options, decimals: options.decimals ?? 0 })
+}
+
+export function formatDateValue(
+  value: string | number | Date | null | undefined,
+  locale = 'en-GB'
+): string {
+  if (value === null || value === undefined || value === '') return EMPTY_VALUE
+
+  const parsed = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(parsed.getTime())) return EMPTY_VALUE
+
+  return parsed.toLocaleDateString(locale, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
   })
 }

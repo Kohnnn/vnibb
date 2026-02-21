@@ -286,6 +286,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         note={`${period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period}`}
+                        sourceLabel="Balance sheet"
                         align="right"
                     />
                 </div>

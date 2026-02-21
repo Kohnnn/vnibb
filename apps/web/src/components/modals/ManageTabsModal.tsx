@@ -118,15 +118,15 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
             {/* Modal */}
             <div className="fixed inset-0 flex items-center justify-center z-[101] p-4">
                 <div
-                    className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-md"
+                    className="bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-xl shadow-2xl w-full max-w-md"
                     onClick={e => e.stopPropagation()}
                 >
                     {/* Header */}
-                    <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
-                        <h2 className="text-lg font-semibold text-white">Manage Tabs</h2>
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-color)]">
+                        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Manage Tabs</h2>
                         <button
                             onClick={handleCancel}
-                            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                            className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                             aria-label="Close manage tabs"
                         >
                             <X size={20} />
@@ -144,7 +144,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                                 onDragEnd={handleDragEnd}
                                 className={`
                                     flex items-center gap-2 p-2 rounded-lg
-                                    bg-gray-800/50 border border-gray-700
+                                    bg-[var(--bg-tertiary)]/60 border border-[var(--border-color)]
                                     ${draggedIndex === index ? 'opacity-50' : ''}
                                     ${dragOverIndex === index ? 'ring-2 ring-blue-500' : ''}
                                     transition-all
@@ -152,7 +152,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                             >
                                 {/* Drag handle */}
                                 <button
-                                    className="p-1 cursor-grab active:cursor-grabbing text-gray-500 hover:text-gray-300"
+                                    className="p-1 cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                     onMouseDown={(e) => e.stopPropagation()}
                                     aria-label="Reorder tab"
                                 >
@@ -165,7 +165,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                                     value={tab.name}
                                     aria-label="Tab name"
                                     onChange={(e) => handleNameChange(index, e.target.value)}
-                                    className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                    className="flex-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                                     placeholder="Tab name"
                                 />
 
@@ -176,8 +176,8 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                                     className={`
                                         p-2 rounded-lg transition-colors
                                         ${localTabs.length <= 1
-                                            ? 'text-gray-600 cursor-not-allowed'
-                                            : 'text-gray-400 hover:text-red-400 hover:bg-gray-700'
+                                            ? 'text-[var(--text-muted)]/40 cursor-not-allowed'
+                                            : 'text-[var(--text-muted)] hover:text-red-400 hover:bg-[var(--bg-secondary)]'
                                         }
                                     `}
                                     title={localTabs.length <= 1 ? 'Cannot delete the only tab' : 'Delete tab'}
@@ -191,7 +191,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                         {/* Add tab button */}
                         <button
                             onClick={handleAddTab}
-                            className="w-full flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors"
+                            className="w-full flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:border-blue-400/50 transition-colors"
                         >
                             <Plus size={18} />
                             <span>Add New Tab</span>
@@ -199,10 +199,10 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                     </div>
 
                     {/* Footer */}
-                    <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-700">
+                    <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-[var(--border-color)]">
                         <button
                             onClick={handleCancel}
-                            className="px-4 py-2 rounded-lg text-gray-300 hover:text-white hover:bg-gray-800 transition-colors"
+                            className="px-4 py-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                         >
                             Cancel
                         </button>

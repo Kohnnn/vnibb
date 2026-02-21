@@ -223,6 +223,26 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
 
     const hasData = Boolean(tableData && tableData.periods.length > 0);
     const isFallback = Boolean(activeQuery?.error && hasData);
+    const populatedCells = useMemo(() => {
+        if (!tableData) return 0
+        return tableData.rows.reduce((acc, row) => {
+            const rowCount = tableData.periods.filter((period) => {
+                const value = row.values[period]?.val
+                return value !== null && value !== undefined && Number.isFinite(Number(value))
+            }).length
+            return acc + rowCount
+        }, 0)
+    }, [tableData])
+    const isSparseData = hasData && populatedCells > 0 && populatedCells < 8
+
+    const sourceLabel =
+        activeTab === 'ratios'
+            ? 'Ratios dataset'
+            : activeTab === 'income_statement'
+                ? 'Income statement'
+                : activeTab === 'balance_sheet'
+                    ? 'Balance sheet'
+                    : 'Cash flow statement'
 
     const tableScale = useMemo(() => {
         if (!tableData || activeTab === 'ratios') return resolveUnitScale([], unitConfig);
@@ -249,7 +269,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
         >
             <div className="h-full flex flex-col bg-secondary text-primary font-sans select-none overflow-hidden">
                 {/* Controls */}
-                <div className="flex flex-wrap items-center gap-1.5 border-b border-white/5 bg-black/20 px-2 py-1 shrink-0">
+                <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/70 px-2 py-1 shrink-0">
                     <div className="flex gap-1 overflow-x-auto scrollbar-hide">
                         {tabs.map((tab) => {
                             const Icon = tab.icon;
@@ -261,7 +281,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                          "flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold uppercase tracking-tight rounded-md transition-all whitespace-nowrap",
                                         activeTab === tab.id
                                             ? "bg-blue-600/10 text-blue-400"
-                                            : "text-muted-foreground hover:text-primary hover:bg-white/5"
+                                            : "text-muted-foreground hover:text-primary hover:bg-[var(--bg-tertiary)]"
                                     )}
                                 >
                                     <Icon size={12} />
@@ -291,6 +311,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                             isFetching={activeQuery.isFetching && hasData}
                             isCached={isFallback}
                             note={periodLabel}
+                            sourceLabel={sourceLabel}
                             align="right"
                             className="ml-2"
                         />
@@ -305,11 +326,16 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                         <WidgetError error={activeQuery.error as Error} onRetry={() => activeQuery.refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty
-                            message="Financial statements are not available for this symbol yet."
+                            message={`No ${tabs.find((tab) => tab.id === activeTab)?.label?.toLowerCase() || 'financial'} data for ${symbol} (${periodLabel}).`}
                             action={{ label: 'Refresh data', onClick: () => activeQuery.refetch() }}
                         />
                     ) : (
                         <div className="min-w-max">
+                            {isSparseData && (
+                                <div className="px-2 pb-1 text-[10px] text-amber-400">
+                                    Partial dataset: some provider fields are still missing for this symbol.
+                                </div>
+                            )}
                             {activeTab !== 'ratios' && (
                                 <div className="px-2 pb-1 text-[10px] text-muted-foreground italic">
                                     {unitLegend}
@@ -317,24 +343,24 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                             )}
                             <table className="data-table financial-dense freeze-first-col w-full text-[11px] border-collapse table-fixed">
                                 <thead className="sticky top-0 bg-secondary/95 backdrop-blur-sm z-20">
-                                    <tr className="border-b border-white/10 shadow-sm">
-                                            <th className="text-left p-2 pl-2.5 text-muted-foreground font-black uppercase tracking-widest w-[152px] bg-secondary/95 backdrop-blur-sm sticky left-0 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.3)]">Metric</th>
+                                    <tr className="border-b border-[var(--border-color)] shadow-sm">
+                                            <th className="text-left p-2 pl-2.5 text-muted-foreground font-black uppercase tracking-widest w-[152px] bg-secondary/95 backdrop-blur-sm sticky left-0 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.2)]">Metric</th>
                                         {tableData?.periods.map(p => (
                                             <th key={p} className="text-right p-2 text-muted-foreground font-black min-w-[96px]">{p}</th>
                                         ))}
                                         <th className="text-center p-2 text-muted-foreground font-black min-w-[84px]">Trend</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-white/[0.03]">
+                                <tbody className="divide-y divide-[var(--border-subtle)]">
                                     {tableData?.rows.map((row, i) => (
                                         <tr
                                             key={i}
                                             className={cn(
-                                                "group hover:bg-white/[0.02] transition-colors",
-                                                i % 2 === 1 && "bg-white/[0.01]"
+                                                "group hover:bg-[var(--bg-tertiary)]/40 transition-colors",
+                                                i % 2 === 1 && "bg-[var(--bg-secondary)]/40"
                                             )}
                                         >
-                                            <td className="p-2 pl-2.5 font-medium text-gray-400 group-hover:text-blue-300 transition-colors border-r border-white/5 bg-secondary/95 backdrop-blur-sm sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.2)]">
+                                            <td className="p-2 pl-2.5 font-medium text-[var(--text-secondary)] group-hover:text-blue-300 transition-colors border-r border-[var(--border-subtle)] bg-secondary/95 backdrop-blur-sm sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.15)]">
                                                 {row.label}
                                             </td>
                                             {tableData.periods.map(p => {
@@ -348,11 +374,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                                         : formatUnitValuePlain(val, tableScale, unitConfig);
 
                                                 return (
-                                                    <td key={p} data-type="number" className="p-2 text-right font-mono group-hover:bg-white/[0.01]">
+                                                    <td key={p} data-type="number" className="p-2 text-right font-mono group-hover:bg-[var(--bg-tertiary)]/30">
                                                         <div className="flex flex-col items-end">
                                                             <span className={cn(
                                                                 "font-medium",
-                                                                val < 0 ? "text-red-400" : "text-gray-200"
+                                                                val < 0 ? "text-red-400" : "text-[var(--text-primary)]"
                                                             )}>
                                                                 {displayValue}
                                                             </span>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useScreenerData, useMetricsHistory, useFinancialRatios } from '@/lib/queries';
+import { useScreenerData, useMetricsHistory, useFinancialRatios, useProfile, useStockQuote } from '@/lib/queries';
 import { formatRatio, formatPercent } from '@/lib/formatters';
 import { formatUnitValue } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
@@ -26,6 +26,7 @@ interface MetricRowProps {
     label: string;
     value: string | number | null;
     sparklineData?: number[];
+    source?: string;
 }
 
 type MetricsCategory = 'valuation' | 'profitability' | 'health' | 'market';
@@ -37,7 +38,7 @@ const METRIC_TABS: Array<{ id: MetricsCategory; label: string }> = [
     { id: 'market', label: 'Market' },
 ];
 
-function MetricRow({ label, value, sparklineData }: MetricRowProps) {
+function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
     return (
         <div className="flex items-center justify-between py-1.5 border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
             <span className="text-gray-400 text-xs leading-tight pr-2 flex-1">{label}</span>
@@ -45,10 +46,33 @@ function MetricRow({ label, value, sparklineData }: MetricRowProps) {
                 {sparklineData && sparklineData.length > 0 && (
                     <Sparkline data={sparklineData} width={40} height={16} />
                 )}
+                {source && source !== 'Unavailable' && (
+                    <span className="text-[9px] uppercase tracking-wider text-gray-500">{source}</span>
+                )}
                 <span className="text-white font-mono text-xs">{value ?? '-'}</span>
             </div>
         </div>
     );
+}
+
+function toNumber(value: unknown): number | null {
+    const parsed = typeof value === 'number' ? value : Number(value)
+    if (!Number.isFinite(parsed)) {
+        return null
+    }
+    return parsed
+}
+
+function resolveMetric(
+    candidates: Array<{ value: unknown; source: string; positiveOnly?: boolean }>
+): { value: number | null; source: string } {
+    for (const candidate of candidates) {
+        const parsed = toNumber(candidate.value)
+        if (parsed === null) continue
+        if (candidate.positiveOnly && parsed <= 0) continue
+        return { value: parsed, source: candidate.source }
+    }
+    return { value: null, source: 'Unavailable' }
 }
 
 export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChange }: KeyMetricsWidgetProps) {
@@ -65,20 +89,82 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
 
     const { data: history, isFetching: historyFetching } = useMetricsHistory(symbol, { enabled: !!symbol });
     const { data: ratiosData } = useFinancialRatios(symbol, { period: 'FY', enabled: !!symbol });
+    const { data: profile } = useProfile(symbol, !!symbol);
+    const { data: quote } = useStockQuote(symbol, !!symbol);
 
     const stock = screenData?.data?.[0];
     const latestRatio = ratiosData?.data?.[0];
-    const mergedStock: any = stock || {
-        pe: latestRatio?.pe,
-        pb: latestRatio?.pb,
-        ps: latestRatio?.ps,
-        roe: latestRatio?.roe,
-        roa: latestRatio?.roa,
-        current_ratio: latestRatio?.current_ratio,
-        debt_to_equity: latestRatio?.debt_equity,
-        gross_margin: latestRatio?.gross_margin,
-        net_margin: latestRatio?.net_margin,
-    };
+    const derivedMarketCap =
+        toNumber(profile?.data?.outstanding_shares) && toNumber(quote?.price)
+            ? (toNumber(profile?.data?.outstanding_shares) || 0) * (toNumber(quote?.price) || 0)
+            : null
+
+    const metricMap = {
+        pe: resolveMetric([
+            { value: stock?.pe, source: 'Screener' },
+            { value: latestRatio?.pe, source: 'Ratios' },
+        ]),
+        pb: resolveMetric([
+            { value: stock?.pb, source: 'Screener' },
+            { value: latestRatio?.pb, source: 'Ratios' },
+        ]),
+        ps: resolveMetric([
+            { value: stock?.ps, source: 'Screener' },
+            { value: latestRatio?.ps, source: 'Ratios' },
+        ]),
+        evEbitda: resolveMetric([
+            { value: stock?.ev_ebitda, source: 'Screener' },
+            { value: latestRatio?.ev_ebitda, source: 'Ratios' },
+        ]),
+        roe: resolveMetric([
+            { value: stock?.roe, source: 'Screener' },
+            { value: latestRatio?.roe, source: 'Ratios' },
+        ]),
+        roa: resolveMetric([
+            { value: stock?.roa, source: 'Screener' },
+            { value: latestRatio?.roa, source: 'Ratios' },
+        ]),
+        roic: resolveMetric([{ value: (latestRatio as any)?.roic, source: 'Ratios' }]),
+        netMargin: resolveMetric([
+            { value: stock?.net_margin, source: 'Screener' },
+            { value: latestRatio?.net_margin, source: 'Ratios' },
+        ]),
+        grossMargin: resolveMetric([
+            { value: stock?.gross_margin, source: 'Screener' },
+            { value: latestRatio?.gross_margin, source: 'Ratios' },
+        ]),
+        debtToEquity: resolveMetric([
+            { value: stock?.debt_to_equity, source: 'Screener' },
+            { value: latestRatio?.debt_equity, source: 'Ratios' },
+        ]),
+        currentRatio: resolveMetric([
+            { value: stock?.current_ratio, source: 'Screener' },
+            { value: latestRatio?.current_ratio, source: 'Ratios' },
+        ]),
+        marketCap: resolveMetric([
+            { value: stock?.market_cap, source: 'Screener', positiveOnly: true },
+            { value: derivedMarketCap, source: 'Profile+Quote', positiveOnly: true },
+        ]),
+        dividendYield: resolveMetric([{ value: stock?.dividend_yield, source: 'Screener' }]),
+        beta: resolveMetric([{ value: stock?.beta, source: 'Screener' }]),
+    }
+
+    const mergedStock: any = {
+        pe: metricMap.pe.value,
+        pb: metricMap.pb.value,
+        ps: metricMap.ps.value,
+        ev_ebitda: metricMap.evEbitda.value,
+        roe: metricMap.roe.value,
+        roa: metricMap.roa.value,
+        roic: metricMap.roic.value,
+        net_margin: metricMap.netMargin.value,
+        gross_margin: metricMap.grossMargin.value,
+        debt_to_equity: metricMap.debtToEquity.value,
+        current_ratio: metricMap.currentRatio.value,
+        market_cap: metricMap.marketCap.value,
+        dividend_yield: metricMap.dividendYield.value,
+        beta: metricMap.beta.value,
+    }
     const hasData = Boolean(mergedStock && Object.values(mergedStock).some((v) => v !== null && v !== undefined));
     const isFallback = Boolean(error && hasData);
     const hasHistory = Boolean(
@@ -103,7 +189,8 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                     updatedAt={dataUpdatedAt}
                     isFetching={(isFetching || historyFetching) && hasData}
                     isCached={isFallback}
-                    note="Ratios & health"
+                    note={metricMap.marketCap.source === 'Profile+Quote' ? 'Market cap derived from profile shares x quote' : 'Ratios & health'}
+                    sourceLabel="Screener + ratios"
                     align="right"
                 />
 
@@ -148,35 +235,35 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
 
                         {activeCategory === 'valuation' && (
                             <>
-                                <MetricRow label="P/E Ratio" value={formatRatio(mergedStock?.pe)} sparklineData={history?.pe_ratio} />
-                                <MetricRow label="P/B Ratio" value={formatRatio(mergedStock?.pb)} sparklineData={history?.pb_ratio} />
-                                <MetricRow label="P/S Ratio" value={formatRatio(mergedStock?.ps)} />
-                                <MetricRow label="EV/EBITDA" value={formatRatio(mergedStock?.ev_ebitda)} />
+                                <MetricRow label="P/E Ratio" value={formatRatio(mergedStock?.pe)} sparklineData={history?.pe_ratio} source={metricMap.pe.source} />
+                                <MetricRow label="P/B Ratio" value={formatRatio(mergedStock?.pb)} sparklineData={history?.pb_ratio} source={metricMap.pb.source} />
+                                <MetricRow label="P/S Ratio" value={formatRatio(mergedStock?.ps)} source={metricMap.ps.source} />
+                                <MetricRow label="EV/EBITDA" value={formatRatio(mergedStock?.ev_ebitda)} source={metricMap.evEbitda.source} />
                             </>
                         )}
 
                         {activeCategory === 'profitability' && (
                             <>
-                                <MetricRow label="ROE" value={formatPercent(mergedStock?.roe)} sparklineData={history?.roe} />
-                                <MetricRow label="ROA" value={formatPercent(mergedStock?.roa)} sparklineData={history?.roa} />
-                                <MetricRow label="ROIC" value={formatPercent(mergedStock?.roic)} />
-                                <MetricRow label="Net Margin" value={formatPercent(mergedStock?.net_margin)} />
-                                <MetricRow label="Gross Margin" value={formatPercent(mergedStock?.gross_margin)} />
+                                <MetricRow label="ROE" value={formatPercent(mergedStock?.roe)} sparklineData={history?.roe} source={metricMap.roe.source} />
+                                <MetricRow label="ROA" value={formatPercent(mergedStock?.roa)} sparklineData={history?.roa} source={metricMap.roa.source} />
+                                <MetricRow label="ROIC" value={formatPercent(mergedStock?.roic)} source={metricMap.roic.source} />
+                                <MetricRow label="Net Margin" value={formatPercent(mergedStock?.net_margin)} source={metricMap.netMargin.source} />
+                                <MetricRow label="Gross Margin" value={formatPercent(mergedStock?.gross_margin)} source={metricMap.grossMargin.source} />
                             </>
                         )}
 
                         {activeCategory === 'health' && (
                             <>
-                                <MetricRow label="Debt/Equity" value={formatRatio(mergedStock?.debt_to_equity)} />
-                                <MetricRow label="Current Ratio" value={formatRatio(mergedStock?.current_ratio)} />
+                                <MetricRow label="Debt/Equity" value={formatRatio(mergedStock?.debt_to_equity)} source={metricMap.debtToEquity.source} />
+                                <MetricRow label="Current Ratio" value={formatRatio(mergedStock?.current_ratio)} source={metricMap.currentRatio.source} />
                             </>
                         )}
 
                         {activeCategory === 'market' && (
                             <>
-                                <MetricRow label="Market Cap" value={formatUnitValue(mergedStock?.market_cap, unitConfig)} />
-                                <MetricRow label="Dividend Yield" value={formatPercent(mergedStock?.dividend_yield)} />
-                                <MetricRow label="Beta" value={formatRatio(mergedStock?.beta)} />
+                                <MetricRow label="Market Cap" value={formatUnitValue(mergedStock?.market_cap, unitConfig)} source={metricMap.marketCap.source} />
+                                <MetricRow label="Dividend Yield" value={formatPercent(mergedStock?.dividend_yield)} source={metricMap.dividendYield.source} />
+                                <MetricRow label="Beta" value={formatRatio(mergedStock?.beta)} source={metricMap.beta.source} />
                             </>
                         )}
                     </div>

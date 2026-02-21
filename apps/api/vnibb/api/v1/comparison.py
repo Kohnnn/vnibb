@@ -10,6 +10,11 @@ router = APIRouter()
 async def get_multi_performance(
     symbols: str = Query(..., description="Comma-separated stock symbols (max 5)"),
     days: int = Query(30, ge=7, le=365),
+    period: str | None = Query(
+        default=None,
+        pattern=r"^(1M|3M|6M|1Y|3Y|5Y|YTD|ALL)$",
+        description="Optional period override: 1M, 3M, 6M, 1Y, 3Y, 5Y, YTD, ALL",
+    ),
 ):
     """
     Get normalized price performance (%) for multiple stocks.
@@ -17,14 +22,14 @@ async def get_multi_performance(
     """
     symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     try:
-        return await get_multi_performance_data(symbol_list, days)
+        return await get_multi_performance_data(symbol_list, days=days, period=period)
     except Exception as e:
         return []
 
 
 @router.get("/", response_model=ComparisonResponse)
 async def compare_stocks(
-    symbols: str = Query(..., description="Comma-separated stock symbols (max 5)"),
+    symbols: str = Query(..., description="Comma-separated stock symbols (max 6)"),
     period: str = Query("FY", description="Period: FY, Q1, Q2, Q3, Q4, TTM"),
 ):
     """
@@ -36,8 +41,8 @@ async def compare_stocks(
 
     if len(symbol_list) < 2:
         raise HTTPException(400, "At least 2 symbols required")
-    if len(symbol_list) > 5:
-        raise HTTPException(400, "Maximum 5 symbols allowed")
+    if len(symbol_list) > 6:
+        raise HTTPException(400, "Maximum 6 symbols allowed")
 
     stocks = await get_comparison_data(symbol_list, period)
 

@@ -80,13 +80,13 @@ export function WidgetError({ error, onRetry, title = 'Failed to load data' }: W
             </div>
 
             {message && (
-                <p className="text-xs text-gray-500 mb-4 max-w-[280px] leading-relaxed">
+                <p className="text-xs text-[var(--text-muted)] mb-4 max-w-[280px] leading-relaxed">
                     {getUserFriendlyErrorMessage(message)}
                 </p>
             )}
 
             {hint && (
-                <p className="text-[11px] text-gray-600 mb-3">{hint}</p>
+                <p className="text-[11px] text-[var(--text-secondary)] mb-3">{hint}</p>
             )}
 
             {onRetry && (
@@ -108,9 +108,9 @@ export function WidgetError({ error, onRetry, title = 'Failed to load data' }: W
 export function OfflineIndicator() {
     return (
         <div className="flex flex-col items-center justify-center h-full min-h-[100px] p-4 text-center">
-            <WifiOff size={20} className="text-gray-500 mb-2" />
-            <p className="text-xs text-gray-500 font-medium">You're offline</p>
-            <p className="text-xs text-gray-600 mt-1">Check your connection</p>
+            <WifiOff size={20} className="text-[var(--text-muted)] mb-2" />
+            <p className="text-xs text-[var(--text-muted)] font-medium">You're offline</p>
+            <p className="text-xs text-[var(--text-secondary)] mt-1">Check your connection</p>
         </div>
     );
 }
@@ -134,10 +134,10 @@ export function WidgetEmpty({
 }: WidgetEmptyProps) {
     return (
         <div className="flex flex-col items-center justify-center h-full min-h-[120px] p-4 text-center">
-            <div className="text-gray-600 mb-2">
+            <div className="text-[var(--text-muted)] mb-2">
                 {icon || <Inbox size={24} />}
             </div>
-            <p className="text-xs text-gray-500 font-medium mb-3">{message}</p>
+            <p className="text-xs text-[var(--text-secondary)] font-medium mb-3">{message}</p>
             {action && (
                 <button
                     onClick={action.onClick}

@@ -1,111 +1,61 @@
-// World Indices Widget - Global market indices
-
 'use client';
 
-import { useState } from 'react';
-import { Globe, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import { Globe, TrendingDown, TrendingUp } from 'lucide-react';
+import { useWorldIndices } from '@/lib/queries';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 
-interface WorldIndexData {
-    name: string;
-    symbol: string;
-    value: number;
-    change: number;
-    changePct: number;
-    region: 'asia' | 'europe' | 'americas';
+function formatValue(value: number | null | undefined): string {
+    if (value === null || value === undefined) return '--';
+    return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
-interface WorldIndicesWidgetProps {
-    isEditing?: boolean;
-    onRemove?: () => void;
-}
+export function WorldIndicesWidget() {
+    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useWorldIndices();
 
-const WORLD_INDICES: WorldIndexData[] = [
-    { name: 'S&P 500', symbol: 'SPX', value: 5234.18, change: 32.45, changePct: 0.62, region: 'americas' },
-    { name: 'Dow Jones', symbol: 'DJI', value: 39127.14, change: -45.23, changePct: -0.12, region: 'americas' },
-    { name: 'NASDAQ', symbol: 'IXIC', value: 16439.22, change: 125.87, changePct: 0.77, region: 'americas' },
-    { name: 'Nikkei 225', symbol: 'N225', value: 38487.90, change: 234.56, changePct: 0.61, region: 'asia' },
-    { name: 'Hang Seng', symbol: 'HSI', value: 16589.44, change: -123.45, changePct: -0.74, region: 'asia' },
-    { name: 'Shanghai', symbol: 'SSEC', value: 3015.17, change: 12.34, changePct: 0.41, region: 'asia' },
-    { name: 'FTSE 100', symbol: 'FTSE', value: 8147.23, change: 45.67, changePct: 0.56, region: 'europe' },
-    { name: 'DAX', symbol: 'GDAXI', value: 18089.67, change: -89.12, changePct: -0.49, region: 'europe' },
-];
-
-type RegionFilter = 'all' | 'asia' | 'europe' | 'americas';
-
-export function WorldIndicesWidget({}: WorldIndicesWidgetProps) {
-    const [filter, setFilter] = useState<RegionFilter>('all');
-    const [isRefreshing, setIsRefreshing] = useState(false);
-    const [lastUpdated, setLastUpdated] = useState<Date | null>(new Date());
-
-    const filteredIndices = filter === 'all'
-        ? WORLD_INDICES
-        : WORLD_INDICES.filter(idx => idx.region === filter);
-
-    const handleRefresh = () => {
-        setIsRefreshing(true);
-        setTimeout(() => {
-            setIsRefreshing(false);
-            setLastUpdated(new Date());
-        }, 500);
-    };
+    const rows = data?.data || [];
+    const hasData = rows.length > 0;
+    const isFallback = Boolean(data?.error);
 
     return (
         <div className="h-full flex flex-col">
-            <div className="flex items-center justify-between px-1 py-1 mb-2">
-                <div className="flex items-center gap-2">
-                    <Globe size={12} className="text-blue-400" />
-                    <div className="flex bg-gray-800 rounded text-[10px]">
-                        {(['all', 'asia', 'europe', 'americas'] as RegionFilter[]).map((r) => (
-                            <button
-                                key={r}
-                                onClick={() => setFilter(r)}
-                                className={`px-2 py-0.5 rounded capitalize ${filter === r ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
-                                type="button"
-                            >
-                                {r === 'all' ? 'All' : r.slice(0, 2).toUpperCase()}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-                <button
-                    onClick={handleRefresh}
-                    className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded"
-                    type="button"
-                >
-                    <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
-                </button>
-            </div>
-
-            <div className="pb-2 border-b border-gray-800/50">
-                <WidgetMeta updatedAt={lastUpdated} isFetching={isRefreshing} note="Sample data" align="right" />
+            <div className="pb-2 border-b border-[var(--border-subtle)]">
+                <WidgetMeta
+                    updatedAt={dataUpdatedAt}
+                    isFetching={isFetching && hasData}
+                    isCached={isFallback}
+                    note={data?.source || 'vnstock'}
+                    align="right"
+                />
             </div>
 
             <div className="flex-1 overflow-auto space-y-1 pt-2">
-                {filteredIndices.length === 0 ? (
-                    <WidgetEmpty message="No indices available" icon={<Globe size={18} />} />
+                {isLoading && !hasData ? (
+                    <WidgetSkeleton lines={6} />
+                ) : error && !hasData ? (
+                    <WidgetError error={error as Error} onRetry={() => refetch()} />
+                ) : !hasData ? (
+                    <WidgetEmpty message="No world index data available" icon={<Globe size={18} />} />
                 ) : (
-                    filteredIndices.map((index, idx) => {
-                        const isUp = index.changePct >= 0;
+                    rows.map((row, index) => {
+                        const isUp = (row.change_pct || 0) >= 0;
                         return (
                             <div
-                                key={`${index.symbol}-${idx}`}
-                                className={`p-2 rounded-lg border ${isUp
-                                        ? 'bg-green-500/5 border-green-500/20'
-                                        : 'bg-red-500/5 border-red-500/20'
-                                    }`}
+                                key={`${row.symbol}-${index}`}
+                                className="flex items-center justify-between p-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40"
                             >
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <div className="text-xs text-gray-400">{index.name}</div>
-                                        <div className={`text-sm font-bold ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                                            {index.value.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                                        </div>
+                                <div className="min-w-0">
+                                    <div className="text-xs font-semibold text-[var(--text-primary)] truncate">
+                                        {row.name || row.symbol}
                                     </div>
-                                    <div className={`flex items-center gap-1 text-xs ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                                        {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                                        <span>{isUp ? '+' : ''}{index.changePct.toFixed(2)}%</span>
+                                    <div className="text-[10px] text-[var(--text-muted)]">{row.symbol}</div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-xs font-mono text-[var(--text-primary)]">{formatValue(row.value)}</div>
+                                    <div className={`text-[11px] flex items-center justify-end gap-1 ${isUp ? 'text-green-400' : 'text-red-400'}`}>
+                                        {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                                        {isUp ? '+' : ''}{(row.change_pct || 0).toFixed(2)}%
                                     </div>
                                 </div>
                             </div>

@@ -90,7 +90,7 @@ export function ScreenerWidget({
         if (search) {
             const searchLower = search.toLowerCase();
             result = result.filter((s: any) =>
-                s.ticker?.toLowerCase().includes(searchLower) ||
+                (s.ticker ?? s.symbol)?.toLowerCase().includes(searchLower) ||
                 s.organ_name?.toLowerCase().includes(searchLower)
             );
         }
@@ -295,7 +295,7 @@ export function ScreenerWidget({
                             data={filteredData}
                             columns={tableColumns}
                             rowHeight={38}
-                            onRowClick={(row) => handleSymbolSelect(row.ticker)}
+                            onRowClick={(row) => handleSymbolSelect(row.ticker ?? row.symbol)}
                             sortField={sortField}
                             sortOrder={sortOrder}
                             onSort={handleSort}
@@ -307,14 +307,14 @@ export function ScreenerWidget({
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
                                 {filteredData.map((stock: any) => (
                                     <ChartGridCard
-                                        key={stock.ticker}
-                                        symbol={stock.ticker}
+                                        key={stock.ticker ?? stock.symbol}
+                                        symbol={stock.ticker ?? stock.symbol}
                                         exchange={stock.exchange}
                                         name={stock.organ_name}
                                         price={stock.price}
                                         change={stock.change_1d}
                                         changePercent={stock.change_1d}
-                                        onClick={() => handleSymbolSelect(stock.ticker)}
+                                        onClick={() => handleSymbolSelect(stock.ticker ?? stock.symbol)}
                                     />
                                 ))}
                             </div>

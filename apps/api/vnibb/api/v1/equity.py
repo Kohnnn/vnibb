@@ -8,14 +8,14 @@ import re
 from datetime import date, timedelta, datetime
 from typing import List, Optional, Literal, Any, Callable, Awaitable
 
-from fastapi import APIRouter, HTTPException, Query, Depends, Path
+from fastapi import APIRouter, Query, Depends, Path
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
 from vnibb.api.v1.schemas import StandardResponse, MetaData
 from vnibb.core.database import get_db
-from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.exceptions import ProviderTimeoutError
 from vnibb.core.cache import cached
 from vnibb.core.config import settings
 from vnibb.services.cache_manager import CacheManager
@@ -58,12 +58,7 @@ from vnibb.providers.vnstock.foreign_trading import (
     ForeignTradingQueryParams,
 )
 from vnibb.providers.vnstock.subsidiaries import VnstockSubsidiariesFetcher, SubsidiariesQueryParams
-from vnibb.providers.vnstock.market_overview import (
-    VnstockMarketOverviewFetcher,
-    MarketOverviewQueryParams,
-)
 from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher
-from vnibb.providers.vnstock.insider_deals import VnstockInsiderDealsFetcher
 from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
 from vnibb.providers.vnstock.trading_stats import VnstockTradingStatsFetcher
 from vnibb.providers.vnstock.ownership import VnstockOwnershipFetcher
@@ -120,6 +115,75 @@ async def _refresh_profile_cache(symbol: str) -> None:
         logger.info(f"Background profile refresh complete (symbol={symbol})")
     except Exception as e:
         logger.warning(f"Background profile refresh failed (symbol={symbol}): {e}")
+
+
+async def _load_financial_statement_fallback(
+    db: AsyncSession,
+    symbol: str,
+    statement_type: str,
+    period: str,
+    limit: int,
+) -> list[FinancialStatementData]:
+    """Read financial statements from local DB when provider data is unavailable."""
+    symbol_upper = symbol.upper()
+    period_upper = (period or "").upper()
+
+    type_map = {
+        "income": IncomeStatement,
+        "income_statement": IncomeStatement,
+        "balance": BalanceSheet,
+        "balance_sheet": BalanceSheet,
+        "cashflow": CashFlow,
+        "cash_flow": CashFlow,
+    }
+    model = type_map.get(statement_type)
+    if model is None:
+        return []
+
+    normalized_period = "year"
+    if period_upper in {"QUARTER", "Q1", "Q2", "Q3", "Q4", "TTM"}:
+        normalized_period = "quarter"
+
+    quarter_filter: Optional[int] = None
+    if period_upper in {"Q1", "Q2", "Q3", "Q4"}:
+        quarter_filter = int(period_upper[1])
+
+    stmt = (
+        select(model)
+        .where(model.symbol == symbol_upper, model.period_type == normalized_period)
+        .order_by(model.fiscal_year.desc(), model.fiscal_quarter.desc())
+    )
+    if quarter_filter is not None:
+        stmt = stmt.where(model.fiscal_quarter == quarter_filter)
+    stmt = stmt.limit(limit)
+
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+
+    return [
+        FinancialStatementData(
+            symbol=row.symbol,
+            period=row.period,
+            fiscal_year=row.fiscal_year,
+            fiscal_quarter=row.fiscal_quarter,
+            revenue=getattr(row, "revenue", None),
+            gross_profit=getattr(row, "gross_profit", None),
+            operating_income=getattr(row, "operating_income", None),
+            net_income=getattr(row, "net_income", None),
+            ebitda=getattr(row, "ebitda", None),
+            eps=getattr(row, "eps", None),
+            total_assets=getattr(row, "total_assets", None),
+            total_liabilities=getattr(row, "total_liabilities", None),
+            total_equity=getattr(row, "total_equity", None),
+            cash_and_equivalents=getattr(row, "cash_and_equivalents", None),
+            inventory=getattr(row, "inventory", None),
+            operating_cash_flow=getattr(row, "operating_cash_flow", None),
+            investing_cash_flow=getattr(row, "investing_cash_flow", None),
+            financing_cash_flow=getattr(row, "financing_cash_flow", None),
+            free_cash_flow=getattr(row, "free_cash_flow", None),
+        )
+        for row in rows
+    ]
 
 
 def _to_historical_data(row: StockPrice) -> EquityHistoricalData:
@@ -253,17 +317,40 @@ async def get_quote(
                 select(StockPrice)
                 .where(StockPrice.symbol == symbol_upper)
                 .order_by(StockPrice.time.desc())
-                .limit(1)
+                .limit(2)
             )
-            price_row = (await db.execute(price_stmt)).scalar_one_or_none()
-            if price_row:
+            price_rows = (await db.execute(price_stmt)).scalars().all()
+            if price_rows:
+                latest_row = price_rows[0]
+                previous_row = price_rows[1] if len(price_rows) > 1 else None
+
+                prev_close = (
+                    float(previous_row.close)
+                    if previous_row and previous_row.close is not None
+                    else None
+                )
+                latest_close = float(latest_row.close) if latest_row.close is not None else None
+                change = (
+                    latest_close - prev_close
+                    if latest_close is not None and prev_close is not None
+                    else None
+                )
+                change_pct = (
+                    (change / prev_close) * 100
+                    if change is not None and prev_close not in (None, 0)
+                    else None
+                )
+
                 return StockQuoteData(
                     symbol=symbol_upper,
-                    price=price_row.close,
-                    open=price_row.open,
-                    high=price_row.high,
-                    low=price_row.low,
-                    volume=price_row.volume,
+                    price=latest_close,
+                    open=float(latest_row.open) if latest_row.open is not None else None,
+                    high=float(latest_row.high) if latest_row.high is not None else None,
+                    low=float(latest_row.low) if latest_row.low is not None else None,
+                    prev_close=prev_close,
+                    change=change,
+                    change_pct=round(change_pct, 2) if change_pct is not None else None,
+                    volume=int(latest_row.volume) if latest_row.volume is not None else None,
                     updated_at=datetime.utcnow(),
                 )
 
@@ -420,48 +507,34 @@ async def get_financials(
             period=period,
             limit=limit,
         )
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        if data:
+            return StandardResponse(data=data, meta=MetaData(count=len(data)))
+
+        fallback_data = await _load_financial_statement_fallback(
+            db=db,
+            symbol=symbol,
+            statement_type=statement_type,
+            period=period,
+            limit=limit,
+        )
+        if fallback_data:
+            return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+
+        return StandardResponse(data=[], meta=MetaData(count=0))
     except Exception as e:
         logger.warning(f"Live API failed for financials {symbol}, trying database fallback: {e}")
         try:
-            normalized_period = "year"
-            if period in {"quarter", "Q1", "Q2", "Q3", "Q4", "TTM"}:
-                normalized_period = "quarter"
-            # Database Fallback
-            model = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow}.get(
-                statement_type
+            fallback_data = await _load_financial_statement_fallback(
+                db=db,
+                symbol=symbol,
+                statement_type=statement_type,
+                period=period,
+                limit=limit,
             )
-            stmt = (
-                select(model)
-                .where(model.symbol == symbol.upper(), model.period_type == normalized_period)
-                .order_by(model.fiscal_year.desc())
-                .limit(limit)
-            )
-            res = await db.execute(stmt)
-            rows = res.scalars().all()
-            if rows:
-                data = [
-                    FinancialStatementData(
-                        symbol=r.symbol,
-                        period=r.period,
-                        fiscal_year=r.fiscal_year,
-                        fiscal_quarter=r.fiscal_quarter,
-                        revenue=getattr(r, "revenue", None),
-                        net_income=getattr(r, "net_income", None),
-                        eps=getattr(r, "eps", None),
-                        total_assets=getattr(r, "total_assets", None),
-                        total_liabilities=getattr(r, "total_liabilities", None),
-                        total_equity=getattr(r, "total_equity", None),
-                        cash_and_equivalents=getattr(r, "cash_and_equivalents", None),
-                        equity=getattr(r, "total_equity", None),
-                        cash=getattr(r, "cash_and_equivalents", None),
-                        inventory=getattr(r, "inventory", None),
-                    )
-                    for r in rows
-                ]
-                return StandardResponse(data=data, meta=MetaData(count=len(data)))
-        except Exception:
-            pass
+            if fallback_data:
+                return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+        except Exception as fallback_error:
+            logger.warning(f"DB fallback failed for financials {symbol}: {fallback_error}")
 
         return StandardResponse(data=[], error=f"Data unavailable: {str(e)}")
 
@@ -507,6 +580,168 @@ async def get_officers(symbol: str):
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         return StandardResponse(data=[], error=str(e))
+
+
+def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
+    entries: List[dict[str, Any]] = []
+
+    for level in range(1, 4):
+        bid_level = getattr(depth_data, f"bid_{level}", None)
+        ask_level = getattr(depth_data, f"ask_{level}", None)
+
+        bid_price = getattr(bid_level, "price", None) if bid_level else None
+        ask_price = getattr(ask_level, "price", None) if ask_level else None
+        bid_vol = getattr(bid_level, "volume", None) if bid_level else None
+        ask_vol = getattr(ask_level, "volume", None) if ask_level else None
+        price = bid_price if bid_price is not None else ask_price
+
+        if any(value is not None for value in (price, bid_vol, ask_vol)):
+            entries.append(
+                {
+                    "level": level,
+                    "price": price,
+                    "bid_vol": bid_vol,
+                    "ask_vol": ask_vol,
+                }
+            )
+
+    raw_levels = getattr(depth_data, "raw_levels", None) or []
+    if entries or not raw_levels:
+        return entries
+
+    for row in raw_levels[:10]:
+        bid_price = row.get("bidPrice1") or row.get("bid1")
+        ask_price = row.get("offerPrice1") or row.get("askPrice1") or row.get("ask1")
+        bid_vol = row.get("bidVol1") or row.get("bidVolume1") or row.get("buyVol")
+        ask_vol = row.get("offerVol1") or row.get("askVolume1") or row.get("sellVol")
+        price = bid_price if bid_price is not None else ask_price
+
+        if any(value is not None for value in (price, bid_vol, ask_vol)):
+            entries.append(
+                {
+                    "level": len(entries) + 1,
+                    "price": price,
+                    "bid_vol": bid_vol,
+                    "ask_vol": ask_vol,
+                }
+            )
+
+    return entries
+
+
+async def _get_orderbook_payload(symbol: str) -> dict[str, Any]:
+    depth = await asyncio.wait_for(
+        VnstockPriceDepthFetcher.fetch(symbol=symbol.upper(), source=settings.vnstock_source),
+        timeout=30,
+    )
+    entries = _normalize_orderbook_entries(depth)
+
+    return {
+        "symbol": symbol.upper(),
+        "entries": entries,
+        "total_bid_volume": getattr(depth, "total_bid_volume", None),
+        "total_ask_volume": getattr(depth, "total_ask_volume", None),
+        "last_price": getattr(depth, "last_price", None),
+        "last_volume": getattr(depth, "last_volume", None),
+    }
+
+
+@router.get("/{symbol}/price-depth", response_model=StandardResponse[dict[str, Any]])
+async def get_price_depth(symbol: str):
+    try:
+        payload = await _get_orderbook_payload(symbol)
+        return StandardResponse(data=payload, meta=MetaData(count=len(payload.get("entries", []))))
+    except asyncio.TimeoutError:
+        return StandardResponse(
+            data={"symbol": symbol.upper(), "entries": []}, error="Request timed out"
+        )
+    except Exception as e:
+        return StandardResponse(data={"symbol": symbol.upper(), "entries": []}, error=str(e))
+
+
+@router.get("/{symbol}/orderbook", response_model=StandardResponse[dict[str, Any]])
+async def get_orderbook(symbol: str):
+    try:
+        payload = await _get_orderbook_payload(symbol)
+        return StandardResponse(data=payload, meta=MetaData(count=len(payload.get("entries", []))))
+    except asyncio.TimeoutError:
+        return StandardResponse(
+            data={"symbol": symbol.upper(), "entries": []}, error="Request timed out"
+        )
+    except Exception as e:
+        return StandardResponse(data={"symbol": symbol.upper(), "entries": []}, error=str(e))
+
+
+@router.get("/{symbol}/intraday", response_model=StandardResponse[List[Any]])
+async def get_intraday(symbol: str, limit: int = Query(200, ge=1, le=1000)):
+    try:
+        data = await asyncio.wait_for(
+            VnstockIntradayFetcher.fetch(IntradayQueryParams(symbol=symbol.upper(), limit=limit)),
+            timeout=30,
+        )
+        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+    except (asyncio.TimeoutError, ProviderTimeoutError):
+        return StandardResponse(data=[], error="Request timed out")
+    except Exception as e:
+        return StandardResponse(data=[], error=str(e))
+
+
+@router.get("/{symbol}/foreign-trading", response_model=StandardResponse[List[Any]])
+async def get_foreign_trading(symbol: str, limit: int = Query(60, ge=1, le=365)):
+    try:
+        data = await asyncio.wait_for(
+            VnstockForeignTradingFetcher.fetch(
+                ForeignTradingQueryParams(symbol=symbol.upper(), limit=limit)
+            ),
+            timeout=30,
+        )
+        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+    except (asyncio.TimeoutError, ProviderTimeoutError):
+        return StandardResponse(data=[], error="Request timed out")
+    except Exception as e:
+        return StandardResponse(data=[], error=str(e))
+
+
+@router.get("/{symbol}/subsidiaries", response_model=StandardResponse[List[Any]])
+async def get_subsidiaries(symbol: str):
+    try:
+        data = await asyncio.wait_for(
+            VnstockSubsidiariesFetcher.fetch(SubsidiariesQueryParams(symbol=symbol.upper())),
+            timeout=30,
+        )
+        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+    except (asyncio.TimeoutError, ProviderTimeoutError):
+        return StandardResponse(data=[], error="Request timed out")
+    except Exception as e:
+        return StandardResponse(data=[], error=str(e))
+
+
+@router.get("/{symbol}/trading-stats", response_model=StandardResponse[Any])
+async def get_trading_stats(symbol: str):
+    try:
+        data = await asyncio.wait_for(
+            VnstockTradingStatsFetcher.fetch(symbol=symbol.upper()),
+            timeout=30,
+        )
+        return StandardResponse(data=data, meta=MetaData(count=1 if data else 0))
+    except (asyncio.TimeoutError, ProviderTimeoutError):
+        return StandardResponse(data=None, error="Request timed out")
+    except Exception as e:
+        return StandardResponse(data=None, error=str(e))
+
+
+@router.get("/{symbol}/rating", response_model=StandardResponse[Any])
+async def get_rating(symbol: str):
+    try:
+        data = await asyncio.wait_for(
+            VnstockGeneralRatingFetcher.fetch(symbol=symbol.upper()),
+            timeout=30,
+        )
+        return StandardResponse(data=data, meta=MetaData(count=1 if data else 0))
+    except (asyncio.TimeoutError, ProviderTimeoutError):
+        return StandardResponse(data=None, error="Request timed out")
+    except Exception as e:
+        return StandardResponse(data=None, error=str(e))
 
 
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
@@ -692,6 +927,7 @@ async def get_income_statement(
     symbol: str,
     period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
     limit: int = Query(5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
         data = await get_financials_with_ttm(
@@ -700,8 +936,28 @@ async def get_income_statement(
             period=period,
             limit=limit,
         )
+        if not data:
+            data = await _load_financial_statement_fallback(
+                db=db,
+                symbol=symbol,
+                statement_type=StatementType.INCOME.value,
+                period=period,
+                limit=limit,
+            )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
+        try:
+            fallback_data = await _load_financial_statement_fallback(
+                db=db,
+                symbol=symbol,
+                statement_type=StatementType.INCOME.value,
+                period=period,
+                limit=limit,
+            )
+            if fallback_data:
+                return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+        except Exception:
+            pass
         return StandardResponse(data=[], error=str(e))
 
 
@@ -713,6 +969,7 @@ async def get_balance_sheet(
     symbol: str,
     period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
     limit: int = Query(5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
         data = await get_financials_with_ttm(
@@ -721,8 +978,28 @@ async def get_balance_sheet(
             period=period,
             limit=limit,
         )
+        if not data:
+            data = await _load_financial_statement_fallback(
+                db=db,
+                symbol=symbol,
+                statement_type=StatementType.BALANCE.value,
+                period=period,
+                limit=limit,
+            )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
+        try:
+            fallback_data = await _load_financial_statement_fallback(
+                db=db,
+                symbol=symbol,
+                statement_type=StatementType.BALANCE.value,
+                period=period,
+                limit=limit,
+            )
+            if fallback_data:
+                return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+        except Exception:
+            pass
         return StandardResponse(data=[], error=str(e))
 
 
@@ -732,6 +1009,7 @@ async def get_cash_flow(
     symbol: str,
     period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
     limit: int = Query(5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
         data = await get_financials_with_ttm(
@@ -740,8 +1018,28 @@ async def get_cash_flow(
             period=period,
             limit=limit,
         )
+        if not data:
+            data = await _load_financial_statement_fallback(
+                db=db,
+                symbol=symbol,
+                statement_type=StatementType.CASHFLOW.value,
+                period=period,
+                limit=limit,
+            )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
+        try:
+            fallback_data = await _load_financial_statement_fallback(
+                db=db,
+                symbol=symbol,
+                statement_type=StatementType.CASHFLOW.value,
+                period=period,
+                limit=limit,
+            )
+            if fallback_data:
+                return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+        except Exception:
+            pass
         return StandardResponse(data=[], error=str(e))
 
 

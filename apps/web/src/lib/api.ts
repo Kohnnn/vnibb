@@ -349,7 +349,7 @@ export async function getMetricsHistory(
     const params: Record<string, any> = { days };
     // Note: our fetchAPI doesn't support array params directly yet, but we can join them or modify fetchAPI
     // The task suggests appending multiple times. Let's adjust params handling if needed.
-    
+
     return fetchAPI<MetricsHistoryResponse>(`/equity/${symbol}/metrics/history`, {
         params: {
             days,
@@ -407,9 +407,79 @@ export async function getCashFlow(
 
 export async function getMarketOverview(signal?: AbortSignal): Promise<MarketOverviewResponse> {
     // Market overview is slow (4 indices), use 15s timeout
-    return fetchAPI<MarketOverviewResponse>('/dashboard/market-overview', {
+    return fetchAPI<MarketOverviewResponse>('/market/indices', {
         timeout: 15000,
         signal
+    });
+}
+
+export interface WorldIndexData {
+    symbol: string;
+    name: string;
+    value: number | null;
+    change: number | null;
+    change_pct: number | null;
+    updated_at?: string | null;
+}
+
+export interface WorldIndicesResponse {
+    count: number;
+    data: WorldIndexData[];
+    source: string;
+    error?: string | null;
+}
+
+export interface ForexRateData {
+    currency_code: string;
+    currency_name?: string | null;
+    buy_cash: number | null;
+    buy_transfer: number | null;
+    sell: number | null;
+    date?: string | null;
+}
+
+export interface ForexRatesResponse {
+    count: number;
+    data: ForexRateData[];
+    source: string;
+    error?: string | null;
+}
+
+export interface CommodityData {
+    source: string;
+    name?: string | null;
+    symbol?: string | null;
+    buy_price: number | null;
+    sell_price: number | null;
+    reference_price?: number | null;
+    time?: string | null;
+}
+
+export interface CommoditiesResponse {
+    count: number;
+    data: CommodityData[];
+    source: string;
+    error?: string | null;
+}
+
+export async function getWorldIndices(options?: { limit?: number }): Promise<WorldIndicesResponse> {
+    return fetchAPI<WorldIndicesResponse>('/market/world-indices', {
+        params: { limit: options?.limit },
+        timeout: 20000,
+    });
+}
+
+export async function getForexRates(options?: { limit?: number }): Promise<ForexRatesResponse> {
+    return fetchAPI<ForexRatesResponse>('/market/forex-rates', {
+        params: { limit: options?.limit },
+        timeout: 20000,
+    });
+}
+
+export async function getCommodities(options?: { limit?: number }): Promise<CommoditiesResponse> {
+    return fetchAPI<CommoditiesResponse>('/market/commodities', {
+        params: { limit: options?.limit },
+        timeout: 20000,
     });
 }
 
@@ -453,11 +523,25 @@ export async function getScreenerData(options?: ScreenerFilterParams, signal?: A
         });
     }
 
-    return fetchAPI<ScreenerResponse>('/screener/', {
+    const response = await fetchAPI<ScreenerResponse>('/screener/', {
         params,
         timeout: 45000,
         signal,
     });
+
+    return {
+        ...response,
+        data: Array.isArray(response.data)
+            ? response.data.map((row: any) => {
+                const resolvedSymbol = row?.symbol ?? row?.ticker ?? null;
+                return {
+                    ...row,
+                    symbol: resolvedSymbol,
+                    ticker: row?.ticker ?? resolvedSymbol,
+                };
+            })
+            : [],
+    };
 }
 
 
@@ -608,13 +692,23 @@ export async function getDerivativesHistory(
 // ============ Additional Equity Endpoints ============
 
 export interface PriceDepthResponse {
-    symbol: string;
-    data: Array<{
-        price: number;
-        volume: number;
-        buy_volume: number;
-        sell_volume: number;
-    }>;
+    data: {
+        symbol: string;
+        entries: Array<{
+            level?: number;
+            price?: number;
+            bid_vol?: number;
+            ask_vol?: number;
+        }>;
+        total_bid_volume?: number;
+        total_ask_volume?: number;
+        last_price?: number;
+        last_volume?: number;
+    };
+    meta?: {
+        count: number;
+    };
+    error?: string | null;
 }
 
 export interface InsiderDealsResponse {
@@ -653,7 +747,7 @@ export interface TradingStatsResponse {
 }
 
 export async function getPriceDepth(symbol: string): Promise<PriceDepthResponse> {
-    return fetchAPI<PriceDepthResponse>(`/equity/${symbol}/price-depth`);
+    return fetchAPI<PriceDepthResponse>(`/equity/${symbol}/orderbook`);
 }
 
 export async function getInsiderDeals(
@@ -798,7 +892,7 @@ export async function getTopMovers(options?: {
     index?: 'VNINDEX' | 'HNX' | 'VN30';
     limit?: number;
 }): Promise<TopMoversResponse> {
-    return fetchAPI<TopMoversResponse>('/trading/top-movers', {
+    return fetchAPI<TopMoversResponse>('/market/top-movers', {
         params: {
             type: options?.type,
             index: options?.index,
@@ -867,15 +961,41 @@ export interface SectorPerformanceResponse {
     data: SectorPerformanceData[];
 }
 
-export async function getSectorPerformance(options?: {
+export async function getSectorPerformance(_options?: {
     source?: 'KBS' | 'VCI' | 'TCBS' | 'DNSE';
 
 }): Promise<SectorPerformanceResponse> {
-    return fetchAPI<SectorPerformanceResponse>('/trading/sector-performance', {
+    return fetchAPI<SectorPerformanceResponse>('/market/sector-performance');
+}
+
+export type ResearchRssSource = 'cafef' | 'vietstock' | 'vnexpress'
+
+export interface ResearchRssItem {
+    title: string
+    url: string
+    published_at?: string | null
+    description?: string | null
+}
+
+export interface ResearchRssFeedResponse {
+    source: ResearchRssSource
+    count: number
+    data: ResearchRssItem[]
+    fetched_at: string
+    error?: string | null
+}
+
+export async function getResearchRssFeed(
+    source: ResearchRssSource,
+    limit = 10
+): Promise<ResearchRssFeedResponse> {
+    return fetchAPI<ResearchRssFeedResponse>('/market/research/rss-feed', {
         params: {
-            source: options?.source,
+            source,
+            limit,
         },
-    });
+        timeout: 15000,
+    })
 }
 
 // ============ Ownership & Rating API ============
@@ -1012,6 +1132,25 @@ export interface ComparisonResponse {
     stocks: StockComparison[];
     period: string;
     generated_at?: string;
+}
+
+export type ComparisonPerformancePeriod = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'YTD' | 'ALL'
+
+export interface ComparisonPerformancePoint {
+    date: string
+    [symbol: string]: string | number
+}
+
+export async function getComparisonPerformance(
+    symbols: string[],
+    period: ComparisonPerformancePeriod = '1M'
+): Promise<ComparisonPerformancePoint[]> {
+    return fetchAPI<ComparisonPerformancePoint[]>('/comparison/performance', {
+        params: {
+            symbols: symbols.join(','),
+            period,
+        },
+    })
 }
 
 
@@ -1305,4 +1444,103 @@ export async function getRSHistory(symbol: string, limit: number = 250): Promise
     return fetchAPI<Array<{ time: string; value: number }>>(`/rs/${symbol}/history`, {
         params: { limit }
     });
+}
+
+// ============ Chart Data API ============
+
+export interface ChartDataPoint {
+    time: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+}
+
+export interface ChartDataResponse {
+    symbol: string;
+    period: string;
+    count: number;
+    data: ChartDataPoint[];
+}
+
+export async function getChartData(
+    symbol: string,
+    period: string = '5Y',
+    signal?: AbortSignal
+): Promise<ChartDataResponse> {
+    return fetchAPI<ChartDataResponse>(`/chart-data/${symbol}`, {
+        params: { period },
+        timeout: 30000,
+        signal,
+    });
+}
+
+// ============ Admin Data Health API ============
+
+export interface DataHealthTableEntry {
+    count: number
+    latest: string | null
+    freshness: 'fresh' | 'recent' | 'stale' | 'critical' | 'unknown'
+    age_seconds: number | null
+    age_days: number | null
+}
+
+export interface DataHealthAlert {
+    table: string
+    freshness: 'stale' | 'critical' | 'unknown'
+    days_stale: number | null
+    severity: 'warning' | 'critical'
+}
+
+export interface AdminDataHealthResponse {
+    timestamp: string
+    tables: Record<string, DataHealthTableEntry>
+    staleness_alerts: DataHealthAlert[]
+    summary: {
+        fresh?: number
+        recent?: number
+        stale?: number
+        critical?: number
+        unknown?: number
+    }
+}
+
+export interface AdminAutoBackfillJob {
+    job: string
+    reason: string
+    args: Record<string, unknown>
+}
+
+export interface AdminAutoBackfillResponse {
+    timestamp: string
+    dry_run: boolean
+    threshold_days: number
+    stale_tables: string[]
+    selected_symbol_count: number
+    selected_symbols_preview: string[]
+    jobs: AdminAutoBackfillJob[]
+    jobs_scheduled: number
+}
+
+export async function getAdminDataHealth(): Promise<AdminDataHealthResponse> {
+    return fetchAPI<AdminDataHealthResponse>('/admin/data-health', {
+        timeout: 20000,
+    })
+}
+
+export async function triggerAdminDataHealthAutoBackfill(options?: {
+    daysStale?: number
+    limitSymbols?: number
+    dryRun?: boolean
+}): Promise<AdminAutoBackfillResponse> {
+    return fetchAPI<AdminAutoBackfillResponse>('/admin/data-health/auto-backfill', {
+        method: 'POST',
+        params: {
+            days_stale: options?.daysStale,
+            limit_symbols: options?.limitSymbols,
+            dry_run: options?.dryRun ?? true,
+        },
+        timeout: 30000,
+    })
 }

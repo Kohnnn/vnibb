@@ -2,7 +2,7 @@
 
 'use client';
 
-import React, { useState, useEffect, type ReactNode } from 'react';
+import React, { useState, useEffect, useRef, type ReactNode } from 'react';
 import {
     Download,
     FileJson,
@@ -113,6 +113,8 @@ export function WidgetWrapper({
     const [isTickerDropdownOpen, setIsTickerDropdownOpen] = useState(false);
     const [widgetGroup, setWidgetGroup] = useState<WidgetGroupId>(initialWidgetGroup);
     const [internalData, setInternalData] = useState<any>(widgetData);
+    const [isContentVisible, setIsContentVisible] = useState(false);
+    const contentHostRef = useRef<HTMLDivElement | null>(null);
 
     // Sync widgetGroup state when prop changes
     useEffect(() => {
@@ -127,6 +129,40 @@ export function WidgetWrapper({
     useEffect(() => {
         setIsCollapsed(initialCollapsed);
     }, [initialCollapsed]);
+
+    useEffect(() => {
+        if (isContentVisible || isCollapsed || isMaximized) {
+            if (isMaximized && !isContentVisible) {
+                setIsContentVisible(true);
+            }
+            return;
+        }
+
+        if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') {
+            setIsContentVisible(true);
+            return;
+        }
+
+        const node = contentHostRef.current;
+        if (!node) {
+            setIsContentVisible(true);
+            return;
+        }
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                const entry = entries[0];
+                if (entry?.isIntersecting) {
+                    setIsContentVisible(true);
+                    observer.disconnect();
+                }
+            },
+            { rootMargin: '280px 0px' }
+        );
+
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, [isCollapsed, isContentVisible, isMaximized]);
 
     // Get current group details if assigned
     const effectiveSymbol = getSymbolForGroup(widgetGroup);
@@ -354,10 +390,14 @@ export function WidgetWrapper({
 
 
                 {/* Content */}
-                <div id={id} className="flex-1 overflow-auto relative bg-secondary p-3 sm:p-4">
+                <div id={id} ref={contentHostRef} className="flex-1 overflow-auto relative bg-secondary p-3 sm:p-4">
                     {isCollapsed ? (
                         <div className="h-full flex items-center justify-center text-[10px] text-muted-foreground uppercase tracking-[0.2em]">
                             Collapsed
+                        </div>
+                    ) : !isContentVisible ? (
+                        <div className="h-full flex items-center justify-center text-[10px] text-muted-foreground uppercase tracking-[0.2em]">
+                            Loading Widget
                         </div>
                     ) : (
                         <WidgetHeaderVisibilityProvider hideHeader>

@@ -10,6 +10,47 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { API_BASE_URL } from '@/lib/api';
 
+function decodeHtml(value: string | null | undefined): string {
+  if (!value) return '';
+
+  if (typeof document === 'undefined') {
+    return value
+      .replace(/&amp;/gi, '&')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>');
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = value;
+  return textarea.value;
+}
+
+function cleanText(value: string | null | undefined): string {
+  return decodeHtml(value)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseNewsDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    const normalized = value.replace(/\//g, '-');
+    const fallback = new Date(normalized);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+  }
+  return parsed;
+}
+
+function formatPublishedDistance(value: string | null | undefined): string {
+  const parsed = parseNewsDate(value);
+  if (!parsed) return 'Unknown time';
+  return formatDistanceToNow(parsed, { addSuffix: true });
+}
+
 function MarketNewsWidgetComponent() {
   const {
     data: news,
@@ -24,7 +65,20 @@ function MarketNewsWidgetComponent() {
       const res = await fetch(`${API_BASE_URL}/news/feed?limit=20`);
       if (!res.ok) throw new Error('Failed to fetch news');
       const data = await res.json();
-      return data.articles;
+      const rawItems = Array.isArray(data?.articles)
+        ? data.articles
+        : Array.isArray(data?.data)
+          ? data.data
+          : [];
+
+      return rawItems.map((item: any) => ({
+        ...item,
+        title: cleanText(item.title || ''),
+        summary: cleanText(item.summary || item.description || ''),
+        source: cleanText(item.source || 'Unknown'),
+        publishedDate: item.published_date || item.published_at || item.date || null,
+        url: item.url || item.link || null,
+      }));
     },
     refetchInterval: 60000,
   });
@@ -67,7 +121,7 @@ function MarketNewsWidgetComponent() {
               {news.map((item: any, index: number) => (
                 <a
                   key={`${item.id ?? item.url ?? item.title}-${index}`}
-                  href={item.url}
+                  href={item.url || '#'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="block p-3 hover:bg-white/5 transition-colors group"
@@ -75,14 +129,19 @@ function MarketNewsWidgetComponent() {
                   <div className="text-sm text-gray-200 font-medium line-clamp-2 mb-1 group-hover:text-blue-400 transition-colors">
                     {item.title}
                   </div>
+                  {item.summary && (
+                    <div className="text-[11px] text-gray-400 line-clamp-2 mb-1.5">
+                      {item.summary}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 text-[10px] text-gray-500">
                     <div className="flex items-center gap-1">
                       <Clock className="w-2.5 h-2.5" />
-                      {formatDistanceToNow(new Date(item.published_date), { addSuffix: true })}
+                      {formatPublishedDistance(item.publishedDate)}
                     </div>
                     <span className="text-gray-700">•</span>
                     <span className="px-1.5 py-0.5 bg-gray-900 rounded border border-gray-800 uppercase font-bold text-[9px]">
-                      {item.source}
+                      {item.source || 'Unknown'}
                     </span>
                     <ExternalLink className="w-2.5 h-2.5 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>

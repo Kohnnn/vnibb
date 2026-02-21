@@ -77,8 +77,12 @@ function SectorBreakdownWidgetComponent({ id, onRemove }: SectorBreakdownWidgetP
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #334155', borderRadius: '8px' }}
-                    itemStyle={{ color: '#fff', fontSize: '10px' }}
+                    contentStyle={{
+                      backgroundColor: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                    }}
+                    itemStyle={{ color: 'var(--text-primary)', fontSize: '10px' }}
                     formatter={(value: any, _name, props: any) => {
                       const payload = props?.payload;
                       const share = payload?.share ? `${payload.share.toFixed(1)}%` : '-';

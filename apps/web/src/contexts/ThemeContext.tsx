@@ -66,6 +66,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     
     // Add the resolved theme
     root.classList.add(resolved);
+    root.setAttribute('data-theme', resolved);
     
     // Update meta theme-color for mobile browsers
     const metaThemeColor = document.querySelector('meta[name="theme-color"]');
@@ -140,7 +141,9 @@ export const ThemeScript = () => {
             : 'light';
         }
         
+        document.documentElement.classList.remove('light', 'dark');
         document.documentElement.classList.add(resolved);
+        document.documentElement.setAttribute('data-theme', resolved);
       } catch (e) {
         console.error('Theme initialization error:', e);
       }

@@ -3,10 +3,23 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Search, Bell, User, Edit, Check, Bot, RotateCcw, X, Link as LinkIcon, LayoutGrid, MoreHorizontal } from 'lucide-react';
+import {
+    Search,
+    User,
+    Edit,
+    Check,
+    Bot,
+    RotateCcw,
+    X,
+    Link as LinkIcon,
+    LayoutGrid,
+    MoreHorizontal,
+    Moon,
+    Sun,
+} from 'lucide-react';
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel';
 import { ConnectionStatus } from '../ui/ConnectionStatus';
-import { useSymbolLink } from '@/contexts/SymbolLinkContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import type { UnitDisplay } from '@/lib/units';
 import { cn } from '@/lib/utils';
 import {
@@ -57,6 +70,7 @@ export function Header({
     const [isSearching, setIsSearching] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const hasActionMenu = Boolean(onAutoFitLayout || onResetLayout || onCollapseAll || onExpandAll || onEditToggle);
+    const { resolvedTheme, setTheme } = useTheme();
 
     // Sync searchValue when currentSymbol changes externally (e.g., widget ticker click)
     useEffect(() => {
@@ -84,14 +98,18 @@ export function Header({
         [handleSearch, currentSymbol]
     );
 
+    const toggleTheme = useCallback(() => {
+        setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
+    }, [resolvedTheme, setTheme]);
+
     return (
-        <header className="h-12 bg-[#0b1021]/90 backdrop-blur-sm border-b border-[#1e2a3b] sticky top-0 z-40">
+        <header className="h-12 bg-[var(--bg-secondary)]/90 backdrop-blur-sm border-b border-[var(--border-color)] sticky top-0 z-40">
             <div className="h-full flex items-center justify-between px-4">
                 {/* Search Bar */}
                 <div className="flex-1 max-w-sm">
                     <div className="relative">
                         <Search
-                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500"
+                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
                             size={14}
                         />
                         <input
@@ -117,8 +135,8 @@ export function Header({
                             placeholder="Search symbol (e.g., VNM, FPT)"
                             className={`
                 w-full pl-8 pr-8 py-1.5 rounded-md text-xs
-                bg-[#0f1629] border border-[#1e2a3b]
-                text-white placeholder-gray-500
+                bg-[var(--bg-tertiary)] border border-[var(--border-color)]
+                text-[var(--text-primary)] placeholder-[var(--text-muted)]
                 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20
                 transition-all
               `}
@@ -132,7 +150,7 @@ export function Header({
                                     setIsSearching(false);
                                     inputRef.current?.focus();
                                 }}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
                                 title="Clear search"
                                 aria-label="Clear search"
                             >
@@ -146,20 +164,20 @@ export function Header({
                 <div className="hidden md:flex items-center gap-4 mx-6">
                     <div className="flex items-center gap-2">
                         <div className="flex items-center">
-                            <span className="text-xs text-gray-500">Viewing:</span>
-                            <span className="ml-1.5 text-sm font-semibold text-white">
+                            <span className="text-xs text-[var(--text-muted)]">Viewing:</span>
+                            <span className="ml-1.5 text-sm font-semibold text-[var(--text-primary)]">
                                 {currentSymbol}
                             </span>
                         </div>
                         <LinkIcon size={12} className="text-blue-500 opacity-50" />
                     </div>
-                    <div className="h-4 w-[1px] bg-gray-800" />
+                    <div className="h-4 w-[1px] bg-[var(--border-color)]" />
                     <ConnectionStatus />
                 </div>
 
                 {onUnitDisplayChange && (
-                    <div className="hidden lg:flex items-center gap-1.5 rounded-md border border-[#1e2a3b] bg-[#0f1629] px-1 py-1">
-                        <span className="px-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                    <div className="hidden lg:flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1 py-1">
+                        <span className="px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                             Unit
                         </span>
                         {UNIT_OPTIONS.map((option) => {
@@ -173,7 +191,7 @@ export function Header({
                                         'rounded px-1.5 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors',
                                         isActive
                                             ? 'bg-blue-600/20 text-blue-300 border border-blue-500/30'
-                                            : 'text-gray-500 hover:text-gray-300 hover:bg-[#1e2a3b]/70 border border-transparent'
+                                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]/70 border border-transparent'
                                     )}
                                     title={`Display numbers as ${option.label}`}
                                 >
@@ -251,6 +269,17 @@ export function Header({
                             </DropdownMenuContent>
                         </DropdownMenu>
                     )}
+                    <button
+                        onClick={toggleTheme}
+                        className="flex items-center gap-1.5 px-2 md:px-2.5 py-1.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-colors border border-[var(--border-color)]"
+                        title={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                        aria-label={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                    >
+                        {resolvedTheme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+                        <span className="hidden md:inline text-xs font-medium">
+                            {resolvedTheme === 'dark' ? 'Light' : 'Dark'}
+                        </span>
+                    </button>
                     {/* Reset Layout Button - only show in edit mode */}
                     {isEditing && onResetLayout && (
                         <button

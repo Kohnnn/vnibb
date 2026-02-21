@@ -10,11 +10,16 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WidgetEmpty, WidgetError, WidgetLoading } from "@/components/ui/widget-states";
 import { WidgetMeta } from "@/components/ui/WidgetMeta";
-import { API_BASE_URL } from "@/lib/api";
+import {
+    API_BASE_URL,
+    getAdminDataHealth,
+    triggerAdminDataHealthAutoBackfill,
+    type AdminDataHealthResponse,
+} from "@/lib/api";
 import {
     Loader2, RefreshCw, Database, Search,
     ChevronLeft, ChevronRight, FileJson, Download, Terminal,
-    Code, Table as TableIcon, X
+    Code, Table as TableIcon, X, ShieldAlert
 } from "lucide-react";
 
 interface TableInfo {
@@ -39,6 +44,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
     const [sqlQuery, setSqlQuery] = useState("SELECT * FROM stocks LIMIT 10");
     const [selectedRow, setSelectedRow] = useState<any>(null);
     const [activeTab, setActiveTab] = useState("browser");
+    const [healthThresholdDays, setHealthThresholdDays] = useState(7);
     
     // Debounce search
     useEffect(() => {
@@ -70,6 +76,31 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
     });
 
     const tables: TableInfo[] = tablesData?.tables || [];
+
+    const {
+        data: dataHealth,
+        isLoading: dataHealthLoading,
+        error: dataHealthError,
+        refetch: refetchDataHealth,
+        isFetching: dataHealthFetching,
+    } = useQuery<AdminDataHealthResponse>({
+        queryKey: ["admin-data-health"],
+        queryFn: () => getAdminDataHealth(),
+        refetchInterval: 60000,
+        enabled: activeTab === "health",
+    });
+
+    const autoBackfillMutation = useMutation({
+        mutationFn: (dryRun: boolean) => triggerAdminDataHealthAutoBackfill({
+            daysStale: healthThresholdDays,
+            limitSymbols: 50,
+            dryRun,
+        }),
+        onSuccess: () => {
+            refetchDataHealth();
+            refetchTables();
+        },
+    });
 
     // Fetch table data
     const { data: tableData, isLoading: tableLoading, error: tableError, refetch: refetchTableData } = useQuery({
@@ -217,6 +248,9 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                             <TabsTrigger value="schema" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none px-0 h-full text-xs font-bold uppercase tracking-wider">
                                 <Code className="h-3 w-3 mr-2" /> Schema
                             </TabsTrigger>
+                            <TabsTrigger value="health" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none px-0 h-full text-xs font-bold uppercase tracking-wider">
+                                <ShieldAlert className="h-3 w-3 mr-2" /> Health
+                            </TabsTrigger>
                         </TabsList>
                         
                         {activeTab === "browser" && (
@@ -232,6 +266,47 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                 </div>
                                 <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => handleExport('csv')}>
                                     <Download className="h-3 w-3 mr-1" /> Export
+                                </Button>
+                            </div>
+                        )}
+                        {activeTab === "health" && (
+                            <div className="flex items-center gap-2">
+                                <Input
+                                    type="number"
+                                    min={1}
+                                    max={90}
+                                    value={healthThresholdDays}
+                                    onChange={(e) => setHealthThresholdDays(Math.max(1, Math.min(90, Number(e.target.value) || 7)))}
+                                    className="h-7 w-20 text-[10px]"
+                                    title="Stale threshold (days)"
+                                />
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-[10px]"
+                                    onClick={() => autoBackfillMutation.mutate(true)}
+                                    disabled={autoBackfillMutation.isPending}
+                                >
+                                    {autoBackfillMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+                                    Dry Run
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    className="h-7 text-[10px]"
+                                    onClick={() => autoBackfillMutation.mutate(false)}
+                                    disabled={autoBackfillMutation.isPending}
+                                >
+                                    {autoBackfillMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
+                                    Trigger Backfill
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
+                                    onClick={() => refetchDataHealth()}
+                                    title="Refresh health"
+                                >
+                                    <RefreshCw className="h-3 w-3" />
                                 </Button>
                             </div>
                         )}
@@ -414,6 +489,131 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                 <WidgetEmpty message="No schema information found" />
                             )}
                          </div>
+                    </TabsContent>
+
+                    <TabsContent value="health" className="flex-1 flex flex-col m-0 overflow-hidden">
+                        <div className="flex-1 overflow-auto border rounded-md border-white/5 p-3 space-y-3">
+                            {dataHealthLoading ? (
+                                <WidgetLoading message="Loading health summary..." />
+                            ) : dataHealthError ? (
+                                <WidgetError
+                                    error={dataHealthError as Error}
+                                    title="Failed to load data health"
+                                    onRetry={() => refetchDataHealth()}
+                                />
+                            ) : !dataHealth ? (
+                                <WidgetEmpty message="Data health summary is unavailable" />
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                        {[
+                                            { key: "fresh", label: "Fresh" },
+                                            { key: "recent", label: "Recent" },
+                                            { key: "stale", label: "Stale" },
+                                            { key: "critical", label: "Critical" },
+                                            { key: "unknown", label: "Unknown" },
+                                        ].map((item) => (
+                                            <div key={item.key} className="rounded border border-white/10 bg-muted/20 p-2">
+                                                <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{item.label}</div>
+                                                <div className="mt-1 text-lg font-black">
+                                                    {dataHealth.summary?.[item.key as keyof typeof dataHealth.summary] ?? 0}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="rounded border border-white/10 overflow-hidden">
+                                        <Table>
+                                            <TableHeader className="bg-muted/30">
+                                                <TableRow className="hover:bg-transparent border-white/5">
+                                                    <TableHead className="text-[10px] font-black uppercase h-8">Table</TableHead>
+                                                    <TableHead className="text-[10px] font-black uppercase h-8 text-right">Rows</TableHead>
+                                                    <TableHead className="text-[10px] font-black uppercase h-8 text-right">Age (days)</TableHead>
+                                                    <TableHead className="text-[10px] font-black uppercase h-8">Freshness</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {Object.entries(dataHealth.tables)
+                                                    .sort((a, b) => {
+                                                        const ageA = a[1]?.age_days ?? -1;
+                                                        const ageB = b[1]?.age_days ?? -1;
+                                                        return ageB - ageA;
+                                                    })
+                                                    .slice(0, 20)
+                                                    .map(([tableName, meta]) => (
+                                                        <TableRow key={tableName} className="border-white/5">
+                                                            <TableCell className="text-xs font-bold text-blue-400">{tableName}</TableCell>
+                                                            <TableCell className="text-xs text-right font-mono">{Number(meta.count || 0).toLocaleString()}</TableCell>
+                                                            <TableCell className="text-xs text-right font-mono">
+                                                                {meta.age_days === null || meta.age_days === undefined ? "-" : meta.age_days.toFixed(2)}
+                                                            </TableCell>
+                                                            <TableCell className="text-xs">
+                                                                <span
+                                                                    className={
+                                                                        meta.freshness === "critical"
+                                                                            ? "text-red-400"
+                                                                            : meta.freshness === "stale"
+                                                                                ? "text-amber-400"
+                                                                                : meta.freshness === "recent"
+                                                                                    ? "text-blue-400"
+                                                                                    : meta.freshness === "fresh"
+                                                                                        ? "text-green-400"
+                                                                                        : "text-muted-foreground"
+                                                                    }
+                                                                >
+                                                                    {meta.freshness}
+                                                                </span>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+
+                                    <div className="rounded border border-white/10 bg-muted/20 p-2">
+                                        <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
+                                            Backfill planner
+                                        </div>
+                                        {autoBackfillMutation.isPending ? (
+                                            <div className="text-xs text-muted-foreground flex items-center gap-2">
+                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                                Preparing backfill jobs...
+                                            </div>
+                                        ) : autoBackfillMutation.error ? (
+                                            <WidgetError
+                                                error={autoBackfillMutation.error as Error}
+                                                title="Backfill trigger failed"
+                                                onRetry={() => autoBackfillMutation.mutate(true)}
+                                            />
+                                        ) : autoBackfillMutation.data ? (
+                                            <div className="space-y-1">
+                                                <div className="text-xs text-muted-foreground">
+                                                    {autoBackfillMutation.data.dry_run ? "Dry run" : "Triggered"} jobs:
+                                                    {" "}{autoBackfillMutation.data.jobs.length}
+                                                    {autoBackfillMutation.data.dry_run
+                                                        ? " (planned)"
+                                                        : ` (${autoBackfillMutation.data.jobs_scheduled} scheduled)`}
+                                                </div>
+                                                <div className="text-[11px] text-primary">
+                                                    {autoBackfillMutation.data.jobs.map((job) => job.job).join(", ") || "No jobs selected"}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-xs text-muted-foreground">
+                                                Run a dry-run or trigger action to create recovery jobs for stale tables.
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <WidgetMeta
+                                        updatedAt={Date.parse(dataHealth.timestamp)}
+                                        isFetching={dataHealthFetching}
+                                        note="Auto refresh 60s"
+                                        align="right"
+                                    />
+                                </>
+                            )}
+                        </div>
                     </TabsContent>
                 </Tabs>
                 )}

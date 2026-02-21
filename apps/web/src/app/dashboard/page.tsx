@@ -4,7 +4,6 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Sidebar, Header, TabBar, RightSidebar, MobileNav } from '@/components/layout';
-import { DashboardTopTabs } from '@/components/dashboard/DashboardTopTabs';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
@@ -368,7 +367,7 @@ function DashboardContent() {
     if (!mounted) return null;
 
     return (
-        <div className="flex min-h-screen bg-black text-white overflow-hidden">
+        <div className="flex min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-hidden">
             <Sidebar
                 onOpenWidgetLibrary={() => setIsWidgetLibraryOpen(true)}
                 onOpenAppsLibrary={() => setIsAppsLibraryOpen(true)}
@@ -410,10 +409,9 @@ function DashboardContent() {
                     onUnitDisplayChange={setUnit}
                 />
 
-                <DashboardTopTabs />
                 <TabBar symbol={globalSymbol} />
 
-                <div className="flex-1 p-3 sm:p-4 overflow-hidden bg-[#0a0a0a]">
+                <div className="flex-1 p-3 sm:p-4 overflow-hidden bg-[var(--bg-primary)]">
                     {activeDashboard && activeTab ? (
                         <div className="h-full w-full overflow-y-auto scrollbar-hide">
                             {activeTab.widgets.length > 0 ? (
@@ -434,7 +432,7 @@ function DashboardContent() {
                                         return (
                                             <div
                                                 key={widget.id}
-                                                className="h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-black rounded"
+                                                className="h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] rounded"
                                                 data-widget-focus="true"
                                                 tabIndex={0}
                                             >

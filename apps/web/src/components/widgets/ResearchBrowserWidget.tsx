@@ -1,496 +1,654 @@
-'use client';
+'use client'
 
-import { useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Globe, Plus, Trash2 } from 'lucide-react';
-import { WidgetContainer } from '@/components/ui/WidgetContainer';
-import { WidgetEmpty } from '@/components/ui/widget-states';
-import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
-import { useProfile } from '@/lib/queries';
-import { toTradingViewSymbol } from '@/lib/tradingView';
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import {
+  BookmarkPlus,
+  ExternalLink,
+  Globe,
+  Link2,
+  Plus,
+  RefreshCcw,
+  Rss,
+  Search,
+  Trash2,
+} from 'lucide-react'
+
+import { WidgetContainer } from '@/components/ui/WidgetContainer'
+import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states'
+import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { useTouchGestures } from '@/hooks/useTouchGestures'
+import {
+  getResearchRssFeed,
+  type ResearchRssSource,
+  type ResearchRssFeedResponse,
+} from '@/lib/api'
+import { useLocalStorage } from '@/lib/hooks/useLocalStorage'
+import { cn } from '@/lib/utils'
+import { ResearchSourceCard } from '@/components/widgets/research/ResearchSourceCard'
 
 interface ResearchBrowserWidgetProps {
-  id: string;
-  symbol?: string;
-  onRemove?: () => void;
+  id: string
+  symbol?: string
+  onRemove?: () => void
+}
+
+type SourceMode = 'embed' | 'external' | 'rss'
+type SourceCategory = 'research' | 'broker' | 'chart' | 'global'
+
+interface QuickSource {
+  id: string
+  label: string
+  mode: SourceMode
+  category: SourceCategory
+  urlTemplate: string
+  description: string
+  favicon?: string
+  rssSource?: ResearchRssSource
 }
 
 interface SavedSite {
-  id: string;
-  url: string;
-  title?: string;
-  createdAt: string;
-  lastVisitedAt?: string;
+  id: string
+  title: string
+  url: string
+  createdAt: string
 }
 
-interface QuickSource {
-  id: string;
-  label: string;
-  url: string;
-  preferredMode?: 'embed' | 'external';
+const QUICK_SOURCES: QuickSource[] = [
+  {
+    id: 'stockbiz',
+    label: 'StockBiz',
+    mode: 'embed',
+    category: 'research',
+    urlTemplate: 'https://stockbiz.vn/symbol/{SYMBOL}',
+    description: 'Company profile, trading overview, and quick fundamentals.',
+    favicon: 'https://stockbiz.vn/favicon.ico',
+  },
+  {
+    id: 'cafef',
+    label: 'CafeF',
+    mode: 'rss',
+    category: 'research',
+    urlTemplate: 'https://s.cafef.vn/Pha-san-chi-tiet/{SYMBOL}/lich-su-gia.chn',
+    description: 'Market coverage and article feed for Vietnam equities.',
+    favicon: 'https://cafef.vn/favicon.ico',
+    rssSource: 'cafef',
+  },
+  {
+    id: 'vietstock',
+    label: 'Vietstock',
+    mode: 'rss',
+    category: 'research',
+    urlTemplate: 'https://finance.vietstock.vn/{SYMBOL}/financials.htm',
+    description: 'Financial statements and market commentary.',
+    favicon: 'https://vietstock.vn/favicon.ico',
+    rssSource: 'vietstock',
+  },
+  {
+    id: 'fireant',
+    label: 'FireAnt',
+    mode: 'external',
+    category: 'research',
+    urlTemplate: 'https://fireant.vn/symbol/{SYMBOL}',
+    description: 'Community data and rich charting tools.',
+    favicon: 'https://fireant.vn/favicon.ico',
+  },
+  {
+    id: 'simplize',
+    label: 'Simplize',
+    mode: 'external',
+    category: 'research',
+    urlTemplate: 'https://simplize.vn/co-phieu/{SYMBOL}',
+    description: 'Stock analytics and profile cards for listed companies.',
+    favicon: 'https://simplize.vn/favicon.ico',
+  },
+  {
+    id: 'vndirect',
+    label: 'VNDirect',
+    mode: 'external',
+    category: 'broker',
+    urlTemplate: 'https://www.vndirect.com.vn/co-phieu/{SYMBOL}',
+    description: 'Broker-native research pages and ticker snapshots.',
+    favicon: 'https://www.vndirect.com.vn/favicon.ico',
+  },
+  {
+    id: 'tradingview',
+    label: 'TradingView',
+    mode: 'external',
+    category: 'chart',
+    urlTemplate: 'https://www.tradingview.com/chart/?symbol=HOSE:{SYMBOL}',
+    description: 'Advanced charting and technical overlays.',
+    favicon: 'https://www.tradingview.com/favicon.ico',
+  },
+  {
+    id: 'investing',
+    label: 'Investing.com',
+    mode: 'external',
+    category: 'global',
+    urlTemplate: 'https://www.investing.com/search/?q={SYMBOL}',
+    description: 'Global context and macro reference coverage.',
+    favicon: 'https://www.investing.com/favicon.ico',
+  },
+]
+
+const EMBED_BLOCKLIST: Record<string, string> = {
+  'cafef.vn': 'CafeF blocks iframe embedding with X-Frame-Options.',
+  'fireant.vn': 'FireAnt blocks embedding for authenticated and public pages.',
+  'vietstock.vn': 'Vietstock blocks most iframe embeds.',
+  'vndirect.com.vn': 'VNDirect pages are protected against iframe embedding.',
+  'google.com': 'Google search pages cannot be embedded in iframes.',
 }
 
-const SITES_KEY = 'vnibb_research_sites';
-const NON_EMBEDDABLE_HOSTS: Record<string, string> = {
-  'google.com': 'Google blocks iframe embedding for search pages.',
-  'tradingview.com': 'TradingView pages are designed to open directly in a browser tab.',
-  'cafef.vn': 'CafeF blocks embedding in most contexts.',
-  'ndh.vn': 'NDH blocks embedding in most contexts.',
-};
+const CATEGORY_LABELS: Record<SourceCategory, string> = {
+  research: 'Research',
+  broker: 'Broker',
+  chart: 'Chart',
+  global: 'Global',
+}
 
 function normalizeUrl(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) return '';
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-  return `https://${trimmed}`;
+  const value = input.trim()
+  if (!value) return ''
+  if (value.startsWith('http://') || value.startsWith('https://')) return value
+  return `https://${value}`
 }
 
-function getHost(url: string): string | null {
+function substituteSymbol(urlTemplate: string, symbol?: string): string {
+  if (!symbol) return urlTemplate.replaceAll('{SYMBOL}', '').replaceAll('{symbol}', '')
+  const normalized = encodeURIComponent(symbol.trim().toUpperCase())
+  return urlTemplate.replaceAll('{SYMBOL}', normalized).replaceAll('{symbol}', normalized)
+}
+
+function getEmbedBlockReason(url: string): string | null {
   try {
-    return new URL(url).hostname.toLowerCase();
+    const host = new URL(url).hostname.toLowerCase()
+    const blocked = Object.entries(EMBED_BLOCKLIST).find(
+      ([domain]) => host === domain || host.endsWith(`.${domain}`)
+    )
+    return blocked ? blocked[1] : null
   } catch {
-    return null;
+    return 'Invalid URL.'
   }
 }
 
-function getEmbedPolicy(url: string): { canEmbed: boolean; reason?: string; host?: string } {
-  const host = getHost(url);
-  if (!host) return { canEmbed: false, reason: 'Invalid URL' };
-
-  const blocked = Object.entries(NON_EMBEDDABLE_HOSTS).find(([domain]) =>
-    host === domain || host.endsWith(`.${domain}`)
-  );
-  if (!blocked) return { canEmbed: true, host };
-
-  return {
-    canEmbed: false,
-    reason: blocked[1],
-    host,
-  };
+function inferRssSource(source?: QuickSource | null): ResearchRssSource | null {
+  if (!source) return null
+  if (source.rssSource) return source.rssSource
+  return source.mode === 'rss' ? (source.id as ResearchRssSource) : null
 }
 
 export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserWidgetProps) {
-  const [sites, setSites] = useLocalStorage<SavedSite[]>(SITES_KEY, []);
-  const [activeSiteId, setActiveSiteId] = useLocalStorage<string | null>(
-    `vnibb_research_browser_active_${id}`,
-    null
-  );
-  const [activeSourceId, setActiveSourceId] = useLocalStorage<string | null>(
+  const [activeSourceId, setActiveSourceId] = useLocalStorage<string>(
     `vnibb_research_source_${id}`,
-    'vietstock'
-  );
-  const [viewMode, setViewMode] = useLocalStorage<'embed' | 'external'>(
-    `vnibb_research_mode_${id}`,
-    'embed'
-  );
-  const [urlInput, setUrlInput] = useState('');
-  const [titleInput, setTitleInput] = useState('');
-  const [embedStatus, setEmbedStatus] = useState<'idle' | 'loading' | 'ready' | 'blocked'>('idle');
-  const [history, setHistory] = useState<string[]>([]);
-  const { data: profileData } = useProfile(symbol || '', Boolean(symbol));
-  const symbolExchange = profileData?.data?.exchange?.trim().toUpperCase() || 'HOSE';
+    'stockbiz'
+  )
+  const [savedSites, setSavedSites] = useLocalStorage<SavedSite[]>(`vnibb_research_saved_${id}`, [])
+  const [activeSavedSiteId, setActiveSavedSiteId] = useLocalStorage<string | null>(
+    `vnibb_research_saved_active_${id}`,
+    null
+  )
+  const [lastVisitedByUrl, setLastVisitedByUrl] = useLocalStorage<Record<string, string>>(
+    `vnibb_research_last_visited_${id}`,
+    {}
+  )
 
-  const activeSite = useMemo(() => {
-    if (activeSourceId) return null;
-    if (activeSiteId) {
-      return sites.find((site) => site.id === activeSiteId) || null;
-    }
-    return sites[0] || null;
-  }, [activeSiteId, activeSourceId, sites]);
+  const [customTitle, setCustomTitle] = useState('')
+  const [customUrl, setCustomUrl] = useState('')
+  const [embedState, setEmbedState] = useState<'idle' | 'loading' | 'ready' | 'blocked'>('idle')
+  const [inlineNotice, setInlineNotice] = useState<string | null>(null)
 
-  const quickSources = useMemo<QuickSource[]>(() => {
-    if (!symbol) return [];
-    const normalizedSymbol = symbol.trim().toUpperCase();
-    const tvSymbol = toTradingViewSymbol(normalizedSymbol, symbolExchange);
-    const tvSlug = tvSymbol.includes(':') ? tvSymbol.replace(':', '-') : tvSymbol;
-    const exchangeHint = ['HOSE', 'HSX', 'HNX', 'UPCOM'].includes(symbolExchange)
-      ? symbolExchange === 'HSX'
-        ? 'HOSE'
-        : symbolExchange
-      : 'VN';
-    const query = `${normalizedSymbol} ${exchangeHint} cổ phiếu phân tích chứng khoán Việt Nam`;
-    return [
-      {
-        id: 'google',
-        label: 'Google',
-        url: `https://www.google.com/search?igu=1&q=${encodeURIComponent(query)}`,
-        preferredMode: 'external',
+  const normalizedSymbol = (symbol || '').trim().toUpperCase()
+  const activeQuickSource = useMemo(
+    () => QUICK_SOURCES.find((source) => source.id === activeSourceId) || QUICK_SOURCES[0],
+    [activeSourceId]
+  )
+  const activeSavedSite = useMemo(
+    () => savedSites.find((site) => site.id === activeSavedSiteId) || null,
+    [savedSites, activeSavedSiteId]
+  )
+
+  const activeUrl = useMemo(() => {
+    if (activeSavedSite) return activeSavedSite.url
+    return substituteSymbol(activeQuickSource.urlTemplate, normalizedSymbol)
+  }, [activeSavedSite, activeQuickSource.urlTemplate, normalizedSymbol])
+
+  const activeTitle = activeSavedSite?.title || activeQuickSource.label
+  const activeMode: SourceMode = activeSavedSite ? 'embed' : activeQuickSource.mode
+  const embedBlockReason = useMemo(() => getEmbedBlockReason(activeUrl), [activeUrl])
+  const canAttemptEmbed = activeMode === 'embed' && Boolean(activeUrl) && !embedBlockReason
+  const rssSource = activeSavedSite ? null : inferRssSource(activeQuickSource)
+
+  const groupedSources = useMemo(() => {
+    return QUICK_SOURCES.reduce<Record<SourceCategory, QuickSource[]>>(
+      (acc, source) => {
+        acc[source.category].push(source)
+        return acc
       },
-      {
-        id: 'vietstock',
-        label: 'Vietstock',
-        url: `https://vietstock.vn/tim-kiem.htm?keyword=${encodeURIComponent(normalizedSymbol)}`,
-      },
-      {
-        id: 'cafef',
-        label: 'CafeF',
-        url: `https://search.cafef.vn/tim-kiem.chn?keywords=${encodeURIComponent(normalizedSymbol)}`,
-        preferredMode: 'external',
-      },
-      {
-        id: 'tradingview',
-        label: 'TradingView',
-        url: `https://www.tradingview.com/symbols/${encodeURIComponent(tvSlug)}/`,
-        preferredMode: 'external',
-      },
-      {
-        id: 'ndh',
-        label: 'NDH',
-        url: `https://ndh.vn/tim-kiem?q=${encodeURIComponent(normalizedSymbol)}`,
-        preferredMode: 'external',
-      },
-    ];
-  }, [symbol, symbolExchange]);
+      { research: [], broker: [], chart: [], global: [] }
+    )
+  }, [])
 
-  const activeSource = useMemo(() => {
-    if (!activeSourceId) return null;
-    return quickSources.find((source) => source.id === activeSourceId) || null;
-  }, [activeSourceId, quickSources]);
+  const sourceOrder = useMemo(() => QUICK_SOURCES.map((source) => source.id), [])
 
-  useEffect(() => {
-    if (!activeSiteId && sites.length > 0 && !activeSourceId) {
-      setActiveSiteId(sites[0].id);
-    }
-  }, [activeSiteId, activeSourceId, setActiveSiteId, sites]);
+  const markVisited = useCallback(
+    (url: string) => {
+      const stamp = new Date().toISOString()
+      setLastVisitedByUrl((prev) => ({ ...prev, [url]: stamp }))
+    },
+    [setLastVisitedByUrl]
+  )
 
-  useEffect(() => {
-    // Keep selected source sticky across ticker changes.
-    // Only clear source mode if no ticker is available.
-    if (!symbol && activeSourceId && quickSources.length === 0) {
-      setActiveSourceId(null);
-    }
-  }, [symbol, activeSourceId, quickSources.length, setActiveSourceId]);
+  const openExternal = useCallback(
+    (url: string) => {
+      if (!url) return
+      window.open(url, '_blank', 'noopener,noreferrer')
+      markVisited(url)
+      if (activeSavedSite) {
+        setSavedSites((prev) =>
+          prev.map((site) => (site.id === activeSavedSite.id ? { ...site, url } : site))
+        )
+      }
+    },
+    [markVisited, activeSavedSite, setSavedSites]
+  )
 
-  useEffect(() => {
-    if (!symbol || quickSources.length === 0) return;
+  const copyUrl = useCallback((url: string) => {
+    if (!url) return
+    navigator.clipboard
+      .writeText(url)
+      .then(() => setInlineNotice('URL copied to clipboard.'))
+      .catch(() => setInlineNotice('Could not copy URL in this browser.'))
+  }, [])
 
-    const selectedSource = quickSources.find((source) => source.id === activeSourceId);
-    if (selectedSource) return;
+  const addCustomSite = useCallback(() => {
+    const normalized = normalizeUrl(customUrl)
+    if (!normalized) return
 
-    const preferred = quickSources.find((source) => source.preferredMode !== 'external') || quickSources[0];
-    setActiveSourceId(preferred.id);
-    if ((preferred.preferredMode || 'embed') === 'embed') {
-      setViewMode('embed');
-    }
-  }, [symbol, quickSources, activeSourceId, setActiveSourceId, setViewMode]);
-
-  const handleAddSite = () => {
-    const normalized = normalizeUrl(urlInput);
-    if (!normalized) return;
-
-    const existing = sites.find((site) => site.url === normalized);
+    const existing = savedSites.find((site) => site.url === normalized)
     if (existing) {
-      setActiveSiteId(existing.id);
-      setUrlInput('');
-      setTitleInput('');
-      return;
+      setActiveSavedSiteId(existing.id)
+      setCustomTitle('')
+      setCustomUrl('')
+      setInlineNotice(`Using existing saved source: ${existing.title}`)
+      return
     }
 
-    const newSite: SavedSite = {
-      id: `${Date.now()}`,
+    const next: SavedSite = {
+      id: `site-${Date.now()}`,
+      title: customTitle.trim() || normalized.replace(/^https?:\/\//, ''),
       url: normalized,
-      title: titleInput.trim() || normalized.replace(/^https?:\/\//, ''),
       createdAt: new Date().toISOString(),
-      lastVisitedAt: new Date().toISOString(),
-    };
-
-    setSites((prev) => [newSite, ...prev]);
-    setActiveSiteId(newSite.id);
-    setActiveSourceId(null);
-    setUrlInput('');
-    setTitleInput('');
-  };
-
-  const handleSelectSite = (site: SavedSite) => {
-    setActiveSiteId(site.id);
-    setActiveSourceId(null);
-    setViewMode('embed');
-    setSites((prev) =>
-      prev.map((item) =>
-        item.id === site.id ? { ...item, lastVisitedAt: new Date().toISOString() } : item
-      )
-    );
-  };
-
-  const handleRemoveSite = (siteId: string) => {
-    setSites((prev) => prev.filter((site) => site.id !== siteId));
-    if (activeSiteId === siteId) {
-      setActiveSiteId(null);
     }
-  };
 
-  const handleSelectQuickSource = (sourceId: string) => {
-    const source = quickSources.find((item) => item.id === sourceId);
-    setActiveSourceId(sourceId);
-    setActiveSiteId(null);
-    setViewMode(source?.preferredMode || 'embed');
-  };
+    setSavedSites((prev) => [next, ...prev])
+    setActiveSavedSiteId(next.id)
+    setCustomTitle('')
+    setCustomUrl('')
+    setInlineNotice('Custom source saved.')
+  }, [customUrl, customTitle, savedSites, setSavedSites, setActiveSavedSiteId])
 
-  const activeUrl = activeSite?.url || activeSource?.url || '';
-  const activeTitle = activeSite?.title || activeSource?.label || activeUrl;
-  const embedPolicy = useMemo(() => getEmbedPolicy(activeUrl), [activeUrl]);
-  const canEmbed = Boolean(activeUrl) && viewMode === 'embed' && embedPolicy.canEmbed;
+  const removeSavedSite = useCallback(
+    (siteId: string) => {
+      setSavedSites((prev) => prev.filter((site) => site.id !== siteId))
+      if (activeSavedSiteId === siteId) {
+        setActiveSavedSiteId(null)
+      }
+    },
+    [activeSavedSiteId, setSavedSites, setActiveSavedSiteId]
+  )
+
+  const bookmarkCurrent = useCallback(() => {
+    if (!activeUrl) return
+
+    const existing = savedSites.find((site) => site.url === activeUrl)
+    if (existing) {
+      setActiveSavedSiteId(existing.id)
+      setInlineNotice('Already bookmarked. Opened saved source.')
+      return
+    }
+
+    const entry: SavedSite = {
+      id: `site-${Date.now()}`,
+      title: activeTitle,
+      url: activeUrl,
+      createdAt: new Date().toISOString(),
+    }
+
+    setSavedSites((prev) => [entry, ...prev])
+    setActiveSavedSiteId(entry.id)
+    setInlineNotice('Current source bookmarked.')
+  }, [activeTitle, activeUrl, savedSites, setActiveSavedSiteId, setSavedSites])
+
+  const switchSource = useCallback(
+    (direction: 1 | -1) => {
+      const currentIndex = sourceOrder.indexOf(activeSourceId)
+      const baseIndex = currentIndex >= 0 ? currentIndex : 0
+      const nextIndex = (baseIndex + direction + sourceOrder.length) % sourceOrder.length
+      const nextId = sourceOrder[nextIndex]
+      setActiveSourceId(nextId)
+      setActiveSavedSiteId(null)
+    },
+    [activeSourceId, sourceOrder, setActiveSourceId, setActiveSavedSiteId]
+  )
+
+  const swipeHandlers = useTouchGestures({
+    onSwipeLeft: () => switchSource(1),
+    onSwipeRight: () => switchSource(-1),
+  })
+
+  useEffect(() => {
+    if (!inlineNotice) return
+    const timeoutId = window.setTimeout(() => setInlineNotice(null), 2200)
+    return () => window.clearTimeout(timeoutId)
+  }, [inlineNotice])
 
   useEffect(() => {
     if (!activeUrl) {
-      setEmbedStatus('idle');
-      return;
+      setEmbedState('idle')
+      return
     }
 
-    setHistory((prev) => {
-      if (prev[prev.length - 1] === activeUrl) return prev;
-      return [...prev.slice(-19), activeUrl];
-    });
-
-    if (viewMode !== 'embed') {
-      setEmbedStatus('idle');
-      return;
+    if (!canAttemptEmbed) {
+      setEmbedState('blocked')
+      return
     }
 
-    if (!embedPolicy.canEmbed) {
-      setEmbedStatus('blocked');
-      return;
+    setEmbedState('loading')
+    const timeoutId = window.setTimeout(() => {
+      setEmbedState((current) => (current === 'ready' ? current : 'blocked'))
+    }, 7000)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [activeUrl, canAttemptEmbed])
+
+  useEffect(() => {
+    const handleKeyboard = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        return
+      }
+
+      if (event.ctrlKey && event.key.toLowerCase() === 'o') {
+        event.preventDefault()
+        openExternal(activeUrl)
+        return
+      }
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        switchSource(-1)
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        switchSource(1)
+      }
     }
 
-    setEmbedStatus('loading');
-    const timeout = window.setTimeout(() => {
-      setEmbedStatus((current) => (current === 'ready' ? current : 'blocked'));
-    }, 9000);
+    window.addEventListener('keydown', handleKeyboard)
+    return () => window.removeEventListener('keydown', handleKeyboard)
+  }, [activeUrl, openExternal, switchSource])
 
-    return () => window.clearTimeout(timeout);
-  }, [activeUrl, viewMode, embedPolicy]);
+  const rssQuery = useQuery<ResearchRssFeedResponse>({
+    queryKey: ['research-rss-feed', rssSource],
+    queryFn: () => getResearchRssFeed(rssSource as ResearchRssSource, 8),
+    enabled: Boolean(rssSource),
+    staleTime: 10 * 60 * 1000,
+    refetchInterval: 15 * 60 * 1000,
+  })
 
   return (
-    <WidgetContainer
-      title="Research Browser"
-      onClose={onRemove}
-      noPadding
-      widgetId={id}
-    >
-      <div className="h-full flex flex-col bg-[#0a0a0a]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
-          <WidgetMeta
-            note={
-              symbol
-                ? `Researching ${symbol} • ${viewMode === 'embed' ? 'Embed mode' : 'External mode'}`
-                : 'Local storage'
-            }
-            align="right"
-          />
+    <WidgetContainer title="Research Browser" onClose={onRemove} noPadding widgetId={id}>
+      <div className="flex h-full flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]" {...swipeHandlers}>
+        <div className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/80 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              <Search size={12} />
+              Source
+            </div>
+
+            <select
+              value={activeSourceId}
+              onChange={(event) => {
+                setActiveSourceId(event.target.value)
+                setActiveSavedSiteId(null)
+              }}
+              className="min-w-[210px] rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500/50"
+              aria-label="Select research source"
+            >
+              {(Object.keys(groupedSources) as SourceCategory[]).map((category) => (
+                <optgroup key={category} label={CATEGORY_LABELS[category]}>
+                  {groupedSources[category].map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={bookmarkCurrent}
+              className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:border-blue-500/40 hover:text-[var(--text-primary)]"
+            >
+              <BookmarkPlus size={13} />
+              Bookmark
+            </button>
+
+            <button
+              type="button"
+              onClick={() => openExternal(activeUrl)}
+              className="inline-flex items-center gap-1 rounded border border-blue-500/50 bg-blue-600/10 px-2 py-1.5 text-xs font-semibold text-blue-300 transition-colors hover:bg-blue-600/20"
+            >
+              <ExternalLink size={13} />
+              Open in Tab
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (canAttemptEmbed) {
+                  setEmbedState('loading')
+                }
+                rssQuery.refetch()
+              }}
+              className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+              title="Refresh source"
+            >
+              <RefreshCcw size={12} />
+              Refresh
+            </button>
+
+            <div className="ml-auto">
+              <WidgetMeta
+                note={normalizedSymbol ? `Ticker ${normalizedSymbol}` : 'No ticker selected'}
+                align="right"
+              />
+            </div>
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              value={customTitle}
+              onChange={(event) => setCustomTitle(event.target.value)}
+              placeholder="Custom title"
+              className="w-36 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500/50"
+              aria-label="Custom source title"
+            />
+            <input
+              value={customUrl}
+              onChange={(event) => setCustomUrl(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  addCustomSite()
+                }
+              }}
+              placeholder="https://custom-site.example"
+              className="min-w-[240px] flex-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500/50"
+              aria-label="Custom source URL"
+            />
+            <button
+              type="button"
+              onClick={addCustomSite}
+              className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-1 text-xs font-semibold text-white transition-colors hover:bg-blue-500"
+            >
+              <Plus size={12} />
+              Add URL
+            </button>
+          </div>
+
+          {inlineNotice && <div className="mt-2 text-[11px] text-blue-300">{inlineNotice}</div>}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] h-full">
-          <div className="border-b lg:border-b-0 lg:border-r border-gray-800/60 p-3 space-y-3">
-            <div className="space-y-2">
-              <input
-                value={titleInput}
-                onChange={(event) => setTitleInput(event.target.value)}
-                placeholder="Site name (optional)"
-                className="w-full rounded border border-gray-800/70 bg-black/20 px-2 py-1 text-xs text-gray-200"
-              />
-              <div className="flex gap-2">
-                <input
-                  value={urlInput}
-                  onChange={(event) => setUrlInput(event.target.value)}
-                  placeholder="https://..."
-                  className="flex-1 rounded border border-gray-800/70 bg-black/20 px-2 py-1 text-xs text-gray-200"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddSite}
-                  className="inline-flex items-center justify-center rounded bg-blue-600 px-2 py-1 text-xs font-semibold text-white hover:bg-blue-500"
-                >
-                  <Plus size={12} />
-                </button>
-              </div>
-              <div className="text-[10px] text-gray-500">
-                Some sites block embedding. Use the open button if the page stays blank.
-              </div>
+        <div className="grid h-full grid-cols-1 lg:grid-cols-[250px_1fr]">
+          <aside className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/40 p-3 lg:border-b-0 lg:border-r">
+            <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
+              Saved Sources
             </div>
 
-            <div className="space-y-2">
-              <div className="text-[10px] font-black uppercase tracking-widest text-gray-500">
-                Quick Search
-              </div>
-              {symbol ? (
-                <div className="grid grid-cols-2 gap-2">
-                  {quickSources.map((source) => (
-                    <button
-                      key={source.id}
-                      type="button"
-                      onClick={() => handleSelectQuickSource(source.id)}
-                      className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                        activeSource?.id === source.id
-                          ? 'border-blue-500/40 bg-blue-500/10 text-blue-200'
-                          : 'border-gray-800/60 bg-black/20 text-gray-300 hover:bg-white/5'
-                      }`}
-                    >
-                      {source.label}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-[10px] text-gray-500">Select a ticker to enable quick search.</div>
-              )}
-            </div>
-
-            {sites.length === 0 ? (
-              <WidgetEmpty message="Save a site to begin" icon={<Globe size={18} />} />
+            {savedSites.length === 0 ? (
+              <WidgetEmpty message="Bookmark or add custom URLs to build your source list." icon={<Globe size={16} />} />
             ) : (
               <div className="space-y-2">
-                <div className="text-[10px] font-black uppercase tracking-widest text-gray-500">Saved Sites</div>
-                {sites.map((site) => (
-                  <div
-                    key={site.id}
-                    className={`flex items-center justify-between gap-2 rounded border px-2 py-2 text-left text-xs transition-colors ${
-                      activeSite?.id === site.id
-                        ? 'border-blue-500/40 bg-blue-500/10 text-blue-200'
-                        : 'border-gray-800/60 bg-black/20 text-gray-300 hover:bg-white/5'
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => handleSelectSite(site)}
-                      className="flex-1 text-left"
+                {savedSites.map((site) => {
+                  const isActive = site.id === activeSavedSiteId
+                  return (
+                    <div
+                      key={site.id}
+                      className={cn(
+                        'flex items-center gap-2 rounded border px-2 py-1.5',
+                        isActive
+                          ? 'border-blue-500/50 bg-blue-600/10'
+                          : 'border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-blue-500/30'
+                      )}
                     >
-                      <div className="font-semibold line-clamp-1">{site.title || site.url}</div>
-                      <div className="text-[10px] text-gray-500 line-clamp-1">
-                        {site.url.replace(/^https?:\/\//, '')}
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveSite(site.id)}
-                      className="text-gray-500 hover:text-red-400"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="relative flex-1 min-h-[320px]">
-            {canEmbed ? (
-              <>
-                <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('external')}
-                    className="inline-flex items-center gap-1 rounded bg-black/60 px-2 py-1 text-[10px] text-gray-200 hover:text-white"
-                  >
-                    External mode
-                  </button>
-                  <a
-                  href={activeUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded bg-black/60 px-2 py-1 text-[10px] text-gray-200 hover:text-white"
-                  >
-                    <ExternalLink size={10} />
-                    Open
-                  </a>
-                </div>
-                <iframe
-                  title={activeTitle || 'Research browser'}
-                  src={activeUrl}
-                  className="h-full w-full border-0"
-                  loading="lazy"
-                  onLoad={() => setEmbedStatus('ready')}
-                />
-                {embedStatus === 'loading' && (
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25 text-xs text-gray-300">
-                    Loading embedded page...
-                  </div>
-                )}
-                {embedStatus === 'blocked' && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/75 p-4 text-center">
-                    <div className="text-sm font-semibold text-white">This site may block embedding</div>
-                    <div className="text-[11px] text-gray-300">
-                      {embedPolicy.reason || 'Switch to external mode or open directly in a new tab.'}
-                    </div>
-                    <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => setViewMode('external')}
-                        className="rounded border border-blue-500/60 px-3 py-1 text-xs text-blue-200 hover:border-blue-300"
+                        onClick={() => setActiveSavedSiteId(site.id)}
+                        className="min-w-0 flex-1 text-left"
                       >
-                        External mode
+                        <div className="truncate text-xs font-semibold text-[var(--text-primary)]">{site.title}</div>
+                        <div className="truncate text-[10px] text-[var(--text-muted)]">
+                          {site.url.replace(/^https?:\/\//, '')}
+                        </div>
                       </button>
-                      <a
-                        href={activeUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded border border-gray-500/60 px-3 py-1 text-xs text-gray-100 hover:border-gray-300"
+                      <button
+                        type="button"
+                        onClick={() => removeSavedSite(site.id)}
+                        className="rounded p-1 text-[var(--text-muted)] transition-colors hover:text-red-400"
+                        aria-label={`Delete saved source ${site.title}`}
                       >
-                        Open in new tab
-                      </a>
+                        <Trash2 size={12} />
+                      </button>
                     </div>
-                  </div>
-                )}
-              </>
-            ) : viewMode === 'embed' && activeUrl && !embedPolicy.canEmbed ? (
-              <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
-                <div className="text-sm font-semibold text-white">Embed blocked for this source</div>
-                <div className="text-[11px] text-gray-300">
-                  {embedPolicy.reason || 'This website blocks iframe embedding.'}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('external')}
-                    className="rounded border border-blue-500/60 px-3 py-1.5 text-xs text-blue-200 hover:border-blue-300"
-                  >
-                    Switch to external mode
-                  </button>
-                  <a
-                    href={activeUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded border border-gray-500/60 px-3 py-1.5 text-xs text-gray-100 hover:border-gray-300"
-                  >
-                    Open in new tab
-                  </a>
-                </div>
+                  )
+                })}
               </div>
-            ) : viewMode === 'external' && activeUrl ? (
-              <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-center">
-                <div className="text-xs text-gray-300">External mode enabled for this source.</div>
-                <div className="flex items-center gap-2">
-                  <a
-                    href={activeUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded border border-blue-500/60 px-3 py-1.5 text-xs text-blue-200 hover:border-blue-300"
-                  >
-                    <ExternalLink size={12} />
-                    Open site
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('embed')}
-                    className="rounded border border-gray-600 px-3 py-1.5 text-xs text-gray-200 hover:border-gray-300"
-                  >
-                    Try embed again
-                  </button>
-                </div>
-                {history.length > 0 && (
-                  <div className="max-w-full text-[10px] text-gray-500">
-                    Last visited: {history[history.length - 1]}
+            )}
+
+            <div className="mt-3 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)]/70 p-2 text-[10px] text-[var(--text-muted)]">
+              <div className="font-semibold text-[var(--text-secondary)]">Shortcuts</div>
+              <div className="mt-1">Ctrl+O open source in tab</div>
+              <div>Arrow left/right switch source</div>
+              <div>Swipe left/right on mobile</div>
+            </div>
+          </aside>
+
+          <section className="min-h-[320px] bg-[var(--bg-primary)] p-3">
+            {!activeUrl ? (
+              <WidgetEmpty message="Pick a source to begin research." icon={<Link2 size={18} />} />
+            ) : canAttemptEmbed && embedState !== 'blocked' ? (
+              <div className="relative h-full min-h-[320px] overflow-hidden rounded-xl border border-[var(--border-color)]">
+                <iframe
+                  title={activeTitle}
+                  src={activeUrl}
+                  className="h-full w-full border-0 bg-[var(--bg-secondary)]"
+                  loading="lazy"
+                  onLoad={() => {
+                    setEmbedState('ready')
+                    markVisited(activeUrl)
+                  }}
+                />
+
+                {embedState === 'loading' && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--bg-primary)]/65 text-xs text-[var(--text-secondary)]">
+                    Attempting embed...
                   </div>
                 )}
               </div>
             ) : (
-              <div className="flex h-full items-center justify-center">
-                <WidgetEmpty message="Select a saved site to embed" icon={<Globe size={18} />} />
+              <div className="space-y-3">
+                <ResearchSourceCard
+                  source={{
+                    id: activeSavedSite?.id || activeQuickSource.id,
+                    label: activeTitle,
+                    url: activeUrl,
+                    favicon: activeSavedSite ? undefined : activeQuickSource.favicon,
+                    description: activeSavedSite
+                      ? 'Custom source. Open externally when embedding fails.'
+                      : activeQuickSource.description,
+                    category: activeMode,
+                  }}
+                  symbol={normalizedSymbol || undefined}
+                  onOpenExternal={openExternal}
+                  onCopyUrl={copyUrl}
+                  lastVisitedAt={lastVisitedByUrl[activeUrl]}
+                />
+
+                {embedBlockReason && (
+                  <div className="rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    {embedBlockReason}
+                  </div>
+                )}
+
+                {rssSource && (
+                  <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3">
+                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--text-primary)]">
+                      <Rss size={14} />
+                      Live headlines ({rssSource})
+                    </div>
+
+                    {rssQuery.isLoading ? (
+                      <div className="text-xs text-[var(--text-muted)]">Loading RSS headlines...</div>
+                    ) : rssQuery.error ? (
+                      <WidgetError error={rssQuery.error as Error} onRetry={() => rssQuery.refetch()} />
+                    ) : rssQuery.data?.error ? (
+                      <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                        RSS feed temporarily unavailable for {rssSource}. You can still open the source directly.
+                      </div>
+                    ) : !rssQuery.data || rssQuery.data.count === 0 ? (
+                      <WidgetEmpty message="No RSS items available right now." />
+                    ) : (
+                      <div className="space-y-2">
+                        {rssQuery.data.data.map((item) => (
+                          <a
+                            key={item.url}
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={() => markVisited(item.url)}
+                            className="block rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 transition-colors hover:border-blue-500/40"
+                          >
+                            <div className="line-clamp-2 text-xs font-semibold text-[var(--text-primary)]">
+                              {item.title}
+                            </div>
+                            {item.description && (
+                              <div className="mt-1 line-clamp-2 text-[11px] text-[var(--text-muted)]">
+                                {item.description}
+                              </div>
+                            )}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </section>
         </div>
       </div>
     </WidgetContainer>
-  );
+  )
 }
 
-export default ResearchBrowserWidget;
+export default ResearchBrowserWidget

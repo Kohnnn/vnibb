@@ -1,8 +1,7 @@
 // Right Sidebar for AI Copilot and Context
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, MessageSquare, ChevronRight, ChevronLeft } from 'lucide-react';
+import { MessageSquare, ChevronRight } from 'lucide-react';
 
 interface RightSidebarProps {
     isOpen: boolean;
@@ -26,7 +25,7 @@ export function RightSidebar({
         <aside
             className={`
                 fixed top-12 bottom-0 right-0 z-40
-                bg-[#0b1221] border-l border-[#1e293b]
+                bg-[var(--bg-secondary)] border-l border-[var(--border-color)]
                 transition-all duration-300 ease-in-out
                 flex flex-col
             `}
@@ -38,14 +37,14 @@ export function RightSidebar({
             }}
         >
             {/* Header */}
-            <div className="h-10 flex items-center justify-between px-4 border-b border-[#1e293b] bg-[#0f172a]">
+            <div className="h-10 flex items-center justify-between px-4 border-b border-[var(--border-color)] bg-[var(--bg-tertiary)]/70">
                 <div className="flex items-center gap-2 text-blue-400">
                     <MessageSquare size={16} />
                     <span className="font-semibold text-sm">Copilot</span>
                 </div>
                 <button
                     onClick={onToggle}
-                    className="p-1 hover:bg-[#1e293b] rounded text-gray-400 hover:text-white transition-colors"
+                    className="p-1 hover:bg-[var(--bg-elevated)] rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                     aria-label="Close Copilot"
                 >
                     <ChevronRight size={16} />

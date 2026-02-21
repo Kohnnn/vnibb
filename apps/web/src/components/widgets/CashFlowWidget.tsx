@@ -282,6 +282,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         note={period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period}
+                        sourceLabel="Cash flow"
                         align="right"
                     />
                 </div>

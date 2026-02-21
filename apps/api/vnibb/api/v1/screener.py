@@ -11,7 +11,7 @@ import logging
 import asyncio
 import math
 from datetime import datetime, date
-from typing import List, Optional, Callable, Awaitable
+from typing import Any, List, Optional, Callable, Awaitable
 
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from pydantic import BaseModel
@@ -98,6 +98,19 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
             return True
         return False
 
+    def _estimate_market_cap(price: object, shares_outstanding: object) -> Optional[float]:
+        if _is_missing(price) or _is_missing(shares_outstanding):
+            return None
+        try:
+            price_value = float(price)
+            shares_value = float(shares_outstanding)
+            # vnstock sometimes returns shares in millions, while company profiles
+            # can store absolute share counts.
+            multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
+            return price_value * shares_value * multiplier
+        except (TypeError, ValueError):
+            return None
+
     missing_symbols = [
         row.symbol
         for row in rows
@@ -106,11 +119,15 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
             _is_missing(row.organ_name)
             or _is_missing(row.exchange)
             or _is_missing(row.industry_name)
+            or _is_missing(row.shares_outstanding)
+            or _is_missing(row.market_cap)
         )
     ]
     symbols = sorted({symbol for symbol in missing_symbols if symbol})
     stock_map: dict[str, tuple[Optional[str], Optional[str], Optional[str]]] = {}
-    company_map: dict[str, tuple[Optional[str], Optional[str], Optional[str]]] = {}
+    company_map: dict[
+        str, tuple[Optional[str], Optional[str], Optional[str], Optional[float], Optional[float]]
+    ] = {}
     if symbols:
         stock_result = await db.execute(
             select(Stock.symbol, Stock.company_name, Stock.exchange, Stock.industry).where(
@@ -122,26 +139,48 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
             for symbol, company_name, exchange, industry in stock_result.fetchall()
         }
         company_result = await db.execute(
-            select(Company.symbol, Company.company_name, Company.exchange, Company.industry).where(
-                Company.symbol.in_(symbols)
-            )
+            select(
+                Company.symbol,
+                Company.company_name,
+                Company.exchange,
+                Company.industry,
+                Company.outstanding_shares,
+                Company.listed_shares,
+            ).where(Company.symbol.in_(symbols))
         )
         company_map = {
-            symbol: (company_name, exchange, industry)
-            for symbol, company_name, exchange, industry in company_result.fetchall()
+            symbol: (
+                company_name,
+                exchange,
+                industry,
+                outstanding_shares,
+                listed_shares,
+            )
+            for (
+                symbol,
+                company_name,
+                exchange,
+                industry,
+                outstanding_shares,
+                listed_shares,
+            ) in company_result.fetchall()
         }
 
     hydrated: List[ScreenerData] = []
     for row in rows:
-        updates: dict[str, Optional[str]] = {}
+        updates: dict[str, Any] = {}
         symbol = row.symbol
         company_name = None
         exchange = None
         industry = None
+        outstanding_shares = None
+        listed_shares = None
 
         if symbol:
             if symbol in company_map:
-                company_name, exchange, industry = company_map[symbol]
+                company_name, exchange, industry, outstanding_shares, listed_shares = company_map[
+                    symbol
+                ]
             if symbol in stock_map:
                 stock_company, stock_exchange, stock_industry = stock_map[symbol]
                 if not company_name:
@@ -157,6 +196,16 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
                 updates["exchange"] = exchange
             if industry and _is_missing(row.industry_name):
                 updates["industry_name"] = industry
+            if outstanding_shares and _is_missing(row.shares_outstanding):
+                updates["shares_outstanding"] = outstanding_shares
+            elif listed_shares and _is_missing(row.shares_outstanding):
+                updates["shares_outstanding"] = listed_shares
+
+        shares_for_market_cap = updates.get("shares_outstanding", row.shares_outstanding)
+        if _is_missing(row.market_cap):
+            estimated_market_cap = _estimate_market_cap(row.price, shares_for_market_cap)
+            if estimated_market_cap is not None:
+                updates["market_cap"] = estimated_market_cap
 
         if updates:
             row = row.model_copy(update=updates)
@@ -218,7 +267,8 @@ def apply_advanced_filters(
 def fill_market_cap(rows: List[ScreenerData]) -> List[ScreenerData]:
     for row in rows:
         if row.market_cap is None and row.price is not None and row.shares_outstanding:
-            row.market_cap = row.price * row.shares_outstanding * 1_000_000
+            multiplier = 1 if row.shares_outstanding >= 1_000_000 else 1_000_000
+            row.market_cap = row.price * row.shares_outstanding * multiplier
     return rows
 
 
