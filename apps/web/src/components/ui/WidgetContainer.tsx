@@ -101,7 +101,7 @@ export function WidgetContainer({
         {children}
       </div>
       {exportData && (
-        <div className="px-3 py-1 border-t border-gray-800 bg-gray-900/20 flex justify-end">
+        <div className="px-3 py-1 border-t border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 flex justify-end">
           <ExportButton 
             data={exportData} 
             filename={exportFilename || title?.toLowerCase().replace(/\s+/g, '_')} 

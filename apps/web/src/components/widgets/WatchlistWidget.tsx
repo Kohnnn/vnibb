@@ -177,25 +177,25 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: Watc
             noPadding
             widgetId={id}
         >
-            <div className="h-full flex flex-col bg-[#0a0a0a]">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
+            <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-color)]">
                     <div className="flex items-center gap-2">
                         <Star size={14} className="text-yellow-400" />
-                        <span className="text-xs text-gray-500 font-bold uppercase tracking-tighter">{symbols.length} symbols</span>
+                        <span className="text-xs text-[var(--text-muted)] font-bold uppercase tracking-tighter">{symbols.length} symbols</span>
                     </div>
                     <div className="flex items-center gap-1">
-                        <button onClick={() => setShowAddInput(!showAddInput)} className="p-1 text-gray-500 hover:text-blue-400 transition-colors">
+                        <button onClick={() => setShowAddInput(!showAddInput)} className="p-1 text-[var(--text-muted)] hover:text-blue-400 transition-colors">
                             <Plus size={14} />
                         </button>
                         {symbols.length > 0 && (
-                            <button onClick={() => setShowClearConfirm(true)} className="p-1 text-gray-500 hover:text-red-400 transition-colors">
+                            <button onClick={() => setShowClearConfirm(true)} className="p-1 text-[var(--text-muted)] hover:text-red-400 transition-colors">
                                 <Trash2 size={14} />
                             </button>
                         )}
                     </div>
                 </div>
 
-                <div className="px-3 py-1.5 border-b border-gray-800/50 bg-[#0a0a0a]">
+                <div className="px-3 py-1.5 border-b border-[var(--border-color)]/70 bg-[var(--bg-primary)]">
                     <WidgetMeta
                         updatedAt={lastTick}
                         isCached={showCached}
@@ -218,14 +218,14 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: Watc
                 )}
 
                 {showAddInput && (
-                    <div className="px-3 py-2 border-b border-gray-800 bg-gray-900/20">
+                    <div className="px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/40">
                         <div className="flex gap-1">
                             <input
                                 type="text"
                                 value={newSymbol}
                                 onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAddSymbol()}
-                                className="flex-1 bg-black border border-gray-800 rounded px-2 py-1 text-xs text-white uppercase font-bold focus:border-blue-500 outline-none"
+                                className="flex-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-2 py-1 text-xs text-[var(--text-primary)] uppercase font-bold focus:border-blue-500 outline-none"
                                 placeholder="SYMBOL"
                                 autoFocus
                             />
@@ -242,15 +242,15 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: Watc
                         />
                     ) : (
                         <table className="data-table w-full text-[11px] text-left border-collapse">
-                            <thead className="sticky top-0 bg-[#0a0a0a] text-gray-500 z-10">
-                                <tr className="border-b border-gray-800">
-                                    <th className="px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('symbol')}>
+                            <thead className="sticky top-0 bg-[var(--bg-primary)] text-[var(--text-muted)] z-10">
+                                <tr className="border-b border-[var(--border-color)]">
+                                    <th className="px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors" onClick={() => handleSort('symbol')}>
                                         Symbol {getSortIcon('symbol')}
                                     </th>
-                                    <th className="text-right px-2 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('price')}>
+                                    <th className="text-right px-2 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors" onClick={() => handleSort('price')}>
                                         Price {getSortIcon('price')}
                                     </th>
-                                    <th className="text-right px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-white transition-colors" onClick={() => handleSort('changePercent')}>
+                                    <th className="text-right px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors" onClick={() => handleSort('changePercent')}>
                                         Chg% {getSortIcon('changePercent')}
                                     </th>
                                 </tr>
@@ -269,7 +269,7 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: Watc
                                         role="button"
                                         tabIndex={0}
                                         aria-label={`View ${item.symbol}`}
-                                        className="border-b border-gray-800/50 hover:bg-white/5 transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                                        className="border-b border-[var(--border-color)]/70 hover:bg-[var(--bg-secondary)]/50 transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
                                     >
                                         <td className="px-3 py-2">
                                             <div className="flex items-center gap-2">
@@ -277,7 +277,7 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: Watc
                                                 <span className="font-black text-blue-400 group-hover:text-blue-300 transition-colors">{item.symbol}</span>
                                             </div>
                                         </td>
-                                        <td className="text-right px-2 py-2 font-mono text-white">
+                                        <td className="text-right px-2 py-2 font-mono text-[var(--text-primary)]">
                                             {formatPrice(item.price)}
                                         </td>
                                         <td className={`text-right px-3 py-2 font-mono ${getChangeColor(item.change)}`}>

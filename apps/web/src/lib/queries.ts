@@ -39,6 +39,9 @@ export const queryKeys = {
     incomeStatement: (symbol: string, period: string) => ['incomeStatement', symbol, period] as const,
     cashFlow: (symbol: string, period: string) => ['cashFlow', symbol, period] as const,
     marketOverview: () => ['marketOverview'] as const,
+    worldIndices: () => ['worldIndices'] as const,
+    forexRates: () => ['forexRates'] as const,
+    commodities: () => ['commodities'] as const,
     screener: (params?: Record<string, unknown>) => ['screener', params] as const,
     dashboards: (userId?: string) => ['dashboards', userId] as const,
     dashboard: (id: number) => ['dashboard', id] as const,
@@ -309,6 +312,42 @@ export function useMarketOverview(enabled = true) {
         queryFn: ({ signal }) => api.getMarketOverview(signal),
         enabled,
         staleTime: 60 * 1000, // 1 minute
+    });
+}
+
+export function useWorldIndices(enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.worldIndices(),
+        queryFn: () => api.getWorldIndices({ limit: 8 }),
+        enabled,
+        staleTime: 2 * 60 * 1000,
+        refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.movers),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
+    });
+}
+
+export function useForexRates(enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.forexRates(),
+        queryFn: () => api.getForexRates({ limit: 12 }),
+        enabled,
+        staleTime: 5 * 60 * 1000,
+        refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.movers),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
+    });
+}
+
+export function useCommodities(enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.commodities(),
+        queryFn: () => api.getCommodities({ limit: 20 }),
+        enabled,
+        staleTime: 5 * 60 * 1000,
+        refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.movers),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
     });
 }
 
@@ -731,7 +770,9 @@ export interface StockQuoteView {
     price: number | null;
     change: number | null;
     changePct: number | null;
+    prevClose: number | null;
     volume: number | null;
+    value: number | null;
     high: number | null;
     low: number | null;
     open: number | null;
@@ -745,7 +786,9 @@ export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Pro
         price: response.data.price,
         change: response.data.change,
         changePct: response.data.changePct,
+        prevClose: response.data.prevClose,
         volume: response.data.volume,
+        value: response.data.value,
         high: response.data.high,
         low: response.data.low,
         open: response.data.open,

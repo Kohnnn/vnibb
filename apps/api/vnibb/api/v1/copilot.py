@@ -20,6 +20,7 @@ router = APIRouter()
 
 # ============ Models ============
 
+
 class Message(BaseModel):
     role: str
     content: str
@@ -27,13 +28,17 @@ class Message(BaseModel):
 
 class WidgetContext(BaseModel):
     """Context from a widget for AI analysis."""
+
     widgetType: str = "General"
     symbol: str = ""
+    activeTab: Optional[str] = None
     dataSnapshot: Optional[Dict[str, Any]] = None
+    widgetPayload: Optional[Dict[str, Any]] = None
 
 
 class ChatStreamRequest(BaseModel):
     """Request for streaming chat."""
+
     message: str
     context: Optional[WidgetContext] = None
     history: List[Message] = []
@@ -41,6 +46,7 @@ class ChatStreamRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     """Legacy chat request with full history."""
+
     messages: List[Message]
     context: Optional[Dict[str, Any]] = None
 
@@ -66,14 +72,16 @@ class PromptsResponse(BaseModel):
 
 # ============ Endpoints ============
 
+
 @router.post("/chat/stream", summary="Stream chat response via SSE")
 async def chat_stream(request: ChatStreamRequest):
     """
     Stream a chat response using Server-Sent Events (SSE).
-    
+
     Returns chunks in format: data: {"chunk": "text"}\n\n
     Final message: data: {"done": true}\n\n
     """
+
     async def generate():
         try:
             # Build context prompt if widget context provided
@@ -82,25 +90,28 @@ async def chat_stream(request: ChatStreamRequest):
                 context_dict = {
                     "widgetType": request.context.widgetType,
                     "symbol": request.context.symbol,
-                    "data": request.context.dataSnapshot or {}
+                    "activeTab": request.context.activeTab,
+                    "data": request.context.dataSnapshot or {},
                 }
+                if request.context.widgetPayload:
+                    context_dict["widget_payload"] = request.context.widgetPayload
                 context_prompt = await copilot_service.build_context_prompt(context_dict)
                 context_dict["context_prompt"] = context_prompt
-            
+
             # Convert history to dict format
             messages = [{"role": m.role, "content": m.content} for m in request.history]
             messages.append({"role": "user", "content": request.message})
-            
+
             # Stream from LLM
             async for chunk in llm_service.generate_response_stream(messages, context_dict):
                 if chunk:
                     yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-            
+
             yield f"data: {json.dumps({'done': True})}\n\n"
-            
+
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
-    
+
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
@@ -108,7 +119,7 @@ async def chat_stream(request: ChatStreamRequest):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        }
+        },
     )
 
 
@@ -120,10 +131,9 @@ async def chat_endpoint(request: ChatRequest):
     """
     messages_dict = [m.model_dump() for m in request.messages]
     context = request.context or {}
-    
+
     return StreamingResponse(
-        llm_service.generate_response_stream(messages_dict, context),
-        media_type="text/plain"
+        llm_service.generate_response_stream(messages_dict, context), media_type="text/plain"
     )
 
 
@@ -134,11 +144,10 @@ async def ask_endpoint(request: AskRequest):
     Uses pattern matching first, then LLM fallback.
     """
     from vnibb.services.copilot_service import CopilotQuery
-    
-    result = await copilot_service.process(CopilotQuery(
-        query=request.query,
-        context=request.context
-    ))
+
+    result = await copilot_service.process(
+        CopilotQuery(query=request.query, context=request.context)
+    )
     return result
 
 
@@ -146,10 +155,18 @@ async def ask_endpoint(request: AskRequest):
 async def get_prompts():
     """Get available pre-built prompt templates."""
     prompts = [
-        PromptTemplate(id="analyze", label="📊 Analyze", template=PROMPT_TEMPLATES.get("analyze", "")),
-        PromptTemplate(id="compare", label="⚖️ Compare", template=PROMPT_TEMPLATES.get("compare", "")),
-        PromptTemplate(id="financials", label="💰 Financials", template=PROMPT_TEMPLATES.get("financials", "")),
-        PromptTemplate(id="technical", label="📈 Technical", template=PROMPT_TEMPLATES.get("technical", "")),
+        PromptTemplate(
+            id="analyze", label="📊 Analyze", template=PROMPT_TEMPLATES.get("analyze", "")
+        ),
+        PromptTemplate(
+            id="compare", label="⚖️ Compare", template=PROMPT_TEMPLATES.get("compare", "")
+        ),
+        PromptTemplate(
+            id="financials", label="💰 Financials", template=PROMPT_TEMPLATES.get("financials", "")
+        ),
+        PromptTemplate(
+            id="technical", label="📈 Technical", template=PROMPT_TEMPLATES.get("technical", "")
+        ),
         PromptTemplate(id="news", label="📰 News", template=PROMPT_TEMPLATES.get("news", "")),
     ]
     return PromptsResponse(prompts=prompts)
@@ -158,9 +175,11 @@ async def get_prompts():
 @router.get("/suggestions", response_model=CopilotSuggestionResponse)
 async def get_suggestions():
     """Get active copilot suggestions based on current market."""
-    return CopilotSuggestionResponse(suggestions=[
-        "Analyze VNM for investment",
-        "Compare FPT and MWG",
-        "Technical outlook for VCB",
-        "Summarize HPG financials"
-    ])
+    return CopilotSuggestionResponse(
+        suggestions=[
+            "Analyze VNM for investment",
+            "Compare FPT and MWG",
+            "Technical outlook for VCB",
+            "Summarize HPG financials",
+        ]
+    )

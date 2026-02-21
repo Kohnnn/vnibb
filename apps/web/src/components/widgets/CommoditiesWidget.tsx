@@ -1,108 +1,65 @@
-// Commodities Widget - Gold, Oil, and commodity prices
-
 'use client';
 
-import { useState } from 'react';
-import { Gem, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import { Gem } from 'lucide-react';
+import { useCommodities } from '@/lib/queries';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 
-interface Commodity {
-    name: string;
-    symbol: string;
-    price: number;
-    unit: string;
-    change: number;
-    changePct: number;
+function formatPrice(value: number | null | undefined): string {
+    if (value === null || value === undefined) return '--';
+    return value.toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
 
-interface CommoditiesWidgetProps {
-    isEditing?: boolean;
-    onRemove?: () => void;
-}
+export function CommoditiesWidget() {
+    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useCommodities();
 
-const COMMODITIES: Commodity[] = [
-    { name: 'Gold', symbol: 'XAU', price: 2045.30, unit: 'USD/oz', change: 12.50, changePct: 0.61 },
-    { name: 'Silver', symbol: 'XAG', price: 23.15, unit: 'USD/oz', change: -0.25, changePct: -1.07 },
-    { name: 'Crude Oil', symbol: 'WTI', price: 78.45, unit: 'USD/bbl', change: 1.20, changePct: 1.55 },
-    { name: 'Brent Oil', symbol: 'BRENT', price: 82.30, unit: 'USD/bbl', change: 0.85, changePct: 1.04 },
-    { name: 'Natural Gas', symbol: 'NG', price: 2.85, unit: 'USD/MMBtu', change: -0.08, changePct: -2.73 },
-    { name: 'Copper', symbol: 'HG', price: 3.92, unit: 'USD/lb', change: 0.05, changePct: 1.29 },
-    { name: 'Platinum', symbol: 'PL', price: 935.50, unit: 'USD/oz', change: -8.20, changePct: -0.87 },
-    { name: 'Coffee', symbol: 'KC', price: 185.40, unit: 'USD/lb', change: 2.30, changePct: 1.26 },
-];
-
-function getCommodityIcon(symbol: string): string {
-    switch (symbol) {
-        case 'XAU': return '🥇';
-        case 'XAG': return '🥈';
-        case 'WTI':
-        case 'BRENT': return '🛢️';
-        case 'NG': return '🔥';
-        case 'HG': return '🔶';
-        case 'PL': return '⚪';
-        case 'KC': return '☕';
-        default: return '📦';
-    }
-}
-
-export function CommoditiesWidget({}: CommoditiesWidgetProps) {
-    const [isRefreshing, setIsRefreshing] = useState(false);
-    const [lastUpdated, setLastUpdated] = useState<Date | null>(new Date());
-
-    const handleRefresh = () => {
-        setIsRefreshing(true);
-        setTimeout(() => {
-            setIsRefreshing(false);
-            setLastUpdated(new Date());
-        }, 500);
-    };
+    const rows = data?.data || [];
+    const hasData = rows.length > 0;
+    const isFallback = Boolean(data?.error);
 
     return (
         <div className="h-full flex flex-col">
-            <div className="flex items-center justify-between px-1 py-1 mb-2">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <Gem size={12} className="text-yellow-400" />
-                    <span>Commodities</span>
-                </div>
-                <button
-                    onClick={handleRefresh}
-                    className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded"
-                    type="button"
-                >
-                    <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
-                </button>
-            </div>
-
-            <div className="pb-2 border-b border-gray-800/50">
-                <WidgetMeta updatedAt={lastUpdated} isFetching={isRefreshing} note="Sample data" align="right" />
+            <div className="pb-2 border-b border-[var(--border-subtle)]">
+                <WidgetMeta
+                    updatedAt={dataUpdatedAt}
+                    isFetching={isFetching && hasData}
+                    isCached={isFallback}
+                    note={data?.source || 'vnstock'}
+                    align="right"
+                />
             </div>
 
             <div className="flex-1 overflow-auto space-y-1 pt-2">
-                {COMMODITIES.length === 0 ? (
-                    <WidgetEmpty message="No commodities available" icon={<Gem size={18} />} />
+                {isLoading && !hasData ? (
+                    <WidgetSkeleton lines={6} />
+                ) : error && !hasData ? (
+                    <WidgetError error={error as Error} onRetry={() => refetch()} />
+                ) : !hasData ? (
+                    <WidgetEmpty message="No commodities data available" icon={<Gem size={18} />} />
                 ) : (
-                    COMMODITIES.map((commodity, index) => {
-                        const isUp = commodity.changePct >= 0;
+                    rows.map((row, index) => {
+                        const spread = (row.sell_price ?? 0) - (row.buy_price ?? 0);
                         return (
                             <div
-                                key={`${commodity.symbol}-${index}`}
-                                className="flex items-center justify-between p-2 rounded bg-gray-800/20 hover:bg-gray-800/40"
+                                key={`${row.source}-${row.symbol}-${index}`}
+                                className="flex items-center justify-between p-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40"
                             >
-                                <div className="flex items-center gap-2">
-                                    <span className="text-lg">{getCommodityIcon(commodity.symbol)}</span>
-                                    <div>
-                                        <div className="text-sm font-medium text-white">{commodity.name}</div>
-                                        <div className="text-[10px] text-gray-500">{commodity.unit}</div>
+                                <div className="min-w-0">
+                                    <div className="text-xs font-semibold text-[var(--text-primary)] truncate">
+                                        {row.name || row.symbol || 'Commodity'}
                                     </div>
+                                    <div className="text-[10px] text-[var(--text-muted)]">{row.source}</div>
                                 </div>
                                 <div className="text-right">
-                                    <div className="text-sm font-mono text-white">
-                                        ${commodity.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                    <div className="text-[11px] text-[var(--text-secondary)] font-mono">
+                                        Buy {formatPrice(row.buy_price)}
                                     </div>
-                                    <div className={`text-xs flex items-center justify-end gap-0.5 ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                                        {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                        {isUp ? '+' : ''}{commodity.changePct.toFixed(2)}%
+                                    <div className="text-[11px] text-[var(--text-secondary)] font-mono">
+                                        Sell {formatPrice(row.sell_price)}
+                                    </div>
+                                    <div className={`text-[10px] font-mono ${spread >= 0 ? 'text-amber-400' : 'text-red-400'}`}>
+                                        Spread {spread >= 0 ? '+' : ''}{formatPrice(spread)}
                                     </div>
                                 </div>
                             </div>

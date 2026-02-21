@@ -1,19 +1,30 @@
-from fastapi import APIRouter, Query
-from typing import List, Optional, Literal
-from pydantic import BaseModel
-from vnibb.core.vn_sectors import VN_SECTORS, get_all_sectors
-from vnibb.providers.vnstock.top_movers import VnstockTopMoversFetcher, SectorTopMoversData as ProviderSectorData
+import logging
 from datetime import datetime
+from typing import Literal
+
+from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 from vnibb.core.cache import cached
+from vnibb.core.vn_sectors import get_all_sectors
+from vnibb.providers.vnstock.top_movers import (
+    SectorTopMoversData as ProviderSectorData,
+)
+from vnibb.providers.vnstock.top_movers import (
+    VnstockTopMoversFetcher,
+)
 
-router = APIRouter(prefix="/sectors", tags=["Sectors"])
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["Sectors"])
+
 
 class SectorTopMoversResponse(BaseModel):
     count: int
     type: str
-    sectors: List[ProviderSectorData]
+    sectors: list[ProviderSectorData]
     updated_at: str
+
 
 @router.get("/top-movers", response_model=SectorTopMoversResponse)
 @cached(ttl=60, key_prefix="sector_top_movers")
@@ -24,17 +35,25 @@ async def get_sector_top_movers(
     """
     Get top gainers and losers grouped by sector/industry using vnstock.
     """
-    data = await VnstockTopMoversFetcher.fetch_sector_top_movers(
-        type=type,
-        limit_per_sector=limit
-    )
-    
+    try:
+        data = await VnstockTopMoversFetcher.fetch_sector_top_movers(
+            type=type,
+            limit_per_sector=limit,
+        )
+    except Exception as error:
+        logger.warning(
+            "Sector top movers fetch failed",
+            extra={"type": type, "limit": limit, "error": str(error)},
+        )
+        data = []
+
     return SectorTopMoversResponse(
         count=len(data),
         type=type,
         sectors=data,
         updated_at=datetime.now().isoformat(),
     )
+
 
 @router.get("")
 async def list_sectors():

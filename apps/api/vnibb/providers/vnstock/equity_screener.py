@@ -509,9 +509,55 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 # Get company names mapping from Listing
                 listing = Listing(source=source)
                 symbols_df = listing.all_symbols()
-                name_map = {}
-                if symbols_df is not None and not symbols_df.empty:
-                    name_map = dict(zip(symbols_df["symbol"], symbols_df["organ_name"]))
+
+                def _to_float(value: Any) -> Optional[float]:
+                    if value is None:
+                        return None
+                    if isinstance(value, (int, float)):
+                        if isinstance(value, float) and math.isnan(value):
+                            return None
+                        return float(value)
+                    try:
+                        text = str(value).strip().replace(",", "")
+                        if not text:
+                            return None
+                        return float(text)
+                    except (TypeError, ValueError):
+                        return None
+
+                def _build_listing_map(df: Any) -> dict[str, dict[str, Any]]:
+                    if df is None or df.empty:
+                        return {}
+
+                    mapping: dict[str, dict[str, Any]] = {}
+                    for _, row in df.iterrows():
+                        symbol_value = row.get("symbol") or row.get("ticker")
+                        symbol_key = str(symbol_value).strip().upper() if symbol_value else ""
+                        if not symbol_key:
+                            continue
+
+                        mapping[symbol_key] = {
+                            "organ_name": row.get("organ_name") or row.get("organName"),
+                            "exchange": row.get("comGroupCode") or row.get("exchange"),
+                            "industry_name": row.get("industryName") or row.get("industry_name"),
+                            "market_cap": _to_float(
+                                row.get("market_cap")
+                                or row.get("marketCap")
+                                or row.get("charter_capital")
+                            ),
+                            "shares_outstanding": _to_float(
+                                row.get("shares_outstanding")
+                                or row.get("issue_share")
+                                or row.get("listed_shares")
+                            ),
+                        }
+                    return mapping
+
+                listing_map = _build_listing_map(symbols_df)
+                name_map = {
+                    symbol_key: (metadata.get("organ_name") or "")
+                    for symbol_key, metadata in listing_map.items()
+                }
 
                 # If single symbol requested, get that specific stock's data
                 if query["symbol"]:
@@ -519,8 +565,19 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
 
                     record = _extract_ratio_snapshot(screener)
                     if record:
-                        record["ticker"] = query["symbol"]
-                        record["organ_name"] = name_map.get(query["symbol"], "")
+                        symbol_key = str(query["symbol"]).upper()
+                        record["ticker"] = symbol_key
+                        record["organ_name"] = name_map.get(symbol_key, "")
+
+                        metadata = listing_map.get(symbol_key, {})
+                        for key in (
+                            "exchange",
+                            "industry_name",
+                            "market_cap",
+                            "shares_outstanding",
+                        ):
+                            if record.get(key) is None and metadata.get(key) is not None:
+                                record[key] = metadata.get(key)
 
                         # Debug: Log key valuation metrics
                         logger.debug(
@@ -556,6 +613,8 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                     logger.warning("No symbols found for exchange: %s", exchange)
                     return []
 
+                exchange_listing_map = _build_listing_map(all_symbols_df)
+
                 symbols = all_symbols_df["symbol"].tolist()
                 symbols = [symbol for symbol in symbols if _is_equity_symbol(symbol)]
                 limit = query.get("limit", 100)
@@ -576,6 +635,20 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                         if record:
                             record["ticker"] = symbol
                             record["organ_name"] = name_map.get(symbol, "")
+
+                            metadata = (
+                                exchange_listing_map.get(symbol) or listing_map.get(symbol) or {}
+                            )
+                            if not record.get("organ_name") and metadata.get("organ_name"):
+                                record["organ_name"] = metadata.get("organ_name")
+                            for key in (
+                                "exchange",
+                                "industry_name",
+                                "market_cap",
+                                "shares_outstanding",
+                            ):
+                                if record.get(key) is None and metadata.get(key) is not None:
+                                    record[key] = metadata.get(key)
 
                             # Get latest price/volume
                             try:

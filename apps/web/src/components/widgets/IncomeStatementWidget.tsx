@@ -283,6 +283,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         note={`${period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period}`}
+                        sourceLabel="Income statement"
                         align="right"
                     />
                 </div>
@@ -292,7 +293,11 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
-                        <WidgetEmpty message={`No income statement data for ${symbol}`} icon={<TrendingUp size={18} />} />
+                        <WidgetEmpty
+                            message={`No income statement data for ${symbol} (${period === 'FY' ? 'Annual' : period}).`}
+                            icon={<TrendingUp size={18} />}
+                            action={{ label: 'Retry', onClick: () => refetch() }}
+                        />
                     ) : viewMode === 'table' ? (
                         renderTable()
                     ) : (

@@ -29,7 +29,7 @@ function getEventTypeColor(type: string): string {
     if (typeLC.includes('bonus') || typeLC.includes('thưởng')) {
         return 'text-cyan-400 bg-cyan-400/10';
     }
-    return 'text-gray-400 bg-gray-400/10';
+    return 'text-[var(--text-secondary)] bg-[var(--bg-tertiary)]';
 }
 
 function formatEventDate(dateStr: string | null | undefined): string {
@@ -82,8 +82,8 @@ export function CompanyFilingsWidget({ symbol }: CompanyFilingsWidgetProps) {
     }
 
     return (
-        <div className="h-full flex flex-col">
-            <div className="pb-2 border-b border-gray-800/50">
+        <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+            <div className="pb-2 border-b border-[var(--border-color)]/70">
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
@@ -103,7 +103,7 @@ export function CompanyFilingsWidget({ symbol }: CompanyFilingsWidgetProps) {
                 ) : (
                     <table className="data-table w-full text-sm" aria-label="Corporate events">
                         <thead>
-                            <tr className="text-left text-xs text-gray-500 uppercase">
+                            <tr className="text-left text-xs text-[var(--text-muted)] uppercase">
                                 <th className="pb-2 pr-4">Date</th>
                                 <th className="pb-2 pr-4">Event</th>
                                 <th className="pb-2">Details</th>
@@ -115,10 +115,10 @@ export function CompanyFilingsWidget({ symbol }: CompanyFilingsWidgetProps) {
                                 const eventDesc = getEventDescription(event);
 
                                 return (
-                                    <tr key={idx} className="border-t border-gray-800/50 hover:bg-gray-800/30">
-                                        <td className="py-2 pr-4 text-gray-300 whitespace-nowrap">
+                                    <tr key={idx} className="border-t border-[var(--border-color)]/60 hover:bg-[var(--bg-secondary)]/40">
+                                        <td className="py-2 pr-4 text-[var(--text-primary)] whitespace-nowrap">
                                             <div className="flex items-center gap-1.5">
-                                                <Calendar size={12} className="text-gray-500" />
+                                                <Calendar size={12} className="text-[var(--text-muted)]" />
                                                 {getEventDate(event)}
                                             </div>
                                         </td>
@@ -127,7 +127,7 @@ export function CompanyFilingsWidget({ symbol }: CompanyFilingsWidgetProps) {
                                                 {eventType}
                                             </span>
                                         </td>
-                                        <td className="py-2 text-gray-400 text-xs max-w-[200px] truncate" title={eventDesc}>
+                                        <td className="py-2 text-[var(--text-secondary)] text-xs max-w-[200px] truncate" title={eventDesc}>
                                             {eventDesc}
                                         </td>
                                     </tr>

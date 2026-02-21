@@ -9,6 +9,20 @@ import { ManageTabsModal } from '@/components/modals/ManageTabsModal';
 import { useTouchGestures } from '@/hooks/useTouchGestures';
 import type { DashboardTab } from '@/types/dashboard';
 
+const MAX_TABS = 12;
+const CREATE_TAB_LOCK_MS = 300;
+
+function getNextTabName(tabs: DashboardTab[]): string {
+    const highestTabNumber = tabs.reduce((maxValue, tab) => {
+        const match = tab.name.trim().match(/^tab\s+(\d+)$/i);
+        if (!match) return maxValue;
+        const parsed = Number.parseInt(match[1], 10);
+        return Number.isFinite(parsed) ? Math.max(maxValue, parsed) : maxValue;
+    }, 0);
+
+    return `Tab ${highestTabNumber + 1}`;
+}
+
 interface TabBarProps {
     symbol?: string;
 }
@@ -17,12 +31,15 @@ export function TabBar({ symbol }: TabBarProps) {
     const [isManageModalOpen, setIsManageModalOpen] = useState(false);
     const [editingTabId, setEditingTabId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
+    const [isCreatingTab, setIsCreatingTab] = useState(false);
     const [deleteConfirmTabId, setDeleteConfirmTabId] = useState<string | null>(null);
     const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
     const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
 
     const editInputRef = useRef<HTMLInputElement>(null);
     const deleteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const createTabLockRef = useRef(false);
+    const createTabTimeoutRef = useRef<number | null>(null);
 
     const {
         activeDashboard,
@@ -56,6 +73,14 @@ export function TabBar({ symbol }: TabBarProps) {
         };
     }, [deleteConfirmTabId]);
 
+    useEffect(() => {
+        return () => {
+            if (createTabTimeoutRef.current) {
+                clearTimeout(createTabTimeoutRef.current);
+            }
+        };
+    }, []);
+
     // Keyboard shortcuts: Ctrl+T (new tab), Ctrl+W (close tab)
     useEffect(() => {
         if (!activeDashboard) return;
@@ -87,13 +112,14 @@ export function TabBar({ symbol }: TabBarProps) {
 
     if (!activeDashboard) {
         return (
-            <div className="border-b border-[#1e2a3b] bg-[#0b1021]/80 backdrop-blur-sm h-9 flex items-center px-4">
-                <span className="text-gray-500 text-xs">No dashboard selected</span>
+            <div className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/80 backdrop-blur-sm h-9 flex items-center px-4">
+                <span className="text-[var(--text-muted)] text-xs">No dashboard selected</span>
             </div>
         );
     }
 
     const sortedTabs = [...activeDashboard.tabs].sort((a, b) => a.order - b.order);
+    const reachedTabLimit = sortedTabs.length >= MAX_TABS;
 
     // Swipe gesture handlers for mobile tab navigation
     const handleSwipeLeft = useCallback(() => {
@@ -124,11 +150,31 @@ export function TabBar({ symbol }: TabBarProps) {
     };
 
     const handleAddTab = () => {
-        const tab = createTab(activeDashboard.id, 'New Tab');
-        setActiveTab(tab.id);
-        // Auto-start editing the new tab name
-        setEditingTabId(tab.id);
-        setEditingName('New Tab');
+        if (isCreatingTab || createTabLockRef.current || reachedTabLimit) {
+            return;
+        }
+
+        createTabLockRef.current = true;
+        setIsCreatingTab(true);
+
+        try {
+            const tabName = getNextTabName(sortedTabs);
+            const tab = createTab(activeDashboard.id, tabName);
+            setActiveTab(tab.id);
+            // Auto-start editing the new tab name
+            setEditingTabId(tab.id);
+            setEditingName(tabName);
+        } finally {
+            if (createTabTimeoutRef.current) {
+                clearTimeout(createTabTimeoutRef.current);
+            }
+
+            createTabTimeoutRef.current = window.setTimeout(() => {
+                createTabLockRef.current = false;
+                setIsCreatingTab(false);
+                createTabTimeoutRef.current = null;
+            }, CREATE_TAB_LOCK_MS);
+        }
     };
 
     // Double-click to start inline rename
@@ -169,14 +215,17 @@ export function TabBar({ symbol }: TabBarProps) {
 
         if (deleteConfirmTabId === tabId) {
             // Second click - actually delete
+            const deletedTabIndex = sortedTabs.findIndex((tab) => tab.id === tabId);
+            const remainingTabs = sortedTabs.filter((tab) => tab.id !== tabId);
             deleteTab(activeDashboard.id, tabId);
             setDeleteConfirmTabId(null);
 
-            // Switch to first available tab if we deleted the active one
+            // Switch to adjacent tab if we deleted the active one
             if (activeTab?.id === tabId) {
-                const remainingTabs = sortedTabs.filter(t => t.id !== tabId);
                 if (remainingTabs.length > 0) {
-                    setActiveTab(remainingTabs[0].id);
+                    const nextIndex = deletedTabIndex > 0 ? deletedTabIndex - 1 : 0;
+                    const nextTab = remainingTabs[nextIndex] || remainingTabs[0];
+                    setActiveTab(nextTab.id);
                 }
             }
         } else {
@@ -243,11 +292,11 @@ export function TabBar({ symbol }: TabBarProps) {
 
     return (
         <>
-            <div className="border-b border-[#1e2a3b] bg-[#0b1021]/80 backdrop-blur-sm" {...swipeHandlers}>
+            <div className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/80 backdrop-blur-sm" {...swipeHandlers}>
                 <div className="flex items-center gap-0.5 px-3">
                     {/* Tabs */}
                     <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
-                        {sortedTabs.map((tab) => {
+                        {sortedTabs.map((tab, index) => {
                             const isActive = activeTab?.id === tab.id;
                             const isEditing = editingTabId === tab.id;
                             const isDragging = draggedTabId === tab.id;
@@ -266,8 +315,8 @@ export function TabBar({ symbol }: TabBarProps) {
                                         group relative flex items-center gap-1 px-1 py-1 text-xs font-medium 
                                         transition-all whitespace-nowrap rounded-t cursor-pointer
                                         ${isActive
-                                            ? 'text-white bg-[#1e2a3b] border-t border-l border-r border-[#2e3a4b]'
-                                            : 'text-gray-500 hover:text-gray-300 hover:bg-[#1e2a3b]/30'
+                                            ? 'text-[var(--text-primary)] bg-[var(--bg-tertiary)] border-t border-l border-r border-[var(--border-color)]'
+                                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/50'
                                         }
                                         ${isDragging ? 'opacity-50' : ''}
                                         ${isDragOver ? 'ring-2 ring-blue-500 ring-inset' : ''}
@@ -299,10 +348,15 @@ export function TabBar({ symbol }: TabBarProps) {
                                             onBlur={handleRenameConfirm}
                                             onKeyDown={handleRenameKeyDown}
                                             onClick={(e) => e.stopPropagation()}
-                                            className="w-20 bg-[#0b1021] border border-blue-500 rounded px-1 py-0.5 text-xs text-white focus:outline-none"
+                                            className="w-20 bg-[var(--bg-secondary)] border border-blue-500 rounded px-1 py-0.5 text-xs text-[var(--text-primary)] focus:outline-none"
                                         />
                                     ) : (
-                                        <span className="px-1">{tab.name}</span>
+                                        <span className="flex items-center gap-1 px-1">
+                                            <span>{tab.name}</span>
+                                            {index < 9 && (
+                                                <span className="text-[10px] text-[var(--text-muted)]">{index + 1}</span>
+                                            )}
+                                        </span>
                                     )}
 
                                     {/* Close button (visible on hover for active tab or when confirming delete) */}
@@ -316,7 +370,7 @@ export function TabBar({ symbol }: TabBarProps) {
                                                 p-0.5 rounded transition-colors
                                                 ${isDeleteConfirm
                                                     ? 'text-red-400 bg-red-500/20 hover:bg-red-500/30'
-                                                    : 'text-gray-500 hover:text-gray-300 hover:bg-[#2e3a4b]/50 opacity-0 group-hover:opacity-100'
+                                                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]/70 opacity-0 group-hover:opacity-100'
                                                 }
                                             `}
                                             title={isDeleteConfirm ? 'Click again to confirm delete' : 'Close tab'}
@@ -332,8 +386,13 @@ export function TabBar({ symbol }: TabBarProps) {
                     {/* Add tab button */}
                     <button
                         onClick={handleAddTab}
-                        className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-[#1e2a3b]/50 rounded transition-colors ml-1"
-                        title="Add new tab (Ctrl+T)"
+                        disabled={reachedTabLimit || isCreatingTab}
+                        className={`p-1.5 rounded transition-colors ml-1 ${
+                            reachedTabLimit || isCreatingTab
+                                ? 'text-[var(--text-muted)]/50 cursor-not-allowed'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60'
+                        }`}
+                        title={reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : 'Add new tab (Ctrl+T)'}
                     >
                         <Plus size={14} />
                     </button>
@@ -341,7 +400,7 @@ export function TabBar({ symbol }: TabBarProps) {
                     {/* Edit tabs button */}
                     <button
                         onClick={() => setIsManageModalOpen(true)}
-                        className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-[#1e2a3b]/50 rounded transition-colors"
+                        className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 rounded transition-colors"
                         title="Manage tabs"
                     >
                         <Settings2 size={14} />
@@ -351,11 +410,10 @@ export function TabBar({ symbol }: TabBarProps) {
                     <div className="flex-1" />
 
                     {/* Keyboard shortcuts hint */}
-                    <div className="hidden md:flex items-center gap-2 text-[10px] text-gray-600 mr-2">
-                        <span className="px-1 py-0.5 bg-gray-800/50 rounded">Ctrl+T</span>
-                        <span>new</span>
-                        <span className="px-1 py-0.5 bg-gray-800/50 rounded">Ctrl+W</span>
-                        <span>close</span>
+                    <div className="hidden md:flex items-center gap-2 text-[10px] text-[var(--text-muted)] mr-2">
+                        <span className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded">1-9</span>
+                        <span>quick switch</span>
+                        {reachedTabLimit && <span className="text-amber-400">max {MAX_TABS} tabs</span>}
                     </div>
 
                     {/* Ticker badge */}

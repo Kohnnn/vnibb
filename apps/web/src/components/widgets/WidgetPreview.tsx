@@ -19,7 +19,6 @@ export function WidgetPreview({ type }: WidgetPreviewProps) {
     const normalizedType = normalizeWidgetType(type);
     const previews: Record<string, React.ReactNode> = {
         price_chart: <ChartPreview />,
-        tradingview_chart: <ChartPreview />,
         valuation_multiples_chart: <ChartPreview />,
         screener: <TablePreview rows={4} />,
         market_overview: <IndexCardsPreview />,

@@ -693,11 +693,17 @@ def create_app() -> FastAPI:
         from vnibb.core.database import check_database_connection
 
         try:
-            db_ok = await asyncio.wait_for(check_database_connection(max_retries=1), timeout=2.5)
+            db_ok = await asyncio.wait_for(check_database_connection(max_retries=1), timeout=5.0)
         except asyncio.TimeoutError:
             return JSONResponse(
                 status_code=503,
                 content={"ready": False, "reason": "Database readiness check timed out"},
+            )
+        except Exception as e:
+            logger.warning(f"Readiness check failed: {e}")
+            return JSONResponse(
+                status_code=503,
+                content={"ready": False, "reason": f"Health check error: {type(e).__name__}"},
             )
 
         if not db_ok:

@@ -20,6 +20,7 @@ from vnibb.api.v1.trading import router as trading_router
 from vnibb.api.v1.derivatives import router as derivatives_router
 from vnibb.api.v1.user import router as user_router
 from vnibb.api.v1.rs_rating import router as rs_rating_router
+from vnibb.api.v1.market import router as market_router
 
 from vnibb.api.v1.comparison import router as comparison_router
 from vnibb.api.v1.sectors import router as sectors_router
@@ -89,6 +90,12 @@ api_router.include_router(
     technical_router,
     prefix="/analysis",
     tags=["Technical Analysis"],
+)
+
+api_router.include_router(
+    market_router,
+    prefix="/market",
+    tags=["Market Data"],
 )
 
 api_router.include_router(
@@ -185,4 +192,13 @@ api_router.include_router(
     admin_router,
     prefix="/admin",
     tags=["Admin"],
+)
+
+# Chart Data - Local Lightweight Charts
+from vnibb.api.v1.chart import router as chart_router
+
+api_router.include_router(
+    chart_router,
+    prefix="/chart-data",
+    tags=["Chart Data"],
 )

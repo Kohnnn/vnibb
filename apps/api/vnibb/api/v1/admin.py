@@ -157,6 +157,71 @@ def _classify_freshness(latest: Optional[datetime]) -> tuple[str, Optional[int]]
     return "critical", age_seconds
 
 
+async def _select_priority_symbols(db: AsyncSession, limit: int) -> list[str]:
+    """Pick top symbols for targeted recovery jobs."""
+    symbols: list[str] = []
+    seen: set[str] = set()
+
+    try:
+        # Pull a larger window, then de-duplicate symbols in Python.
+        screener_rows = await db.execute(
+            text(
+                """
+                SELECT symbol
+                FROM screener_snapshots
+                WHERE symbol IS NOT NULL
+                ORDER BY snapshot_date DESC, COALESCE(market_cap, 0) DESC
+                LIMIT :window
+                """
+            ),
+            {"window": max(limit * 6, limit)},
+        )
+
+        for row in screener_rows.fetchall():
+            raw_symbol = row[0]
+            if not raw_symbol:
+                continue
+            symbol = str(raw_symbol).upper().strip()
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            symbols.append(symbol)
+            if len(symbols) >= limit:
+                return symbols
+    except Exception:
+        await db.rollback()
+
+    if len(symbols) >= limit:
+        return symbols[:limit]
+
+    fallback_rows = await db.execute(
+        text(
+            """
+            SELECT symbol
+            FROM stocks
+            WHERE symbol IS NOT NULL
+            ORDER BY symbol ASC
+            LIMIT :window
+            """
+        ),
+        {"window": max(limit * 3, limit)},
+    )
+
+    for row in fallback_rows.fetchall():
+        raw_symbol = row[0]
+        if not raw_symbol:
+            continue
+        symbol = str(raw_symbol).upper().strip()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        symbols.append(symbol)
+        if len(symbols) >= limit:
+            break
+
+    return symbols[:limit]
+
+
 @router.get("/database/tables")
 async def list_all_tables(db: AsyncSession = Depends(get_db)):
     """List all database tables with row counts and freshness metadata."""
@@ -273,6 +338,197 @@ async def get_freshness_summary(db: AsyncSession = Depends(get_db)):
         "entries": entries,
         "tables": entries,
         "warning_tables": warning_tables,
+    }
+
+
+@router.get("/data-health")
+async def get_data_health(db: AsyncSession = Depends(get_db)):
+    """Compact data freshness endpoint for dashboard widgets."""
+    freshness = await get_freshness_summary(db)
+    entries = freshness.get("entries", [])
+
+    tables: dict[str, dict[str, Any]] = {}
+    staleness_alerts: list[dict[str, Any]] = []
+
+    for entry in entries:
+        table_name = entry.get("table")
+        if not table_name:
+            continue
+
+        freshness_level = entry.get("freshness")
+        age_seconds = entry.get("age_seconds")
+        age_days = round((age_seconds or 0) / 86400, 2) if age_seconds is not None else None
+
+        tables[table_name] = {
+            "count": entry.get("count", 0),
+            "latest": entry.get("last_updated"),
+            "freshness": freshness_level,
+            "age_seconds": age_seconds,
+            "age_days": age_days,
+        }
+
+        if freshness_level in {"stale", "critical", "unknown"}:
+            staleness_alerts.append(
+                {
+                    "table": table_name,
+                    "freshness": freshness_level,
+                    "days_stale": age_days,
+                    "severity": "critical" if freshness_level == "critical" else "warning",
+                }
+            )
+
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "tables": tables,
+        "staleness_alerts": staleness_alerts,
+        "summary": freshness.get("summary", {}),
+    }
+
+
+@router.post("/data-health/auto-backfill")
+async def trigger_data_health_auto_backfill(
+    background_tasks: BackgroundTasks,
+    days_stale: int = Query(default=7, ge=1, le=90),
+    limit_symbols: int = Query(default=50, ge=5, le=200),
+    dry_run: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Build and optionally schedule targeted data recovery jobs for stale tables.
+
+    - Uses `/admin/database/freshness-summary` internals as source of truth.
+    - Applies a staleness threshold in days (default: 7).
+    - Schedules conservative background jobs when `dry_run=false`.
+    """
+    freshness = await get_freshness_summary(db)
+    entries = freshness.get("entries", [])
+    min_age_seconds = days_stale * 24 * 60 * 60
+
+    stale_entries = [
+        entry
+        for entry in entries
+        if (entry.get("age_seconds") is not None)
+        and int(entry.get("age_seconds") or 0) >= min_age_seconds
+    ]
+    stale_tables = sorted(
+        {str(entry.get("table")) for entry in stale_entries if entry.get("table")}
+    )
+
+    symbols = await _select_priority_symbols(db, limit_symbols)
+
+    from vnibb.services.data_pipeline import data_pipeline
+
+    jobs: list[dict[str, Any]] = []
+    scheduled_count = 0
+
+    def maybe_add_job(
+        key: str,
+        reason: str,
+        fn,
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> None:
+        nonlocal scheduled_count
+        payload = {
+            "job": key,
+            "reason": reason,
+            "args": kwargs or {},
+        }
+        jobs.append(payload)
+        if not dry_run:
+            background_tasks.add_task(fn, **(kwargs or {}))
+            scheduled_count += 1
+
+    stale_set = set(stale_tables)
+
+    if stale_set.intersection({"stock_prices"}):
+        maybe_add_job(
+            "sync_daily_prices",
+            "Stock prices older than threshold",
+            data_pipeline.sync_daily_prices,
+            {"symbols": symbols, "days": min(days_stale + 3, 30)},
+        )
+
+    if stale_set.intersection({"screener_snapshots"}):
+        maybe_add_job(
+            "sync_screener_data",
+            "Screener snapshots older than threshold",
+            data_pipeline.sync_screener_data,
+            {},
+        )
+
+    if stale_set.intersection({"income_statements", "balance_sheets", "cash_flows"}):
+        maybe_add_job(
+            "sync_financials_quarter",
+            "Statement tables are stale",
+            data_pipeline.sync_financials,
+            {"symbols": symbols, "period": "quarter"},
+        )
+
+    if stale_set.intersection({"financial_ratios"}):
+        maybe_add_job(
+            "sync_financial_ratios_quarter",
+            "Financial ratios table is stale",
+            data_pipeline.sync_financial_ratios,
+            {"symbols": symbols, "period": "quarter"},
+        )
+
+    if stale_set.intersection({"company_news"}):
+        maybe_add_job(
+            "sync_company_news",
+            "Company news table is stale",
+            data_pipeline.sync_company_news,
+            {"symbols": symbols, "limit": 30},
+        )
+
+    if stale_set.intersection({"company_events"}):
+        maybe_add_job(
+            "sync_company_events",
+            "Company events table is stale",
+            data_pipeline.sync_company_events,
+            {"symbols": symbols, "limit": 40},
+        )
+
+    if stale_set.intersection({"foreign_trading", "order_flow_daily", "intraday_trades"}):
+        maybe_add_job(
+            "run_daily_trading_updates",
+            "Trading flow tables are stale",
+            data_pipeline.run_daily_trading_updates,
+            {"trade_date": None, "resume": False},
+        )
+
+    if stale_set.intersection({"shareholders"}):
+        maybe_add_job(
+            "sync_shareholders",
+            "Shareholders table is stale",
+            data_pipeline.sync_shareholders,
+            {"symbols": symbols},
+        )
+
+    if stale_set.intersection({"officers"}):
+        maybe_add_job(
+            "sync_officers",
+            "Officers table is stale",
+            data_pipeline.sync_officers,
+            {"symbols": symbols},
+        )
+
+    if stale_set.intersection({"market_sectors", "sector_performance", "stock_indices"}):
+        maybe_add_job(
+            "sync_market_sectors",
+            "Market reference tables are stale",
+            data_pipeline.sync_market_sectors,
+            {},
+        )
+
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "dry_run": dry_run,
+        "threshold_days": days_stale,
+        "stale_tables": stale_tables,
+        "selected_symbol_count": len(symbols),
+        "selected_symbols_preview": symbols[:10],
+        "jobs": jobs,
+        "jobs_scheduled": scheduled_count,
     }
 
 

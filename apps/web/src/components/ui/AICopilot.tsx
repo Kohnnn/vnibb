@@ -29,6 +29,14 @@ interface Message {
     timestamp: Date;
 }
 
+interface PersistedMessage {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    reasoning?: string;
+    timestamp: string;
+}
+
 interface AICopilotProps {
     isOpen: boolean;
     onClose: () => void;
@@ -88,6 +96,30 @@ function normalizeTabKey(tabName?: string): string {
     return 'overview';
 }
 
+function getSessionKey(symbol: string): string {
+    return `vnibb:copilot:session:${symbol || 'UNKNOWN'}`;
+}
+
+function toPersistedMessage(message: Message): PersistedMessage {
+    return {
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        reasoning: message.reasoning,
+        timestamp: message.timestamp.toISOString(),
+    };
+}
+
+function fromPersistedMessage(message: PersistedMessage): Message {
+    return {
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        reasoning: message.reasoning,
+        timestamp: new Date(message.timestamp),
+    };
+}
+
 export function AICopilot({
     isOpen,
     onClose,
@@ -124,6 +156,31 @@ export function AICopilot({
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const raw = window.sessionStorage.getItem(getSessionKey(currentSymbol));
+            if (!raw) {
+                setMessages([]);
+                return;
+            }
+            const parsed = JSON.parse(raw) as PersistedMessage[];
+            setMessages(parsed.map(fromPersistedMessage));
+        } catch {
+            setMessages([]);
+        }
+    }, [currentSymbol]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        try {
+            const limited = messages.slice(-40).map(toPersistedMessage);
+            window.sessionStorage.setItem(getSessionKey(currentSymbol), JSON.stringify(limited));
+        } catch {
+            // ignore persistence failures
+        }
+    }, [messages, currentSymbol]);
 
     // Focus input when opened
     useEffect(() => {
@@ -172,7 +229,7 @@ export function AICopilot({
             };
 
             // Prepare messages for API
-            const history = messages.map(m => ({ role: m.role, content: m.content }));
+            const history = messages.slice(-20).map(m => ({ role: m.role, content: m.content }));
 
             // Use new SSE streaming endpoint
             const response = await fetch(`${API_BASE_URL}/copilot/chat/stream`, {
@@ -272,14 +329,14 @@ export function AICopilot({
     if (!isOpen) return null;
 
     return (
-        <div className="flex flex-col h-full w-full bg-[#0a1628]">
+        <div className="flex flex-col h-full w-full bg-[var(--bg-primary)] text-[var(--text-primary)]">
             {/* Header - Optional or integrated */}
             {/* We keep the branding but remove the close button which is now in RightSidebar */}
             {/* If wrapped in RightSidebar, we might want to skip this header or simplify it */}
 
 
             {/* Context Badge */}
-            <div className="px-4 py-2 border-b border-[#1e3a5f] bg-blue-600/10 flex items-center justify-between">
+            <div className="px-4 py-2 border-b border-[var(--border-color)] bg-blue-600/10 flex items-center justify-between">
                 <span className="text-xs text-blue-400">
                     {widgetContext ? `Context: @${widgetContext} · ` : ''}
                     {activeTabName ? `${activeTabName} · ` : ''}
@@ -288,7 +345,7 @@ export function AICopilot({
                 {messages.length > 0 && (
                     <button
                         onClick={handleExport}
-                        className="p-1 text-gray-400 hover:text-white transition-colors"
+                        className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                         title="Export chat as Markdown"
                         aria-label="Export chat"
                     >
@@ -301,8 +358,8 @@ export function AICopilot({
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {messages.length === 0 ? (
                     <div className="space-y-4">
-                        <div className="text-center text-gray-500 py-8">
-                            <Bot size={40} className="mx-auto mb-3 text-gray-600" />
+                        <div className="text-center text-[var(--text-muted)] py-8">
+                            <Bot size={40} className="mx-auto mb-3 text-[var(--text-muted)]/70" />
                             <p className="text-sm">Ask me anything about {currentSymbol}</p>
                         </div>
 
@@ -313,7 +370,7 @@ export function AICopilot({
                                     <button
                                         key={i}
                                         onClick={() => handleSend(item.prompt)}
-                                        className="flex items-center gap-2 px-3 py-2 text-xs text-gray-400 bg-[#0d1f3c] rounded-lg hover:bg-[#1e3a5f] hover:text-white transition-colors border border-transparent hover:border-blue-500/30"
+                                        className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] bg-[var(--bg-secondary)] rounded-lg hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors border border-transparent hover:border-blue-500/30"
                                     >
                                         <item.icon size={12} className="text-blue-400" />
                                         {item.label}
@@ -328,10 +385,10 @@ export function AICopilot({
                             <div
                                 className={`rounded-lg p-3 ${message.role === 'user'
                                     ? 'bg-blue-600/20 ml-8 border border-blue-500/20'
-                                    : 'bg-[#0d1f3c] mr-4 border border-gray-800'
+                                    : 'bg-[var(--bg-secondary)] mr-4 border border-[var(--border-color)]'
                                     }`}
                             >
-                                <div className="text-sm text-gray-200 prose prose-invert prose-sm max-w-none">
+                                <div className="text-sm text-[var(--text-primary)] prose prose-sm max-w-none">
                                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                         {message.content}
                                     </ReactMarkdown>
@@ -342,7 +399,7 @@ export function AICopilot({
                             {message.role === 'assistant' && message.reasoning && (
                                 <button
                                     onClick={() => toggleReasoning(message.id)}
-                                    className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-400"
+                                    className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 >
                                     {showReasoning[message.id] ? (
                                         <ChevronDown size={12} />
@@ -353,7 +410,7 @@ export function AICopilot({
                                 </button>
                             )}
                             {showReasoning[message.id] && message.reasoning && (
-                                <div className="ml-4 p-2 text-xs text-gray-500 bg-gray-900/50 rounded border-l-2 border-blue-500">
+                                <div className="ml-4 p-2 text-xs text-[var(--text-secondary)] bg-[var(--bg-tertiary)]/70 rounded border-l-2 border-blue-500">
                                     {message.reasoning}
                                 </div>
                             )}
@@ -362,8 +419,8 @@ export function AICopilot({
                 )}
 
                 {isLoading && messages[messages.length - 1]?.role === 'user' && (
-                    <div className="bg-[#0d1f3c] rounded-lg p-3 mr-4">
-                        <div className="flex items-center gap-2 text-sm text-gray-400">
+                    <div className="bg-[var(--bg-secondary)] rounded-lg p-3 mr-4 border border-[var(--border-color)]">
+                        <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                             <div className="animate-pulse">Thinking...</div>
                         </div>
                     </div>
@@ -373,7 +430,7 @@ export function AICopilot({
             </div>
 
             {/* Settings Toggles */}
-            <div className="px-4 py-2 border-t border-[#1e3a5f] flex items-center gap-4 text-xs">
+            <div className="px-4 py-2 border-t border-[var(--border-color)] flex items-center gap-4 text-xs">
                 <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                         type="checkbox"
@@ -381,8 +438,8 @@ export function AICopilot({
                         onChange={(e) => setGlobalData(e.target.checked)}
                         className="w-3 h-3 rounded"
                     />
-                    <Globe size={12} className="text-gray-500" />
-                    <span className="text-gray-500">Global data</span>
+                    <Globe size={12} className="text-[var(--text-muted)]" />
+                    <span className="text-[var(--text-muted)]">Global data</span>
                 </label>
                 <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
@@ -391,8 +448,8 @@ export function AICopilot({
                         onChange={(e) => setGenerativeUI(e.target.checked)}
                         className="w-3 h-3 rounded"
                     />
-                    <Sparkles size={12} className="text-gray-500" />
-                    <span className="text-gray-500">Generative UI</span>
+                    <Sparkles size={12} className="text-[var(--text-muted)]" />
+                    <span className="text-[var(--text-muted)]">Generative UI</span>
                     <span className="px-1 py-0.5 text-[10px] bg-blue-600/20 text-blue-400 rounded">BETA</span>
                 </label>
                 <label className="flex items-center gap-1.5 cursor-pointer">
@@ -402,14 +459,14 @@ export function AICopilot({
                         onChange={(e) => setWebSearch(e.target.checked)}
                         className="w-3 h-3 rounded"
                     />
-                    <SearchIcon size={12} className="text-gray-500" />
-                    <span className="text-gray-500">Web Search</span>
+                    <SearchIcon size={12} className="text-[var(--text-muted)]" />
+                    <span className="text-[var(--text-muted)]">Web Search</span>
                 </label>
             </div>
 
             {/* Input */}
-            <div className="p-4 border-t border-[#1e3a5f]">
-                <div className="flex items-center gap-2 bg-[#0d1f3c] rounded-lg px-3 py-2">
+            <div className="p-4 border-t border-[var(--border-color)]">
+                <div className="flex items-center gap-2 bg-[var(--bg-secondary)] rounded-lg px-3 py-2 border border-[var(--border-color)]">
                     <input
                         ref={inputRef}
                         type="text"
@@ -418,7 +475,7 @@ export function AICopilot({
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                         placeholder="Ask a question..."
-                        className="flex-1 bg-transparent text-sm text-white placeholder-gray-500 outline-none"
+                        className="flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none"
                     />
                     <button
                         onClick={() => handleSend()}

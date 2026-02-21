@@ -297,6 +297,10 @@ class ComparisonService:
             start_date = end_date - timedelta(days=90)
         elif period == "6M":
             start_date = end_date - timedelta(days=180)
+        elif period == "3Y":
+            start_date = end_date - timedelta(days=365 * 3)
+        elif period == "5Y":
+            start_date = end_date - timedelta(days=365 * 5)
         elif period == "YTD":
             start_date = date(end_date.year, 1, 1)
         elif period == "ALL":
@@ -509,13 +513,30 @@ class ComparisonService:
 comparison_service = ComparisonService()
 
 
-async def get_multi_performance_data(symbols: List[str], days: int = 30):
+async def get_multi_performance_data(
+    symbols: List[str],
+    days: int = 30,
+    period: Optional[str] = None,
+):
     """
     Get normalized price performance (%) for multiple symbols.
     """
-    results = await comparison_service.compare_price_performance(
-        symbols, period="1M" if days <= 30 else "1Y"
-    )
+    resolved_period = period
+    if resolved_period is None:
+        if days <= 31:
+            resolved_period = "1M"
+        elif days <= 93:
+            resolved_period = "3M"
+        elif days <= 186:
+            resolved_period = "6M"
+        elif days <= 365:
+            resolved_period = "1Y"
+        elif days <= 365 * 3:
+            resolved_period = "3Y"
+        else:
+            resolved_period = "5Y"
+
+    results = await comparison_service.compare_price_performance(symbols, period=resolved_period)
     # Convert to a format easy for Recharts: [{date: '...', VNM: 100, FPT: 105}, ...]
     formatted = []
     for pt in results:
@@ -577,14 +598,21 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
             "pe_ratio": pick_value(stock_metrics.metrics.get("pe"), ratio_snapshot.get("pe")),
             "pb_ratio": pick_value(stock_metrics.metrics.get("pb"), ratio_snapshot.get("pb")),
             "ps_ratio": pick_value(stock_metrics.metrics.get("ps"), ratio_snapshot.get("ps")),
-            "ev_ebitda": pick_value(stock_metrics.metrics.get("ev_ebitda"), ratio_snapshot.get("ev_ebitda")),
+            "ev_ebitda": pick_value(
+                stock_metrics.metrics.get("ev_ebitda"), ratio_snapshot.get("ev_ebitda")
+            ),
             "market_cap": stock_metrics.metrics.get("market_cap"),
             "roe": pick_value(stock_metrics.metrics.get("roe"), ratio_snapshot.get("roe")),
             "roa": pick_value(stock_metrics.metrics.get("roa"), ratio_snapshot.get("roa")),
-            "gross_margin": pick_value(stock_metrics.metrics.get("gross_margin"), ratio_snapshot.get("gross_margin")),
-            "net_margin": pick_value(stock_metrics.metrics.get("net_margin"), ratio_snapshot.get("net_margin")),
+            "gross_margin": pick_value(
+                stock_metrics.metrics.get("gross_margin"), ratio_snapshot.get("gross_margin")
+            ),
+            "net_margin": pick_value(
+                stock_metrics.metrics.get("net_margin"), ratio_snapshot.get("net_margin")
+            ),
             "operating_margin": pick_value(
-                stock_metrics.metrics.get("operating_margin"), ratio_snapshot.get("operating_margin")
+                stock_metrics.metrics.get("operating_margin"),
+                ratio_snapshot.get("operating_margin"),
             ),
             "current_ratio": pick_value(
                 stock_metrics.metrics.get("current_ratio"), ratio_snapshot.get("current_ratio")
@@ -596,7 +624,8 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                 stock_metrics.metrics.get("asset_turnover"), ratio_snapshot.get("asset_turnover")
             ),
             "inventory_turnover": pick_value(
-                stock_metrics.metrics.get("inventory_turnover"), ratio_snapshot.get("inventory_turnover")
+                stock_metrics.metrics.get("inventory_turnover"),
+                ratio_snapshot.get("inventory_turnover"),
             ),
             "debt_equity": pick_value(
                 stock_metrics.metrics.get("debt_to_equity"),
@@ -609,7 +638,8 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                 ratio_snapshot.get("debt_assets"),
             ),
             "interest_coverage": pick_value(
-                stock_metrics.metrics.get("interest_coverage"), ratio_snapshot.get("interest_coverage")
+                stock_metrics.metrics.get("interest_coverage"),
+                ratio_snapshot.get("interest_coverage"),
             ),
             "debt_service_coverage": pick_value(
                 stock_metrics.metrics.get("debt_service_coverage"),
@@ -620,8 +650,12 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                 stock_metrics.metrics.get("ocf_to_debt"),
                 ratio_snapshot.get("ocf_debt"),
             ),
-            "fcf_yield": pick_value(stock_metrics.metrics.get("fcf_yield"), ratio_snapshot.get("fcf_yield")),
-            "ocf_sales": pick_value(stock_metrics.metrics.get("ocf_sales"), ratio_snapshot.get("ocf_sales")),
+            "fcf_yield": pick_value(
+                stock_metrics.metrics.get("fcf_yield"), ratio_snapshot.get("fcf_yield")
+            ),
+            "ocf_sales": pick_value(
+                stock_metrics.metrics.get("ocf_sales"), ratio_snapshot.get("ocf_sales")
+            ),
         }
 
         results.append(

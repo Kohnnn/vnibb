@@ -18,24 +18,25 @@ async def get_financials_with_ttm(
     Fetch financials with support for TTM.
     """
     normalized_period = (period or "").upper()
+    is_specific_quarter = normalized_period in {"Q1", "Q2", "Q3", "Q4"}
     if normalized_period == "FY":
         period = "year"
     if normalized_period == "TTM":
         return await calculate_ttm(symbol, statement_type)
 
     # Map periods like Q1, Q2, Q3, Q4 to quarter and filter
-    actual_period = "quarter" if normalized_period.startswith("Q") else period
+    actual_period = "quarter" if is_specific_quarter else period
 
     params = FinancialsQueryParams(
         symbol=symbol,
         statement_type=StatementType(statement_type),
         period=actual_period,
-        limit=limit if not normalized_period.startswith("Q") else 20,
+        limit=limit if not is_specific_quarter else 20,
     )
 
     data = await VnstockFinancialsFetcher.fetch(params)
 
-    if normalized_period.startswith("Q"):
+    if is_specific_quarter:
         # Filter for specific quarter across years
         q_num = normalized_period[1]
 

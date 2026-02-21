@@ -169,7 +169,10 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 def _column_is_period(col: Any) -> bool:
                     col_str = str(col).strip().upper()
                     return bool(
-                        re.match(r"^\d{4}$", col_str) or re.match(r"^Q[1-4]-\d{4}$", col_str)
+                        re.match(r"^\d{4}$", col_str)
+                        or re.match(r"^Q[1-4]-\d{4}$", col_str)
+                        or re.match(r"^\d{4}-Q[1-4]$", col_str)
+                        or re.match(r"^\d{4}Q[1-4]$", col_str)
                     )
 
                 row_based = any(
@@ -260,7 +263,12 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             for row in rows:
                 for key in row.keys():
                     key_str = str(key).strip().upper()
-                    if re.match(r"^\d{4}$", key_str) or re.match(r"^Q[1-4]-\d{4}$", key_str):
+                    if (
+                        re.match(r"^\d{4}$", key_str)
+                        or re.match(r"^Q[1-4]-\d{4}$", key_str)
+                        or re.match(r"^\d{4}-Q[1-4]$", key_str)
+                        or re.match(r"^\d{4}Q[1-4]$", key_str)
+                    ):
                         period_cols.add(key_str)
             return sorted(period_cols, key=_period_sort_key)
 
@@ -459,23 +467,35 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     # Map common fields
                     revenue=_pick_number(row.get("revenue"), row.get("netRevenue")),
                     gross_profit=_pick_number(row.get("grossProfit")),
-                    operating_income=_pick_number(row.get("operatingProfit"), row.get("operatingIncome")),
+                    operating_income=_pick_number(
+                        row.get("operatingProfit"), row.get("operatingIncome")
+                    ),
                     net_income=_pick_number(row.get("netIncome"), row.get("postTaxProfit")),
                     ebitda=_pick_number(row.get("ebitda")),
-                    eps=_pick_number(row.get("eps"), row.get("earningsPerShare"), row.get("basicEps")),
+                    eps=_pick_number(
+                        row.get("eps"), row.get("earningsPerShare"), row.get("basicEps")
+                    ),
                     eps_diluted=_pick_number(row.get("epsDiluted"), row.get("dilutedEps")),
                     # Balance sheet
                     total_assets=_pick_number(row.get("totalAssets"), row.get("asset")),
                     total_liabilities=_pick_number(row.get("totalLiabilities"), row.get("debt")),
                     total_equity=_pick_number(row.get("totalEquity"), row.get("equity")),
-                    cash_and_equivalents=_pick_number(row.get("cash"), row.get("cashAndCashEquivalents")),
+                    cash_and_equivalents=_pick_number(
+                        row.get("cash"), row.get("cashAndCashEquivalents")
+                    ),
                     equity=_pick_number(row.get("totalEquity"), row.get("equity")),
                     cash=_pick_number(row.get("cash"), row.get("cashAndCashEquivalents")),
                     inventory=_pick_number(row.get("inventory"), row.get("inventories")),
                     # Cash flow
-                    operating_cash_flow=_pick_number(row.get("operatingCashFlow"), row.get("fromOperating")),
-                    investing_cash_flow=_pick_number(row.get("investingCashFlow"), row.get("fromInvesting")),
-                    financing_cash_flow=_pick_number(row.get("financingCashFlow"), row.get("fromFinancing")),
+                    operating_cash_flow=_pick_number(
+                        row.get("operatingCashFlow"), row.get("fromOperating")
+                    ),
+                    investing_cash_flow=_pick_number(
+                        row.get("investingCashFlow"), row.get("fromInvesting")
+                    ),
+                    financing_cash_flow=_pick_number(
+                        row.get("financingCashFlow"), row.get("fromFinancing")
+                    ),
                     free_cash_flow=_pick_number(row.get("freeCashFlow")),
                     # Store raw data for flexibility
                     raw_data=None,

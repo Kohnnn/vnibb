@@ -7,6 +7,7 @@ import { DataSourcesProvider } from "@/contexts/DataSourcesContext";
 import { UnitProvider } from "@/contexts/UnitContext";
 import { WidgetGroupProvider } from "@/contexts/WidgetGroupContext";
 import { SymbolLinkProvider } from "@/contexts/SymbolLinkContext";
+import { ThemeProvider, ThemeScript } from "@/contexts/ThemeContext";
 import { CommandPaletteWrapper } from "@/components/CommandPaletteWrapper";
 import "./globals.css";
 
@@ -31,9 +32,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <ThemeScript />
+      </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black text-white`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[var(--bg-primary)] text-[var(--text-primary)]`}
         suppressHydrationWarning
       >
         <a
@@ -42,22 +46,24 @@ export default function RootLayout({
         >
           Skip to main content
         </a>
-        <QueryProvider>
-          <AuthProvider>
-            <DashboardProvider>
-              <WidgetGroupProvider>
-                <SymbolLinkProvider>
-                  <DataSourcesProvider>
-                    <UnitProvider>
-                      <main id="main-content">{children}</main>
-                      <CommandPaletteWrapper />
-                    </UnitProvider>
-                  </DataSourcesProvider>
-                </SymbolLinkProvider>
-              </WidgetGroupProvider>
-            </DashboardProvider>
-          </AuthProvider>
-        </QueryProvider>
+        <ThemeProvider>
+          <QueryProvider>
+            <AuthProvider>
+              <DashboardProvider>
+                <WidgetGroupProvider>
+                  <SymbolLinkProvider>
+                    <DataSourcesProvider>
+                      <UnitProvider>
+                        <main id="main-content">{children}</main>
+                        <CommandPaletteWrapper />
+                      </UnitProvider>
+                    </DataSourcesProvider>
+                  </SymbolLinkProvider>
+                </WidgetGroupProvider>
+              </DashboardProvider>
+            </AuthProvider>
+          </QueryProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

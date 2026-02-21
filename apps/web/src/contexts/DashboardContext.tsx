@@ -35,7 +35,10 @@ import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
 const STORAGE_KEY = 'vnibb_dashboards';
 const FOLDERS_KEY = 'vnibb_folders';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 2; // Increment when adding new migrations
+const CURRENT_MIGRATION_VERSION = 6;
+const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
+const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
+const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
 
 // ============================================================================
 // Default Data & Templates
@@ -238,6 +241,180 @@ const migrateEmptyTabs = (dashboards: Dashboard[]): Dashboard[] => {
             return { ...tab, widgets };
         }),
     }));
+};
+
+const migrateLegacyDashboardNames = (dashboards: Dashboard[]): Dashboard[] => {
+    const usedNames = new Set(
+        dashboards
+            .filter((dashboard) => !LEGACY_DASHBOARD_NAME_RE.test(dashboard.name.trim()))
+            .map((dashboard) => dashboard.name.trim().toLowerCase())
+    );
+
+    let dashboardNumber = 1;
+    const nextDashboardName = () => {
+        while (usedNames.has(`dashboard ${dashboardNumber}`)) {
+            dashboardNumber += 1;
+        }
+        const candidate = `Dashboard ${dashboardNumber}`;
+        usedNames.add(candidate.toLowerCase());
+        dashboardNumber += 1;
+        return candidate;
+    };
+
+    return dashboards.map((dashboard) => {
+        if (!LEGACY_DASHBOARD_NAME_RE.test(dashboard.name.trim())) {
+            usedNames.add(dashboard.name.trim().toLowerCase());
+            return dashboard;
+        }
+
+        return {
+            ...dashboard,
+            name: nextDashboardName(),
+            updatedAt: new Date().toISOString(),
+        };
+    });
+};
+
+const migrateLegacyChartWidgets = (dashboards: Dashboard[]): Dashboard[] => {
+    return dashboards.map((dashboard) => ({
+        ...dashboard,
+        tabs: dashboard.tabs.map((tab) => ({
+            ...tab,
+            widgets: tab.widgets.map((widget) => {
+                const widgetType = widget.type as string;
+                if (widgetType !== 'tradingview_chart') {
+                    return widget;
+                }
+
+                return {
+                    ...widget,
+                    type: 'price_chart',
+                };
+            }),
+        })),
+    }));
+};
+
+const countDashboardWidgets = (dashboard: Dashboard): number => {
+    return dashboard.tabs.reduce((total, tab) => total + tab.widgets.length, 0);
+};
+
+const migrateLegacySidebarDashboards = (dashboards: Dashboard[]): Dashboard[] => {
+    const filteredDashboards = dashboards.filter((dashboard) => {
+        if (!LEGACY_SIDEBAR_DASHBOARD_RE.test(dashboard.name.trim())) {
+            return true;
+        }
+
+        if (dashboards.length <= 1) {
+            return true;
+        }
+
+        return countDashboardWidgets(dashboard) > 0;
+    });
+
+    if (filteredDashboards.length === 0) {
+        return dashboards;
+    }
+
+    const usedNames = new Set(
+        filteredDashboards
+            .filter((dashboard) => !LEGACY_SIDEBAR_DASHBOARD_RE.test(dashboard.name.trim()))
+            .map((dashboard) => dashboard.name.trim().toLowerCase())
+    );
+
+    let dashboardNumber = 1;
+    const nextDashboardName = () => {
+        while (usedNames.has(`dashboard ${dashboardNumber}`)) {
+            dashboardNumber += 1;
+        }
+        const candidate = `Dashboard ${dashboardNumber}`;
+        usedNames.add(candidate.toLowerCase());
+        dashboardNumber += 1;
+        return candidate;
+    };
+
+    return filteredDashboards.map((dashboard) => {
+        if (!LEGACY_SIDEBAR_DASHBOARD_RE.test(dashboard.name.trim())) {
+            return dashboard;
+        }
+
+        return {
+            ...dashboard,
+            name: nextDashboardName(),
+            updatedAt: new Date().toISOString(),
+        };
+    });
+};
+
+const migrateLegacyManageTabs = (dashboards: Dashboard[]): Dashboard[] => {
+    return dashboards.map((dashboard) => {
+        if (dashboard.tabs.length === 0) {
+            return dashboard;
+        }
+
+        const sortedTabs = [...dashboard.tabs].sort((a, b) => a.order - b.order);
+        const filteredTabs = sortedTabs.filter(
+            (tab) => !(LEGACY_MANAGE_TAB_NAME_RE.test(tab.name.trim()) && tab.widgets.length === 0)
+        );
+
+        if (filteredTabs.length === sortedTabs.length) {
+            return dashboard;
+        }
+
+        const fallbackTabs = filteredTabs.length > 0 ? filteredTabs : sortedTabs.slice(0, 1);
+        const normalizedTabs = fallbackTabs.map((tab, index) => ({
+            ...tab,
+            name:
+                filteredTabs.length === 0 &&
+                index === 0 &&
+                LEGACY_MANAGE_TAB_NAME_RE.test(tab.name.trim())
+                    ? 'Overview'
+                    : tab.name,
+            order: index,
+        }));
+
+        return {
+            ...dashboard,
+            tabs: normalizedTabs,
+            updatedAt: new Date().toISOString(),
+        };
+    });
+};
+
+const isLegacyFolderName = (name: string): boolean => {
+    const normalized = name.trim().toLowerCase();
+    return !normalized || normalized === 'test' || normalized.includes('new folder');
+};
+
+const migrateSidebarClutter = (
+    dashboards: Dashboard[],
+    folders: DashboardFolder[]
+): { dashboards: Dashboard[]; folders: DashboardFolder[] } => {
+    const cleanedFolders = folders.filter((folder) => !isLegacyFolderName(folder.name));
+    const validFolderIds = new Set(cleanedFolders.map((folder) => folder.id));
+
+    const normalizedDashboards = dashboards.map((dashboard) => {
+        if (!dashboard.folderId || validFolderIds.has(dashboard.folderId)) {
+            return dashboard;
+        }
+
+        return {
+            ...dashboard,
+            folderId: undefined,
+            updatedAt: new Date().toISOString(),
+        };
+    });
+
+    const usedFolderIds = new Set(
+        normalizedDashboards
+            .map((dashboard) => dashboard.folderId)
+            .filter((folderId): folderId is string => Boolean(folderId))
+    );
+
+    return {
+        dashboards: normalizedDashboards,
+        folders: cleanedFolders.filter((folder) => usedFolderIds.has(folder.id)),
+    };
 };
 
 // Convert template widgets to actual widget instances
@@ -749,9 +926,27 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             if (dashboards.length === 0) {
                 dashboards = [createDefaultDashboard()];
             } else if (migrationVersion < CURRENT_MIGRATION_VERSION) {
-                // Apply migrations for existing dashboards
-                // Migration v2: Apply templates to empty tabs
-                dashboards = migrateEmptyTabs(dashboards);
+                if (migrationVersion < 2) {
+                    dashboards = migrateEmptyTabs(dashboards);
+                }
+
+                if (migrationVersion < 3) {
+                    dashboards = migrateLegacyDashboardNames(dashboards);
+                }
+
+                if (migrationVersion < 4) {
+                    dashboards = migrateLegacyChartWidgets(dashboards);
+                }
+
+                if (migrationVersion < 5) {
+                    const cleaned = migrateSidebarClutter(dashboards, folders);
+                    dashboards = cleaned.dashboards;
+                    folders = cleaned.folders;
+                }
+
+                if (migrationVersion < 6) {
+                    dashboards = migrateLegacyManageTabs(dashboards);
+                }
 
                 // Final safety validation for all widgets
                 dashboards = dashboards.map(d => ({
@@ -771,6 +966,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 // Save migration version
                 localStorage.setItem(MIGRATION_VERSION_KEY, String(CURRENT_MIGRATION_VERSION));
             }
+
+            dashboards = migrateLegacySidebarDashboards(dashboards);
+            const cleanedSidebar = migrateSidebarClutter(dashboards, folders);
+            dashboards = cleanedSidebar.dashboards;
+            folders = cleanedSidebar.folders;
 
             const activeDashboardId = dashboards[0]?.id || null;
             const activeTabId = dashboards[0]?.tabs[0]?.id || null;

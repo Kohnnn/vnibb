@@ -16,7 +16,7 @@ const PERIODS: Period[] = ['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'];
 function PeriodToggleComponent({ value, onChange, compact = false }: PeriodToggleProps) {
   return (
     <div className={cn(
-        "flex bg-gray-900 rounded-md p-0.5 border border-gray-800",
+        "flex bg-[var(--bg-tertiary)] rounded-md p-0.5 border border-[var(--border-color)]",
         compact ? "gap-0.5" : "gap-1"
     )}>
       {PERIODS.map(period => (
@@ -28,7 +28,7 @@ function PeriodToggleComponent({ value, onChange, compact = false }: PeriodToggl
             compact ? "px-1.5 py-0.5 text-[9px]" : "px-2.5 py-1 text-[10px]",
             value === period
               ? "bg-blue-600 text-white shadow-sm"
-              : "text-gray-500 hover:text-gray-300"
+              : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
           )}
         >
           {period}

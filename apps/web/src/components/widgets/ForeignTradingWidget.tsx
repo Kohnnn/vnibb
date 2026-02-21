@@ -57,7 +57,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove }: ForeignTradingW
             id: 'date',
             header: 'Date',
             accessor: (row) => (
-                <div className="text-gray-500 font-mono text-[10px]">{formatDate(row.date)}</div>
+                <div className="text-[var(--text-muted)] font-mono text-[10px]">{formatDate(row.date)}</div>
             ),
             width: 70,
         },
@@ -116,8 +116,8 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove }: ForeignTradingW
             exportData={trades}
             exportFilename={`foreign_${symbol}`}
         >
-            <div className="h-full flex flex-col bg-black">
-                <div className="px-3 py-2 border-b border-gray-800/50">
+            <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+                <div className="px-3 py-2 border-b border-[var(--border-color)]/70">
                     <WidgetMeta
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
@@ -127,10 +127,10 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove }: ForeignTradingW
                     />
                 </div>
 
-                <div className="px-3 py-2 border-b border-gray-800 bg-gray-900/40 flex items-center justify-between">
+                <div className="px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/50 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                         <Globe size={12} className="text-blue-500" />
-                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Net Position</span>
+                        <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Net Position</span>
                     </div>
                     <div
                         className={cn(

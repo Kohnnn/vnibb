@@ -46,6 +46,11 @@ from vnibb.providers.vnstock.financial_ratios import (
     FinancialRatiosQueryParams,
     VnstockFinancialRatiosFetcher,
 )
+from vnibb.providers.vnstock.financials import (
+    FinancialsQueryParams,
+    StatementType,
+    VnstockFinancialsFetcher,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -538,6 +543,8 @@ class DataPipeline:
         try:
             listing = Listing(source=listing_source)
             df = listing.all_symbols()
+            exchange_df = listing.symbols_by_exchange()
+            industry_df = listing.symbols_by_industries()
         except SystemExit as exc:
             logger.warning(f"Listing source {listing_source} aborted: {exc}")
             return 0
@@ -556,6 +563,27 @@ class DataPipeline:
                 cleaned = value.strip()
                 return cleaned or None
             return str(value)
+
+        exchange_map: Dict[str, str] = {}
+        if exchange_df is not None and not exchange_df.empty:
+            for _, row in exchange_df.iterrows():
+                symbol_value = normalize_text(row.get("symbol") or row.get("ticker"))
+                exchange_value = normalize_text(row.get("exchange") or row.get("comGroupCode"))
+                if symbol_value and exchange_value:
+                    exchange_map[symbol_value.upper()] = exchange_value
+
+        industry_map: Dict[str, str] = {}
+        if industry_df is not None and not industry_df.empty:
+            for _, row in industry_df.iterrows():
+                symbol_value = normalize_text(row.get("symbol") or row.get("ticker"))
+                industry_value = normalize_text(
+                    row.get("industry")
+                    or row.get("industry_name")
+                    or row.get("industryName")
+                    or row.get("icb_name3")
+                )
+                if symbol_value and industry_value:
+                    industry_map[symbol_value.upper()] = industry_value
 
         start_index = 0
         symbols = df["symbol"].tolist() if "symbol" in df.columns else []
@@ -587,12 +615,18 @@ class DataPipeline:
                 if not symbol:
                     continue
 
+                exchange_value = normalize_text(
+                    row.get("comGroupCode") or row.get("exchange")
+                ) or exchange_map.get(symbol)
+                industry_value = normalize_text(
+                    row.get("industryName") or row.get("industry")
+                ) or industry_map.get(symbol)
+
                 values = {
                     "symbol": symbol,
                     "company_name": normalize_text(row.get("organName") or row.get("organ_name")),
-                    "exchange": normalize_text(row.get("comGroupCode") or row.get("exchange"))
-                    or "HOSE",
-                    "industry": normalize_text(row.get("industryName") or row.get("industry")),
+                    "exchange": exchange_value or "UNKNOWN",
+                    "industry": industry_value,
                     "is_active": 1,
                     "updated_at": datetime.utcnow(),
                 }
@@ -617,7 +651,7 @@ class DataPipeline:
                         progress["error_count"] = progress.get("error_count", 0) + 1
                         progress["stage_stats"]["stock_list"]["errors"] += 1
 
-                if count % batch_size == 0:
+                if count > 0 and count % batch_size == 0:
                     await session.commit()
                     for item in cache_batch:
                         cache_key = build_cache_key("vnibb", "listing", "symbol", item["symbol"])
@@ -637,7 +671,11 @@ class DataPipeline:
                 {
                     "symbol": str(row.get("symbol", row.get("ticker", ""))).upper(),
                     "organ_name": row.get("organName") or row.get("organ_name"),
-                    "exchange": row.get("comGroupCode") or row.get("exchange"),
+                    "exchange": (
+                        row.get("comGroupCode")
+                        or row.get("exchange")
+                        or exchange_map.get(str(row.get("symbol", row.get("ticker", ""))).upper())
+                    ),
                 }
                 for _, row in df.iterrows()
             ]
@@ -655,22 +693,205 @@ class DataPipeline:
     @with_retry(max_retries=3)
     async def sync_screener_data(
         self,
+        symbols: Optional[List[str]] = None,
+        exchanges: Optional[List[str]] = None,
+        limit: Optional[int] = None,
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
     ) -> int:
-        """Sync comprehensive metrics for all stocks using vnstock finance.ratio."""
-        from vnstock import Vnstock
+        """Sync comprehensive metrics for stocks using vnstock finance.ratio."""
+        from vnstock import Listing, Vnstock
 
         logger.info("Syncing screener data...")
         loop = asyncio.get_running_loop()
 
-        async with async_session_maker() as session:
-            result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1))
-            symbols = [r[0] for r in result.fetchall()]
+        def _normalize_text(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            if isinstance(value, float) and pd.isna(value):
+                return None
+            raw = str(value).strip()
+            return raw or None
 
-        if not symbols:
+        def _parse_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            if isinstance(value, float) and pd.isna(value):
+                return None
+            try:
+                parsed = float(value)
+                if pd.isna(parsed):
+                    return None
+                return parsed
+            except (TypeError, ValueError):
+                return None
+
+        def _extract_listing_metadata(src: str) -> Dict[str, Dict[str, Any]]:
+            metadata: Dict[str, Dict[str, Any]] = {}
+            try:
+                listing = Listing(source=src)
+                df = listing.all_symbols()
+                exchange_df = listing.symbols_by_exchange()
+                industry_df = listing.symbols_by_industries()
+            except Exception as listing_error:
+                logger.debug("Listing metadata fetch failed: %s", listing_error)
+                return metadata
+
+            if df is None or df.empty:
+                return metadata
+
+            exchange_map: Dict[str, str] = {}
+            if exchange_df is not None and not exchange_df.empty:
+                for _, row in exchange_df.iterrows():
+                    symbol_value = _normalize_text(row.get("symbol") or row.get("ticker"))
+                    exchange_value = _normalize_text(row.get("exchange") or row.get("comGroupCode"))
+                    if symbol_value and exchange_value:
+                        exchange_map[symbol_value.upper()] = exchange_value
+
+            industry_map: Dict[str, str] = {}
+            if industry_df is not None and not industry_df.empty:
+                for _, row in industry_df.iterrows():
+                    symbol_value = _normalize_text(row.get("symbol") or row.get("ticker"))
+                    industry_value = _normalize_text(
+                        row.get("industry")
+                        or row.get("industry_name")
+                        or row.get("industryName")
+                        or row.get("icb_name3")
+                    )
+                    if symbol_value and industry_value:
+                        industry_map[symbol_value.upper()] = industry_value
+
+            for _, row in df.iterrows():
+                symbol_value = row.get("symbol", row.get("ticker"))
+                symbol_key = _normalize_text(symbol_value)
+                if not symbol_key:
+                    continue
+
+                symbol_upper = symbol_key.upper()
+                company_name = _normalize_text(row.get("organ_name") or row.get("organName"))
+                exchange_value = _normalize_text(
+                    row.get("comGroupCode") or row.get("exchange") or row.get("com_group_code")
+                ) or exchange_map.get(symbol_upper)
+                industry_value = _normalize_text(
+                    row.get("industryName") or row.get("industry")
+                ) or industry_map.get(symbol_upper)
+                market_cap_value = (
+                    _parse_float(row.get("market_cap"))
+                    or _parse_float(row.get("marketCap"))
+                    or _parse_float(row.get("charter_capital"))
+                )
+
+                metadata[symbol_upper] = {
+                    "company_name": company_name,
+                    "exchange": exchange_value,
+                    "industry": industry_value,
+                    "market_cap": market_cap_value,
+                }
+
+            # Include exchange/industry entries not present in all_symbols payload.
+            for symbol_upper, exchange_value in exchange_map.items():
+                item = metadata.setdefault(
+                    symbol_upper,
+                    {
+                        "company_name": None,
+                        "exchange": None,
+                        "industry": None,
+                        "market_cap": None,
+                    },
+                )
+                if not item.get("exchange"):
+                    item["exchange"] = exchange_value
+
+            for symbol_upper, industry_value in industry_map.items():
+                item = metadata.setdefault(
+                    symbol_upper,
+                    {
+                        "company_name": None,
+                        "exchange": None,
+                        "industry": None,
+                        "market_cap": None,
+                    },
+                )
+                if not item.get("industry"):
+                    item["industry"] = industry_value
+
+            return metadata
+
+        normalized_exchanges: List[str] = []
+        if exchanges:
+            normalized_exchanges = [
+                exchange.strip().upper()
+                for exchange in exchanges
+                if isinstance(exchange, str) and exchange.strip()
+            ]
+
+        if symbols:
+            symbol_list = [
+                symbol.strip().upper()
+                for symbol in symbols
+                if isinstance(symbol, str) and symbol.strip()
+            ]
+            deduped_symbols = list(dict.fromkeys(symbol_list))
+        else:
+            async with async_session_maker() as session:
+                stmt = select(Stock.symbol).where(Stock.is_active == 1)
+                if normalized_exchanges:
+                    stmt = stmt.where(func.upper(Stock.exchange).in_(normalized_exchanges))
+                result = await session.execute(stmt)
+                deduped_symbols = [str(row[0]).upper() for row in result.fetchall() if row[0]]
+
+        if limit is not None and limit > 0:
+            deduped_symbols = deduped_symbols[:limit]
+
+        if not deduped_symbols:
             logger.warning("No symbols found in database for screener sync.")
             return 0
+
+        stock_metadata: Dict[str, Dict[str, Any]] = {}
+        company_metadata: Dict[str, Dict[str, Any]] = {}
+        async with async_session_maker() as session:
+            rows = await session.execute(
+                select(Stock.symbol, Stock.company_name, Stock.exchange, Stock.industry).where(
+                    Stock.symbol.in_(deduped_symbols)
+                )
+            )
+            for symbol, company_name, exchange_value, industry_value in rows.fetchall():
+                stock_metadata[str(symbol).upper()] = {
+                    "company_name": _normalize_text(company_name),
+                    "exchange": _normalize_text(exchange_value),
+                    "industry": _normalize_text(industry_value),
+                }
+
+            company_rows = await session.execute(
+                select(
+                    Company.symbol,
+                    Company.company_name,
+                    Company.exchange,
+                    Company.industry,
+                    Company.outstanding_shares,
+                    Company.listed_shares,
+                ).where(Company.symbol.in_(deduped_symbols))
+            )
+            for (
+                symbol,
+                company_name,
+                exchange_value,
+                industry_value,
+                outstanding_shares,
+                listed_shares,
+            ) in company_rows.fetchall():
+                company_metadata[str(symbol).upper()] = {
+                    "company_name": _normalize_text(company_name),
+                    "exchange": _normalize_text(exchange_value),
+                    "industry": _normalize_text(industry_value),
+                    "outstanding_shares": _parse_float(outstanding_shares),
+                    "listed_shares": _parse_float(listed_shares),
+                }
+
+        primary_source = (settings.vnstock_source or "KBS").upper()
+        listing_metadata = await loop.run_in_executor(
+            None, _extract_listing_metadata, primary_source
+        )
 
         start_index = 0
         if progress and progress.get("stage") == "screener":
@@ -678,16 +899,75 @@ class DataPipeline:
             last_symbol = progress.get("last_symbol")
             if isinstance(last_index, int) and last_index >= 0:
                 start_index = last_index + 1
-            elif last_symbol and last_symbol in symbols:
-                start_index = symbols.index(last_symbol) + 1
+            elif last_symbol and last_symbol in deduped_symbols:
+                start_index = deduped_symbols.index(last_symbol) + 1
 
-        ratio_sources = []
-        primary_source = (settings.vnstock_source or "KBS").upper()
-        ratio_sources.append(primary_source)
-
+        ratio_sources = [primary_source]
         batch_size = 20
         cache_batch: List[Dict[str, Any]] = []
         today = date.today()
+
+        previous_snapshot_fallback: Dict[str, Dict[str, Any]] = {}
+        latest_price_fallback: Dict[str, Dict[str, Optional[float]]] = {}
+        async with async_session_maker() as session:
+            previous_date_result = await session.execute(
+                select(func.max(ScreenerSnapshot.snapshot_date)).where(
+                    ScreenerSnapshot.snapshot_date < today
+                )
+            )
+            previous_snapshot_date = previous_date_result.scalar()
+            if previous_snapshot_date:
+                previous_rows = await session.execute(
+                    select(
+                        ScreenerSnapshot.symbol,
+                        ScreenerSnapshot.company_name,
+                        ScreenerSnapshot.exchange,
+                        ScreenerSnapshot.industry,
+                        ScreenerSnapshot.price,
+                        ScreenerSnapshot.volume,
+                        ScreenerSnapshot.market_cap,
+                    ).where(
+                        ScreenerSnapshot.snapshot_date == previous_snapshot_date,
+                        ScreenerSnapshot.symbol.in_(deduped_symbols),
+                    )
+                )
+                for row in previous_rows.fetchall():
+                    previous_snapshot_fallback[str(row.symbol).upper()] = {
+                        "company_name": row.company_name,
+                        "exchange": row.exchange,
+                        "industry": row.industry,
+                        "price": row.price,
+                        "volume": row.volume,
+                        "market_cap": row.market_cap,
+                    }
+
+            latest_price_subquery = (
+                select(
+                    StockPrice.symbol.label("symbol"),
+                    func.max(StockPrice.time).label("latest_time"),
+                )
+                .where(
+                    StockPrice.interval == "1D",
+                    StockPrice.symbol.in_(deduped_symbols),
+                )
+                .group_by(StockPrice.symbol)
+                .subquery()
+            )
+            latest_price_rows = await session.execute(
+                select(StockPrice.symbol, StockPrice.close, StockPrice.volume).join(
+                    latest_price_subquery,
+                    and_(
+                        StockPrice.symbol == latest_price_subquery.c.symbol,
+                        StockPrice.time == latest_price_subquery.c.latest_time,
+                        StockPrice.interval == "1D",
+                    ),
+                )
+            )
+            for row in latest_price_rows.fetchall():
+                latest_price_fallback[str(row.symbol).upper()] = {
+                    "price": _parse_float(row.close),
+                    "volume": _parse_float(row.volume),
+                }
 
         if progress is not None:
             progress.setdefault("stage_stats", {})
@@ -695,13 +975,13 @@ class DataPipeline:
             progress["stage_index"] = STAGE_ORDER.index("screener")
             progress["stage_stats"].setdefault(
                 "screener",
-                {"success": 0, "errors": 0, "total": len(symbols)},
+                {"success": 0, "errors": 0, "total": len(deduped_symbols)},
             )
 
         async with async_session_maker() as session:
             count = 0
-            for idx in range(start_index, len(symbols)):
-                symbol = symbols[idx]
+            for idx in range(start_index, len(deduped_symbols)):
+                symbol = deduped_symbols[idx]
                 await self.rate_limiters["screener"].wait()
                 try:
                     ratio_df = None
@@ -750,10 +1030,26 @@ class DataPipeline:
                                             owners_equity = value
                                     if liabilities is not None and owners_equity not in (None, 0):
                                         ratio_row["de"] = liabilities / owners_equity
-                                    return ratio_row
+                                else:
+                                    # Legacy format
+                                    ratio_row = df.iloc[0].to_dict()
 
-                                # Legacy format
-                                return df.iloc[0].to_dict()
+                                try:
+                                    end_date = datetime.now()
+                                    start_date = end_date - timedelta(days=10)
+                                    history = stock.quote.history(
+                                        start=start_date.strftime("%Y-%m-%d"),
+                                        end=end_date.strftime("%Y-%m-%d"),
+                                    )
+                                    if history is not None and not history.empty:
+                                        latest = history.iloc[-1]
+                                        ratio_row["price"] = latest.get("close")
+                                        ratio_row["volume"] = latest.get("volume")
+                                except Exception:
+                                    # Price enrichment is best-effort only
+                                    pass
+
+                                return ratio_row
 
                             ratio_df = await asyncio.wait_for(
                                 loop.run_in_executor(
@@ -773,22 +1069,85 @@ class DataPipeline:
                             logger.debug(
                                 f"Ratio summary failed for {symbol} with {ratio_source}: {ratio_error}"
                             )
-                    if not ratio_df:
-                        if progress is not None:
-                            progress["error_count"] = progress.get("error_count", 0) + 1
-                            progress["stage_stats"]["screener"]["errors"] += 1
-                        continue
 
-                    row = ratio_df
+                    row = ratio_df or {}
+                    stock_row = stock_metadata.get(symbol, {})
+                    company_row = company_metadata.get(symbol, {})
+                    listing_row = listing_metadata.get(symbol, {})
+                    previous_row = previous_snapshot_fallback.get(symbol, {})
+                    latest_price_row = latest_price_fallback.get(symbol, {})
+
+                    price_value = (
+                        _parse_float(row.get("price"))
+                        or _parse_float(previous_row.get("price"))
+                        or _parse_float(latest_price_row.get("price"))
+                    )
+                    volume_value = (
+                        _parse_float(row.get("volume"))
+                        or _parse_float(previous_row.get("volume"))
+                        or _parse_float(latest_price_row.get("volume"))
+                    )
+                    market_cap_value = (
+                        _parse_float(row.get("market_cap"))
+                        or _parse_float(row.get("marketCap"))
+                        or _parse_float(row.get("charter_capital"))
+                        or _parse_float(listing_row.get("market_cap"))
+                        or _parse_float(previous_row.get("market_cap"))
+                    )
+
+                    shares_for_market_cap = company_row.get("outstanding_shares")
+                    if not shares_for_market_cap:
+                        shares_for_market_cap = company_row.get("listed_shares")
+                    if not shares_for_market_cap:
+                        shares_for_market_cap = _parse_float(row.get("shares_outstanding"))
+
+                    if not market_cap_value and shares_for_market_cap and price_value:
+                        market_cap_value = float(shares_for_market_cap) * float(price_value)
+
                     values = {
                         "symbol": symbol,
                         "snapshot_date": today,
-                        "market_cap": row.get("market_cap") or row.get("marketCap"),
+                        "company_name": (
+                            _normalize_text(
+                                row.get("company_name")
+                                or row.get("organ_name")
+                                or row.get("organName")
+                            )
+                            or stock_row.get("company_name")
+                            or company_row.get("company_name")
+                            or listing_row.get("company_name")
+                            or previous_row.get("company_name")
+                        ),
+                        "exchange": (
+                            _normalize_text(row.get("exchange"))
+                            or stock_row.get("exchange")
+                            or company_row.get("exchange")
+                            or listing_row.get("exchange")
+                            or previous_row.get("exchange")
+                        ),
+                        "industry": (
+                            _normalize_text(
+                                row.get("industry")
+                                or row.get("industry_name")
+                                or row.get("industryName")
+                            )
+                            or stock_row.get("industry")
+                            or company_row.get("industry")
+                            or listing_row.get("industry")
+                            or previous_row.get("industry")
+                        ),
+                        "price": price_value,
+                        "volume": volume_value,
+                        "market_cap": market_cap_value,
                         "pe": row.get("pe") or row.get("pe_ratio") or row.get("priceToEarning"),
                         "pb": row.get("pb") or row.get("priceToBook"),
+                        "ps": row.get("ps") or row.get("priceToSales"),
+                        "ev_ebitda": row.get("ev_ebitda") or row.get("value_before_ebitda"),
                         "roe": row.get("roe"),
                         "roa": row.get("roa"),
-                        "industry": row.get("industry_name") or row.get("industryName"),
+                        "debt_to_equity": row.get("de") or row.get("debt_to_equity"),
+                        "current_ratio": row.get("current_ratio"),
+                        "quick_ratio": row.get("quick_ratio"),
                         "eps": row.get("eps"),
                         "source": "vnstock_ratio",
                         "created_at": datetime.utcnow(),
@@ -796,17 +1155,29 @@ class DataPipeline:
                     stmt = get_upsert_stmt(ScreenerSnapshot, ["symbol", "snapshot_date"], values)
                     await session.execute(stmt)
                     count += 1
+
+                    previous_snapshot_fallback[symbol] = {
+                        "company_name": values.get("company_name"),
+                        "exchange": values.get("exchange"),
+                        "industry": values.get("industry"),
+                        "price": values.get("price"),
+                        "volume": values.get("volume"),
+                        "market_cap": values.get("market_cap"),
+                    }
+
                     cache_batch.append(
                         {
                             "symbol": symbol,
                             "snapshot_date": today.isoformat(),
-                            "market_cap": values["market_cap"],
-                            "pe": values["pe"],
-                            "pb": values["pb"],
-                            "roe": values["roe"],
-                            "roa": values["roa"],
-                            "industry": values["industry"],
-                            "eps": values["eps"],
+                            "company_name": values.get("company_name"),
+                            "price": values.get("price"),
+                            "market_cap": values.get("market_cap"),
+                            "pe": values.get("pe"),
+                            "pb": values.get("pb"),
+                            "roe": values.get("roe"),
+                            "roa": values.get("roa"),
+                            "industry": values.get("industry"),
+                            "eps": values.get("eps"),
                         }
                     )
                     if progress is not None:
@@ -1121,6 +1492,51 @@ class DataPipeline:
                 "profiles",
                 {"success": 0, "errors": 0, "total": len(symbols)},
             )
+
+        def _normalize_text(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            if isinstance(value, float) and pd.isna(value):
+                return None
+            raw = str(value).strip()
+            return raw or None
+
+        def _parse_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            if isinstance(value, float) and pd.isna(value):
+                return None
+            try:
+                parsed = float(value)
+                if pd.isna(parsed):
+                    return None
+                return parsed
+            except (TypeError, ValueError):
+                return None
+
+        def _parse_date(value: Any) -> Optional[date]:
+            if value is None:
+                return None
+            if isinstance(value, date) and not isinstance(value, datetime):
+                return value
+            if isinstance(value, datetime):
+                return value.date()
+
+            raw = str(value).strip()
+            if not raw:
+                return None
+
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%Y/%m/%d"):
+                try:
+                    return datetime.strptime(raw, fmt).date()
+                except ValueError:
+                    continue
+
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+            except ValueError:
+                return None
+
         total = 0
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
@@ -1129,30 +1545,173 @@ class DataPipeline:
                 from vnstock import Vnstock
 
                 stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
-                df = stock.company.profile()
-                if df is not None and not df.empty:
-                    async with async_session_maker() as session:
-                        row = df.iloc[0].to_dict()
-                        values = {
-                            "symbol": symbol,
-                            "company_name": row.get("organName") or row.get("companyName"),
-                            "short_name": row.get("organShortName") or row.get("shortName"),
-                            "industry": row.get("industryName") or row.get("industry"),
-                            "sector": row.get("icbName1"),
-                            "business_description": row.get("businessDescription")
-                            or row.get("business_description"),
-                            "website": row.get("website"),
-                            "updated_at": datetime.utcnow(),
-                        }
-                        stmt = get_upsert_stmt(Company, ["symbol"], values)
-                        await session.execute(stmt)
-                        await session.commit()
-                        total += 1
-                        cache_key = build_cache_key("vnibb", "profile", symbol)
-                        await self._cache_set_json(cache_key, values, CACHE_TTL_PROFILE)
-                        if progress is not None:
-                            progress["success_count"] = progress.get("success_count", 0) + 1
-                            progress["stage_stats"]["profiles"]["success"] += 1
+
+                overview_row: Dict[str, Any] = {}
+                profile_row: Dict[str, Any] = {}
+
+                try:
+                    overview_df = stock.company.overview()
+                    if overview_df is not None and not overview_df.empty:
+                        overview_row = overview_df.iloc[0].to_dict()
+                except Exception as overview_error:
+                    logger.debug("Overview fetch failed for %s: %s", symbol, overview_error)
+
+                try:
+                    profile_df = stock.company.profile()
+                    if profile_df is not None and not profile_df.empty:
+                        profile_row = profile_df.iloc[0].to_dict()
+                except Exception as profile_error:
+                    logger.debug("Profile fetch failed for %s: %s", symbol, profile_error)
+
+                merged_row = {**profile_row, **overview_row}
+                if not merged_row:
+                    if progress is not None:
+                        progress["error_count"] = progress.get("error_count", 0) + 1
+                        progress["stage_stats"]["profiles"]["errors"] += 1
+                    continue
+
+                values = {
+                    "symbol": symbol,
+                    "company_name": _normalize_text(
+                        merged_row.get("company_name")
+                        or merged_row.get("organ_name")
+                        or merged_row.get("organName")
+                        or merged_row.get("companyName")
+                    ),
+                    "short_name": _normalize_text(
+                        merged_row.get("short_name")
+                        or merged_row.get("organ_short_name")
+                        or merged_row.get("organShortName")
+                        or merged_row.get("shortName")
+                    ),
+                    "english_name": _normalize_text(
+                        merged_row.get("english_name")
+                        or merged_row.get("en_organ_name")
+                        or merged_row.get("enOrganName")
+                    ),
+                    "exchange": _normalize_text(
+                        merged_row.get("exchange") or merged_row.get("comGroupCode")
+                    ),
+                    "industry": _normalize_text(
+                        merged_row.get("industry")
+                        or merged_row.get("industry_name")
+                        or merged_row.get("industryName")
+                        or merged_row.get("icb_name3")
+                    ),
+                    "sector": _normalize_text(
+                        merged_row.get("sector")
+                        or merged_row.get("icb_name2")
+                        or merged_row.get("icbName2")
+                        or merged_row.get("icb_name1")
+                        or merged_row.get("icbName1")
+                    ),
+                    "subsector": _normalize_text(
+                        merged_row.get("subsector")
+                        or merged_row.get("icb_name4")
+                        or merged_row.get("icbName4")
+                    ),
+                    "established_date": _parse_date(
+                        merged_row.get("founded_date")
+                        or merged_row.get("established_date")
+                        or merged_row.get("foundedDate")
+                    ),
+                    "listing_date": _parse_date(
+                        merged_row.get("listing_date") or merged_row.get("listingDate")
+                    ),
+                    "outstanding_shares": _parse_float(
+                        merged_row.get("outstanding_shares")
+                        or merged_row.get("issue_share")
+                        or merged_row.get("financial_ratio_issue_share")
+                    ),
+                    "listed_shares": _parse_float(
+                        merged_row.get("listed_shares")
+                        or merged_row.get("listed_volume")
+                        or merged_row.get("issue_share")
+                    ),
+                    "website": _normalize_text(merged_row.get("website")),
+                    "email": _normalize_text(merged_row.get("email")),
+                    "phone": _normalize_text(merged_row.get("phone")),
+                    "fax": _normalize_text(merged_row.get("fax")),
+                    "address": _normalize_text(merged_row.get("address")),
+                    "business_description": _normalize_text(
+                        merged_row.get("business_description")
+                        or merged_row.get("businessDescription")
+                        or merged_row.get("business_model")
+                        or merged_row.get("history")
+                    ),
+                    "raw_data": merged_row,
+                    "updated_at": datetime.utcnow(),
+                }
+
+                async with async_session_maker() as session:
+                    existing_company = await session.scalar(
+                        select(Company).where(Company.symbol == symbol)
+                    )
+                    existing_stock = await session.scalar(
+                        select(Stock).where(Stock.symbol == symbol)
+                    )
+
+                    if not values.get("company_name") and existing_stock is not None:
+                        values["company_name"] = _normalize_text(existing_stock.company_name)
+                    if not values.get("exchange") and existing_stock is not None:
+                        values["exchange"] = _normalize_text(existing_stock.exchange)
+                    if not values.get("industry") and existing_stock is not None:
+                        values["industry"] = _normalize_text(existing_stock.industry)
+                    if not values.get("sector") and existing_stock is not None:
+                        values["sector"] = _normalize_text(existing_stock.sector)
+
+                    if existing_company is not None:
+                        for field_name in (
+                            "company_name",
+                            "short_name",
+                            "english_name",
+                            "exchange",
+                            "industry",
+                            "sector",
+                            "subsector",
+                            "established_date",
+                            "listing_date",
+                            "outstanding_shares",
+                            "listed_shares",
+                            "website",
+                            "email",
+                            "phone",
+                            "fax",
+                            "address",
+                            "business_description",
+                            "raw_data",
+                        ):
+                            if values.get(field_name) is None:
+                                values[field_name] = getattr(existing_company, field_name)
+
+                    stmt = get_upsert_stmt(Company, ["symbol"], values)
+                    await session.execute(stmt)
+
+                    # Keep stock classification fields in sync when profile metadata is available.
+                    stock_updates = {
+                        "updated_at": datetime.utcnow(),
+                    }
+                    if values.get("company_name"):
+                        stock_updates["company_name"] = values["company_name"]
+                    if values.get("exchange"):
+                        stock_updates["exchange"] = values["exchange"]
+                    if values.get("industry"):
+                        stock_updates["industry"] = values["industry"]
+                    if values.get("sector"):
+                        stock_updates["sector"] = values["sector"]
+
+                    await session.execute(
+                        update(Stock).where(Stock.symbol == symbol).values(**stock_updates)
+                    )
+
+                    await session.commit()
+
+                total += 1
+                cache_key = build_cache_key("vnibb", "profile", symbol)
+                await self._cache_set_json(cache_key, values, CACHE_TTL_PROFILE)
+                if progress is not None:
+                    progress["success_count"] = progress.get("success_count", 0) + 1
+                    progress["stage_stats"]["profiles"]["success"] += 1
             except SystemExit as exc:
                 logger.warning(f"Profile sync aborted for {symbol}: {exc}")
                 if progress is not None:
@@ -1201,111 +1760,135 @@ class DataPipeline:
             )
         total = 0
 
-        def _safe_finance_call(method, **kwargs):
-            try:
-                return method(**kwargs)
-            except TypeError as exc:
-                if "lang" in str(exc):
-                    kwargs.pop("lang", None)
-                    return method(**kwargs)
-                raise
+        normalized_period = "quarter" if period in {"quarter", "Q", "QTR"} else "year"
+        fetch_limit = 8 if normalized_period == "quarter" else 6
+
+        def _parse_period_fields(raw_period: Any) -> Tuple[str, int, Optional[int]]:
+            raw_text = str(raw_period or "").strip().upper()
+            if not raw_text:
+                fallback_year = datetime.utcnow().year
+                return str(fallback_year), fallback_year, None
+
+            year_match = re.search(r"(20\d{2})", raw_text)
+            fiscal_year = int(year_match.group(1)) if year_match else datetime.utcnow().year
+            quarter_match = re.search(r"Q([1-4])", raw_text)
+            fiscal_quarter = int(quarter_match.group(1)) if quarter_match else None
+
+            if normalized_period == "quarter" and fiscal_quarter is not None:
+                return f"Q{fiscal_quarter}-{fiscal_year}", fiscal_year, fiscal_quarter
+
+            return str(fiscal_year), fiscal_year, None
 
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             await self.rate_limiters["financials"].wait()
             try:
-                from vnstock import Vnstock
+                statement_specs = [
+                    (StatementType.INCOME, IncomeStatement, "income"),
+                    (StatementType.BALANCE, BalanceSheet, "balance"),
+                    (StatementType.CASHFLOW, CashFlow, "cashflow"),
+                ]
 
-                stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
+                symbol_synced = False
+                for statement_type, model, cache_slug in statement_specs:
+                    params = FinancialsQueryParams(
+                        symbol=symbol,
+                        statement_type=statement_type,
+                        period=normalized_period,
+                        limit=fetch_limit,
+                    )
+                    items = await VnstockFinancialsFetcher.fetch(params)
+                    if not items:
+                        continue
 
-                # Income Statement
-                df_inc = _safe_finance_call(
-                    stock.finance.income_statement, period=period, lang="en"
-                )
-                if df_inc is not None and not df_inc.empty:
+                    latest_cache_payload: List[Dict[str, Any]] = []
                     async with async_session_maker() as session:
-                        for _, row in df_inc.iterrows():
-                            # Extract period info
-                            period_str = str(row.get("period", row.name))
-                            val = {
+                        for entry in items:
+                            period_value, fiscal_year, fiscal_quarter = _parse_period_fields(
+                                entry.period
+                            )
+
+                            common = {
                                 "symbol": symbol,
-                                "period": period_str,
-                                "period_type": period,
-                                "fiscal_year": int(period_str.split("-")[-1])
-                                if "-" in period_str
-                                else int(period_str),
-                                "revenue": float(row.get("revenue", 0)),
-                                "net_income": float(row.get("netIncome", 0)),
+                                "period": period_value,
+                                "period_type": normalized_period,
+                                "fiscal_year": fiscal_year,
+                                "fiscal_quarter": fiscal_quarter,
                                 "source": "vnstock",
                                 "updated_at": datetime.utcnow(),
                             }
+
+                            if statement_type == StatementType.INCOME:
+                                values = {
+                                    **common,
+                                    "revenue": entry.revenue,
+                                    "gross_profit": entry.gross_profit,
+                                    "operating_income": entry.operating_income,
+                                    "net_income": entry.net_income,
+                                    "ebitda": entry.ebitda,
+                                    "eps": entry.eps,
+                                    "eps_diluted": entry.eps_diluted,
+                                    "raw_data": entry.raw_data,
+                                }
+                            elif statement_type == StatementType.BALANCE:
+                                values = {
+                                    **common,
+                                    "total_assets": entry.total_assets,
+                                    "total_liabilities": entry.total_liabilities,
+                                    "total_equity": entry.total_equity,
+                                    "cash_and_equivalents": entry.cash_and_equivalents,
+                                    "inventory": entry.inventory,
+                                    "raw_data": entry.raw_data,
+                                }
+                            else:
+                                net_change = None
+                                if (
+                                    entry.operating_cash_flow is not None
+                                    and entry.investing_cash_flow is not None
+                                    and entry.financing_cash_flow is not None
+                                ):
+                                    net_change = (
+                                        entry.operating_cash_flow
+                                        + entry.investing_cash_flow
+                                        + entry.financing_cash_flow
+                                    )
+
+                                values = {
+                                    **common,
+                                    "operating_cash_flow": entry.operating_cash_flow,
+                                    "investing_cash_flow": entry.investing_cash_flow,
+                                    "financing_cash_flow": entry.financing_cash_flow,
+                                    "free_cash_flow": entry.free_cash_flow,
+                                    "net_change_in_cash": net_change,
+                                    "raw_data": entry.raw_data,
+                                }
+
                             stmt = get_upsert_stmt(
-                                IncomeStatement, ["symbol", "period", "period_type"], val
+                                model, ["symbol", "period", "period_type"], values
                             )
                             await session.execute(stmt)
-                        await session.commit()
-                    latest_inc = df_inc.head(1).to_dict(orient="records")
-                    inc_key = build_cache_key("vnibb", "financials", "income", symbol, period)
-                    await self._cache_set_json(inc_key, latest_inc, CACHE_TTL_FINANCIALS)
 
-                # Balance Sheet
-                df_bal = _safe_finance_call(stock.finance.balance_sheet, period=period, lang="en")
-                if df_bal is not None and not df_bal.empty:
-                    async with async_session_maker() as session:
-                        for _, row in df_bal.iterrows():
-                            period_str = str(row.get("period", row.name))
-                            val = {
-                                "symbol": symbol,
-                                "period": period_str,
-                                "period_type": period,
-                                "fiscal_year": int(period_str.split("-")[-1])
-                                if "-" in period_str
-                                else int(period_str),
-                                "total_assets": float(row.get("totalAssets", 0)),
-                                "total_equity": float(row.get("totalEquity", 0)),
-                                "source": "vnstock",
-                                "updated_at": datetime.utcnow(),
-                            }
-                            stmt = get_upsert_stmt(
-                                BalanceSheet, ["symbol", "period", "period_type"], val
-                            )
-                            await session.execute(stmt)
-                        await session.commit()
-                    latest_bal = df_bal.head(1).to_dict(orient="records")
-                    bal_key = build_cache_key("vnibb", "financials", "balance", symbol, period)
-                    await self._cache_set_json(bal_key, latest_bal, CACHE_TTL_FINANCIALS)
+                            if not latest_cache_payload:
+                                latest_cache_payload.append(entry.model_dump(mode="json"))
 
-                # Cash Flow
-                df_cf = _safe_finance_call(stock.finance.cash_flow, period=period, lang="en")
-                if df_cf is not None and not df_cf.empty:
-                    async with async_session_maker() as session:
-                        for _, row in df_cf.iterrows():
-                            period_str = str(row.get("period", row.name))
-                            val = {
-                                "symbol": symbol,
-                                "period": period_str,
-                                "period_type": period,
-                                "fiscal_year": int(period_str.split("-")[-1])
-                                if "-" in period_str
-                                else int(period_str),
-                                "operating_cash_flow": float(row.get("operatingCashFlow", 0)),
-                                "free_cash_flow": float(row.get("freeCashFlow", 0)),
-                                "source": "vnstock",
-                                "updated_at": datetime.utcnow(),
-                            }
-                            stmt = get_upsert_stmt(
-                                CashFlow, ["symbol", "period", "period_type"], val
-                            )
-                            await session.execute(stmt)
                         await session.commit()
-                    latest_cf = df_cf.head(1).to_dict(orient="records")
-                    cf_key = build_cache_key("vnibb", "financials", "cashflow", symbol, period)
-                    await self._cache_set_json(cf_key, latest_cf, CACHE_TTL_FINANCIALS)
 
-                total += 1
-                if progress is not None:
-                    progress["success_count"] = progress.get("success_count", 0) + 1
-                    progress["stage_stats"]["financials"]["success"] += 1
+                    cache_key = build_cache_key(
+                        "vnibb", "financials", cache_slug, symbol, normalized_period
+                    )
+                    await self._cache_set_json(
+                        cache_key, latest_cache_payload, CACHE_TTL_FINANCIALS
+                    )
+                    symbol_synced = True
+
+                if symbol_synced:
+                    total += 1
+                    if progress is not None:
+                        progress["success_count"] = progress.get("success_count", 0) + 1
+                        progress["stage_stats"]["financials"]["success"] += 1
+                elif progress is not None:
+                    progress["error_count"] = progress.get("error_count", 0) + 1
+                    progress["stage_stats"]["financials"]["errors"] += 1
             except SystemExit as exc:
                 logger.warning(f"Financials sync aborted for {symbol}: {exc}")
                 if progress is not None:

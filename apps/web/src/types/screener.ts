@@ -3,6 +3,7 @@
 export interface ScreenerData {
     id?: string;
     ticker: string;
+    symbol?: string;
 
     company_name?: string;
     exchange?: string;

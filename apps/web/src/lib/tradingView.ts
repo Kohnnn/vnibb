@@ -61,24 +61,26 @@ export function buildTradingViewSymbolCandidates(symbol: string, exchange?: stri
 
   const candidates: string[] = []
 
-  const persisted = getPersistedTradingViewSymbol(normalizedSymbol)
-  if (persisted) {
-    candidates.push(persisted)
-  }
-
   const normalizedExchange = normalizeExchange(exchange)
   if (normalizedExchange) {
     if (normalizedExchange === 'HOSE') {
-      // TradingView commonly uses HSX ticker prefix for HOSE symbols.
-      candidates.push(`HSX:${normalizedSymbol}`)
       candidates.push(`HOSE:${normalizedSymbol}`)
+      candidates.push(`HSX:${normalizedSymbol}`)
     } else {
       candidates.push(`${normalizedExchange}:${normalizedSymbol}`)
     }
   }
 
+  const persisted = getPersistedTradingViewSymbol(normalizedSymbol)
+  if (persisted) {
+    if (persisted === `HSX:${normalizedSymbol}`) {
+      candidates.push(`HOSE:${normalizedSymbol}`)
+    }
+    candidates.push(persisted)
+  }
+
   // VN-first fallback chain
-  for (const exchangeCandidate of ['HSX', 'HOSE', 'HNX', 'UPCOM']) {
+  for (const exchangeCandidate of ['HOSE', 'HNX', 'UPCOM', 'HSX']) {
     candidates.push(`${exchangeCandidate}:${normalizedSymbol}`)
   }
 

@@ -309,7 +309,6 @@ function CommandItem({ command }: { command: CommandItem }) {
 function getWidgetIcon(type: WidgetType): React.ReactNode {
   const iconMap: Partial<Record<WidgetType, React.ReactNode>> = {
     price_chart: <BarChart2 className="w-4 h-4" />,
-    tradingview_chart: <TrendingUp className="w-4 h-4" />,
     valuation_multiples_chart: <BarChart2 className="w-4 h-4" />,
     screener: <Database className="w-4 h-4" />,
     news_feed: <Newspaper className="w-4 h-4" />,
