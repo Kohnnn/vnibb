@@ -320,7 +320,11 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                             ))}
                             <Legend wrapperStyle={{ fontSize: '10px' }} />
                             <Tooltip
-                                contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', fontSize: '11px' }}
+                                contentStyle={{
+                                    backgroundColor: 'var(--bg-secondary)',
+                                    border: '1px solid var(--border-color)',
+                                    fontSize: '11px',
+                                }}
                                 itemStyle={{ padding: '2px 0' }}
                             />
                         </RadarChart>
@@ -363,7 +367,11 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                 tickLine={false}
                             />
                             <Tooltip
-                                contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', fontSize: '11px' }}
+                                contentStyle={{
+                                    backgroundColor: 'var(--bg-secondary)',
+                                    border: '1px solid var(--border-color)',
+                                    fontSize: '11px',
+                                }}
                             />
                             <Legend wrapperStyle={{ fontSize: '10px' }} />
                             {peers.map((sym, i) => (
@@ -590,4 +598,3 @@ const CHART_COLORS = [
     '#06B6D4', // Cyan
     '#EC4899', // Pink
 ];
-

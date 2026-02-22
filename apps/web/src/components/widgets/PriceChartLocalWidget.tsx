@@ -129,29 +129,36 @@ export function PriceChartLocalWidget({
       const container = chartContainerRef.current;
       if (!container) return;
 
+      const cssVars = getComputedStyle(document.documentElement);
+      const bgPrimary = cssVars.getPropertyValue('--bg-primary').trim() || '#ffffff';
+      const bgSecondary = cssVars.getPropertyValue('--bg-secondary').trim() || '#f5f7fa';
+      const textMuted = cssVars.getPropertyValue('--text-muted').trim() || '#9ca3af';
+      const borderColor = cssVars.getPropertyValue('--border-color').trim() || '#1f2937';
+      const borderSubtle = cssVars.getPropertyValue('--border-subtle').trim() || '#374151';
+
       const chart = createChart(container, {
         width: container.clientWidth,
         height: container.clientHeight,
         layout: {
-          background: { type: CT.Solid, color: '#0a0a0a' },
-          textColor: '#9ca3af',
+          background: { type: CT.Solid, color: bgPrimary },
+          textColor: textMuted,
           fontSize: 11,
         },
         grid: {
-          vertLines: { color: '#1f2937' },
-          horzLines: { color: '#1f2937' },
+          vertLines: { color: borderSubtle },
+          horzLines: { color: borderSubtle },
         },
         crosshair: {
           mode: CrosshairMode.Normal,
-          vertLine: { color: '#4b5563', width: 1, style: 3, labelBackgroundColor: '#374151' },
-          horzLine: { color: '#4b5563', width: 1, style: 3, labelBackgroundColor: '#374151' },
+          vertLine: { color: textMuted, width: 1, style: 3, labelBackgroundColor: bgSecondary },
+          horzLine: { color: textMuted, width: 1, style: 3, labelBackgroundColor: bgSecondary },
         },
         rightPriceScale: {
-          borderColor: '#1f2937',
+          borderColor,
           scaleMargins: { top: 0.1, bottom: 0.25 },
         },
         timeScale: {
-          borderColor: '#1f2937',
+          borderColor,
           timeVisible: false,
           rightOffset: 5,
         },
@@ -291,14 +298,14 @@ export function PriceChartLocalWidget({
       onClose={onRemove}
       noPadding
     >
-      <div className="h-full flex flex-col bg-[#0a0a0a]">
+      <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
         {/* Header bar */}
-        <div className="px-3 py-2 border-b border-gray-800/60 flex items-center justify-between gap-2 flex-wrap">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2 flex-wrap">
           {/* Price stats */}
           <div className="flex items-center gap-2 min-w-0">
             {priceStats && (
               <>
-                <span className="text-sm font-semibold text-white tabular-nums">
+                <span className="text-sm font-semibold text-[var(--text-primary)] tabular-nums">
                   {priceStats.price.toLocaleString('vi-VN')}
                 </span>
                 <span
@@ -315,7 +322,7 @@ export function PriceChartLocalWidget({
 
           <div className="flex items-center gap-1.5">
             {/* Period selector */}
-            <div className="flex gap-0.5 bg-gray-900/50 rounded-md p-0.5">
+            <div className="flex gap-0.5 bg-[var(--bg-secondary)] rounded-md p-0.5">
               {PERIODS.map((p) => (
                 <button
                   key={p}
@@ -323,7 +330,7 @@ export function PriceChartLocalWidget({
                   className={`px-1.5 py-0.5 text-[10px] font-medium rounded transition-colors ${
                     period === p
                       ? 'bg-blue-600 text-white'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                   }`}
                 >
                   {p}
@@ -332,7 +339,7 @@ export function PriceChartLocalWidget({
             </div>
 
             {/* Chart type selector */}
-            <div className="flex gap-0.5 bg-gray-900/50 rounded-md p-0.5">
+            <div className="flex gap-0.5 bg-[var(--bg-secondary)] rounded-md p-0.5">
               {CHART_TYPES.map((ct) => (
                 <button
                   key={ct}
@@ -340,7 +347,7 @@ export function PriceChartLocalWidget({
                   className={`px-1.5 py-0.5 text-[10px] font-medium rounded transition-colors ${
                     chartType === ct
                       ? 'bg-indigo-600 text-white'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                   }`}
                 >
                   {ct === 'Candlestick' ? '🕯️' : ct === 'Line' ? '📈' : '📊'}
@@ -353,13 +360,13 @@ export function PriceChartLocalWidget({
         {/* Chart area */}
         <div className="flex-1 relative min-h-[200px]">
           {isLoading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0a0a0a]/90">
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg-primary)]/90">
               <WidgetSkeleton />
             </div>
           )}
 
           {error && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#0a0a0a]">
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg-primary)]">
               <div className="text-center px-4">
                 <p className="text-red-400 text-sm mb-2">⚠️ {error}</p>
                 <button
@@ -376,7 +383,7 @@ export function PriceChartLocalWidget({
         </div>
 
         {/* Footer meta */}
-        <div className="px-3 py-1 border-t border-gray-800/40">
+        <div className="px-3 py-1 border-t border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={lastUpdated || undefined}
             isFetching={isLoading}

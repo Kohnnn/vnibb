@@ -65,15 +65,15 @@ export function WidgetSettingsModal({
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="w-full max-w-lg bg-[#0b1221] border border-[#1e293b] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="w-full max-w-lg bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-2xl flex flex-col overflow-hidden">
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b] bg-[#0f172a]">
-                    <h2 className="text-lg font-semibold text-white">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-surface)]">
+                    <h2 className="text-lg font-semibold text-[var(--text-primary)]">
                         Settings: <span className="text-blue-400">{widget.type}</span>
                     </h2>
                     <button
                         onClick={onClose}
-                        className="p-2 text-gray-400 hover:text-white hover:bg-[#1e293b] rounded-lg transition-colors"
+                        className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
                         aria-label="Close widget settings"
                     >
                         <X size={20} />
@@ -86,7 +86,7 @@ export function WidgetSettingsModal({
                     <div className="space-y-4">
                         <label
                             htmlFor="widget-refresh-interval"
-                            className="block text-sm font-medium text-gray-300"
+                            className="block text-sm font-medium text-[var(--text-secondary)]"
                         >
                             Auto-Refresh Interval (seconds)
                         </label>
@@ -97,26 +97,26 @@ export function WidgetSettingsModal({
                                 min="0"
                                 value={refreshInterval}
                                 onChange={(e) => setRefreshInterval(parseInt(e.target.value) || 0)}
-                                className="bg-[#1e293b] border border-[#334155] rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500 w-32"
+                                className="bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500 w-32"
                             />
-                            <span className="text-xs text-gray-500">Set to 0 to disable</span>
+                            <span className="text-xs text-[var(--text-muted)]">Set to 0 to disable</span>
                         </div>
                     </div>
 
-                    <div className="border-t border-[#1e293b]" />
+                    <div className="border-t border-[var(--border-default)]" />
 
                     {/* Advanced Configuration (JSON) */}
                     <div className="space-y-2">
                         <div className="flex items-center justify-between">
                             <label
                                 htmlFor="widget-advanced-config"
-                                className="block text-sm font-medium text-gray-300"
+                                className="block text-sm font-medium text-[var(--text-secondary)]"
                             >
                                 Advanced Configuration (JSON)
                             </label>
                             <button
                                 onClick={() => setConfig('{}')}
-                                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                            className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
                             >
                                 <RotateCcw size={12} /> Reset
                             </button>
@@ -128,20 +128,20 @@ export function WidgetSettingsModal({
                                 setConfig(e.target.value);
                                 setError(null);
                             }}
-                            className={`w-full h-40 bg-[#1e293b] border ${error ? 'border-red-500' : 'border-[#334155]'} rounded-lg p-3 text-sm font-mono text-gray-300 focus:outline-none focus:border-blue-500 resize-none`}
+                            className={`w-full h-40 bg-[var(--bg-secondary)] border ${error ? 'border-red-500' : 'border-[var(--border-default)]'} rounded-lg p-3 text-sm font-mono text-[var(--text-secondary)] focus:outline-none focus:border-blue-500 resize-none`}
                         />
                         {error && <p className="text-xs text-red-400">{error}</p>}
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-[var(--text-muted)]">
                             Edit widget-specific properties directly.
                         </p>
                     </div>
                 </div>
 
                 {/* Footer */}
-                <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[#1e293b] bg-[#0f172a]">
+                <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border-default)] bg-[var(--bg-surface)]">
                     <button
                         onClick={onClose}
-                        className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors"
+                        className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                     >
                         Cancel
                     </button>

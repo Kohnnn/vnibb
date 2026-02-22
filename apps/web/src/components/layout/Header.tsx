@@ -209,59 +209,62 @@ export function Header({
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <button
-                                    className="flex items-center gap-1.5 px-2 md:px-2.5 py-1.5 rounded-md bg-[#1e2a3b]/50 text-gray-300 hover:bg-[#1e2a3b] transition-colors"
+                                    className="flex items-center gap-1.5 px-2 md:px-2.5 py-1.5 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] transition-colors"
                                     title="Dashboard actions"
                                 >
                                     <MoreHorizontal size={14} />
                                     <span className="hidden md:inline text-xs font-medium">Actions</span>
                                 </button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="bg-[#0b1021] border border-[#1e2a3b] min-w-[180px]">
+                            <DropdownMenuContent
+                                align="end"
+                                className="bg-[var(--bg-secondary)] border border-[var(--border-color)] min-w-[180px]"
+                            >
                                 {onAutoFitLayout && (
-                                    <DropdownMenuItem onClick={onAutoFitLayout} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                    <DropdownMenuItem onClick={onAutoFitLayout} className="text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
                                         Auto-fit layout
                                     </DropdownMenuItem>
                                 )}
                                 {onResetLayout && (
-                                    <DropdownMenuItem onClick={onResetLayout} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                    <DropdownMenuItem onClick={onResetLayout} className="text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
                                         Reset layout
                                     </DropdownMenuItem>
                                 )}
-                                {(onCollapseAll || onExpandAll) && <DropdownMenuSeparator className="bg-[#1e2a3b]" />}
+                                {(onCollapseAll || onExpandAll) && <DropdownMenuSeparator className="bg-[var(--border-subtle)]" />}
                                 {onCollapseAll && (
-                                    <DropdownMenuItem onClick={onCollapseAll} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                    <DropdownMenuItem onClick={onCollapseAll} className="text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
                                         Collapse all widgets
                                     </DropdownMenuItem>
                                 )}
                                 {onExpandAll && (
-                                    <DropdownMenuItem onClick={onExpandAll} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                    <DropdownMenuItem onClick={onExpandAll} className="text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
                                         Expand all widgets
                                     </DropdownMenuItem>
                                 )}
                                 {onUnitDisplayChange && (
                                     <>
-                                        <DropdownMenuSeparator className="bg-[#1e2a3b]" />
-                                        <DropdownMenuItem className="text-[10px] uppercase tracking-wider text-gray-500 focus:bg-transparent focus:text-gray-500">
+                                        <DropdownMenuSeparator className="bg-[var(--border-subtle)]" />
+                                        <DropdownMenuItem className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] focus:bg-transparent focus:text-[var(--text-muted)]">
                                             Unit display ({unitDisplay})
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('auto')} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('auto')} className="text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
                                             Auto scale
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('raw')} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('raw')} className="text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
                                             Raw values
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('M')} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('M')} className="text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
                                             Million
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('B')} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                        <DropdownMenuItem onClick={() => onUnitDisplayChange('B')} className="text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
                                             Billion
                                         </DropdownMenuItem>
                                     </>
                                 )}
                                 {onEditToggle && (
                                     <>
-                                        <DropdownMenuSeparator className="bg-[#1e2a3b]" />
-                                        <DropdownMenuItem onClick={onEditToggle} className="text-xs text-gray-300 hover:bg-[#1e2a3b]/60">
+                                        <DropdownMenuSeparator className="bg-[var(--border-subtle)]" />
+                                        <DropdownMenuItem onClick={onEditToggle} className="text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
                                             {isEditing ? 'Lock Editing' : 'Unlock Editing'}
                                         </DropdownMenuItem>
                                     </>
@@ -312,7 +315,7 @@ export function Header({
               transition-colors font-medium text-xs
               ${isEditing
                                 ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25 border border-green-500/20'
-                                : 'bg-[#1e2a3b]/50 text-gray-300 hover:bg-[#1e2a3b]'
+                                : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)]'
                             }
             `}
                     >
@@ -344,7 +347,7 @@ export function Header({
                     </div>
 
                     {/* Profile - Hidden on small mobile */}
-                    <button className="hidden sm:block p-1.5 rounded-md hover:bg-[#1e2a3b] text-gray-400 hover:text-gray-200 transition-colors">
+                    <button className="hidden sm:block p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">
                         <User size={16} />
                     </button>
                 </div>

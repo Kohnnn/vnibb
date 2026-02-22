@@ -99,12 +99,12 @@ export function TickerCombobox({
     return (
         <div
             ref={containerRef}
-            className="absolute top-full left-0 mt-1 w-72 bg-[#0a0a0a] border border-[#2a2a2a] rounded-lg shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+            className="absolute top-full left-0 mt-1 w-72 bg-[var(--bg-dropdown)] border border-[var(--border-default)] rounded-lg shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
         >
             {/* Search Input */}
-            <div className="p-2 border-b border-[#2a2a2a]">
+            <div className="p-2 border-b border-[var(--border-default)]">
                 <div className="relative">
-                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
                     <input
                         ref={inputRef}
                         type="text"
@@ -115,7 +115,7 @@ export function TickerCombobox({
                         }}
                         onKeyDown={handleKeyDown}
                         placeholder="Search ticker"
-                        className="w-full bg-transparent border-none pl-8 pr-3 py-1.5 text-white placeholder-gray-600 focus:outline-none text-xs"
+                        className="w-full bg-transparent border-none pl-8 pr-3 py-1.5 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none text-xs"
                     />
                 </div>
             </div>
@@ -123,13 +123,13 @@ export function TickerCombobox({
             {/* Results */}
             <div className="max-h-64 overflow-y-auto">
                 {/* Section Header */}
-                <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                <div className="px-3 py-1.5 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
                     Top Results
                 </div>
 
                 {/* Results List */}
                 {results.length === 0 ? (
-                    <div className="px-3 py-4 text-center text-gray-500 text-xs">
+                    <div className="px-3 py-4 text-center text-[var(--text-muted)] text-xs">
                         No results for "{query}"
                     </div>
                 ) : (
@@ -141,7 +141,7 @@ export function TickerCombobox({
                                 onMouseEnter={() => setSelectedIndex(index)}
                                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${index === selectedIndex
                                         ? 'bg-blue-600/20'
-                                        : 'hover:bg-white/5'
+                                        : 'hover:bg-[var(--bg-hover)]'
                                     }`}
                             >
                                 {/* Ticker Icon */}
@@ -150,17 +150,17 @@ export function TickerCombobox({
                                 </div>
 
                                 {/* Ticker Symbol */}
-                                <span className="text-xs font-bold text-white min-w-[48px]">
+                                <span className="text-xs font-bold text-[var(--text-primary)] min-w-[48px]">
                                     {stock.symbol}
                                 </span>
 
                                 {/* Company Name */}
-                                <span className="text-xs text-gray-300 flex-1 truncate">
+                                <span className="text-xs text-[var(--text-secondary)] flex-1 truncate">
                                     {stock.name}
                                 </span>
 
                                 {/* Type & Exchange */}
-                                <span className="text-[10px] text-gray-500 uppercase shrink-0">
+                                <span className="text-[10px] text-[var(--text-muted)] uppercase shrink-0">
                                     {stock.type} · {stock.exchange}
                                 </span>
                             </button>
@@ -170,7 +170,7 @@ export function TickerCombobox({
             </div>
 
             {/* Footer hint */}
-            <div className="px-3 py-1.5 border-t border-[#2a2a2a] text-[10px] text-gray-600 flex items-center gap-3">
+            <div className="px-3 py-1.5 border-t border-[var(--border-default)] text-[10px] text-[var(--text-muted)] flex items-center gap-3">
                 <span>↑↓ Navigate</span>
                 <span>↵ Select</span>
                 <span>ESC Close</span>

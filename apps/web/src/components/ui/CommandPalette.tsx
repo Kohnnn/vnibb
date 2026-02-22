@@ -169,10 +169,10 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
 
             {/* Modal */}
             <div className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-lg z-50">
-                <div className="bg-[#0d1f3c] border border-[#1e3a5f] rounded-xl shadow-2xl overflow-hidden">
+                <div className="bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-2xl overflow-hidden">
                     {/* Search Input */}
-                    <div className="flex items-center gap-3 px-4 py-3 border-b border-[#1e3a5f]">
-                        <Search size={20} className="text-gray-400" />
+                    <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border-default)]">
+                        <Search size={20} className="text-[var(--text-secondary)]" />
                         <input
                             ref={inputRef}
                             type="text"
@@ -183,9 +183,9 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                                 setSelectedIndex(0);
                             }}
                             placeholder="Search ticker, navigate..."
-                            className="flex-1 bg-transparent text-white placeholder-gray-500 outline-none text-sm"
+                            className="flex-1 bg-transparent text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none text-sm"
                         />
-                        <kbd className="px-2 py-0.5 text-xs text-gray-500 bg-gray-800 rounded">
+                        <kbd className="px-2 py-0.5 text-xs text-[var(--text-muted)] bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded">
                             ESC
                         </kbd>
                     </div>
@@ -193,7 +193,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                     {/* Results */}
                     <div className="max-h-80 overflow-y-auto">
                         {results.length === 0 ? (
-                            <div className="p-4 text-center text-gray-500 text-sm">
+                            <div className="p-4 text-center text-[var(--text-muted)] text-sm">
                                 No results found for "{query}"
                             </div>
                         ) : (
@@ -214,20 +214,20 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                                         }}
                                         className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${index === selectedIndex
                                                 ? 'bg-blue-600/20 text-white'
-                                                : 'text-gray-300 hover:bg-gray-800/50'
+                                                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                                             }`}
                                     >
                                         {result.icon}
                                         <div className="flex-1 min-w-0">
                                             <div className="text-sm font-medium">{result.label}</div>
                                             {result.description && (
-                                                <div className="text-xs text-gray-500 truncate">
+                                                <div className="text-xs text-[var(--text-muted)] truncate">
                                                     {result.description}
                                                 </div>
                                             )}
                                         </div>
                                         {result.type === 'ticker' && (
-                                            <span className="text-xs text-gray-500">STOCK</span>
+                                            <span className="text-xs text-[var(--text-muted)]">STOCK</span>
                                         )}
                                     </button>
                                 ))}
@@ -236,7 +236,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                     </div>
 
                     {/* Footer */}
-                    <div className="flex items-center justify-between px-4 py-2 border-t border-[#1e3a5f] text-xs text-gray-500">
+                    <div className="flex items-center justify-between px-4 py-2 border-t border-[var(--border-default)] text-xs text-[var(--text-muted)]">
                         <div className="flex items-center gap-4">
                             <span>↑↓ Navigate</span>
                             <span>↵ Select</span>

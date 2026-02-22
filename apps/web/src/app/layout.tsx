@@ -24,6 +24,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "VNIBB",
   description: "Vietnam stock market analytics dashboard",
+  openGraph: {
+    title: "VNIBB",
+    description: "Vietnam stock market analytics dashboard",
+    type: "website",
+  },
 };
 
 export default function RootLayout({
@@ -35,6 +40,17 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <ThemeScript />
+        <title>VNIBB | Vietnam Stock Market Analytics</title>
+        <meta
+          name="description"
+          content="Vietnam-first stock market analytics dashboard with financial statements, ratios, charts, and market intelligence."
+        />
+        <meta property="og:title" content="VNIBB | Vietnam Stock Market Analytics" />
+        <meta
+          property="og:description"
+          content="Vietnam-first stock market analytics dashboard with financial statements, ratios, charts, and market intelligence."
+        />
+        <meta property="og:type" content="website" />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[var(--bg-primary)] text-[var(--text-primary)]`}

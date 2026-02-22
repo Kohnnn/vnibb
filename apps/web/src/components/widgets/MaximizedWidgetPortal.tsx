@@ -79,18 +79,18 @@ export function MaximizedWidgetPortal({
         >
             <div
                 className={`
-                    w-full h-full bg-[#0b1021] border border-[#1e2a3b] rounded-lg 
+                    w-full h-full bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg 
                     shadow-2xl flex flex-col overflow-hidden
                     transition-all duration-200 ease-out
                     ${isAnimating ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}
                 `}
             >
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-2 border-b border-[#1e2a3b] bg-[#0a0f1d]">
-                    <span className="text-sm font-medium text-white">{title}</span>
+                <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-primary)]">
+                    <span className="text-sm font-medium text-[var(--text-primary)]">{title}</span>
                     <button
                         onClick={onClose}
-                        className="p-1.5 hover:bg-white/10 rounded transition-colors text-gray-400 hover:text-white"
+                        className="p-1.5 hover:bg-[var(--bg-tertiary)] rounded transition-colors text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                         title="Minimize (Esc)"
                     >
                         <Minimize2 size={16} />

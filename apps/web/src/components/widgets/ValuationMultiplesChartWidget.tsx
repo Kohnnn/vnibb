@@ -82,7 +82,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
       exportData={rows}
       exportFilename={`valuation_multiples_${symbol}`}
     >
-      <div className="h-full flex flex-col bg-[#0a0a0a]">
+      <div className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-gray-800/60">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
@@ -103,23 +103,23 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
             <ChartSizeBox className="h-full" minHeight={220}>
               {({ width, height }) => (
                 <LineChart width={width} height={height} data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
-                  <CartesianGrid stroke="#1f2937" strokeDasharray="3 3" />
+                  <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
                   <XAxis
                     dataKey="period"
-                    tick={{ fill: '#9ca3af', fontSize: 10 }}
+                    tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
                     axisLine={false}
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fill: '#9ca3af', fontSize: 10 }}
+                    tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
                     axisLine={false}
                     tickLine={false}
                     domain={['auto', 'auto']}
-                    label={{ value: 'Multiple', angle: -90, position: 'insideLeft', fill: '#9ca3af', fontSize: 10 }}
+                    label={{ value: 'Multiple', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 10 }}
                   />
                   <Tooltip
-                    contentStyle={{ background: '#0b1221', border: '1px solid #1f2937', fontSize: '11px' }}
-                    labelStyle={{ color: '#9ca3af' }}
+                    contentStyle={{ background: 'var(--bg-tooltip)', border: '1px solid var(--border-default)', fontSize: '11px' }}
+                    labelStyle={{ color: 'var(--text-muted)' }}
                   />
                   <Legend wrapperStyle={{ fontSize: '10px' }} />
                   {SERIES.map((series) => (

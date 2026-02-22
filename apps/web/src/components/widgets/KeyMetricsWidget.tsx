@@ -40,16 +40,16 @@ const METRIC_TABS: Array<{ id: MetricsCategory; label: string }> = [
 
 function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
     return (
-        <div className="flex items-center justify-between py-1.5 border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-            <span className="text-gray-400 text-xs leading-tight pr-2 flex-1">{label}</span>
+        <div className="flex items-center justify-between py-1.5 border-b border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)]/30 transition-colors">
+            <span className="text-[var(--text-secondary)] text-xs leading-tight pr-2 flex-1">{label}</span>
             <div className="flex items-center gap-2 shrink-0">
                 {sparklineData && sparklineData.length > 0 && (
                     <Sparkline data={sparklineData} width={40} height={16} />
                 )}
                 {source && source !== 'Unavailable' && (
-                    <span className="text-[9px] uppercase tracking-wider text-gray-500">{source}</span>
+                    <span className="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">{source}</span>
                 )}
-                <span className="text-white font-mono text-xs">{value ?? '-'}</span>
+                <span className="text-[var(--text-primary)] font-mono text-xs">{value ?? '-'}</span>
             </div>
         </div>
     );
@@ -195,7 +195,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                 />
 
                 {!historyFetching && hasData && !hasHistory && (
-                    <div className="text-[10px] text-gray-500 uppercase tracking-widest">
+                    <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">
                         Trend data not available yet.
                     </div>
                 )}
@@ -217,7 +217,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                     />
                 ) : (
                     <div className="space-y-1">
-                        <div className="flex flex-wrap gap-1 pb-2 border-b border-gray-800/50">
+                        <div className="flex flex-wrap gap-1 pb-2 border-b border-[var(--border-subtle)]">
                             {METRIC_TABS.map((tab) => (
                                 <button
                                     key={tab.id}
@@ -225,7 +225,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                                     className={`px-2 py-1 text-[10px] font-bold uppercase rounded-md transition-colors ${
                                         activeCategory === tab.id
                                             ? 'bg-blue-600/15 text-blue-300 border border-blue-500/30'
-                                            : 'text-gray-500 border border-gray-800 hover:text-gray-300 hover:border-gray-700'
+                                            : 'text-[var(--text-muted)] border border-[var(--border-color)] hover:text-[var(--text-secondary)] hover:border-[var(--border-subtle)]'
                                     }`}
                                 >
                                     {tab.label}

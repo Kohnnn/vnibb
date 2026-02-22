@@ -29,6 +29,7 @@ from vnibb.providers.vnstock.market_overview import (
     MarketOverviewQueryParams,
 )
 from vnibb.providers.vnstock.top_movers import VnstockTopMoversFetcher
+from vnibb.core.cache import cached
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
@@ -251,6 +252,7 @@ async def _fetch_world_index_point(symbol: str, name: str) -> Optional[dict[str,
     summary="Get Market Heatmap Data",
     description="Get aggregated market data for treemap visualization. Supports grouping by sector/industry.",
 )
+@cached(ttl=120, key_prefix="market_heatmap")
 async def get_heatmap_data(
     group_by: str = Query(
         default="sector",
@@ -273,7 +275,7 @@ async def get_heatmap_data(
         description="Exchange filter: HOSE, HNX, UPCOM, or ALL",
     ),
     limit: int = Query(
-        default=500,
+        default=200,
         ge=1,
         le=2000,
         description="Maximum stocks to include",
@@ -474,6 +476,7 @@ async def get_heatmap_data(
 
 
 @router.get("/indices", response_model=MarketIndicesResponse)
+@cached(ttl=60, key_prefix="market_indices")
 async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=20),
 ) -> MarketIndicesResponse:
@@ -557,6 +560,7 @@ async def get_market_sector_performance() -> MarketSectorPerformanceResponse:
 
 
 @router.get("/world-indices", response_model=WorldIndicesResponse)
+@cached(ttl=300, key_prefix="world_indices")
 async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> WorldIndicesResponse:
     symbols: list[tuple[str, str]] = [
         ("DJI", "Dow Jones"),

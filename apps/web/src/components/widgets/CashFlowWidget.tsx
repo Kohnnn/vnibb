@@ -26,8 +26,8 @@ import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { cn } from '@/lib/utils';
-import { Sparkline } from '@/components/ui/Sparkline';
 import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 
 interface CashFlowWidgetProps {
     id: string;
@@ -46,6 +46,8 @@ const labels: Record<string, string> = {
     free_cash_flow: 'Free Cash Flow',
     capital_expenditure: 'CapEx',
 };
+
+const TABLE_YEAR_LIMIT = 10;
 
 function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWidgetProps) {
     const { period, setPeriod } = usePeriodState({
@@ -103,61 +105,89 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(() => `Note: ${unitLegend}`, [unitLegend]);
 
+    const tableColumns = useMemo(
+        () =>
+            items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => ({
+                key: entry.period ?? `period_${index}`,
+                label: formatFinancialPeriodLabel(entry.period, {
+                    mode: periodMode,
+                    index,
+                    total: Math.min(items.length, TABLE_YEAR_LIMIT),
+                }),
+                align: 'right' as const,
+            })),
+        [items, periodMode]
+    );
+
+    const tableRows = useMemo<DenseTableRow[]>(() => {
+        const mapValues = (metricKey: keyof (typeof items)[number]) =>
+            Object.fromEntries(
+                items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
+                    tableColumns[index]?.key ?? `period_${index}`,
+                    entry[metricKey],
+                ])
+            );
+
+        return [
+            { id: 'group:cash-flows', label: 'Cash flows', values: {}, isGroup: true },
+            {
+                id: 'operating_cash_flow',
+                label: labels.operating_cash_flow,
+                parentId: 'group:cash-flows',
+                indent: 12,
+                values: mapValues('operating_cash_flow'),
+            },
+            {
+                id: 'investing_cash_flow',
+                label: labels.investing_cash_flow,
+                parentId: 'group:cash-flows',
+                indent: 12,
+                values: mapValues('investing_cash_flow'),
+            },
+            {
+                id: 'financing_cash_flow',
+                label: labels.financing_cash_flow,
+                parentId: 'group:cash-flows',
+                indent: 12,
+                values: mapValues('financing_cash_flow'),
+            },
+            { id: 'group:summary', label: 'Summary', values: {}, isGroup: true },
+            {
+                id: 'free_cash_flow',
+                label: labels.free_cash_flow,
+                parentId: 'group:summary',
+                indent: 12,
+                values: mapValues('free_cash_flow'),
+            },
+            {
+                id: 'net_cash_flow',
+                label: labels.net_cash_flow,
+                parentId: 'group:summary',
+                indent: 12,
+                values: mapValues('net_cash_flow'),
+            },
+            {
+                id: 'capital_expenditure',
+                label: labels.capital_expenditure,
+                parentId: 'group:summary',
+                indent: 12,
+                values: mapValues('capital_expenditure'),
+            },
+        ];
+    }, [items, tableColumns]);
+
     const renderTable = () => (
         <div className="space-y-1">
-            <table className="data-table financial-dense freeze-first-col w-full text-[11px] text-left">
-                <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
-                    <tr className="border-b border-gray-800">
-                        <th className="py-2 px-1 font-bold uppercase tracking-tighter">Item</th>
-                        {items.slice(0, 4).map((d, i) => (
-                            <th key={`${d.period ?? i}-${i}`} className="text-right py-2 px-1 font-bold">
-                                {formatFinancialPeriodLabel(d.period, {
-                                    mode: periodMode,
-                                    index: i,
-                                    total: Math.min(items.length, 4),
-                                })}
-                            </th>
-                        ))}
-                        <th className="py-2 px-1 font-bold uppercase tracking-tighter text-center">Trend</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {['operating_cash_flow', 'investing_cash_flow', 'financing_cash_flow', 'free_cash_flow'].map((key) => {
-                        const points = items
-                            .slice(0, 4)
-                            .slice()
-                            .reverse()
-                            .map((d) => Number(d[key as keyof typeof d]))
-                            .filter((value) => Number.isFinite(value));
-
-                        return (
-                            <tr key={key} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors">
-                                <td className="py-2 px-1 text-gray-400 font-medium">{labels[key] || key}</td>
-                                {items.slice(0, 4).map((d, i) => {
-                                    const value = d[key as keyof typeof d] as number;
-                                    return (
-                                        <td
-                                            key={`${d.period ?? i}-${i}`}
-                                            data-type="number"
-                                            className={`text-right py-2 px-1 font-mono ${value && value >= 0 ? 'text-green-400' : 'text-red-400'}`}
-                                        >
-                                            {formatUnitValuePlain(value, tableScale, unitConfig)}
-                                        </td>
-                                    );
-                                })}
-                                <td className="py-2 px-1 text-center">
-                                    {points.length < 2 ? (
-                                        <span className="text-[10px] text-muted-foreground">—</span>
-                                    ) : (
-                                        <Sparkline data={points} width={70} height={18} />
-                                    )}
-                                </td>
-                            </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
-            <div className="px-1 pt-1 text-[10px] text-gray-500 italic">{unitNote}</div>
+            <DenseFinancialTable
+                columns={tableColumns}
+                rows={tableRows}
+                sortable
+                storageKey={`cash-flow:${id}:${symbol}:${period}`}
+                valueFormatter={(value) =>
+                    formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig)
+                }
+            />
+            <div className="px-1 pt-1 text-[10px] text-[var(--text-muted)] italic">{unitNote}</div>
         </div>
     );
 
@@ -166,7 +196,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
     const renderChart = () => {
         if (!chartData.length) {
             return (
-                <div className="flex flex-col items-center justify-center h-48 text-gray-600 gap-2">
+                <div className="flex flex-col items-center justify-center h-48 text-[var(--text-muted)] gap-2">
                     <BarChart3 size={32} className="opacity-20" />
                     <p className="text-[10px] font-bold uppercase tracking-widest">No visualization available</p>
                 </div>
@@ -179,7 +209,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                     <select
                         value={chartType}
                         onChange={(e) => setChartType(e.target.value as any)}
-                        className="bg-gray-900 text-[10px] font-bold text-gray-400 border border-gray-800 rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-white transition-colors"
+                        className="bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
                     >
                         <option value="overview">Cash Flows</option>
                         <option value="fcf">Free Cash Flow</option>
@@ -190,18 +220,23 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                     <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
                         {chartType === 'overview' ? (
                             <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fill: '#666', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                                <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
                                 <YAxis
                                     tickFormatter={(value) => formatAxisValue(value, unitConfig)}
-                                    tick={{ fill: '#666', fontSize: 9 }}
+                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                     axisLine={false}
                                     tickLine={false}
-                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: '#666', fontSize: 9 }}
+                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
                                 />
                                 <ReferenceLine y={0} stroke="#333" />
                                 <Tooltip
-                                    contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }}
+                                    contentStyle={{
+                                        backgroundColor: 'var(--bg-tooltip)',
+                                        border: '1px solid var(--border-default)',
+                                        borderRadius: '8px',
+                                        fontSize: '11px',
+                                    }}
                                 />
                                 <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                 <Bar dataKey="operatingCF" name="Operating" fill="#3b82f6" radius={[2, 2, 2, 2]} />
@@ -210,18 +245,23 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                             </ComposedChart>
                         ) : (
                             <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fill: '#666', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                                <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
                                 <YAxis
                                     tickFormatter={(value) => formatAxisValue(value, unitConfig)}
-                                    tick={{ fill: '#666', fontSize: 9 }}
+                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                     axisLine={false}
                                     tickLine={false}
-                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: '#666', fontSize: 9 }}
+                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
                                 />
                                 <ReferenceLine y={0} stroke="#333" />
                                 <Tooltip
-                                    contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }}
+                                    contentStyle={{
+                                        backgroundColor: 'var(--bg-tooltip)',
+                                        border: '1px solid var(--border-default)',
+                                        borderRadius: '8px',
+                                        fontSize: '11px',
+                                    }}
                                 />
                                 <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                 <Area type="monotone" dataKey="freeCashFlow" name="Free Cash Flow" fill="#10b981" stroke="#10b981" fillOpacity={0.1} />
@@ -236,12 +276,14 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
 
     const headerActions = (
         <div className="flex items-center gap-1.5 mr-1">
-            <div className="flex bg-gray-900 rounded p-0.5 border border-gray-800">
+            <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-color)]">
                 <button
                     onClick={() => setViewMode('table')}
                     className={cn(
                         "p-1 rounded transition-all",
-                        viewMode === 'table' ? "bg-gray-800 text-blue-400 shadow-sm" : "text-gray-500 hover:text-gray-300"
+                        viewMode === 'table'
+                            ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     )}
                     title="Table View"
                 >
@@ -251,7 +293,9 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                     onClick={() => setViewMode('chart')}
                     className={cn(
                         "p-1 rounded transition-all",
-                        viewMode === 'chart' ? "bg-gray-800 text-blue-400 shadow-sm" : "text-gray-500 hover:text-gray-300"
+                        viewMode === 'chart'
+                            ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     )}
                     title="Chart View"
                 >
@@ -276,7 +320,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             exportData={items}
         >
             <div className="h-full flex flex-col px-2 py-1.5">
-                <div className="pb-1 border-b border-gray-800/50">
+                <div className="pb-1 border-b border-[var(--border-subtle)]">
                     <WidgetMeta
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}

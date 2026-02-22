@@ -15,9 +15,16 @@ body {
 :root {
   --bg-primary: var(--color-bg-primary);
   --bg-secondary: var(--color-bg-secondary);
+  --bg-surface: var(--color-bg-elevated);
   --bg-widget: var(--color-bg-secondary);
   --bg-widget-header: var(--color-bg-tertiary);
+  --bg-dropdown: var(--color-bg-elevated);
+  --bg-modal: var(--color-bg-elevated);
+  --bg-tooltip: var(--color-bg-elevated);
+  --bg-hover: color-mix(in srgb, var(--color-bg-tertiary) 75%, transparent);
   --border-color: var(--color-border-default);
+  --border-default: var(--color-border-default);
+  --border-accent: var(--color-accent-primary);
   --border-subtle: var(--color-border-subtle);
   --text-primary: var(--color-text-primary);
   --text-secondary: var(--color-text-secondary);
@@ -53,9 +60,16 @@ body {
 
   --bg-primary: var(--color-bg-primary);
   --bg-secondary: var(--color-bg-secondary);
+  --bg-surface: var(--color-bg-elevated);
   --bg-widget: var(--color-bg-secondary);
   --bg-widget-header: var(--color-bg-tertiary);
+  --bg-dropdown: var(--color-bg-elevated);
+  --bg-modal: var(--color-bg-elevated);
+  --bg-tooltip: var(--color-bg-elevated);
+  --bg-hover: color-mix(in srgb, var(--color-bg-tertiary) 75%, transparent);
   --border-color: var(--color-border-default);
+  --border-default: var(--color-border-default);
+  --border-accent: var(--color-accent-primary);
   --border-subtle: var(--color-border-subtle);
   --text-primary: var(--color-text-primary);
   --text-secondary: var(--color-text-secondary);

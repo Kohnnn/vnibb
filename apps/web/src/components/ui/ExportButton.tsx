@@ -97,7 +97,7 @@ export function ExportButton({
           }
         }}
         disabled={disabled}
-        className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-gray-500 hover:text-white hover:bg-white/10 rounded transition-colors disabled:opacity-50"
+        className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors disabled:opacity-50"
         title="Export data"
         aria-label="Export data"
       >
@@ -107,11 +107,11 @@ export function ExportButton({
       </button>
 
       {isOpen && (
-        <div className="absolute bottom-full right-0 mb-1 bg-[#1e293b] border border-[#334155] rounded-lg shadow-xl z-50 py-1 min-w-[100px]">
+        <div className="absolute bottom-full right-0 mb-1 bg-[var(--bg-dropdown)] border border-[var(--border-default)] rounded-lg shadow-xl z-50 py-1 min-w-[100px]">
           {formats.includes('csv') && (
             <button
               onClick={exportCSV}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] text-gray-300 hover:bg-white/10 hover:text-white text-left"
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] text-left"
             >
               <FileText className="w-3 h-3" />
               CSV
@@ -120,7 +120,7 @@ export function ExportButton({
           {formats.includes('xlsx') && (
             <button
               onClick={exportXLSX}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] text-gray-300 hover:bg-white/10 hover:text-white text-left"
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] text-left"
             >
               <FileSpreadsheet className="w-3 h-3" />
               Excel
@@ -129,7 +129,7 @@ export function ExportButton({
           {formats.includes('json') && (
             <button
               onClick={exportJSON}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] text-gray-300 hover:bg-white/10 hover:text-white text-left"
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] text-left"
             >
               <FileJson className="w-3 h-3" />
               JSON

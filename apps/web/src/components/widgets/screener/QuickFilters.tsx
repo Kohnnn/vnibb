@@ -27,7 +27,7 @@ const PRESET_FILTERS: ScreenerFilter[] = [
 
 function QuickFiltersComponent({ activeFilterIds, onFilterToggle }: QuickFiltersProps) {
   return (
-    <div className="flex flex-wrap gap-2 p-3 border-b border-gray-800 bg-[#050505]">
+    <div className="flex flex-wrap gap-2 p-3 border-b border-[var(--border-default)] bg-[var(--bg-secondary)]">
       {PRESET_FILTERS.map(filter => (
         <FilterChip
           key={filter.id}

@@ -178,7 +178,7 @@ export function ComparisonWidget({ id, initialSymbols = ['VNM', 'FPT'], hideHead
                                     <ChartMountGuard className="h-full" minHeight={120}>
                                         <ResponsiveContainer width="100%" height="100%">
                                             <ReLineChart data={perfData}>
-                                                <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
+                                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                                 <XAxis 
                                                     dataKey="date" 
                                                     hide 

@@ -77,7 +77,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
       noPadding
       widgetId={id}
     >
-      <div className="h-full flex flex-col bg-[#0a0a0a]">
+      <div className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-gray-800/60">
           <WidgetMeta
             updatedAt={updatedAt}

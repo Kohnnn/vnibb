@@ -29,10 +29,10 @@ function IndexTicker({ symbol, price, change, change_pct, direction }: IndexData
             "flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all duration-500",
             direction === 'up' ? "bg-green-500/20 border-green-500/40 scale-[1.02]" : 
             direction === 'down' ? "bg-red-500/20 border-red-500/40 scale-[1.02]" :
-            "bg-[#1e293b]/60 border-[#334155]/50"
+            "bg-[var(--bg-secondary)]/70 border-[var(--border-default)]"
         )}>
-            <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{symbol}</span>
-            <span className="text-sm font-black text-white font-mono">
+            <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest">{symbol}</span>
+            <span className="text-sm font-black text-[var(--text-primary)] font-mono">
                 {formatNumber(price)}
             </span>
             <div className={cn(
@@ -92,7 +92,7 @@ export function MarketRibbon() {
 
 
     return (
-        <div className="bg-[#0f172a]/90 border-b border-[#1e293b] px-4 py-2 backdrop-blur-sm sticky top-0 z-[100]">
+        <div className="bg-[var(--bg-primary)]/90 border-b border-[var(--border-color)] px-4 py-2 backdrop-blur-sm sticky top-0 z-[100]">
             <div className="flex items-center justify-between max-w-[1800px] mx-auto">
                 <div className="flex items-center gap-3">
                     {vnindex && (
@@ -139,13 +139,13 @@ export function MarketRibbon() {
                         )}
                     </div>
 
-                    <div className="h-4 w-px bg-gray-800" />
+                    <div className="h-4 w-px bg-[var(--border-subtle)]" />
 
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => refetch()}
                             disabled={isFetching}
-                            className="p-1.5 text-gray-500 hover:text-gray-300 transition-colors"
+                            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
                             title="Refresh Indices"
                         >
                             <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />

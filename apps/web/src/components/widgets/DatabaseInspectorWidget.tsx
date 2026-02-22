@@ -175,7 +175,7 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?
           />
         </div>
         {/* Table List */}
-        <div className="p-2 border-b border-gray-800 bg-[#0a0a0a] flex flex-wrap gap-1">
+        <div className="p-2 border-b border-[var(--border-default)] bg-[var(--bg-primary)] flex flex-wrap gap-1">
           {statsLoading && !hasTables ? (
             <WidgetSkeleton lines={3} />
           ) : statsError && !hasTables ? (

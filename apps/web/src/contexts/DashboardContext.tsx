@@ -35,10 +35,11 @@ import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
 const STORAGE_KEY = 'vnibb_dashboards';
 const FOLDERS_KEY = 'vnibb_folders';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 6;
+const CURRENT_MIGRATION_VERSION = 7;
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
+const LEGACY_STALE_TAB_RE = /^new\s+tab(?:\s+\d+)?$/i;
 
 // ============================================================================
 // Default Data & Templates
@@ -368,6 +369,43 @@ const migrateLegacyManageTabs = (dashboards: Dashboard[]): Dashboard[] => {
                 filteredTabs.length === 0 &&
                 index === 0 &&
                 LEGACY_MANAGE_TAB_NAME_RE.test(tab.name.trim())
+                    ? 'Overview'
+                    : tab.name,
+            order: index,
+        }));
+
+        return {
+            ...dashboard,
+            tabs: normalizedTabs,
+            updatedAt: new Date().toISOString(),
+        };
+    });
+};
+
+const migrateStaleNewTabs = (dashboards: Dashboard[]): Dashboard[] => {
+    return dashboards.map((dashboard) => {
+        if (dashboard.tabs.length === 0) {
+            return {
+                ...dashboard,
+                tabs: [createDefaultTab('Overview', 0)],
+                updatedAt: new Date().toISOString(),
+            };
+        }
+
+        const sortedTabs = [...dashboard.tabs].sort((a, b) => a.order - b.order);
+        const filteredTabs = sortedTabs.filter(
+            (tab) => !(LEGACY_STALE_TAB_RE.test(tab.name.trim()) && tab.widgets.length === 0)
+        );
+
+        if (filteredTabs.length === sortedTabs.length) {
+            return dashboard;
+        }
+
+        const fallbackTabs = filteredTabs.length > 0 ? filteredTabs : sortedTabs.slice(0, 1);
+        const normalizedTabs = fallbackTabs.map((tab, index) => ({
+            ...tab,
+            name:
+                index === 0 && LEGACY_STALE_TAB_RE.test(tab.name.trim())
                     ? 'Overview'
                     : tab.name,
             order: index,
@@ -946,6 +984,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
                 if (migrationVersion < 6) {
                     dashboards = migrateLegacyManageTabs(dashboards);
+                }
+
+                if (migrationVersion < 7) {
+                    dashboards = migrateStaleNewTabs(dashboards);
                 }
 
                 // Final safety validation for all widgets

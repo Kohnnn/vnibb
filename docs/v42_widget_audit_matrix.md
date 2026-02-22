@@ -1,7 +1,7 @@
 # V42 Widget Audit Matrix
 
 Date: 2026-02-15
-Updated: 2026-02-21
+Updated: 2026-02-22
 
 Audit method:
 - Static wiring check from `WidgetRegistry.ts` + API hook paths.
@@ -47,20 +47,20 @@ Status buckets:
 | World Indices | ✅ Works | `/market/world-indices` | Endpoint timeout path tuned; now returns fallback payload within matrix timeout budget. |
 | Forex Rates | ✅ Works | `/market/forex-rates` | Wired to VCB exchange-rate feed via vnstock explorer helpers. |
 | Commodities | ✅ Works | `/market/commodities` | Wired to BTMC/SJC gold feeds via vnstock explorer helpers. |
-| Quick Stats | ⚠️ Partial | mixed market/equity | Needs focused QA pass. |
+| Quick Stats | ✅ Works | quote + ratios + historical | Stabilized query path in V47 with dedicated quote/ratios hooks and partial-load fallback behavior. |
 | Similar Stocks | ✅ Works | peers/screener | Loaded for all 5 test symbols in latest local matrix run. |
 | Market Heatmap | ✅ Works | `/market/heatmap` | Endpoint present and wired. |
 | Ownership Changes | ✅ Works | ownership endpoints | Loaded for all 5 test symbols in latest local matrix run. |
 
 ## Summary
 
-- `✅ Works`: 33
-- `⚠️ Partial`: 2
+- `✅ Works`: 34
+- `⚠️ Partial`: 1
 - `❌ Broken`: 0 (in this static+wiring audit)
 - `🔲 No endpoint`: 0 for core V42 scope
 
 ## Remaining carryover to V43
 
-- Close remaining partial widgets (`Sector Breakdown`, `Quick Stats`) via data-quality and provider stability work.
+- Close remaining partial widget (`Sector Breakdown`) with final UI-side validation after latest industry enrichment.
 - Reconcile production runtime health (502/timeout) with local matrix outcomes before deployment promotion.
 - Continue light-mode visual pass across long-tail widgets.

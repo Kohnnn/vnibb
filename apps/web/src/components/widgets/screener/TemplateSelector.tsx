@@ -235,32 +235,32 @@ export function TemplateSelector({ currentFilters, currentColumns, onLoadTemplat
                 <Button
                     variant="outline"
                     size="sm"
-                    className="bg-[#161616] border-[#222] text-xs h-8 flex items-center gap-2 text-gray-300 hover:text-white"
+                    className="bg-[var(--bg-secondary)] border-[var(--border-default)] text-xs h-8 flex items-center gap-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                     onClick={() => setIsSaving(!isSaving)}
                 >
                     <FolderOpen size={14} className="text-amber-500" />
                     Templates
-                    <ChevronDown size={12} className="text-gray-500" />
+                    <ChevronDown size={12} className="text-[var(--text-muted)]" />
                 </Button>
             </div>
 
             {isSaving && (
                 <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-[#0a0a0a] border border-[#1e1e1e] rounded-xl p-6 shadow-2xl w-96 max-w-full">
-                        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                    <div className="bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl p-6 shadow-2xl w-96 max-w-full">
+                        <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4 flex items-center gap-2">
                             <Save size={20} className="text-blue-500" />
                             Screener Templates
                         </h3>
 
                         <div className="space-y-4">
                             <div>
-                                <label className="text-xs text-gray-500 mb-1.5 block">Save current view as</label>
+                                <label className="text-xs text-[var(--text-muted)] mb-1.5 block">Save current view as</label>
                                 <div className="flex gap-2">
                                     <Input
                                         placeholder="Template name (e.g. High Yield Growth)"
                                         value={newName}
                                         onChange={(e) => setNewName(e.target.value)}
-                                        className="bg-[#161616] border-[#222] h-10 text-sm"
+                                        className="bg-[var(--bg-secondary)] border-[var(--border-default)] h-10 text-sm"
                                     />
                                     <Button onClick={saveTemplate} className="bg-blue-600 hover:bg-blue-500 h-10 px-4">
                                         <Save size={16} />
@@ -268,11 +268,11 @@ export function TemplateSelector({ currentFilters, currentColumns, onLoadTemplat
                                 </div>
                             </div>
 
-                            <div className="border-t border-[#1e1e1e] pt-4">
-                                <label className="text-xs text-gray-500 mb-2 block">Saved Templates</label>
+                            <div className="border-t border-[var(--border-subtle)] pt-4">
+                                <label className="text-xs text-[var(--text-muted)] mb-2 block">Saved Templates</label>
                                 <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
                                     {templates.length === 0 ? (
-                                        <p className="text-xs text-gray-600 italic py-4 text-center">No saved templates</p>
+                                        <p className="text-xs text-[var(--text-muted)] italic py-4 text-center">No saved templates</p>
                                     ) : (
                                         templates.map(t => (
                                             <div
@@ -281,17 +281,17 @@ export function TemplateSelector({ currentFilters, currentColumns, onLoadTemplat
                                                     onLoadTemplate(t);
                                                     setIsSaving(false);
                                                 }}
-                                                className="flex items-center justify-between p-3 bg-[#161616] border border-[#222] hover:border-blue-500/50 rounded-lg group cursor-pointer transition-all"
+                                                className="flex items-center justify-between p-3 bg-[var(--bg-secondary)] border border-[var(--border-default)] hover:border-blue-500/50 rounded-lg group cursor-pointer transition-all"
                                             >
                                                 <div>
-                                                    <div className="text-sm font-medium text-gray-200 group-hover:text-blue-400">{t.name}</div>
-                                                    <div className="text-[10px] text-gray-500">{new Date(t.createdAt).toLocaleDateString()}</div>
+                                                    <div className="text-sm font-medium text-[var(--text-secondary)] group-hover:text-blue-400">{t.name}</div>
+                                                    <div className="text-[10px] text-[var(--text-muted)]">{new Date(t.createdAt).toLocaleDateString()}</div>
                                                 </div>
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
                                                     onClick={(e) => deleteTemplate(t.id, e)}
-                                                    className="h-8 w-8 text-gray-600 hover:text-red-500 opacity-0 group-hover:opacity-100"
+                                                    className="h-8 w-8 text-[var(--text-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100"
                                                 >
                                                     <Trash2 size={14} />
                                                 </Button>
@@ -303,14 +303,14 @@ export function TemplateSelector({ currentFilters, currentColumns, onLoadTemplat
 
                             <div className="flex justify-between pt-2">
                                 <div className="flex gap-2">
-                                    <Button variant="outline" size="sm" onClick={exportTemplates} className="text-xs border-[#222] text-gray-400">
+                                    <Button variant="outline" size="sm" onClick={exportTemplates} className="text-xs border-[var(--border-default)] text-[var(--text-secondary)]">
                                         <Download size={14} className="mr-2" /> Export
                                     </Button>
                                     <Button
                                         variant="outline"
                                         size="sm"
                                         onClick={() => fileInputRef.current?.click()}
-                                        className="text-xs border-[#222] text-gray-400"
+                                        className="text-xs border-[var(--border-default)] text-[var(--text-secondary)]"
                                     >
                                         <Upload size={14} className="mr-2" /> Import
                                     </Button>
@@ -322,7 +322,7 @@ export function TemplateSelector({ currentFilters, currentColumns, onLoadTemplat
                                         className="hidden"
                                     />
                                 </div>
-                                <Button variant="ghost" size="sm" onClick={() => setIsSaving(false)} className="text-xs text-gray-500">
+                                <Button variant="ghost" size="sm" onClick={() => setIsSaving(false)} className="text-xs text-[var(--text-muted)]">
                                     Close
                                 </Button>
                             </div>
@@ -335,14 +335,14 @@ export function TemplateSelector({ currentFilters, currentColumns, onLoadTemplat
                             )}
 
                             {/* Preset Templates */}
-                            <div className="border-t border-[#1e1e1e] pt-4 mt-2">
-                                <label className="text-xs text-gray-500 mb-2 block">Quick Presets</label>
+                            <div className="border-t border-[var(--border-subtle)] pt-4 mt-2">
+                                <label className="text-xs text-[var(--text-muted)] mb-2 block">Quick Presets</label>
                                 <div className="flex flex-wrap gap-2">
                                     {PRESET_TEMPLATES.map(preset => (
                                         <button
                                             key={preset.name}
                                             onClick={() => loadPreset(preset)}
-                                            className="px-3 py-1.5 text-xs bg-[#1e1e1e] hover:bg-blue-600/20 text-gray-400 hover:text-blue-400 rounded transition-colors"
+                                            className="px-3 py-1.5 text-xs bg-[var(--bg-secondary)] hover:bg-blue-600/20 text-[var(--text-secondary)] hover:text-blue-400 rounded transition-colors"
                                         >
                                             {preset.name}
                                         </button>

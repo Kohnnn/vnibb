@@ -48,7 +48,7 @@ export function CompanyLogo({ symbol, name, website, size = 20, className }: Com
       alt={name || symbol}
       width={size}
       height={size}
-      className={`rounded-full border border-white/10 bg-[#0b1221] object-cover ${className ?? ''}`.trim()}
+      className={`rounded-full border border-white/10 bg-[var(--bg-secondary)] object-cover ${className ?? ''}`.trim()}
       onError={() => setBroken(true)}
       loading="lazy"
       decoding="async"

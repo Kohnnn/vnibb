@@ -3,7 +3,7 @@
 'use client';
 
 import { Activity, TrendingUp, TrendingDown, BarChart2, DollarSign } from 'lucide-react';
-import { useHistoricalPrices, useScreenerData } from '@/lib/queries';
+import { useFinancialRatios, useHistoricalPrices, useStockQuote } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -18,14 +18,16 @@ export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
     const pricesQuery = useHistoricalPrices(symbol, {
         startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     });
-    const screenerQuery = useScreenerData({ symbol, enabled: !!symbol });
+    const quoteQuery = useStockQuote(symbol, !!symbol);
+    const ratiosQuery = useFinancialRatios(symbol, { period: 'FY', enabled: !!symbol });
 
     const priceData = pricesQuery.data?.data || [];
-    const stock = screenerQuery.data?.data?.find((s) => s.ticker === symbol) || screenerQuery.data?.data?.[0];
+    const latestQuote = quoteQuery.data;
+    const latestRatio = ratiosQuery.data?.data?.[0];
 
     const latest = priceData[priceData.length - 1];
     const prev = priceData[priceData.length - 2];
-    const change = latest && prev ? ((latest.close - prev.close) / prev.close * 100) : null;
+    const change = latestQuote?.changePct ?? (latest && prev ? ((latest.close - prev.close) / prev.close * 100) : null);
 
     const closes = priceData.map((p) => p.close || 0);
     const high30 = Math.max(...closes);
@@ -34,12 +36,14 @@ export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
     const volumes = priceData.map((p) => p.volume || 0);
     const avgVol = volumes.length > 0 ? volumes.reduce((a, b) => a + b, 0) / volumes.length : 0;
 
-    const isLoading = pricesQuery.isLoading || screenerQuery.isLoading;
-    const error = pricesQuery.error || screenerQuery.error;
-    const isFetching = pricesQuery.isFetching || screenerQuery.isFetching;
-    const dataUpdatedAt = Math.max(pricesQuery.dataUpdatedAt || 0, screenerQuery.dataUpdatedAt || 0) || undefined;
+    const isLoading = pricesQuery.isLoading || quoteQuery.isLoading || ratiosQuery.isLoading;
+    const error = pricesQuery.error || quoteQuery.error || ratiosQuery.error;
+    const isFetching = pricesQuery.isFetching || quoteQuery.isFetching || ratiosQuery.isFetching;
+    const dataUpdatedAt =
+        Math.max(pricesQuery.dataUpdatedAt || 0, quoteQuery.dataUpdatedAt || 0, ratiosQuery.dataUpdatedAt || 0) ||
+        undefined;
 
-    const hasData = Boolean(latest || stock);
+    const hasData = Boolean(latest || latestQuote || latestRatio);
     const isFallback = Boolean(error && hasData);
 
     if (!symbol) {
@@ -49,7 +53,7 @@ export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
     const stats = [
         {
             label: 'Price',
-            value: latest?.close?.toLocaleString() || '-',
+            value: latestQuote?.price?.toLocaleString() || latest?.close?.toLocaleString() || '-',
             icon: DollarSign,
             color: 'text-blue-400',
         },
@@ -79,7 +83,7 @@ export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
         },
         {
             label: 'P/E Ratio',
-            value: stock?.pe?.toFixed(1) || '-',
+            value: latestRatio?.pe?.toFixed(1) || '-',
             icon: Activity,
             color: 'text-cyan-400',
         },
@@ -87,12 +91,12 @@ export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
 
     return (
         <div className="h-full flex flex-col">
-            <div className="flex items-center gap-2 px-1 py-1 mb-2 text-xs text-gray-500">
+            <div className="mb-2 flex items-center gap-2 px-1 py-1 text-xs text-[var(--text-secondary)]">
                 <Activity size={12} className="text-blue-400" />
                 <span>Quick Stats - {symbol}</span>
             </div>
 
-            <div className="pb-2 border-b border-gray-800/50">
+            <div className="border-b border-[var(--border-default)] pb-2">
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
@@ -108,7 +112,8 @@ export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
                 ) : error && !hasData ? (
                     <WidgetError error={error as Error} onRetry={() => {
                         pricesQuery.refetch();
-                        screenerQuery.refetch();
+                        quoteQuery.refetch();
+                        ratiosQuery.refetch();
                     }} />
                 ) : !hasData ? (
                     <WidgetEmpty message={`No data for ${symbol}`} />
@@ -117,11 +122,11 @@ export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
                         {stats.map((stat, i) => (
                             <div
                                 key={i}
-                                className="p-3 rounded-lg bg-gray-800/30 hover:bg-gray-800/50"
+                                className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 transition-colors hover:bg-[var(--bg-hover)]"
                             >
                                 <div className="flex items-center gap-1.5 mb-1">
                                     <stat.icon size={12} className={stat.color} />
-                                    <span className="text-[10px] text-gray-500">{stat.label}</span>
+                                    <span className="text-[10px] text-[var(--text-secondary)]">{stat.label}</span>
                                 </div>
                                 <div className={`text-lg font-bold ${stat.color}`}>{stat.value}</div>
                             </div>
