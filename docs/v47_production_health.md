@@ -39,7 +39,7 @@ This report captures V47 Track 6 stability work (timeouts + hot-endpoint load re
 ### Backend tests
 
 - `cd apps/api && pytest tests -q`
-- Result: `64 passed`.
+- Result: `70 passed`.
 
 ### Frontend gates
 
@@ -60,6 +60,7 @@ This report captures V47 Track 6 stability work (timeouts + hot-endpoint load re
 - `python -m py_compile apps/api/vnibb/api/main.py` -> pass.
 - `python -X utf8 .agent/skills/seo-fundamentals/scripts/seo_checker.py vnibb` -> pass.
 - `python -X utf8 .agent/scripts/checklist.py .` -> 5/6 passed; UX audit remains heuristic-noisy.
+- `python -X utf8 .agent/skills/frontend-design/scripts/ux_audit.py vnibb` -> fails with heuristic regex issues (10 hard issues, 1057 warnings), dominated by false positives.
 
 ### Production endpoint spot-check (latest)
 
@@ -76,6 +77,53 @@ This report captures V47 Track 6 stability work (timeouts + hot-endpoint load re
   - `overall_ok: true`
   - `endpoint_ok: true`
   - `widget_state_ok: true`
+
+### V49-V50 pre-deploy probe (new endpoint baseline)
+
+- `GET /api/v1/equity/VNM/peers` -> `404` (new route implemented in code, not deployed yet)
+- `GET /api/v1/equity/VNM/ttm` -> `404` (new route implemented in code, not deployed yet)
+- `GET /api/v1/equity/VNM/growth` -> `404` (new route implemented in code, not deployed yet)
+- `GET /api/v1/sectors/banking/stocks` -> `404` (new route implemented in code, not deployed yet)
+- Existing endpoints remain `200`, but missing financial fields on production payloads persist until backend deployment.
+
+### Full production endpoint matrix rerun (2026-02-22, latest)
+
+- `GET /api/v1/equity/VNM/peers` -> `404`
+- `GET /api/v1/equity/VNM/income-statement` -> `200`
+- `GET /api/v1/equity/VNM/balance-sheet` -> `200`
+- `GET /api/v1/equity/VNM/cash-flow` -> `200`
+- `GET /api/v1/equity/VNM/ratios` -> `200`
+- `GET /api/v1/equity/VNM/ttm` -> `404`
+- `GET /api/v1/equity/VNM/growth` -> `404`
+- `GET /api/v1/sectors` -> `200`
+- `GET /api/v1/sectors/banking/stocks` -> `404`
+- `GET /api/v1/comparison/VNM,FPT,VCB` -> `404`
+- `GET /api/v1/market/indices` -> `200`
+- `GET /api/v1/market/world-indices` -> `200`
+- `GET /api/v1/market/heatmap` -> `504` (timeout)
+- `GET /api/v1/screener` -> `307` (redirect)
+
+Interpretation:
+
+- New V49/V50 backend routes are still not live in production.
+- There is also an active production reliability issue on `/market/heatmap` (`504`) that needs backend investigation after deploy.
+
+### Local code-level mitigations prepared (pending deploy)
+
+- Added no-trailing-slash route compatibility:
+  - `/api/v1/screener` and `/api/v1/comparison` now resolve directly without 307 redirect.
+- Added path-style comparison alias:
+  - `/api/v1/comparison/{symbols}` supports calls like `/api/v1/comparison/VNM,FPT,VCB`.
+- Hardened heatmap fetch path:
+  - Uses stale screener cache entries when available (faster fallback).
+  - Added explicit provider timeout guard (`20s`) for both primary fetch and fresh-refetch fallback.
+  - On provider timeout/error, returns an empty heatmap payload instead of surfacing 5xx (frontend can render empty-state instead of hard failure).
+
+## Documentation Artifacts (V52)
+
+- Added `docs/API_REFERENCE.md` with current frontend-consumed route map and deployment probes.
+- Added `docs/WIDGET_CATALOG.md` with 59 registered widgets and data-source mapping.
+- Added root `CHANGELOG.md` with V46-V52 grouped release notes.
 
 ## Notes
 

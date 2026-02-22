@@ -48,7 +48,7 @@ export function EarningsHistoryWidget({ symbol }: EarningsHistoryWidgetProps) {
 
     return (
         <div className="h-full flex flex-col">
-            <div className="pb-2 border-b border-gray-800/50">
+            <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
@@ -66,7 +66,7 @@ export function EarningsHistoryWidget({ symbol }: EarningsHistoryWidgetProps) {
                 ) : (
                     <table className="data-table w-full text-sm">
                         <thead>
-                            <tr className="text-left text-xs text-gray-500 uppercase">
+                            <tr className="text-left text-xs text-[var(--text-muted)] uppercase">
                                 <th className="pb-2 pr-4">Period</th>
                                 <th className="pb-2 pr-4 text-right">EPS</th>
                                 <th className="pb-2 pr-4 text-right">ROE</th>
@@ -77,11 +77,11 @@ export function EarningsHistoryWidget({ symbol }: EarningsHistoryWidgetProps) {
                         </thead>
                         <tbody>
                             {rows.map((row, idx) => (
-                                <tr key={`${row.period || 'period'}-${idx}`} className="border-t border-gray-800/50 hover:bg-gray-800/30">
-                                    <td className="py-2 pr-4 text-gray-300">{formatPeriod(row.period)}</td>
-                                    <td className="py-2 pr-4 text-right text-white font-medium">{formatEps(row.eps ?? null)}</td>
-                                    <td className="py-2 pr-4 text-right text-white">{formatPercent(row.roe ?? null)}</td>
-                                    <td className="py-2 pr-4 text-right text-gray-300">{formatPercent(row.roa ?? null)}</td>
+                                <tr key={`${row.period || 'period'}-${idx}`} className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
+                                    <td className="py-2 pr-4 text-[var(--text-secondary)]">{formatPeriod(row.period)}</td>
+                                    <td className="py-2 pr-4 text-right text-[var(--text-primary)] font-medium">{formatEps(row.eps ?? null)}</td>
+                                    <td className="py-2 pr-4 text-right text-[var(--text-primary)]">{formatPercent(row.roe ?? null)}</td>
+                                    <td className="py-2 pr-4 text-right text-[var(--text-secondary)]">{formatPercent(row.roa ?? null)}</td>
                                     <td className="py-2 pr-4 text-right text-green-400 font-medium">{formatPercent(row.net_margin ?? null)}</td>
                                     <td className="py-2 text-right text-blue-400 font-medium">{formatEps(row.pe ?? null)}</td>
                                 </tr>

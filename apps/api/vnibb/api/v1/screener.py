@@ -294,6 +294,12 @@ async def _refresh_screener_cache(params: StockScreenerParams) -> None:
 
 
 @router.get(
+    "",
+    response_model=StandardResponse[List[ScreenerData]],
+    response_model_by_alias=False,
+    summary="Get Stock Screener Data",
+)
+@router.get(
     "/",
     response_model=StandardResponse[List[ScreenerData]],
     response_model_by_alias=False,

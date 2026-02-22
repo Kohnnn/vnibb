@@ -7,6 +7,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useMarketHeatmap } from '@/lib/queries';
 
 interface SectorBreakdownWidgetProps {
@@ -43,7 +44,7 @@ function SectorBreakdownWidgetComponent({ id, onRemove }: SectorBreakdownWidgetP
   return (
     <WidgetContainer title="Market Sector Breakdown" onRefresh={() => refetch()} onClose={onRemove} isLoading={isLoading && !hasData}>
       <div className="h-full w-full flex flex-col">
-        <div className="pb-2 border-b border-gray-800/50">
+        <div className="pb-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
@@ -61,42 +62,44 @@ function SectorBreakdownWidgetComponent({ id, onRemove }: SectorBreakdownWidgetP
             <WidgetEmpty message="Sector data will appear when available." icon={<LayoutGrid size={18} />} />
           ) : (
             <div className="w-full h-full min-h-[220px]">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
-                <PieChart>
-                  <Pie
-                    data={chartData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={40}
-                    outerRadius={70}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {chartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'var(--bg-secondary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                    }}
-                    itemStyle={{ color: 'var(--text-primary)', fontSize: '10px' }}
-                    formatter={(value: any, _name, props: any) => {
-                      const payload = props?.payload;
-                      const share = payload?.share ? `${payload.share.toFixed(1)}%` : '-';
-                      return [`${share}`, 'Share'];
-                    }}
-                  />
-                  <Legend
-                    verticalAlign="bottom"
-                    height={36}
-                    iconType="circle"
-                    wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              <ChartMountGuard className="h-full" minHeight={200}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
+                  <PieChart>
+                    <Pie
+                      data={chartData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={40}
+                      outerRadius={70}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {chartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                      }}
+                      itemStyle={{ color: 'var(--text-primary)', fontSize: '10px' }}
+                      formatter={(value: any, _name, props: any) => {
+                        const payload = props?.payload;
+                        const share = payload?.share ? `${payload.share.toFixed(1)}%` : '-';
+                        return [`${share}`, 'Share'];
+                      }}
+                    />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      iconType="circle"
+                      wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </ChartMountGuard>
             </div>
           )}
         </div>

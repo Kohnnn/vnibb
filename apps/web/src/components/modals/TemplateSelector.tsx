@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useState } from 'react';
-import { X, Layout, TrendingUp, Search, Newspaper, Box, ChevronRight } from 'lucide-react';
+import { X, Layout, TrendingUp, Search, Newspaper, ChevronRight } from 'lucide-react';
 import { DASHBOARD_TEMPLATES, DashboardTemplate } from '@/types/dashboard-templates';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -19,6 +19,20 @@ const CATEGORY_ICONS: Record<string, any> = {
   overview: Newspaper,
 };
 
+const CATEGORY_PREVIEW_STYLES: Record<string, string> = {
+  trading: 'from-emerald-500/15 via-emerald-500/5 to-cyan-500/10',
+  analysis: 'from-sky-500/15 via-blue-500/5 to-cyan-500/10',
+  research: 'from-amber-500/15 via-orange-500/5 to-yellow-500/10',
+  overview: 'from-blue-500/15 via-indigo-500/5 to-cyan-500/10',
+};
+
+function formatWidgetType(type: string) {
+  return type
+    .split('_')
+    .map(chunk => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(' ');
+}
+
 function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: TemplateSelectorProps) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
@@ -33,7 +47,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-4xl max-h-[85vh] bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+        className="w-full max-w-4xl max-h-[85vh] bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-[var(--border-default)] bg-[var(--bg-surface)]">
@@ -91,14 +105,37 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
                 }}
                 className="group flex flex-col text-left transition-all duration-300 focus:outline-none"
               >
-                {/* Thumbnail Placeholder */}
-                <div className="aspect-video w-full mb-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-default)] flex items-center justify-center relative overflow-hidden group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] transition-all">
-                  <Box className="w-12 h-12 text-[var(--text-muted)]/40 group-hover:text-blue-500/30 transition-colors" strokeWidth={1} />
-                  
-                  {/* Hover Overlay */}
+                <div className={cn(
+                  "aspect-video w-full mb-3 rounded-xl border border-[var(--border-default)] relative overflow-hidden group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] transition-all",
+                  "bg-gradient-to-br",
+                  CATEGORY_PREVIEW_STYLES[template.category] || CATEGORY_PREVIEW_STYLES.overview
+                )}>
+                  <div className="absolute inset-0 p-3 flex flex-col justify-between">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {template.widgets.slice(0, 3).map((widget, idx) => (
+                        <div
+                          key={`${template.id}-preview-top-${idx}`}
+                          className="h-5 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/85"
+                        />
+                      ))}
+                    </div>
+                    <div className="space-y-1">
+                      {template.widgets.slice(0, 3).map((widget, idx) => (
+                        <div
+                          key={`${template.id}-preview-label-${idx}`}
+                          className="inline-flex items-center mr-1 mb-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-1.5 py-0.5"
+                        >
+                          <span className="text-[8px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">
+                            {formatWidgetType(widget.type)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/5 transition-colors flex items-center justify-center">
                     <div className="px-4 py-2 bg-blue-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transform translate-y-2 group-hover:translate-y-0 transition-all">
-                        Apply Template
+                      Apply Template
                     </div>
                   </div>
                 </div>

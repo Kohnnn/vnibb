@@ -132,7 +132,7 @@ export function RSRankingWidget({ widgetGroup }: RSRankingWidgetProps) {
     };
 
     return (
-        <div className="h-full flex flex-col space-y-3 overflow-hidden">
+        <div aria-label="RS rankings" className="h-full flex flex-col space-y-3 overflow-hidden">
             <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
                     <Zap size={14} className="text-blue-400" />
@@ -149,6 +149,7 @@ export function RSRankingWidget({ widgetGroup }: RSRankingWidgetProps) {
                     <button
                         onClick={handleRefresh}
                         disabled={activeQuery.isFetching}
+                        aria-label="Refresh RS rankings"
                         className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
                         type="button"
                     >

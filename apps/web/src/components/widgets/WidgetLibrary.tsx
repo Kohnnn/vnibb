@@ -86,7 +86,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         onClick={onClose}
-                        className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[40]"
+                        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[40]"
                     />
 
                     {/* Sidebar */}
@@ -95,30 +95,33 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: -350, opacity: 0 }}
                         transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-                        className="fixed left-16 md:left-[220px] top-4 bottom-4 w-[calc(100vw-5rem)] md:w-96 max-w-[28rem] bg-gray-900/90 backdrop-blur-2xl border border-white/10 rounded-2xl z-[65] flex flex-col shadow-2xl overflow-hidden"
+                        className="fixed left-16 md:left-[220px] top-4 bottom-4 w-[calc(100vw-5rem)] md:w-96 max-w-[28rem] bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-2xl z-[65] flex flex-col shadow-2xl overflow-hidden"
                     >
                         {/* Header */}
-                        <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-900/30">
+                        <div className="p-4 border-b border-[var(--border-default)] flex items-center justify-between bg-[var(--bg-surface)]">
                             <div className="flex items-center gap-2">
                                 <Layers size={18} className="text-blue-500" />
-                                <span className="text-sm font-black uppercase tracking-widest text-white">Components</span>
+                                <span className="text-sm font-black uppercase tracking-widest text-[var(--text-primary)]">Components</span>
                             </div>
-                            <button onClick={onClose} className="p-1 hover:bg-white/5 rounded text-gray-500 hover:text-white transition-colors">
+                            <button
+                                onClick={onClose}
+                                className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                            >
                                 <X size={18} />
                             </button>
                         </div>
 
                         {/* Search */}
-                        <div className="p-3 border-b border-gray-800 bg-black/20">
+                        <div className="p-3 border-b border-[var(--border-default)] bg-[var(--bg-secondary)]">
                             <div className="relative">
-                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600" />
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
                                 <input
                                     type="text"
                                     autoFocus
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     placeholder="Search widgets..."
-                                    className="w-full pl-9 pr-3 py-2 bg-gray-950 border border-gray-800 rounded-lg text-xs text-white placeholder-gray-700 outline-none focus:border-blue-500/50 transition-all font-medium"
+                                    className="w-full pl-9 pr-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-blue-500/50 transition-all font-medium"
                                 />
                             </div>
                         </div>
@@ -127,8 +130,8 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         <div className="flex-1 overflow-y-auto scrollbar-hide">
                             {/* Recents */}
                             {searchQuery === '' && recentWidgetTypes.length > 0 && (
-                                <div className="border-b border-gray-800/50">
-                                    <div className="px-4 py-2 text-[9px] font-black text-gray-700 uppercase tracking-[0.2em] bg-black/10 flex items-center gap-2">
+                                <div className="border-b border-[var(--border-subtle)]">
+                                    <div className="px-4 py-2 text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] bg-[var(--bg-secondary)] flex items-center gap-2">
                                         <Clock size={10} />
                                         Recently Used
                                     </div>
@@ -140,9 +143,9 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                 <button
                                                     key={type}
                                                     onClick={() => handleAddWidget(widget)}
-                                                    className="p-2 rounded-lg bg-gray-900/50 border border-gray-800 hover:border-blue-500/50 hover:bg-blue-500/5 transition-all text-left group"
+                                                    className="p-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-blue-500/50 hover:bg-blue-500/5 transition-all text-left group"
                                                 >
-                                                    <div className="text-[10px] font-bold text-gray-400 group-hover:text-blue-400 truncate uppercase tracking-tighter">
+                                                    <div className="text-[10px] font-bold text-[var(--text-secondary)] group-hover:text-blue-400 truncate uppercase tracking-tighter">
                                                         {widget.name}
                                                     </div>
                                                 </button>
@@ -158,35 +161,35 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                 const isExpanded = activeCategory === cat.id || searchQuery !== '';
 
                                 return (
-                                    <div key={cat.id} className="border-b border-gray-800/50 last:border-0">
+                                    <div key={cat.id} className="border-b border-[var(--border-subtle)] last:border-0">
                                         <button
                                             onClick={() => setActiveCategory(isExpanded && searchQuery === '' ? null : cat.id)}
                                             className={cn(
                                                 "w-full flex items-center justify-between px-4 py-3 text-left transition-colors",
-                                                isExpanded ? "bg-blue-600/5" : "hover:bg-white/5"
+                                                isExpanded ? "bg-blue-600/5" : "hover:bg-[var(--bg-hover)]"
                                             )}
                                         >
                                             <div className="flex items-center gap-3">
-                                                <Icon size={16} className={cn(isExpanded ? "text-blue-400" : "text-gray-500")} />
-                                                <span className={cn("text-[11px] font-bold uppercase tracking-tighter", isExpanded ? "text-white" : "text-gray-400")}>
+                                                <Icon size={16} className={cn(isExpanded ? "text-blue-400" : "text-[var(--text-muted)]")} />
+                                                <span className={cn("text-[11px] font-bold uppercase tracking-tighter", isExpanded ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]")}>
                                                     {cat.name}
                                                 </span>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[10px] text-gray-700 font-black">{cat.widgets.length}</span>
-                                                <ChevronRight size={14} className={cn("text-gray-700 transition-transform duration-200", isExpanded && "rotate-90 text-blue-500")} />
+                                                <span className="text-[10px] text-[var(--text-muted)] font-black">{cat.widgets.length}</span>
+                                                <ChevronRight size={14} className={cn("text-[var(--text-muted)] transition-transform duration-200", isExpanded && "rotate-90 text-blue-500")} />
                                             </div>
                                         </button>
 
                                         {isExpanded && (
-                                            <div className="p-1 space-y-1 bg-black/10">
+                                            <div className="p-1 space-y-1 bg-[var(--bg-secondary)]/60">
                                                 {cat.widgets.map((widget) => (
                                                     <div
                                                         key={widget.type}
-                                                        className="p-3 rounded-xl border border-transparent hover:border-gray-800 hover:bg-gray-900/50 transition-all group cursor-default"
+                                                        className="p-3 rounded-xl border border-transparent hover:border-[var(--border-default)] hover:bg-[var(--bg-surface)] transition-all group cursor-default"
                                                     >
                                                         <div className="flex items-start justify-between mb-1">
-                                                            <div className="text-[11px] font-black text-gray-200 group-hover:text-blue-400 transition-colors uppercase tracking-tight">
+                                                            <div className="text-[11px] font-black text-[var(--text-primary)] group-hover:text-blue-400 transition-colors uppercase tracking-tight">
                                                                 {widget.name}
                                                             </div>
                                                             <button
@@ -196,16 +199,16 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                                 <Plus size={14} strokeWidth={3} />
                                                             </button>
                                                         </div>
-                                                        <div className="text-[10px] text-gray-600 line-clamp-2 leading-tight font-medium">
+                                                        <div className="text-[10px] text-[var(--text-muted)] line-clamp-2 leading-tight font-medium">
                                                             {widget.description}
                                                         </div>
 
                                                         {/* Enhanced Preview Thumbnail */}
-                                                        <div className="mt-3 h-20 bg-gradient-to-b from-gray-950 to-gray-900 rounded-xl border border-gray-800/50 relative overflow-hidden group-hover:border-blue-500/30 transition-all">
+                                                        <div className="mt-3 h-20 bg-[var(--bg-primary)] rounded-xl border border-[var(--border-subtle)] relative overflow-hidden group-hover:border-blue-500/30 transition-all">
                                                             <WidgetPreview type={widget.type} />
-                                                            <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                                                            <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                                                             <div className="absolute bottom-1.5 left-2 right-2 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                <span className="text-[7px] font-bold text-gray-600 bg-gray-900/80 px-1 rounded">
+                                                                <span className="text-[7px] font-bold text-[var(--text-muted)] bg-[var(--bg-surface)] px-1 rounded">
                                                                     {widget.defaultLayout.w}×{widget.defaultLayout.h}
                                                                 </span>
                                                                 <Maximize2 size={10} className="text-blue-400/60" />
@@ -221,8 +224,8 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         </div>
 
                         {/* Footer */}
-                        <div className="p-4 border-t border-gray-800 bg-gray-900/50">
-                            <div className="flex items-center gap-3 text-[10px] font-bold text-gray-600 uppercase tracking-widest">
+                        <div className="p-4 border-t border-[var(--border-default)] bg-[var(--bg-secondary)]">
+                            <div className="flex items-center gap-3 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                                 <Info size={14} className="text-blue-500" />
                                 <span>Click + to add to dashboard</span>
                             </div>

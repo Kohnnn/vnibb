@@ -1055,14 +1055,45 @@ export interface FinancialStatementData {
     operating_income?: number;
     net_income?: number;
     ebitda?: number;
+    eps?: number;
+    eps_diluted?: number;
+    cost_of_revenue?: number;
+    pre_tax_profit?: number;
+    profit_before_tax?: number;
+    tax_expense?: number;
+    interest_expense?: number;
+    depreciation?: number;
+    selling_general_admin?: number;
+    research_development?: number;
+    other_income?: number;
     total_assets?: number;
+    current_assets?: number;
+    fixed_assets?: number;
     total_liabilities?: number;
+    current_liabilities?: number;
+    long_term_liabilities?: number;
+    short_term_debt?: number;
+    long_term_debt?: number;
     total_equity?: number;
+    retained_earnings?: number;
     cash_and_equivalents?: number;
+    cash?: number;
+    inventory?: number;
+    accounts_receivable?: number;
+    accounts_payable?: number;
+    goodwill?: number;
+    intangible_assets?: number;
     operating_cash_flow?: number;
     investing_cash_flow?: number;
     financing_cash_flow?: number;
     free_cash_flow?: number;
+    net_change_in_cash?: number;
+    net_cash_flow?: number;
+    capex?: number;
+    capital_expenditure?: number;
+    dividends_paid?: number;
+    stock_repurchased?: number;
+    debt_repayment?: number;
     raw_data?: Record<string, unknown>;
 }
 
@@ -1183,7 +1214,7 @@ export interface PeersResponse {
 }
 
 export async function getPeerCompanies(symbol: string, limit = 5): Promise<PeersResponse> {
-    return fetchAPI<PeersResponse>(`/compare/peers/${symbol}`, {
+    return fetchAPI<PeersResponse>(`/equity/${symbol}/peers`, {
         params: { limit },
     });
 }

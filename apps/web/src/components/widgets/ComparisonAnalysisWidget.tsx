@@ -199,7 +199,7 @@ function ComparisonAnalysisWidgetComponent({
                     <button
                       type="button"
                       onClick={() => removeSymbol(ticker)}
-                      className="rounded p-0.5 text-current/80 transition-colors hover:bg-black/10"
+                      className="rounded p-0.5 text-current/80 transition-colors hover:bg-[var(--bg-hover)]"
                       aria-label={`Remove ${ticker}`}
                     >
                       <X size={11} />

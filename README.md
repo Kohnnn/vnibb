@@ -102,6 +102,15 @@ pnpm ci:gate:win
 
 ---
 
+## 📚 Documentation
+
+- API reference: `docs/API_REFERENCE.md`
+- Widget catalog: `docs/WIDGET_CATALOG.md`
+- Production health tracking: `docs/v47_production_health.md`
+- Sprint summary changes: `CHANGELOG.md`
+
+---
+
 ## 📦 Packages
 
 ### NPM Packages

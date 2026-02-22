@@ -75,7 +75,7 @@ function RangeInput({
 }) {
     return (
         <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-400 font-medium">{label}</label>
+            <label className="text-xs text-[var(--text-secondary)] font-medium">{label}</label>
             <div className="flex items-center gap-2">
                 <input
                     type="number"
@@ -84,9 +84,9 @@ function RangeInput({
                     aria-label={`${label} minimum`}
                     onChange={(e) => onMinChange(e.target.value ? parseFloat(e.target.value) : undefined)}
                     placeholder={placeholder.min}
-                    className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
+                    className="w-20 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-2 py-1 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-blue-500"
                 />
-                <span className="text-gray-500">-</span>
+                <span className="text-[var(--text-muted)]">-</span>
                 <input
                     type="number"
                     step={step}
@@ -94,7 +94,7 @@ function RangeInput({
                     aria-label={`${label} maximum`}
                     onChange={(e) => onMaxChange(e.target.value ? parseFloat(e.target.value) : undefined)}
                     placeholder={placeholder.max}
-                    className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
+                    className="w-20 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-2 py-1 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-blue-500"
                 />
             </div>
         </div>
@@ -118,7 +118,7 @@ function MinInput({
 }) {
     return (
         <div className="flex flex-col gap-1">
-            <label className="text-xs text-gray-400 font-medium">{label}</label>
+            <label className="text-xs text-[var(--text-secondary)] font-medium">{label}</label>
             <div className="flex items-center gap-1">
                 <input
                     type="number"
@@ -127,9 +127,9 @@ function MinInput({
                     aria-label={`${label} minimum`}
                     onChange={(e) => onChange(e.target.value ? parseFloat(e.target.value) : undefined)}
                     placeholder={placeholder}
-                    className="w-24 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
+                    className="w-24 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-2 py-1 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-blue-500"
                 />
-                {suffix && <span className="text-xs text-gray-500">{suffix}</span>}
+                {suffix && <span className="text-xs text-[var(--text-muted)]">{suffix}</span>}
             </div>
         </div>
     );
@@ -197,12 +197,12 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
     const hasActiveFilters = Object.values(filters).some(v => v !== undefined);
 
     return (
-        <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 mb-4">
+        <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-lg p-4 mb-4">
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                     <Filter size={16} className="text-blue-400" />
-                    <span className="text-sm font-medium text-white">Advanced Filters</span>
+                    <span className="text-sm font-medium text-[var(--text-primary)]">Advanced Filters</span>
                     {hasActiveFilters && (
                         <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">
                             Active
@@ -218,7 +218,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
                                 resetFilters();
                             }
                         }}
-                        className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-white transition-colors"
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                         title="Reset filters"
                         aria-label="Reset filters"
                     >
@@ -228,7 +228,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
                     {onClose && (
                         <button
                             onClick={onClose}
-                            className="p-1 text-gray-400 hover:text-white transition-colors"
+                            className="p-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                         >
                             <X size={16} />
                         </button>
@@ -240,7 +240,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Valuation */}
                 <div>
-                    <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-3">
+                    <h4 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
                         Valuation
                     </h4>
                     <div className="space-y-3">
@@ -270,7 +270,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
 
                 {/* Fundamentals */}
                 <div>
-                    <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-3">
+                    <h4 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
                         Fundamentals
                     </h4>
                     <div className="space-y-3">
@@ -299,7 +299,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
 
                 {/* Trading */}
                 <div>
-                    <h4 className="text-xs font-semibold text-gray-300 uppercase tracking-wider mb-3">
+                    <h4 className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">
                         Trading
                     </h4>
                     <div className="space-y-3">
@@ -324,9 +324,9 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
             </div>
 
             {/* Presets */}
-            <div className="mt-4 pt-4 border-t border-gray-800">
+            <div className="mt-4 pt-4 border-t border-[var(--border-default)]">
                 <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                    <span className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
                         Quick Presets
                     </span>
                     <button
@@ -342,7 +342,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
                         <button
                             key={preset.name}
                             onClick={() => loadPreset(preset)}
-                            className="px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded transition-colors"
+                            className="px-3 py-1.5 text-xs bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] rounded transition-colors"
                         >
                             {preset.name}
                         </button>
@@ -351,13 +351,13 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
                         <div key={preset.name} className="flex items-center gap-1">
                             <button
                                 onClick={() => loadPreset(preset)}
-                                className="px-3 py-1.5 text-xs bg-blue-900/30 hover:bg-blue-900/50 text-blue-300 rounded-l transition-colors"
+                                className="px-3 py-1.5 text-xs bg-blue-600/15 hover:bg-blue-600/25 text-blue-300 rounded-l transition-colors"
                             >
                                 {preset.name}
                             </button>
                             <button
                                 onClick={() => deletePreset(preset.name)}
-                                className="px-1.5 py-1.5 text-xs bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded-r transition-colors"
+                                className="px-1.5 py-1.5 text-xs bg-red-600/15 hover:bg-red-600/25 text-red-400 rounded-r transition-colors"
                             >
                                 <X size={12} />
                             </button>
@@ -368,22 +368,22 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
 
             {/* Save Preset Modal */}
             {showPresetModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 w-80">
-                        <h3 className="text-sm font-medium text-white mb-3">Save Filter Preset</h3>
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+                    <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-lg p-4 w-80 shadow-2xl">
+                        <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">Save Filter Preset</h3>
                         <input
                             type="text"
                             value={presetName}
                             aria-label="Preset name"
                             onChange={(e) => setPresetName(e.target.value)}
                             placeholder="Preset name"
-                            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 mb-3"
+                            className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-blue-500 mb-3"
                             autoFocus
                         />
                         <div className="flex justify-end gap-2">
                             <button
                                 onClick={() => setShowPresetModal(false)}
-                                className="px-3 py-1.5 text-sm text-gray-400 hover:text-white transition-colors"
+                                className="px-3 py-1.5 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                             >
                                 Cancel
                             </button>

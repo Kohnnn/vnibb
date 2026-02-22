@@ -105,6 +105,15 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
 ---
 
+## 📚 Documentation
+
+Workspace docs:
+- `../../docs/WIDGET_CATALOG.md`
+- `../../docs/API_REFERENCE.md`
+- `../../CHANGELOG.md`
+
+---
+
 ## 🧪 Testing
 
 ```bash

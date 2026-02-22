@@ -1010,6 +1010,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             }
 
             dashboards = migrateLegacySidebarDashboards(dashboards);
+            dashboards = migrateStaleNewTabs(dashboards);
             const cleanedSidebar = migrateSidebarClutter(dashboards, folders);
             dashboards = cleanedSidebar.dashboards;
             folders = cleanedSidebar.folders;

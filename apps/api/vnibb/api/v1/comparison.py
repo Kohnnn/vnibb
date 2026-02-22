@@ -6,6 +6,23 @@ from vnibb.services.comparison_service import get_comparison_data, get_multi_per
 router = APIRouter()
 
 
+async def _build_comparison_response(symbols: str, period: str) -> ComparisonResponse:
+    symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+
+    if len(symbol_list) < 2:
+        raise HTTPException(400, "At least 2 symbols required")
+    if len(symbol_list) > 6:
+        raise HTTPException(400, "Maximum 6 symbols allowed")
+
+    stocks = await get_comparison_data(symbol_list, period)
+
+    return ComparisonResponse(
+        metrics=COMPARISON_METRICS,
+        stocks=stocks,
+        period=period,
+    )
+
+
 @router.get("/performance")
 async def get_multi_performance(
     symbols: str = Query(..., description="Comma-separated stock symbols (max 5)"),
@@ -27,6 +44,7 @@ async def get_multi_performance(
         return []
 
 
+@router.get("", response_model=ComparisonResponse)
 @router.get("/", response_model=ComparisonResponse)
 async def compare_stocks(
     symbols: str = Query(..., description="Comma-separated stock symbols (max 6)"),
@@ -37,17 +55,17 @@ async def compare_stocks(
 
     Example: /comparison?symbols=VNM,FPT,VIC&period=FY
     """
-    symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    return await _build_comparison_response(symbols=symbols, period=period)
 
-    if len(symbol_list) < 2:
-        raise HTTPException(400, "At least 2 symbols required")
-    if len(symbol_list) > 6:
-        raise HTTPException(400, "Maximum 6 symbols allowed")
 
-    stocks = await get_comparison_data(symbol_list, period)
+@router.get("/{symbols}", response_model=ComparisonResponse)
+async def compare_stocks_path(
+    symbols: str,
+    period: str = Query("FY", description="Period: FY, Q1, Q2, Q3, Q4, TTM"),
+):
+    """
+    Compatibility route for path-style symbol lists.
 
-    return ComparisonResponse(
-        metrics=COMPARISON_METRICS,
-        stocks=stocks,
-        period=period,
-    )
+    Example: /comparison/VNM,FPT,VIC?period=FY
+    """
+    return await _build_comparison_response(symbols=symbols, period=period)

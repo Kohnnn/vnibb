@@ -59,7 +59,7 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
   };
 
   const headerActions = (
-    <div className="flex bg-gray-900 rounded p-0.5 border border-gray-800 mr-2">
+    <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-default)] mr-2">
       {(['gainers', 'losers'] as const).map((type) => (
         <button
           key={type}
@@ -70,7 +70,7 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
               ? type === 'gainers'
                 ? 'bg-green-600 text-white'
                 : 'bg-red-600 text-white'
-              : 'text-gray-500 hover:text-gray-300'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
           )}
         >
           {type}
@@ -95,7 +95,7 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
       noPadding
     >
       <div className="h-full flex flex-col relative group/widget">
-        <div className="px-3 py-2 border-b border-gray-800/50">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={updatedAt}
             isFetching={isFetching && hasData}
@@ -106,22 +106,22 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
         </div>
         <button
           onClick={() => scroll('left')}
-          className="absolute left-0 top-1/2 -translate-y-1/2 z-20 p-1.5 bg-black/80 text-white rounded-r-lg border-r border-y border-gray-800 opacity-0 group-hover/widget:opacity-100 transition-opacity"
+          className="absolute left-0 top-1/2 -translate-y-1/2 z-20 p-1.5 bg-[var(--bg-surface)]/95 text-[var(--text-primary)] rounded-r-lg border-r border-y border-[var(--border-default)] opacity-0 group-hover/widget:opacity-100 transition-opacity"
           type="button"
         >
           <ChevronLeft size={16} />
         </button>
         <button
           onClick={() => scroll('right')}
-          className="absolute right-0 top-1/2 -translate-y-1/2 z-20 p-1.5 bg-black/80 text-white rounded-l-lg border-l border-y border-gray-800 opacity-0 group-hover/widget:opacity-100 transition-opacity"
+          className="absolute right-0 top-1/2 -translate-y-1/2 z-20 p-1.5 bg-[var(--bg-surface)]/95 text-[var(--text-primary)] rounded-l-lg border-l border-y border-[var(--border-default)] opacity-0 group-hover/widget:opacity-100 transition-opacity"
           type="button"
         >
           <ChevronRight size={16} />
         </button>
 
-        <div ref={scrollRef} className="flex-1 flex overflow-x-auto scrollbar-hide select-none bg-black">
+        <div ref={scrollRef} className="flex-1 flex overflow-x-auto scrollbar-hide select-none bg-[var(--bg-primary)]">
           {isLoading && !hasData ? (
-            <div className="flex flex-col items-center justify-center w-full text-gray-600 gap-2">
+            <div className="flex flex-col items-center justify-center w-full text-[var(--text-muted)] gap-2">
               <WidgetSkeleton lines={4} />
             </div>
           ) : error && !hasData ? (
@@ -166,7 +166,7 @@ function SectorColumn({
           isPositive ? 'border-b-green-900/30' : 'border-b-red-900/30'
         )}
       >
-        <div className="text-[9px] font-black text-gray-500 uppercase tracking-widest truncate mb-0.5">
+        <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest truncate mb-0.5">
           {sector.sector_vi || sector.sector}
         </div>
         <div
@@ -176,11 +176,11 @@ function SectorColumn({
           )}
         >
           <span>{isPositive ? '+' : ''}{avgChange.toFixed(2)}%</span>
-          <span className="text-[8px] text-gray-600">{stocks.length}</span>
+          <span className="text-[8px] text-[var(--text-muted)]">{stocks.length}</span>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide divide-y divide-gray-800/20">
+      <div className="flex-1 overflow-y-auto scrollbar-hide divide-y divide-[var(--border-subtle)]">
         {stocks.map((stock, index) => (
           <StockRow key={`${stock.symbol}-${index}`} stock={stock} onSelect={onSelectSymbol} />
         ))}
@@ -203,7 +203,7 @@ function StockRow({ stock, onSelect }: { stock: StockPerformance; onSelect: (sym
         }
       }}
       className={cn(
-        'w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30',
+        'w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--bg-hover)] transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30',
         isPositive
           ? (stock.change_pct || 0) > 4
             ? 'bg-green-500/10'
@@ -218,7 +218,7 @@ function StockRow({ stock, onSelect }: { stock: StockPerformance; onSelect: (sym
           {stock.symbol}
         </span>
         {stock.volume && (
-          <span className="text-[8px] font-bold text-gray-600">
+          <span className="text-[8px] font-bold text-[var(--text-muted)]">
             {(stock.volume / 1000).toFixed(0)}K
           </span>
         )}
@@ -232,7 +232,7 @@ function StockRow({ stock, onSelect }: { stock: StockPerformance; onSelect: (sym
         >
           {isPositive ? '+' : ''}{(stock.change_pct || 0).toFixed(1)}%
         </div>
-        <div className="text-[9px] font-bold text-gray-300 font-mono">
+        <div className="text-[9px] font-bold text-[var(--text-secondary)] font-mono">
           {stock.price.toLocaleString()}
         </div>
       </div>

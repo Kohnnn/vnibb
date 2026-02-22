@@ -102,20 +102,20 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
             <select
                 value={groupBy}
                 onChange={(e) => setGroupBy(e.target.value as any)}
-                className="bg-gray-900 text-[9px] font-black uppercase text-gray-400 border border-gray-800 rounded px-1.5 py-0.5 outline-none hover:text-white transition-colors"
+                className="bg-[var(--bg-secondary)] text-[9px] font-black uppercase text-[var(--text-secondary)] border border-[var(--border-default)] rounded px-1.5 py-0.5 outline-none hover:text-[var(--text-primary)] transition-colors"
             >
                 <option value="sector">By Sector</option>
                 <option value="industry">By Industry</option>
             </select>
 
-            <div className="flex bg-gray-900 rounded p-0.5 border border-gray-800">
+            <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-default)]">
                 {['HOSE', 'HNX', 'ALL'].map(m => (
                     <button
                         key={m}
                         onClick={() => setExchange(m as any)}
                         className={cn(
                             "px-2 py-0.5 text-[9px] font-bold rounded transition-all",
-                            exchange === m ? "bg-blue-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-300"
+                            exchange === m ? "bg-blue-600 text-white shadow-sm" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                         )}
                     >
                         {m}
@@ -125,7 +125,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
 
             <button
                 onClick={handleExport}
-                className="p-1 text-gray-500 hover:text-blue-400 transition-colors"
+                className="p-1 text-[var(--text-muted)] hover:text-blue-400 transition-colors"
                 title="Export Image"
             >
                 <Download size={14} />
@@ -146,7 +146,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
             noPadding
             widgetId={id}
         >
-            <div className="h-full flex flex-col bg-black">
+            <div className="h-full flex flex-col bg-[var(--bg-primary)]">
                 <div className="flex-1 overflow-hidden relative">
                     {isLoading && !hasData ? (
                         <WidgetSkeleton variant="chart" />
@@ -172,7 +172,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                 height={height}
                                                 fill={color}
                                                 className="hover:brightness-110 transition-all cursor-pointer hover:stroke-white/20 hover:stroke-2"
-                                                stroke="#000"
+                                                stroke="var(--border-default)"
                                                 strokeWidth={1}
                                             >
                                                 <title>
@@ -201,9 +201,9 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                 </div>
 
                 {/* Legend bar */}
-                <div className="px-3 py-2 border-t border-gray-800 bg-gray-950 flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.3)] z-10">
+                <div className="px-3 py-2 border-t border-[var(--border-default)] bg-[var(--bg-secondary)] flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.2)] z-10">
                     <div className="flex items-center gap-3">
-                        <div className="flex h-1.5 w-32 rounded-full overflow-hidden border border-gray-800/50 shadow-inner">
+                        <div className="flex h-1.5 w-32 rounded-full overflow-hidden border border-[var(--border-subtle)] shadow-inner">
                             <div className="flex-1 bg-blue-500" title="Floor" />
                             <div className="flex-1 bg-red-600" />
                             <div className="flex-1 bg-yellow-600" />
@@ -211,14 +211,14 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                             <div className="flex-1 bg-green-500" />
                             <div className="flex-1 bg-cyan-500" title="Ceiling" />
                         </div>
-                        <span className="text-[8px] font-black text-gray-500 uppercase tracking-tighter">-7% to +7%</span>
+                        <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tighter">-7% to +7%</span>
                     </div>
                     <div className="flex items-center gap-3">
                         {data && (
-                            <div className="flex items-center gap-2 text-[9px] font-bold text-gray-600 uppercase tracking-widest">
-                                <span className="text-gray-400">{data.count}</span> Stocks
-                                <span className="text-gray-700">•</span>
-                                <span className="text-gray-400">{data.sectors.length}</span> Groups
+                            <div className="flex items-center gap-2 text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
+                                <span className="text-[var(--text-secondary)]">{data.count}</span> Stocks
+                                <span className="text-[var(--text-muted)]">•</span>
+                                <span className="text-[var(--text-secondary)]">{data.sectors.length}</span> Groups
                             </div>
                         )}
                         <WidgetMeta

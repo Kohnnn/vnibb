@@ -91,6 +91,14 @@ class FinancialStatementData(BaseModel):
     ebitda: float | None = Field(None, description="EBITDA")
     eps: float | None = Field(None, description="Earnings Per Share")
     eps_diluted: float | None = Field(None, description="Diluted EPS")
+    cost_of_revenue: float | None = Field(None, description="Cost of Revenue")
+    pre_tax_profit: float | None = Field(None, description="Profit Before Tax")
+    tax_expense: float | None = Field(None, description="Tax Expense")
+    interest_expense: float | None = Field(None, description="Interest Expense")
+    depreciation: float | None = Field(None, description="Depreciation")
+    selling_general_admin: float | None = Field(None, description="Selling, General & Admin")
+    research_development: float | None = Field(None, description="Research & Development")
+    other_income: float | None = Field(None, description="Other Income")
 
     # Balance Sheet specific
     total_assets: float | None = Field(None, description="Total Assets")
@@ -100,12 +108,33 @@ class FinancialStatementData(BaseModel):
     equity: float | None = Field(None, description="Equity")
     cash: float | None = Field(None, description="Cash")
     inventory: float | None = Field(None, description="Inventory")
+    current_assets: float | None = Field(None, description="Current Assets")
+    fixed_assets: float | None = Field(None, description="Fixed Assets")
+    current_liabilities: float | None = Field(None, description="Current Liabilities")
+    long_term_liabilities: float | None = Field(None, description="Long-term Liabilities")
+    retained_earnings: float | None = Field(None, description="Retained Earnings")
+    short_term_debt: float | None = Field(None, description="Short-term Debt")
+    long_term_debt: float | None = Field(None, description="Long-term Debt")
+    accounts_receivable: float | None = Field(None, description="Accounts Receivable")
+    accounts_payable: float | None = Field(None, description="Accounts Payable")
+    goodwill: float | None = Field(None, description="Goodwill")
+    intangible_assets: float | None = Field(None, description="Intangible Assets")
 
     # Cash Flow specific
     operating_cash_flow: float | None = Field(None, description="Operating Cash Flow")
     investing_cash_flow: float | None = Field(None, description="Investing Cash Flow")
     financing_cash_flow: float | None = Field(None, description="Financing Cash Flow")
     free_cash_flow: float | None = Field(None, description="Free Cash Flow")
+    net_change_in_cash: float | None = Field(None, description="Net Change in Cash")
+    capex: float | None = Field(None, description="Capital Expenditure")
+    capital_expenditure: float | None = Field(None, description="Capital Expenditure")
+    dividends_paid: float | None = Field(None, description="Dividends Paid")
+    stock_repurchased: float | None = Field(None, description="Stock Repurchased")
+    debt_repayment: float | None = Field(None, description="Debt Repayment")
+
+    # Backward-compatible aliases used by existing widgets
+    profit_before_tax: float | None = Field(None, description="Alias of pre_tax_profit")
+    net_cash_flow: float | None = Field(None, description="Alias of net_change_in_cash")
 
     # Raw data for flexibility
     raw_data: dict[str, Any] | None = Field(None, description="Full raw statement data")
@@ -313,7 +342,6 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "net_profit_after_tax": "net_income",
                     "net_profit_atttributable_to_the_equity_holders_of_the_bank": "net_income",
                     "ebitda": "ebitda",
-                    "profit_before_tax": "ebitda",
                     "profit_before_tax_and_interest": "ebitda",
                     "eps": "eps",
                     "earning_per_share": "eps",
@@ -323,6 +351,27 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "earning_per_share_vnd": "eps",
                     "diluted_eps": "eps_diluted",
                     "eps_diluted": "eps_diluted",
+                    "cost_of_goods_sold": "cost_of_revenue",
+                    "cost_of_sales": "cost_of_revenue",
+                    "cost_of_revenue": "cost_of_revenue",
+                    "income_before_tax": "pre_tax_profit",
+                    "profit_before_tax": "pre_tax_profit",
+                    "pretax_income": "pre_tax_profit",
+                    "income_tax": "tax_expense",
+                    "income_tax_expense": "tax_expense",
+                    "tax_expense": "tax_expense",
+                    "corporate_income_tax": "tax_expense",
+                    "interest_expense": "interest_expense",
+                    "interest_cost": "interest_expense",
+                    "depreciation": "depreciation",
+                    "depreciation_and_amortization": "depreciation",
+                    "selling_general_admin": "selling_general_admin",
+                    "selling_expenses": "selling_general_admin",
+                    "selling_and_admin_expenses": "selling_general_admin",
+                    "research_and_development": "research_development",
+                    "research_development": "research_development",
+                    "rd_expense": "research_development",
+                    "other_income": "other_income",
                 }
             if statement == StatementType.BALANCE.value:
                 return {
@@ -346,6 +395,23 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "cash_and_bank": "cash_and_equivalents",
                     "inventory": "inventory",
                     "inventories": "inventory",
+                    "current_assets": "current_assets",
+                    "fixed_assets": "fixed_assets",
+                    "property_plant_and_equipment": "fixed_assets",
+                    "current_liabilities": "current_liabilities",
+                    "long_term_liabilities": "long_term_liabilities",
+                    "non_current_liabilities": "long_term_liabilities",
+                    "retained_earnings": "retained_earnings",
+                    "short_term_debt": "short_term_debt",
+                    "short_term_borrowings": "short_term_debt",
+                    "long_term_debt": "long_term_debt",
+                    "long_term_borrowings": "long_term_debt",
+                    "accounts_receivable": "accounts_receivable",
+                    "receivables": "accounts_receivable",
+                    "accounts_payable": "accounts_payable",
+                    "payables": "accounts_payable",
+                    "goodwill": "goodwill",
+                    "intangible_assets": "intangible_assets",
                 }
             return {
                 "operating_cash_flow": "operating_cash_flow",
@@ -368,6 +434,13 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 "freecashflow": "free_cash_flow",
                 "free_cashflow": "free_cash_flow",
                 "net_cash_flows_during_the_period": "free_cash_flow",
+                "net_change_in_cash": "net_change_in_cash",
+                "net_cash_change": "net_change_in_cash",
+                "capital_expenditure": "capex",
+                "capex": "capex",
+                "dividends_paid": "dividends_paid",
+                "stock_repurchased": "stock_repurchased",
+                "debt_repayment": "debt_repayment",
             }
 
         def _pivot_statement_rows(
@@ -433,6 +506,15 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         ebitda=metrics.get("ebitda"),
                         eps=metrics.get("eps"),
                         eps_diluted=metrics.get("eps_diluted"),
+                        cost_of_revenue=metrics.get("cost_of_revenue"),
+                        pre_tax_profit=metrics.get("pre_tax_profit"),
+                        tax_expense=metrics.get("tax_expense"),
+                        interest_expense=metrics.get("interest_expense"),
+                        depreciation=metrics.get("depreciation"),
+                        selling_general_admin=metrics.get("selling_general_admin"),
+                        research_development=metrics.get("research_development"),
+                        other_income=metrics.get("other_income"),
+                        profit_before_tax=metrics.get("pre_tax_profit"),
                         total_assets=metrics.get("total_assets"),
                         total_liabilities=metrics.get("total_liabilities"),
                         total_equity=total_equity,
@@ -440,10 +522,28 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         equity=total_equity,
                         cash=cash_and_equivalents,
                         inventory=metrics.get("inventory"),
+                        current_assets=metrics.get("current_assets"),
+                        fixed_assets=metrics.get("fixed_assets"),
+                        current_liabilities=metrics.get("current_liabilities"),
+                        long_term_liabilities=metrics.get("long_term_liabilities"),
+                        retained_earnings=metrics.get("retained_earnings"),
+                        short_term_debt=metrics.get("short_term_debt"),
+                        long_term_debt=metrics.get("long_term_debt"),
+                        accounts_receivable=metrics.get("accounts_receivable"),
+                        accounts_payable=metrics.get("accounts_payable"),
+                        goodwill=metrics.get("goodwill"),
+                        intangible_assets=metrics.get("intangible_assets"),
                         operating_cash_flow=metrics.get("operating_cash_flow"),
                         investing_cash_flow=metrics.get("investing_cash_flow"),
                         financing_cash_flow=metrics.get("financing_cash_flow"),
                         free_cash_flow=metrics.get("free_cash_flow"),
+                        net_change_in_cash=metrics.get("net_change_in_cash"),
+                        net_cash_flow=metrics.get("net_change_in_cash"),
+                        capex=metrics.get("capex"),
+                        capital_expenditure=metrics.get("capex"),
+                        dividends_paid=metrics.get("dividends_paid"),
+                        stock_repurchased=metrics.get("stock_repurchased"),
+                        debt_repayment=metrics.get("debt_repayment"),
                     )
                 )
             return output
@@ -486,6 +586,37 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         row.get("basicEps"),
                     ),
                     eps_diluted=_pick_number(row.get("epsDiluted"), row.get("dilutedEps")),
+                    cost_of_revenue=_pick_number(
+                        row.get("costOfRevenue"),
+                        row.get("cost_of_revenue"),
+                        row.get("costOfGoodsSold"),
+                    ),
+                    pre_tax_profit=_pick_number(
+                        row.get("incomeBeforeTax"),
+                        row.get("preTaxProfit"),
+                        row.get("profitBeforeTax"),
+                    ),
+                    tax_expense=_pick_number(
+                        row.get("incomeTax"), row.get("taxExpense"), row.get("incomeTaxExpense")
+                    ),
+                    interest_expense=_pick_number(
+                        row.get("interestExpense"), row.get("interest_expense")
+                    ),
+                    depreciation=_pick_number(
+                        row.get("depreciation"), row.get("depreciationAndAmortization")
+                    ),
+                    selling_general_admin=_pick_number(
+                        row.get("sellingGeneralAdmin"), row.get("sellingExpenses")
+                    ),
+                    research_development=_pick_number(
+                        row.get("researchDevelopment"), row.get("researchAndDevelopment")
+                    ),
+                    other_income=_pick_number(row.get("otherIncome"), row.get("other_income")),
+                    profit_before_tax=_pick_number(
+                        row.get("incomeBeforeTax"),
+                        row.get("preTaxProfit"),
+                        row.get("profitBeforeTax"),
+                    ),
                     # Balance sheet
                     total_assets=_pick_number(row.get("totalAssets"), row.get("asset")),
                     total_liabilities=_pick_number(row.get("totalLiabilities"), row.get("debt")),
@@ -496,6 +627,33 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     equity=_pick_number(row.get("totalEquity"), row.get("equity")),
                     cash=_pick_number(row.get("cash"), row.get("cashAndCashEquivalents")),
                     inventory=_pick_number(row.get("inventory"), row.get("inventories")),
+                    current_assets=_pick_number(
+                        row.get("currentAssets"), row.get("current_assets")
+                    ),
+                    fixed_assets=_pick_number(row.get("fixedAssets"), row.get("fixed_assets")),
+                    current_liabilities=_pick_number(
+                        row.get("currentLiabilities"), row.get("current_liabilities")
+                    ),
+                    long_term_liabilities=_pick_number(
+                        row.get("longTermLiabilities"), row.get("long_term_liabilities")
+                    ),
+                    retained_earnings=_pick_number(
+                        row.get("retainedEarnings"), row.get("retained_earnings")
+                    ),
+                    short_term_debt=_pick_number(
+                        row.get("shortTermDebt"), row.get("short_term_debt")
+                    ),
+                    long_term_debt=_pick_number(row.get("longTermDebt"), row.get("long_term_debt")),
+                    accounts_receivable=_pick_number(
+                        row.get("accountsReceivable"), row.get("accounts_receivable")
+                    ),
+                    accounts_payable=_pick_number(
+                        row.get("accountsPayable"), row.get("accounts_payable")
+                    ),
+                    goodwill=_pick_number(row.get("goodwill")),
+                    intangible_assets=_pick_number(
+                        row.get("intangibleAssets"), row.get("intangible_assets")
+                    ),
                     # Cash flow
                     operating_cash_flow=_pick_number(
                         row.get("operatingCashFlow"), row.get("fromOperating")
@@ -507,6 +665,29 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         row.get("financingCashFlow"), row.get("fromFinancing")
                     ),
                     free_cash_flow=_pick_number(row.get("freeCashFlow")),
+                    net_change_in_cash=_pick_number(
+                        row.get("netChangeInCash"),
+                        row.get("net_change_in_cash"),
+                        row.get("netCashFlow"),
+                    ),
+                    net_cash_flow=_pick_number(
+                        row.get("netChangeInCash"),
+                        row.get("net_change_in_cash"),
+                        row.get("netCashFlow"),
+                    ),
+                    capex=_pick_number(row.get("capex"), row.get("capitalExpenditure")),
+                    capital_expenditure=_pick_number(
+                        row.get("capex"), row.get("capitalExpenditure")
+                    ),
+                    dividends_paid=_pick_number(
+                        row.get("dividendsPaid"), row.get("dividends_paid")
+                    ),
+                    stock_repurchased=_pick_number(
+                        row.get("stockRepurchased"), row.get("stock_repurchased")
+                    ),
+                    debt_repayment=_pick_number(
+                        row.get("debtRepayment"), row.get("debt_repayment")
+                    ),
                     # Store raw data for flexibility
                     raw_data=None,
                     updated_at=datetime.utcnow(),

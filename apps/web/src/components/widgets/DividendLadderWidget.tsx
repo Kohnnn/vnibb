@@ -76,8 +76,8 @@ export function DividendLadderWidget({ id, symbol, onRemove }: DividendLadderWid
       noPadding
       widgetId={id}
     >
-      <div className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
+      <div aria-label="Dividend ladder timeline" className="h-full flex flex-col bg-[var(--bg-primary)]">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
@@ -99,17 +99,17 @@ export function DividendLadderWidget({ id, symbol, onRemove }: DividendLadderWid
               {displayEvents.slice(0, 8).map((event, index) => (
                 <div
                   key={`${event.type}-${event.date}-${index}`}
-                  className="flex items-center justify-between rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2"
                 >
                   <div>
-                    <div className="text-xs font-semibold text-gray-200">{event.label}</div>
-                    <div className="text-[10px] text-gray-500">
+                    <div className="text-xs font-semibold text-[var(--text-primary)]">{event.label}</div>
+                    <div className="text-[10px] text-[var(--text-muted)]">
                       {formatDate(event.date, 'short')} • {formatRelativeTime(event.date)}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs font-mono text-gray-200">{formatVND(event.value)}</div>
-                    <div className="text-[10px] text-gray-500">{symbol}</div>
+                    <div className="text-xs font-mono text-[var(--text-primary)]">{formatVND(event.value)}</div>
+                    <div className="text-[10px] text-[var(--text-muted)]">{symbol}</div>
                   </div>
                 </div>
               ))}

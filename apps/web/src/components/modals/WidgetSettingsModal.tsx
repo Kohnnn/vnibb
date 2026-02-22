@@ -65,7 +65,7 @@ export function WidgetSettingsModal({
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="w-full max-w-lg bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="w-full max-w-lg bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-xl shadow-2xl flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-surface)]">
                     <h2 className="text-lg font-semibold text-[var(--text-primary)]">

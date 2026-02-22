@@ -79,7 +79,7 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove }: NewsF
       isLoading={isLoading && !hasData}
       noPadding
     >
-      <div className="h-full flex flex-col bg-black">
+      <div aria-label="News flow stream" className="h-full flex flex-col bg-black">
         <NewsFilterBar filters={filters} onFiltersChange={setFilters} />
 
         <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">

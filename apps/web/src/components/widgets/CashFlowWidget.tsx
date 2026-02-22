@@ -25,6 +25,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
 import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
@@ -43,8 +44,13 @@ const labels: Record<string, string> = {
     investing_cash_flow: 'Investing CF',
     financing_cash_flow: 'Financing CF',
     net_cash_flow: 'Net Cash Flow',
+    net_change_in_cash: 'Net Change in Cash',
     free_cash_flow: 'Free Cash Flow',
+    capex: 'CapEx',
     capital_expenditure: 'CapEx',
+    dividends_paid: 'Dividends Paid',
+    debt_repayment: 'Debt Repayment',
+    stock_repurchased: 'Stock Repurchased',
 };
 
 const TABLE_YEAR_LIMIT = 10;
@@ -86,7 +92,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             investingCF: d.investing_cash_flow || 0,
             financingCF: d.financing_cash_flow || 0,
             freeCashFlow: d.free_cash_flow || 0,
-            netCashFlow: d.net_cash_flow || 0,
+            netCashFlow: d.net_change_in_cash ?? d.net_cash_flow ?? 0,
         }));
     }, [items, periodMode]);
 
@@ -96,8 +102,13 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             item.investing_cash_flow,
             item.financing_cash_flow,
             item.free_cash_flow,
+            item.net_change_in_cash,
             item.net_cash_flow,
+            item.capex,
             item.capital_expenditure,
+            item.dividends_paid,
+            item.debt_repayment,
+            item.stock_repurchased,
         ]);
         return resolveUnitScale(values, unitConfig);
     }, [items, unitConfig]);
@@ -120,11 +131,17 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
-        const mapValues = (metricKey: keyof (typeof items)[number]) =>
+        const valueFor = (entry: (typeof items)[number], metricKey: string) => {
+            if (metricKey === 'net_change_in_cash') return entry.net_change_in_cash ?? entry.net_cash_flow
+            if (metricKey === 'capex') return entry.capex ?? entry.capital_expenditure
+            return entry[metricKey as keyof typeof entry]
+        }
+
+        const mapValues = (metricKey: string) =>
             Object.fromEntries(
                 items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
                     tableColumns[index]?.key ?? `period_${index}`,
-                    entry[metricKey],
+                    valueFor(entry, metricKey),
                 ])
             );
 
@@ -160,18 +177,32 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                 values: mapValues('free_cash_flow'),
             },
             {
-                id: 'net_cash_flow',
-                label: labels.net_cash_flow,
+                id: 'net_change_in_cash',
+                label: labels.net_change_in_cash,
                 parentId: 'group:summary',
                 indent: 12,
-                values: mapValues('net_cash_flow'),
+                values: mapValues('net_change_in_cash'),
             },
             {
-                id: 'capital_expenditure',
+                id: 'capex',
                 label: labels.capital_expenditure,
                 parentId: 'group:summary',
                 indent: 12,
-                values: mapValues('capital_expenditure'),
+                values: mapValues('capex'),
+            },
+            {
+                id: 'dividends_paid',
+                label: labels.dividends_paid,
+                parentId: 'group:summary',
+                indent: 12,
+                values: mapValues('dividends_paid'),
+            },
+            {
+                id: 'debt_repayment',
+                label: labels.debt_repayment,
+                parentId: 'group:summary',
+                indent: 12,
+                values: mapValues('debt_repayment'),
             },
         ];
     }, [items, tableColumns]);
@@ -207,6 +238,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             <div className="h-full flex flex-col gap-1">
                 <div className="flex justify-end px-1 pt-0.5">
                     <select
+                        aria-label="Cash flow chart mode"
                         value={chartType}
                         onChange={(e) => setChartType(e.target.value as any)}
                         className="bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
@@ -217,58 +249,60 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                 </div>
 
                 <div className="flex-1 min-h-[132px]">
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
-                        {chartType === 'overview' ? (
-                            <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
-                                <YAxis
-                                    tickFormatter={(value) => formatAxisValue(value, unitConfig)}
-                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
-                                    axisLine={false}
-                                    tickLine={false}
-                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
-                                />
-                                <ReferenceLine y={0} stroke="#333" />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: 'var(--bg-tooltip)',
-                                        border: '1px solid var(--border-default)',
-                                        borderRadius: '8px',
-                                        fontSize: '11px',
-                                    }}
-                                />
-                                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                <Bar dataKey="operatingCF" name="Operating" fill="#3b82f6" radius={[2, 2, 2, 2]} />
-                                <Bar dataKey="investingCF" name="Investing" fill="#f59e0b" radius={[2, 2, 2, 2]} />
-                                <Bar dataKey="financingCF" name="Financing" fill="#ef4444" radius={[2, 2, 2, 2]} />
-                            </ComposedChart>
-                        ) : (
-                            <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
-                                <YAxis
-                                    tickFormatter={(value) => formatAxisValue(value, unitConfig)}
-                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
-                                    axisLine={false}
-                                    tickLine={false}
-                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
-                                />
-                                <ReferenceLine y={0} stroke="#333" />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: 'var(--bg-tooltip)',
-                                        border: '1px solid var(--border-default)',
-                                        borderRadius: '8px',
-                                        fontSize: '11px',
-                                    }}
-                                />
-                                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                <Area type="monotone" dataKey="freeCashFlow" name="Free Cash Flow" fill="#10b981" stroke="#10b981" fillOpacity={0.1} />
-                                <Line type="monotone" dataKey="netCashFlow" name="Net Cash Change" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
-                            </ComposedChart>
-                        )}
-                    </ResponsiveContainer>
+                    <ChartMountGuard className="h-full" minHeight={120}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
+                            {chartType === 'overview' ? (
+                                <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                    <YAxis
+                                        tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
+                                        axisLine={false}
+                                        tickLine={false}
+                                        label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
+                                    />
+                                    <ReferenceLine y={0} stroke="#333" />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: 'var(--bg-tooltip)',
+                                            border: '1px solid var(--border-default)',
+                                            borderRadius: '8px',
+                                            fontSize: '11px',
+                                        }}
+                                    />
+                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                                    <Bar dataKey="operatingCF" name="Operating" fill="#3b82f6" radius={[2, 2, 2, 2]} />
+                                    <Bar dataKey="investingCF" name="Investing" fill="#f59e0b" radius={[2, 2, 2, 2]} />
+                                    <Bar dataKey="financingCF" name="Financing" fill="#ef4444" radius={[2, 2, 2, 2]} />
+                                </ComposedChart>
+                            ) : (
+                                <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                    <YAxis
+                                        tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
+                                        axisLine={false}
+                                        tickLine={false}
+                                        label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
+                                    />
+                                    <ReferenceLine y={0} stroke="#333" />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: 'var(--bg-tooltip)',
+                                            border: '1px solid var(--border-default)',
+                                            borderRadius: '8px',
+                                            fontSize: '11px',
+                                        }}
+                                    />
+                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                                    <Area type="monotone" dataKey="freeCashFlow" name="Free Cash Flow" fill="#10b981" stroke="#10b981" fillOpacity={0.1} />
+                                    <Line type="monotone" dataKey="netCashFlow" name="Net Cash Change" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                                </ComposedChart>
+                            )}
+                        </ResponsiveContainer>
+                    </ChartMountGuard>
                 </div>
             </div>
         );
