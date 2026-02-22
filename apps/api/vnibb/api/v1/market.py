@@ -150,6 +150,7 @@ RSS_FEED_URLS: dict[str, list[str]] = {
 
 WORLD_INDEX_POINT_TIMEOUT_SECONDS = 5
 WORLD_INDEX_FALLBACK_TIMEOUT_SECONDS = 5
+HEATMAP_FETCH_TIMEOUT_SECONDS = 20
 
 
 async def _fetch_rss_content(url: str) -> str:
@@ -321,9 +322,12 @@ async def get_heatmap_data(
                     allow_stale=True,
                 )
 
-                if cache_result.is_fresh and cache_result.data:
+                if cache_result.data:
+                    freshness = "fresh" if cache_result.is_fresh else "stale"
                     logger.info(
-                        f"Using cached screener data for heatmap ({len(cache_result.data)} records)"
+                        "Using %s cached screener data for heatmap (%d records)",
+                        freshness,
+                        len(cache_result.data),
                     )
                     # Convert ORM to Pydantic
                     screener_data = [
@@ -346,7 +350,13 @@ async def get_heatmap_data(
 
         # Fetch from API if no cache
         if not screener_data:
-            screener_data = await VnstockScreenerFetcher.fetch(params)
+            try:
+                screener_data = await asyncio.wait_for(
+                    VnstockScreenerFetcher.fetch(params),
+                    timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError as exc:
+                raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
             logger.info(f"Fetched {len(screener_data)} stocks from API for heatmap")
 
         # Step 2: Filter by exchange if needed
@@ -425,7 +435,13 @@ async def get_heatmap_data(
         # fall back to a fresh provider fetch once before returning empty data.
         if cached and not groups:
             logger.info("Cached screener data produced empty heatmap; retrying with fresh fetch")
-            screener_data = await VnstockScreenerFetcher.fetch(params)
+            try:
+                screener_data = await asyncio.wait_for(
+                    VnstockScreenerFetcher.fetch(params),
+                    timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError as exc:
+                raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
             if exchange != "ALL":
                 screener_data = [
                     s for s in screener_data if not s.exchange or s.exchange == exchange
@@ -467,10 +483,26 @@ async def get_heatmap_data(
             cached=cached,
         )
 
-    except (ProviderTimeoutError, ProviderError) as e:
-        if isinstance(e, ProviderTimeoutError):
-            raise HTTPException(status_code=504, detail=f"Timeout: {e.message}")
-        raise HTTPException(status_code=502, detail=f"Provider error: {e.message}")
+    except ProviderTimeoutError as e:
+        logger.warning("Heatmap provider timeout, returning empty payload: %s", e.message)
+        return HeatmapResponse(
+            count=0,
+            group_by=group_by,
+            color_metric=color_metric,
+            size_metric=size_metric,
+            sectors=[],
+            cached=False,
+        )
+    except ProviderError as e:
+        logger.warning("Heatmap provider error, returning empty payload: %s", e.message)
+        return HeatmapResponse(
+            count=0,
+            group_by=group_by,
+            color_metric=color_metric,
+            size_metric=size_metric,
+            sectors=[],
+            cached=False,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

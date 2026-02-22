@@ -101,18 +101,34 @@ async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialState
     if statement_type in ["income", "cashflow"]:
         metrics = [
             "revenue",
+            "cost_of_revenue",
             "gross_profit",
             "operating_income",
             "net_income",
             "ebitda",
+            "pre_tax_profit",
+            "tax_expense",
+            "interest_expense",
+            "depreciation",
             "operating_cash_flow",
             "investing_cash_flow",
             "financing_cash_flow",
             "free_cash_flow",
+            "net_change_in_cash",
+            "capex",
+            "dividends_paid",
+            "stock_repurchased",
+            "debt_repayment",
         ]
         for metric in metrics:
             total = sum(_safe_number(getattr(q, metric)) for q in quarters)
             setattr(ttm_data, metric, total)
+
+        if statement_type == "income":
+            ttm_data.profit_before_tax = ttm_data.pre_tax_profit
+        if statement_type == "cashflow":
+            ttm_data.net_cash_flow = ttm_data.net_change_in_cash
+            ttm_data.capital_expenditure = ttm_data.capex
 
     # For Balance Sheet, we usually take the most recent quarter instead of summing
     elif statement_type == "balance":
@@ -121,5 +137,16 @@ async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialState
         ttm_data.total_liabilities = _sanitize_optional(most_recent.total_liabilities)
         ttm_data.total_equity = _sanitize_optional(most_recent.total_equity)
         ttm_data.cash_and_equivalents = _sanitize_optional(most_recent.cash_and_equivalents)
+        ttm_data.current_assets = _sanitize_optional(most_recent.current_assets)
+        ttm_data.fixed_assets = _sanitize_optional(most_recent.fixed_assets)
+        ttm_data.current_liabilities = _sanitize_optional(most_recent.current_liabilities)
+        ttm_data.long_term_liabilities = _sanitize_optional(most_recent.long_term_liabilities)
+        ttm_data.retained_earnings = _sanitize_optional(most_recent.retained_earnings)
+        ttm_data.short_term_debt = _sanitize_optional(most_recent.short_term_debt)
+        ttm_data.long_term_debt = _sanitize_optional(most_recent.long_term_debt)
+        ttm_data.accounts_receivable = _sanitize_optional(most_recent.accounts_receivable)
+        ttm_data.accounts_payable = _sanitize_optional(most_recent.accounts_payable)
+        ttm_data.goodwill = _sanitize_optional(most_recent.goodwill)
+        ttm_data.intangible_assets = _sanitize_optional(most_recent.intangible_assets)
 
     return [ttm_data]

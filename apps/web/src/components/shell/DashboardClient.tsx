@@ -314,6 +314,35 @@ function DashboardContent() {
         });
     }, [activeDashboard, activeTab, addWidget]);
 
+    const quickAddOptions: Array<{ type: WidgetType; label: string }> = [
+        { type: 'price_chart', label: 'Price Chart' },
+        { type: 'key_metrics', label: 'Key Metrics' },
+        { type: 'screener', label: 'Screener' },
+    ];
+
+    const handleQuickAddWidget = useCallback((type: WidgetType) => {
+        if (!activeDashboard || !activeTab) return;
+
+        const defaults = defaultWidgetLayouts[type] || { w: 6, h: 4 };
+        const nextY = activeTab.widgets.reduce(
+            (maxY, widget) => Math.max(maxY, widget.layout.y + widget.layout.h),
+            0,
+        );
+
+        addWidget(activeDashboard.id, activeTab.id, {
+            type,
+            tabId: activeTab.id,
+            layout: {
+                x: 0,
+                y: nextY,
+                w: defaults.w,
+                h: defaults.h,
+                minW: defaults.minW,
+                minH: defaults.minH,
+            },
+        });
+    }, [activeDashboard, activeTab, addWidget]);
+
     const memoizedLayouts = useMemo(() => {
         if (!activeTab?.widgets) return [];
 
@@ -367,7 +396,7 @@ function DashboardContent() {
     if (!mounted) return null;
 
     return (
-        <div className="flex min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-hidden">
+        <div aria-label="Dashboard workspace" className="flex min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-hidden">
             <Sidebar
                 onOpenWidgetLibrary={() => setIsWidgetLibraryOpen(true)}
                 onOpenAppsLibrary={() => setIsAppsLibraryOpen(true)}
@@ -472,9 +501,23 @@ function DashboardContent() {
                                     })}
                                 </ResponsiveDashboardGrid>
                             ) : (
-                                <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
-                                    <Grid3X3 size={48} className="opacity-20" />
-                                    <p>Dashboard is empty. Add widgets from the sidebar.</p>
+                                <div className="h-full flex flex-col items-center justify-center text-[var(--text-secondary)] space-y-4 px-4 text-center">
+                                    <Grid3X3 size={48} className="opacity-30" />
+                                    <div className="space-y-1">
+                                        <p className="font-medium text-[var(--text-primary)]">This tab is empty</p>
+                                        <p className="text-sm text-[var(--text-muted)]">Add your first widget or open the full library.</p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center justify-center gap-2">
+                                        {quickAddOptions.map((option) => (
+                                            <button
+                                                key={option.type}
+                                                onClick={() => handleQuickAddWidget(option.type)}
+                                                className="px-3 py-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                                            >
+                                                {option.label}
+                                            </button>
+                                        ))}
+                                    </div>
                                     <button
                                         onClick={() => setIsWidgetLibraryOpen(true)}
                                         className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors"

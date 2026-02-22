@@ -23,6 +23,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
 import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
@@ -40,13 +41,18 @@ const labels: Record<string, string> = {
     total_assets: 'Total Assets',
     current_assets: 'Current Assets',
     fixed_assets: 'Fixed Assets',
+    accounts_receivable: 'Accounts Receivable',
     total_liabilities: 'Total Liabilities',
     current_liabilities: 'Current Liab.',
     long_term_liabilities: 'Long-term Liab.',
+    short_term_debt: 'Short-term Debt',
+    long_term_debt: 'Long-term Debt',
+    accounts_payable: 'Accounts Payable',
     equity: 'Equity',
+    total_equity: 'Total Equity',
+    retained_earnings: 'Retained Earnings',
     cash: 'Cash',
     inventory: 'Inventory',
-    receivables: 'Receivables',
 };
 
 const TABLE_YEAR_LIMIT = 10;
@@ -78,27 +84,40 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
     const chartData = useMemo(() => {
         if (!items.length) return [];
         const recentItems = [...items].slice(0, 5).reverse();
-        return recentItems.map((d, index) => ({
-            period: formatFinancialPeriodLabel(d.period, {
-                mode: periodMode,
-                index,
-                total: recentItems.length,
-            }),
-            totalAssets: d.total_assets || 0,
-            totalLiabilities: d.total_liabilities || 0,
-            equity: d.equity || 0,
-            cash: d.cash || 0,
-            debtToEquity: d.total_liabilities && d.equity && d.equity !== 0
-                ? (d.total_liabilities / d.equity)
-                : 0,
-        }));
+        return recentItems.map((d, index) => {
+            const equityValue = d.total_equity ?? d.equity ?? 0
+            const liabilities = d.total_liabilities ?? 0
+            return {
+                equityValue,
+                period: formatFinancialPeriodLabel(d.period, {
+                    mode: periodMode,
+                    index,
+                    total: recentItems.length,
+                }),
+                totalAssets: d.total_assets || 0,
+                totalLiabilities: liabilities,
+                equity: equityValue,
+                cash: d.cash || 0,
+                debtToEquity: liabilities > 0 && equityValue !== 0 ? liabilities / equityValue : 0,
+            }
+        });
     }, [items, periodMode]);
 
     const tableScale = useMemo(() => {
         const values = items.flatMap((item) => [
             item.total_assets,
+            item.current_assets,
+            item.fixed_assets,
+            item.accounts_receivable,
             item.total_liabilities,
+            item.current_liabilities,
+            item.long_term_liabilities,
+            item.short_term_debt,
+            item.long_term_debt,
+            item.accounts_payable,
+            item.total_equity,
             item.equity,
+            item.retained_earnings,
             item.cash,
             item.inventory,
         ]);
@@ -123,11 +142,17 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
-        const mapValues = (metricKey: keyof (typeof items)[number]) =>
+        const valueFor = (entry: (typeof items)[number], metricKey: string) => {
+            if (metricKey === 'total_equity') return entry.total_equity ?? entry.equity
+            if (metricKey === 'accounts_receivable') return entry.accounts_receivable ?? entry.receivables
+            return entry[metricKey as keyof typeof entry]
+        }
+
+        const mapValues = (metricKey: string) =>
             Object.fromEntries(
                 items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
                     tableColumns[index]?.key ?? `period_${index}`,
-                    entry[metricKey],
+                    valueFor(entry, metricKey),
                 ])
             );
 
@@ -168,6 +193,13 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                 indent: 12,
                 values: mapValues('inventory'),
             },
+            {
+                id: 'accounts_receivable',
+                label: labels.accounts_receivable,
+                parentId: 'group:assets',
+                indent: 12,
+                values: mapValues('accounts_receivable'),
+            },
             { id: 'group:liabilities', label: 'Liabilities', values: {}, isGroup: true },
             {
                 id: 'total_liabilities',
@@ -190,13 +222,41 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                 indent: 12,
                 values: mapValues('long_term_liabilities'),
             },
+            {
+                id: 'short_term_debt',
+                label: labels.short_term_debt,
+                parentId: 'group:liabilities',
+                indent: 12,
+                values: mapValues('short_term_debt'),
+            },
+            {
+                id: 'long_term_debt',
+                label: labels.long_term_debt,
+                parentId: 'group:liabilities',
+                indent: 12,
+                values: mapValues('long_term_debt'),
+            },
+            {
+                id: 'accounts_payable',
+                label: labels.accounts_payable,
+                parentId: 'group:liabilities',
+                indent: 12,
+                values: mapValues('accounts_payable'),
+            },
             { id: 'group:equity', label: 'Equity', values: {}, isGroup: true },
             {
-                id: 'equity',
-                label: labels.equity,
+                id: 'total_equity',
+                label: labels.total_equity,
                 parentId: 'group:equity',
                 indent: 12,
-                values: mapValues('equity'),
+                values: mapValues('total_equity'),
+            },
+            {
+                id: 'retained_earnings',
+                label: labels.retained_earnings,
+                parentId: 'group:equity',
+                indent: 12,
+                values: mapValues('retained_earnings'),
             },
         ];
     }, [items, tableColumns]);
@@ -242,66 +302,68 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                 </div>
 
                 <div className="flex-1 min-h-[132px]">
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
-                        {chartType === 'overview' ? (
-                            <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
-                                <YAxis
-                                    tickFormatter={(value) => formatAxisValue(value, unitConfig)}
-                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
-                                    axisLine={false}
-                                    tickLine={false}
-                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
-                                />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: 'var(--bg-tooltip)',
-                                        border: '1px solid var(--border-default)',
-                                        borderRadius: '8px',
-                                        fontSize: '11px',
-                                    }}
-                                />
-                                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                <Bar dataKey="totalAssets" name="Assets" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-                                <Bar dataKey="totalLiabilities" name="Liabilities" fill="#ef4444" radius={[2, 2, 0, 0]} />
-                                <Line type="monotone" dataKey="equity" name="Equity" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
-                            </ComposedChart>
-                        ) : (
-                            <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
-                                <YAxis
-                                    yAxisId="left"
-                                    tickFormatter={(value) => formatAxisValue(value, unitConfig)}
-                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
-                                    axisLine={false}
-                                    tickLine={false}
-                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
-                                />
-                                <YAxis
-                                    yAxisId="right"
-                                    orientation="right"
-                                    tickFormatter={(v) => v.toFixed(1) + 'x'}
-                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
-                                    axisLine={false}
-                                    tickLine={false}
-                                    label={{ value: 'x', angle: 90, position: 'insideRight', fill: 'var(--text-muted)', fontSize: 9 }}
-                                />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: 'var(--bg-tooltip)',
-                                        border: '1px solid var(--border-default)',
-                                        borderRadius: '8px',
-                                        fontSize: '11px',
-                                    }}
-                                />
-                                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                <Bar yAxisId="left" dataKey="totalLiabilities" name="Total Debt" fill="#ef4444" radius={[2, 2, 0, 0]} />
-                                <Line yAxisId="right" type="monotone" dataKey="debtToEquity" name="D/E Ratio" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
-                            </ComposedChart>
-                        )}
-                    </ResponsiveContainer>
+                    <ChartMountGuard className="h-full" minHeight={120}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
+                            {chartType === 'overview' ? (
+                                <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                    <YAxis
+                                        tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
+                                        axisLine={false}
+                                        tickLine={false}
+                                        label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
+                                    />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: 'var(--bg-tooltip)',
+                                            border: '1px solid var(--border-default)',
+                                            borderRadius: '8px',
+                                            fontSize: '11px',
+                                        }}
+                                    />
+                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                                    <Bar dataKey="totalAssets" name="Assets" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                                    <Bar dataKey="totalLiabilities" name="Liabilities" fill="#ef4444" radius={[2, 2, 0, 0]} />
+                                    <Line type="monotone" dataKey="equity" name="Equity" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                </ComposedChart>
+                            ) : (
+                                <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                    <YAxis
+                                        yAxisId="left"
+                                        tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
+                                        axisLine={false}
+                                        tickLine={false}
+                                        label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
+                                    />
+                                    <YAxis
+                                        yAxisId="right"
+                                        orientation="right"
+                                        tickFormatter={(v) => v.toFixed(1) + 'x'}
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
+                                        axisLine={false}
+                                        tickLine={false}
+                                        label={{ value: 'x', angle: 90, position: 'insideRight', fill: 'var(--text-muted)', fontSize: 9 }}
+                                    />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: 'var(--bg-tooltip)',
+                                            border: '1px solid var(--border-default)',
+                                            borderRadius: '8px',
+                                            fontSize: '11px',
+                                        }}
+                                    />
+                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                                    <Bar yAxisId="left" dataKey="totalLiabilities" name="Total Debt" fill="#ef4444" radius={[2, 2, 0, 0]} />
+                                    <Line yAxisId="right" type="monotone" dataKey="debtToEquity" name="D/E Ratio" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                                </ComposedChart>
+                            )}
+                        </ResponsiveContainer>
+                    </ChartMountGuard>
                 </div>
             </div>
         );

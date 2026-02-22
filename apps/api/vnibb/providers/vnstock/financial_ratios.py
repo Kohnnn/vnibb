@@ -60,6 +60,12 @@ class FinancialRatioData(BaseModel):
     ocf_debt: Optional[float] = None
     fcf_yield: Optional[float] = None
     ocf_sales: Optional[float] = None
+    revenue_growth: Optional[float] = None
+    earnings_growth: Optional[float] = None
+    dps: Optional[float] = None
+    dividend_yield: Optional[float] = None
+    payout_ratio: Optional[float] = None
+    peg_ratio: Optional[float] = None
 
     model_config = {
         "json_schema_extra": {
@@ -163,6 +169,11 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 "roa": "roa",
                 "trailing_eps": "eps",
                 "book_value_per_share_bvps": "bvps",
+                "dividends_per_share": "dps",
+                "dps": "dps",
+                "dividend_yield": "dividend_yield",
+                "payout_ratio": "payout_ratio",
+                "peg_ratio": "peg_ratio",
                 "gross_profit_margin": "gross_margin",
                 "net_profit_margin": "net_margin",
                 "short_term_ratio": "current_ratio",
@@ -178,6 +189,8 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 "ocf_debt": "ocf_debt",
                 "fcf_yield": "fcf_yield",
                 "ocf_sales": "ocf_sales",
+                "revenue_growth": "revenue_growth",
+                "earnings_growth": "earnings_growth",
             }
 
             raw_fields = {
@@ -322,6 +335,12 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         ocf_debt=row.get("ocfToDebt") or row.get("ocfDebt"),
                         fcf_yield=row.get("fcfYield"),
                         ocf_sales=row.get("ocfSales"),
+                        revenue_growth=row.get("revenueGrowth") or row.get("revenue_growth"),
+                        earnings_growth=row.get("earningsGrowth") or row.get("earnings_growth"),
+                        dps=row.get("dividendPerShare") or row.get("dps"),
+                        dividend_yield=row.get("dividendYield") or row.get("dividend_yield"),
+                        payout_ratio=row.get("payoutRatio") or row.get("payout_ratio"),
+                        peg_ratio=row.get("pegRatio") or row.get("peg_ratio"),
                     )
                 )
             except Exception as e:

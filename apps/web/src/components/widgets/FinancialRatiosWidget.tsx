@@ -33,6 +33,7 @@ const ratioLabels: Record<string, string> = {
     pe: 'P/E',
     pb: 'P/B',
     ps: 'P/S',
+    peg_ratio: 'PEG Ratio',
     ev_sales: 'EV/Sales',
     ev_ebitda: 'EV/EBITDA',
     current_ratio: 'Current Ratio',
@@ -54,6 +55,10 @@ const ratioLabels: Record<string, string> = {
     ocf_debt: 'OCF/Debt',
     fcf_yield: 'FCF Yield',
     ocf_sales: 'OCF/Sales',
+    revenue_growth: 'Revenue Growth',
+    earnings_growth: 'Earnings Growth',
+    dividend_yield: 'Dividend Yield',
+    payout_ratio: 'Payout Ratio',
 };
 
 const TABLE_YEAR_LIMIT = 10;
@@ -80,13 +85,15 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
     const hasData = ratios.length > 0;
     const isFallback = Boolean(error && hasData);
     const categoryMetrics = {
-        valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda'],
+        valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda', 'peg_ratio'],
         liquidity: ['current_ratio', 'quick_ratio', 'cash_ratio'],
         efficiency: ['asset_turnover', 'inventory_turnover', 'receivables_turnover'],
         profitability: ['gross_margin', 'operating_margin', 'net_margin', 'roe', 'roa'],
         leverage: ['debt_equity', 'debt_assets', 'equity_multiplier'],
         coverage: ['interest_coverage', 'debt_service_coverage'],
         ocf: ['ocf_debt', 'fcf_yield', 'ocf_sales'],
+        growth: ['revenue_growth', 'earnings_growth'],
+        dividend: ['dividend_yield', 'payout_ratio'],
     } as const;
 
     const categoryLabels: Record<keyof typeof categoryMetrics, string> = {
@@ -97,6 +104,8 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
         leverage: 'Leverage',
         coverage: 'Coverage',
         ocf: 'Operating cash flow',
+        growth: 'Growth',
+        dividend: 'Dividend',
     };
 
     const percentKeys = new Set([
@@ -108,6 +117,10 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
         'debt_assets',
         'fcf_yield',
         'ocf_sales',
+        'revenue_growth',
+        'earnings_growth',
+        'dividend_yield',
+        'payout_ratio',
     ]);
 
     const headerActions = (

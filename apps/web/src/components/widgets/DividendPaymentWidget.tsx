@@ -39,7 +39,7 @@ export function DividendPaymentWidget({ symbol }: DividendPaymentWidgetProps) {
     }
 
     return (
-        <div className="h-full flex flex-col">
+        <div aria-label="Dividend payment history" className="h-full flex flex-col">
             <div className="pb-2 border-b border-gray-800/50">
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}

@@ -73,7 +73,7 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
     }
 
     return (
-        <div className="h-full flex flex-col">
+        <div aria-label="Events calendar" className="h-full flex flex-col">
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2 text-xs text-gray-500">
                     <Calendar size={12} />
@@ -82,6 +82,7 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
                 <button
                     onClick={() => refetch()}
                     disabled={isFetching}
+                    aria-label="Refresh events"
                     className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
                     title="Refresh events"
                     type="button"

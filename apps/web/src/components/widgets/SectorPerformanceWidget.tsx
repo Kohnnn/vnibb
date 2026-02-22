@@ -41,16 +41,16 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup }: SectorPerform
     }, [sectors]);
 
     const headerActions = (
-        <div className="flex bg-gray-800 rounded text-[10px] mr-2">
+        <div className="flex bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded text-[10px] mr-2">
             <button
                 onClick={() => setView('grid')}
-                className={`px-3 py-1 rounded ${view === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
+                className={`px-3 py-1 rounded transition-colors ${view === 'grid' ? 'bg-blue-600 text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
             >
                 Grid
             </button>
             <button
                 onClick={() => setView('list')}
-                className={`px-3 py-1 rounded ${view === 'list' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
+                className={`px-3 py-1 rounded transition-colors ${view === 'list' ? 'bg-blue-600 text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
             >
                 List
             </button>
@@ -91,15 +91,15 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup }: SectorPerform
                                 return (
                                     <div
                                         key={sector.sectorId}
-                                        className={`p-3 rounded-lg ${getHeatmapColor(change)} cursor-pointer hover:opacity-90 transition-opacity flex flex-col justify-between min-h-[60px]`}
+                                        className={`p-3 rounded-lg border border-[var(--border-default)] ${getHeatmapColor(change)} cursor-pointer hover:opacity-90 transition-opacity flex flex-col justify-between min-h-[60px]`}
                                     >
-                                        <div className="text-[10px] font-bold text-white/80 uppercase truncate">
+                                        <div className="text-[10px] font-bold text-[var(--text-secondary)] uppercase truncate">
                                             {name}
                                         </div>
-                                        <div className="text-base font-black text-white">
+                                        <div className={`text-base font-black ${change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                             {change >= 0 ? '+' : ''}{change.toFixed(2)}%
                                         </div>
-                                        <div className="text-[9px] text-white/70">{sector.totalStocks} stocks</div>
+                                        <div className="text-[9px] text-[var(--text-muted)]">{sector.totalStocks} stocks</div>
                                     </div>
                                 );
                             })}
@@ -116,13 +116,13 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup }: SectorPerform
                                 return (
                                     <div
                                         key={sector.sectorId}
-                                        className="flex items-center justify-between py-2 px-3 hover:bg-gray-800/30 rounded-lg transition-colors"
+                                        className="flex items-center justify-between py-2 px-3 hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
                                     >
                                         <div className="flex items-center gap-3">
                                             <div className={`w-2 h-2 rounded-full ${isUp ? 'bg-green-400' : 'bg-red-400'}`} />
                                             <div>
-                                                <div className="text-sm font-medium text-white">{name}</div>
-                                                <div className="text-[10px] text-gray-500 flex items-center gap-2">
+                                                <div className="text-sm font-medium text-[var(--text-primary)]">{name}</div>
+                                                <div className="text-[10px] text-[var(--text-muted)] flex items-center gap-2">
                                                     {topGainer && (
                                                         <button
                                                             onClick={() => setLinkedSymbol(topGainer)}

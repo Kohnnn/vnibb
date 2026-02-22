@@ -181,7 +181,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             initial={{ opacity: 0, scale: 0.95, y: -20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            className="w-full max-w-xl bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-2xl overflow-hidden"
+            className="w-full max-w-xl bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-xl shadow-2xl overflow-hidden"
           >
             <Command className="flex flex-col h-full">
               <div className="flex items-center gap-3 px-4 border-b border-[var(--border-default)]">

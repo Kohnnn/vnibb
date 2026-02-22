@@ -31,6 +31,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 
@@ -45,11 +46,20 @@ type ViewMode = 'table' | 'chart';
 
 const labels: Record<string, string> = {
     revenue: 'Revenue',
+    cost_of_revenue: 'Cost of Revenue',
     gross_profit: 'Gross Profit',
+    selling_general_admin: 'SG&A',
+    research_development: 'R&D',
+    depreciation: 'Depreciation',
     operating_income: 'Operating Income',
+    interest_expense: 'Interest Expense',
+    pre_tax_profit: 'Pre-tax Profit',
     profit_before_tax: 'Pre-tax Profit',
+    tax_expense: 'Tax Expense',
+    other_income: 'Other Income',
     net_income: 'Net Income',
     eps: 'EPS',
+    eps_diluted: 'Diluted EPS',
 };
 
 const TABLE_YEAR_LIMIT = 10;
@@ -100,8 +110,17 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
     const tableScale = useMemo(() => {
         const values = items.flatMap((item) => [
             item.revenue,
+            item.cost_of_revenue,
             item.gross_profit,
+            item.selling_general_admin,
+            item.research_development,
+            item.depreciation,
             item.operating_income,
+            item.interest_expense,
+            item.pre_tax_profit,
+            item.profit_before_tax,
+            item.tax_expense,
+            item.other_income,
             item.net_income,
         ]);
         return resolveUnitScale(values, unitConfig);
@@ -128,7 +147,29 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
-        const primaryMetrics = ['revenue', 'gross_profit', 'operating_income', 'profit_before_tax', 'net_income'] as const;
+        const rowValue = (entry: (typeof items)[number], metricKey: string) => {
+            if (metricKey === 'pre_tax_profit') return entry.pre_tax_profit ?? entry.profit_before_tax;
+            return entry[metricKey as keyof typeof entry];
+        }
+
+        const coreMetrics = [
+            'revenue',
+            'cost_of_revenue',
+            'gross_profit',
+            'operating_income',
+            'pre_tax_profit',
+            'tax_expense',
+            'net_income',
+        ] as const
+
+        const expenseMetrics = [
+            'selling_general_admin',
+            'research_development',
+            'depreciation',
+            'interest_expense',
+            'other_income',
+        ] as const
+
         const rows: DenseTableRow[] = [
             {
                 id: 'group:profitability',
@@ -136,7 +177,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                 values: {},
                 isGroup: true,
             },
-            ...primaryMetrics.map((metricKey) => ({
+            ...coreMetrics.map((metricKey) => ({
                 id: metricKey,
                 label: labels[metricKey] || metricKey,
                 parentId: 'group:profitability',
@@ -144,7 +185,25 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                 values: Object.fromEntries(
                     items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
-                        entry[metricKey],
+                        rowValue(entry, metricKey),
+                    ])
+                ),
+            })),
+            {
+                id: 'group:expenses',
+                label: 'Expenses & Other',
+                values: {},
+                isGroup: true,
+            },
+            ...expenseMetrics.map((metricKey) => ({
+                id: metricKey,
+                label: labels[metricKey] || metricKey,
+                parentId: 'group:expenses',
+                indent: 12,
+                values: Object.fromEntries(
+                    items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
+                        tableColumns[index]?.key ?? `period_${index}`,
+                        rowValue(entry, metricKey),
                     ])
                 ),
             })),
@@ -163,6 +222,18 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                     items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
                         entry.eps,
+                    ])
+                ),
+            },
+            {
+                id: 'eps_diluted',
+                label: labels.eps_diluted,
+                parentId: 'group:per-share',
+                indent: 12,
+                values: Object.fromEntries(
+                    items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
+                        tableColumns[index]?.key ?? `period_${index}`,
+                        entry.eps_diluted,
                     ])
                 ),
             },
@@ -215,56 +286,58 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                 </div>
 
                 <div className="flex-1 min-h-[132px]">
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
-                        {chartType === 'overview' ? (
-                            <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
-                                <YAxis
-                                    tickFormatter={(value) => formatAxisValue(value, unitConfig)}
-                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
-                                    axisLine={false}
-                                    tickLine={false}
-                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
-                                />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: 'var(--bg-tooltip)',
-                                        border: '1px solid var(--border-default)',
-                                        borderRadius: '8px',
-                                        fontSize: '11px',
-                                    }}
-                                    itemStyle={{ padding: '0px' }}
-                                />
-                                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                <Bar dataKey="revenue" name="Revenue" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-                                <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
-                            </ComposedChart>
-                        ) : (
-                            <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
-                                <YAxis
-                                    tickFormatter={(val) => `${val}%`}
-                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
-                                    axisLine={false}
-                                    tickLine={false}
-                                    label={{ value: '%', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
-                                />
-                                <Tooltip
-                                    contentStyle={{
-                                        backgroundColor: 'var(--bg-tooltip)',
-                                        border: '1px solid var(--border-default)',
-                                        borderRadius: '8px',
-                                        fontSize: '11px',
-                                    }}
-                                />
-                                <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                <Line type="monotone" dataKey="grossMargin" name="Gross %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
-                                <Line type="monotone" dataKey="netMargin" name="Net %" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
-                            </ComposedChart>
-                        )}
-                    </ResponsiveContainer>
+                    <ChartMountGuard className="h-full" minHeight={120}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
+                            {chartType === 'overview' ? (
+                                <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                    <YAxis
+                                        tickFormatter={(value) => formatAxisValue(value, unitConfig)}
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
+                                        axisLine={false}
+                                        tickLine={false}
+                                        label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
+                                    />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: 'var(--bg-tooltip)',
+                                            border: '1px solid var(--border-default)',
+                                            borderRadius: '8px',
+                                            fontSize: '11px',
+                                        }}
+                                        itemStyle={{ padding: '0px' }}
+                                    />
+                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                                    <Bar dataKey="revenue" name="Revenue" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                                    <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                </ComposedChart>
+                            ) : (
+                                <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                    <YAxis
+                                        tickFormatter={(val) => `${val}%`}
+                                        tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
+                                        axisLine={false}
+                                        tickLine={false}
+                                        label={{ value: '%', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
+                                    />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: 'var(--bg-tooltip)',
+                                            border: '1px solid var(--border-default)',
+                                            borderRadius: '8px',
+                                            fontSize: '11px',
+                                        }}
+                                    />
+                                    <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
+                                    <Line type="monotone" dataKey="grossMargin" name="Gross %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
+                                    <Line type="monotone" dataKey="netMargin" name="Net %" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
+                                </ComposedChart>
+                            )}
+                        </ResponsiveContainer>
+                    </ChartMountGuard>
                 </div>
             </div>
         );

@@ -169,7 +169,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
 
             {/* Modal */}
             <div className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-lg z-50">
-                <div className="bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-2xl overflow-hidden">
+                <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-xl shadow-2xl overflow-hidden">
                     {/* Search Input */}
                     <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border-default)]">
                         <Search size={20} className="text-[var(--text-secondary)]" />

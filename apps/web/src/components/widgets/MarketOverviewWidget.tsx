@@ -37,7 +37,7 @@ export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
       isLoading={isLoading && !hasData}
       noPadding
     >
-      <div className="h-full flex flex-col">
+      <div aria-label="Market overview panel" className="h-full flex flex-col">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}

@@ -108,12 +108,12 @@ export function ComparisonWidget({ id, initialSymbols = ['VNM', 'FPT'], hideHead
             widgetId={id}
             hideHeader={hideHeader}
         >
-            <div className="h-full flex flex-col bg-secondary overflow-hidden">
+            <div className="h-full flex flex-col bg-[var(--bg-primary)] overflow-hidden">
                 {/* Search & Ticker Bar */}
-                <div className="flex items-center gap-2 p-2 border-b border-white/5 bg-black/10">
+                <div className="flex items-center gap-2 p-2 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
                     <div className="flex gap-1 overflow-x-auto scrollbar-hide flex-1">
                         {symbols.map(s => (
-                            <div key={s} className="flex items-center gap-1.5 px-2 py-1 bg-gray-800/50 rounded border border-white/5 shrink-0 group">
+                            <div key={s} className="flex items-center gap-1.5 px-2 py-1 bg-[var(--bg-tertiary)] rounded border border-[var(--border-default)] shrink-0 group">
                                 <CompanyLogo symbol={s} size={14} />
                                 <span className="text-[10px] font-bold text-blue-400">{s}</span>
                                 <button onClick={() => removeSymbol(s)} className="text-muted-foreground hover:text-red-400">
@@ -125,7 +125,7 @@ export function ComparisonWidget({ id, initialSymbols = ['VNM', 'FPT'], hideHead
                             <div className="relative flex items-center">
                                 <Search size={10} className="absolute left-2 text-muted-foreground" />
                                 <input 
-                                    className="w-20 pl-6 pr-2 py-1 bg-black/30 border border-white/5 rounded text-[10px] font-bold outline-none focus:border-blue-500"
+                                    className="w-20 pl-6 pr-2 py-1 bg-[var(--bg-primary)] border border-[var(--border-default)] rounded text-[10px] font-bold text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-blue-500"
                                     placeholder="Add..."
                                     value={inputValue}
                                     onChange={(e) => setInputValue(e.target.value.toUpperCase())}
@@ -145,7 +145,7 @@ export function ComparisonWidget({ id, initialSymbols = ['VNM', 'FPT'], hideHead
                         <button 
                             onClick={() => setShowChart(!showChart)}
                             className={cn(
-                                "p-1.5 rounded hover:bg-white/5 transition-colors",
+                                "p-1.5 rounded hover:bg-[var(--bg-hover)] transition-colors",
                                 showChart ? "text-blue-400" : "text-muted-foreground"
                             )}
                         >
@@ -169,7 +169,7 @@ export function ComparisonWidget({ id, initialSymbols = ['VNM', 'FPT'], hideHead
                     <>
                         {/* Performance Chart Section */}
                         {showChart && symbols.length > 0 && (
-                            <div className="h-[180px] w-full p-2 border-b border-white/5 bg-black/5">
+                            <div className="h-[180px] w-full p-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
                                 {perfLoading ? (
                                     <div className="h-full flex items-center justify-center opacity-20 animate-pulse">
                                         <LineChart size={24} />
@@ -185,14 +185,14 @@ export function ComparisonWidget({ id, initialSymbols = ['VNM', 'FPT'], hideHead
                                                 />
                                                 <YAxis 
                                                     domain={['auto', 'auto']} 
-                                                    tick={{fontSize: 9, fill: '#666'}} 
+                                                    tick={{fontSize: 9, fill: 'var(--text-muted)'}} 
                                                     axisLine={false}
                                                     tickLine={false}
                                                     tickFormatter={(v) => `${(v - 100).toFixed(0)}%`}
                                                 />
                                                 <Tooltip 
-                                                    contentStyle={{backgroundColor: '#111', border: '1px solid #333', fontSize: '10px'}}
-                                                    labelStyle={{color: '#666'}}
+                                                    contentStyle={{backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)', fontSize: '10px', color: 'var(--text-primary)'}}
+                                                    labelStyle={{color: 'var(--text-muted)'}}
                                                     formatter={(v: any) => [`${(v - 100).toFixed(2)}%`, '']}
                                                 />
                                                 <Legend iconType="circle" wrapperStyle={{fontSize: '9px', fontWeight: 'bold'}} />
@@ -224,26 +224,26 @@ export function ComparisonWidget({ id, initialSymbols = ['VNM', 'FPT'], hideHead
                             <div className="flex-1 overflow-auto scrollbar-hide">
                                 <table className="data-table w-full text-[11px] border-collapse">
                                     <thead>
-                                        <tr className="sticky top-0 bg-secondary border-b border-white/10 shadow-sm z-10">
+                                        <tr className="sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-default)] shadow-sm z-10">
                                             <th className="text-left p-3 text-muted-foreground font-black uppercase tracking-widest w-1/3">Metric</th>
                                             {symbols.map(s => (
                                                 <th key={s} className="text-right p-3 text-muted-foreground font-black">{s}</th>
                                             ))}
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-white/5">
+                                    <tbody className="divide-y divide-[var(--border-subtle)]">
                                         {categoryMetrics.map((m: any) => {
                                             const id = metricKey(m);
                                             return (
-                                            <tr key={id} className="group hover:bg-white/[0.02]">
-                                                <td className="p-3 text-muted-foreground font-bold group-hover:text-primary transition-colors border-r border-white/5">
+                                            <tr key={id} className="group hover:bg-[var(--bg-tertiary)]/40">
+                                                <td className="p-3 text-muted-foreground font-bold group-hover:text-primary transition-colors border-r border-[var(--border-subtle)]">
                                                     {metricLabel(m)}
                                                 </td>
                                                 {symbols.map(s => {
                                                     const stock = data?.stocks.find((st: any) => st.symbol === s);
                                                     const val = stock?.metrics[id];
                                                     return (
-                                                        <td key={s} className="p-3 text-right font-mono text-primary group-hover:bg-white/[0.01]">
+                                                        <td key={s} className="p-3 text-right font-mono text-primary group-hover:bg-[var(--bg-tertiary)]/30">
                                                             {formatMetric(val, m.format)}
                                                         </td>
                                                     );

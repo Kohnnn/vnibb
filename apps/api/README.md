@@ -144,6 +144,11 @@ Premium package strategy:
 
 **Full Docs:** `/docs` (Swagger UI)
 
+Workspace docs:
+- `../../docs/API_REFERENCE.md`
+- `../../docs/v47_production_health.md`
+- `../../CHANGELOG.md`
+
 ---
 
 ## Sprint V34 Ops Scripts

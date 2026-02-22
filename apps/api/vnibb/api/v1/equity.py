@@ -63,6 +63,7 @@ from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
 from vnibb.providers.vnstock.trading_stats import VnstockTradingStatsFetcher
 from vnibb.providers.vnstock.ownership import VnstockOwnershipFetcher
 from vnibb.providers.vnstock.general_rating import VnstockGeneralRatingFetcher
+from vnibb.services.comparison_service import comparison_service
 
 # Models for Fallback
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
@@ -164,23 +165,69 @@ async def _load_financial_statement_fallback(
         FinancialStatementData(
             symbol=row.symbol,
             period=row.period,
+            statement_type=statement_type,
             fiscal_year=row.fiscal_year,
             fiscal_quarter=row.fiscal_quarter,
             revenue=getattr(row, "revenue", None),
+            cost_of_revenue=getattr(row, "cost_of_revenue", None),
             gross_profit=getattr(row, "gross_profit", None),
             operating_income=getattr(row, "operating_income", None),
+            pre_tax_profit=getattr(
+                row,
+                "pre_tax_profit",
+                getattr(row, "income_before_tax", None),
+            ),
+            profit_before_tax=getattr(
+                row,
+                "pre_tax_profit",
+                getattr(row, "income_before_tax", None),
+            ),
+            tax_expense=getattr(row, "tax_expense", getattr(row, "income_tax", None)),
+            interest_expense=getattr(row, "interest_expense", None),
+            depreciation=getattr(row, "depreciation", None),
+            selling_general_admin=getattr(row, "selling_general_admin", None),
+            research_development=getattr(row, "research_development", None),
+            other_income=getattr(row, "other_income", None),
             net_income=getattr(row, "net_income", None),
             ebitda=getattr(row, "ebitda", None),
             eps=getattr(row, "eps", None),
+            eps_diluted=getattr(row, "eps_diluted", None),
             total_assets=getattr(row, "total_assets", None),
             total_liabilities=getattr(row, "total_liabilities", None),
             total_equity=getattr(row, "total_equity", None),
             cash_and_equivalents=getattr(row, "cash_and_equivalents", None),
+            cash=getattr(row, "cash_and_equivalents", getattr(row, "cash", None)),
             inventory=getattr(row, "inventory", None),
+            current_assets=getattr(row, "current_assets", None),
+            fixed_assets=getattr(row, "fixed_assets", None),
+            current_liabilities=getattr(row, "current_liabilities", None),
+            long_term_liabilities=getattr(
+                row,
+                "long_term_liabilities",
+                getattr(row, "non_current_liabilities", None),
+            ),
+            retained_earnings=getattr(row, "retained_earnings", None),
+            short_term_debt=getattr(row, "short_term_debt", None),
+            long_term_debt=getattr(row, "long_term_debt", None),
+            accounts_receivable=getattr(row, "accounts_receivable", None),
+            accounts_payable=getattr(row, "accounts_payable", None),
+            goodwill=getattr(row, "goodwill", None),
+            intangible_assets=getattr(row, "intangible_assets", None),
             operating_cash_flow=getattr(row, "operating_cash_flow", None),
             investing_cash_flow=getattr(row, "investing_cash_flow", None),
             financing_cash_flow=getattr(row, "financing_cash_flow", None),
             free_cash_flow=getattr(row, "free_cash_flow", None),
+            net_change_in_cash=getattr(row, "net_change_in_cash", None),
+            net_cash_flow=getattr(row, "net_change_in_cash", None),
+            capex=getattr(row, "capex", getattr(row, "capital_expenditure", None)),
+            capital_expenditure=getattr(
+                row,
+                "capital_expenditure",
+                getattr(row, "capex", None),
+            ),
+            dividends_paid=getattr(row, "dividends_paid", None),
+            stock_repurchased=getattr(row, "stock_repurchased", None),
+            debt_repayment=getattr(row, "debt_repayment", None),
         )
         for row in rows
     ]
@@ -251,6 +298,36 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
         interest_coverage=row.interest_coverage,
         revenue_growth=row.revenue_growth,
         earnings_growth=row.earnings_growth,
+        dps=getattr(row, "dps", _coerce_optional_float(raw_data.get("dps"))),
+        asset_turnover=getattr(
+            row, "asset_turnover", _coerce_optional_float(raw_data.get("asset_turnover"))
+        ),
+        inventory_turnover=getattr(
+            row,
+            "inventory_turnover",
+            _coerce_optional_float(raw_data.get("inventory_turnover")),
+        ),
+        receivables_turnover=getattr(
+            row,
+            "receivables_turnover",
+            _coerce_optional_float(raw_data.get("receivables_turnover")),
+        ),
+        equity_multiplier=getattr(
+            row,
+            "equity_multiplier",
+            _coerce_optional_float(raw_data.get("equity_multiplier")),
+        ),
+        dividend_yield=getattr(
+            row,
+            "dividend_yield",
+            _coerce_optional_float(raw_data.get("dividend_yield")),
+        ),
+        payout_ratio=getattr(
+            row,
+            "payout_ratio",
+            _coerce_optional_float(raw_data.get("payout_ratio")),
+        ),
+        peg_ratio=getattr(row, "peg_ratio", _coerce_optional_float(raw_data.get("peg_ratio"))),
     )
 
 
@@ -282,6 +359,9 @@ def _ratio_has_metric_value(item: FinancialRatioData) -> bool:
         item.ocf_debt,
         item.fcf_yield,
         item.ocf_sales,
+        item.dividend_yield,
+        item.payout_ratio,
+        item.peg_ratio,
     )
     return any(value is not None for value in metric_values)
 
@@ -481,6 +561,218 @@ async def _enrich_ratio_ev_sales_from_income(
 
         if computed_ev_sales is not None:
             item.ev_sales = computed_ev_sales
+
+    return rows
+
+
+async def _enrich_missing_ratio_metrics(
+    symbol: str,
+    period: str,
+    rows: List[FinancialRatioData],
+    db: AsyncSession,
+) -> List[FinancialRatioData]:
+    if not rows:
+        return rows
+
+    normalized_period = "year" if period in {"year", "FY"} else "quarter"
+
+    income_stmt = (
+        select(
+            IncomeStatement.fiscal_year,
+            IncomeStatement.fiscal_quarter,
+            IncomeStatement.revenue,
+            IncomeStatement.operating_income,
+            IncomeStatement.net_income,
+            IncomeStatement.cost_of_revenue,
+            IncomeStatement.eps,
+        )
+        .where(IncomeStatement.symbol == symbol, IncomeStatement.period_type == normalized_period)
+        .order_by(desc(IncomeStatement.fiscal_year), desc(IncomeStatement.fiscal_quarter))
+    )
+    balance_stmt = (
+        select(
+            BalanceSheet.fiscal_year,
+            BalanceSheet.fiscal_quarter,
+            BalanceSheet.total_assets,
+            BalanceSheet.total_liabilities,
+            BalanceSheet.total_equity,
+            BalanceSheet.inventory,
+            BalanceSheet.accounts_receivable,
+        )
+        .where(BalanceSheet.symbol == symbol, BalanceSheet.period_type == normalized_period)
+        .order_by(desc(BalanceSheet.fiscal_year), desc(BalanceSheet.fiscal_quarter))
+    )
+
+    income_rows = (await db.execute(income_stmt)).all()
+    balance_rows = (await db.execute(balance_stmt)).all()
+
+    income_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
+    prev_income_lookup: dict[tuple[int, int], tuple[float | None, float | None, float | None]] = {}
+    for year, quarter, revenue, operating_income, net_income, cost_of_revenue, eps in income_rows:
+        if year is None:
+            continue
+        key = (int(year), int(quarter or 0))
+        income_lookup[key] = {
+            "revenue": _coerce_optional_float(revenue),
+            "operating_income": _coerce_optional_float(operating_income),
+            "net_income": _coerce_optional_float(net_income),
+            "cost_of_revenue": _coerce_optional_float(cost_of_revenue),
+            "eps": _coerce_optional_float(eps),
+        }
+
+    for year, quarter, revenue, _operating_income, net_income, _cost_of_revenue, eps in income_rows:
+        if year is None:
+            continue
+        y = int(year)
+        q = int(quarter or 0)
+        if normalized_period == "quarter" and 1 <= q <= 4:
+            prev_key = (y - 1, q)
+        else:
+            prev_key = (y - 1, 0)
+        prev_income_lookup[(y, q)] = (
+            _coerce_optional_float(revenue),
+            _coerce_optional_float(net_income),
+            _coerce_optional_float(eps),
+        )
+
+    prev_income_values: dict[tuple[int, int], tuple[float | None, float | None, float | None]] = {}
+    for key in list(prev_income_lookup.keys()):
+        year, quarter = key
+        prev_key = (year - 1, quarter if normalized_period == "quarter" else 0)
+        prev = income_lookup.get(prev_key)
+        prev_income_values[key] = (
+            None if prev is None else _coerce_optional_float(prev.get("revenue")),
+            None if prev is None else _coerce_optional_float(prev.get("net_income")),
+            None if prev is None else _coerce_optional_float(prev.get("eps")),
+        )
+
+    balance_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
+    for (
+        year,
+        quarter,
+        total_assets,
+        total_liabilities,
+        total_equity,
+        inventory,
+        receivables,
+    ) in balance_rows:
+        if year is None:
+            continue
+        balance_lookup[(int(year), int(quarter or 0))] = {
+            "total_assets": _coerce_optional_float(total_assets),
+            "total_liabilities": _coerce_optional_float(total_liabilities),
+            "total_equity": _coerce_optional_float(total_equity),
+            "inventory": _coerce_optional_float(inventory),
+            "accounts_receivable": _coerce_optional_float(receivables),
+        }
+
+    latest_price = None
+    latest_price_stmt = (
+        select(ScreenerSnapshot.price)
+        .where(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.price.is_not(None))
+        .order_by(ScreenerSnapshot.snapshot_date.desc())
+        .limit(1)
+    )
+    latest_price = _coerce_optional_float(
+        (await db.execute(latest_price_stmt)).scalar_one_or_none()
+    )
+
+    for item in rows:
+        year, quarter = _extract_year_quarter(item.period or "")
+        if year is None:
+            continue
+        key = (year, quarter or 0)
+        income = income_lookup.get(key)
+        balance = balance_lookup.get(key)
+        if income is None and quarter is not None:
+            income = income_lookup.get((year, 0))
+        if balance is None and quarter is not None:
+            balance = balance_lookup.get((year, 0))
+
+        revenue = None if income is None else _coerce_optional_float(income.get("revenue"))
+        operating_income = (
+            None if income is None else _coerce_optional_float(income.get("operating_income"))
+        )
+        net_income = None if income is None else _coerce_optional_float(income.get("net_income"))
+        cost_of_revenue = (
+            None if income is None else _coerce_optional_float(income.get("cost_of_revenue"))
+        )
+
+        total_assets = (
+            None if balance is None else _coerce_optional_float(balance.get("total_assets"))
+        )
+        total_liabilities = (
+            None if balance is None else _coerce_optional_float(balance.get("total_liabilities"))
+        )
+        total_equity = (
+            None if balance is None else _coerce_optional_float(balance.get("total_equity"))
+        )
+        inventory = None if balance is None else _coerce_optional_float(balance.get("inventory"))
+        receivables = (
+            None if balance is None else _coerce_optional_float(balance.get("accounts_receivable"))
+        )
+
+        if (
+            item.operating_margin is None
+            and revenue not in (None, 0)
+            and operating_income is not None
+        ):
+            item.operating_margin = (operating_income / revenue) * 100
+        if (
+            item.asset_turnover is None
+            and revenue not in (None, 0)
+            and total_assets not in (None, 0)
+        ):
+            item.asset_turnover = revenue / total_assets
+        if (
+            item.inventory_turnover is None
+            and cost_of_revenue not in (None, 0)
+            and inventory not in (None, 0)
+        ):
+            item.inventory_turnover = cost_of_revenue / inventory
+        if (
+            item.receivables_turnover is None
+            and revenue not in (None, 0)
+            and receivables not in (None, 0)
+        ):
+            item.receivables_turnover = revenue / receivables
+        if (
+            item.debt_assets is None
+            and total_liabilities not in (None, 0)
+            and total_assets not in (None, 0)
+        ):
+            item.debt_assets = total_liabilities / total_assets
+        if (
+            item.equity_multiplier is None
+            and total_assets not in (None, 0)
+            and total_equity not in (None, 0)
+        ):
+            item.equity_multiplier = total_assets / total_equity
+
+        prev_revenue, prev_net_income, _prev_eps = prev_income_values.get(key, (None, None, None))
+        if (
+            item.revenue_growth is None
+            and revenue not in (None, 0)
+            and prev_revenue not in (None, 0)
+        ):
+            item.revenue_growth = ((revenue - prev_revenue) / prev_revenue) * 100
+        if (
+            item.earnings_growth is None
+            and net_income not in (None, 0)
+            and prev_net_income not in (None, 0)
+        ):
+            item.earnings_growth = ((net_income - prev_net_income) / prev_net_income) * 100
+
+        if item.dividend_yield is None and latest_price not in (None, 0):
+            dps = _coerce_optional_float(getattr(item, "dps", None))
+            if dps is not None:
+                item.dividend_yield = (dps / latest_price) * 100
+
+        if item.payout_ratio is None:
+            dps = _coerce_optional_float(getattr(item, "dps", None))
+            eps = _coerce_optional_float(item.eps)
+            if dps is not None and eps not in (None, 0):
+                item.payout_ratio = (dps / eps) * 100
 
     return rows
 
@@ -761,6 +1053,151 @@ async def get_financials(
         return StandardResponse(data=[], error=f"Data unavailable: {str(e)}")
 
 
+@router.get("/{symbol}/peers")
+@cached(ttl=900, key_prefix="equity_peers")
+async def get_equity_peers(
+    symbol: str,
+    limit: int = Query(default=10, ge=1, le=20),
+):
+    peers = await comparison_service.get_peers(symbol=symbol.upper(), limit=limit)
+    payload = peers.model_dump(mode="json") if hasattr(peers, "model_dump") else dict(peers)
+    return payload
+
+
+@router.get("/{symbol}/ttm", response_model=StandardResponse[dict[str, Any]])
+@cached(ttl=3600, key_prefix="equity_ttm")
+async def get_ttm_snapshot(
+    symbol: str,
+):
+    income_rows = await get_financials_with_ttm(
+        symbol=symbol,
+        statement_type=StatementType.INCOME.value,
+        period="TTM",
+        limit=1,
+    )
+    balance_rows = await get_financials_with_ttm(
+        symbol=symbol,
+        statement_type=StatementType.BALANCE.value,
+        period="TTM",
+        limit=1,
+    )
+    cashflow_rows = await get_financials_with_ttm(
+        symbol=symbol,
+        statement_type=StatementType.CASHFLOW.value,
+        period="TTM",
+        limit=1,
+    )
+
+    payload = {
+        "symbol": symbol.upper(),
+        "income": income_rows[0].model_dump(mode="json") if income_rows else None,
+        "balance": balance_rows[0].model_dump(mode="json") if balance_rows else None,
+        "cash_flow": cashflow_rows[0].model_dump(mode="json") if cashflow_rows else None,
+    }
+    return StandardResponse(data=payload, meta=MetaData(count=1))
+
+
+def _growth_rate(current: Optional[float], previous: Optional[float]) -> Optional[float]:
+    if current is None or previous in (None, 0):
+        return None
+    return ((current - previous) / previous) * 100
+
+
+@router.get("/{symbol}/growth", response_model=StandardResponse[dict[str, Any]])
+@cached(ttl=3600, key_prefix="equity_growth")
+async def get_growth_rates(
+    symbol: str,
+    db: AsyncSession = Depends(get_db),
+):
+    symbol_upper = symbol.upper()
+
+    annual_income_stmt = (
+        select(IncomeStatement)
+        .where(IncomeStatement.symbol == symbol_upper, IncomeStatement.period_type == "year")
+        .order_by(desc(IncomeStatement.fiscal_year))
+        .limit(2)
+    )
+    annual_balance_stmt = (
+        select(BalanceSheet)
+        .where(BalanceSheet.symbol == symbol_upper, BalanceSheet.period_type == "year")
+        .order_by(desc(BalanceSheet.fiscal_year))
+        .limit(2)
+    )
+    quarterly_income_stmt = (
+        select(IncomeStatement)
+        .where(IncomeStatement.symbol == symbol_upper, IncomeStatement.period_type == "quarter")
+        .order_by(desc(IncomeStatement.fiscal_year), desc(IncomeStatement.fiscal_quarter))
+        .limit(8)
+    )
+
+    annual_income = (await db.execute(annual_income_stmt)).scalars().all()
+    annual_balance = (await db.execute(annual_balance_stmt)).scalars().all()
+    quarterly_income = (await db.execute(quarterly_income_stmt)).scalars().all()
+
+    yoy: dict[str, Optional[float]] = {
+        "revenue_growth": None,
+        "earnings_growth": None,
+        "eps_growth": None,
+        "ebitda_growth": None,
+        "asset_growth": None,
+    }
+    qoq: dict[str, Optional[float]] = {
+        "revenue_growth": None,
+        "earnings_growth": None,
+        "eps_growth": None,
+        "ebitda_growth": None,
+    }
+
+    if len(annual_income) >= 2:
+        current, previous = annual_income[0], annual_income[1]
+        yoy["revenue_growth"] = _growth_rate(current.revenue, previous.revenue)
+        yoy["earnings_growth"] = _growth_rate(current.net_income, previous.net_income)
+        yoy["eps_growth"] = _growth_rate(current.eps, previous.eps)
+        yoy["ebitda_growth"] = _growth_rate(current.ebitda, previous.ebitda)
+
+    if len(annual_balance) >= 2:
+        current, previous = annual_balance[0], annual_balance[1]
+        yoy["asset_growth"] = _growth_rate(current.total_assets, previous.total_assets)
+
+    latest_quarter = quarterly_income[0] if quarterly_income else None
+    if latest_quarter and latest_quarter.fiscal_quarter:
+        comparison_stmt = (
+            select(IncomeStatement)
+            .where(
+                IncomeStatement.symbol == symbol_upper,
+                IncomeStatement.period_type == "quarter",
+                IncomeStatement.fiscal_year == latest_quarter.fiscal_year - 1,
+                IncomeStatement.fiscal_quarter == latest_quarter.fiscal_quarter,
+            )
+            .limit(1)
+        )
+        same_quarter_prev_year = (await db.execute(comparison_stmt)).scalar_one_or_none()
+        if same_quarter_prev_year:
+            qoq["revenue_growth"] = _growth_rate(
+                latest_quarter.revenue,
+                same_quarter_prev_year.revenue,
+            )
+            qoq["earnings_growth"] = _growth_rate(
+                latest_quarter.net_income,
+                same_quarter_prev_year.net_income,
+            )
+            qoq["eps_growth"] = _growth_rate(latest_quarter.eps, same_quarter_prev_year.eps)
+            qoq["ebitda_growth"] = _growth_rate(
+                latest_quarter.ebitda, same_quarter_prev_year.ebitda
+            )
+
+    payload = {
+        "symbol": symbol_upper,
+        "yoy": yoy,
+        "qoq": qoq,
+        "as_of": {
+            "annual": annual_income[0].period if annual_income else None,
+            "quarter": latest_quarter.period if latest_quarter else None,
+        },
+    }
+    return StandardResponse(data=payload, meta=MetaData(count=1))
+
+
 # Re-adding missing endpoints for completeness
 @router.get("/{symbol}/news", response_model=StandardResponse[List[Any]])
 @cached(ttl=settings.news_retention_days * 86400, key_prefix="company_news_v26")
@@ -994,6 +1431,12 @@ async def get_financial_ratios(
                 rows=data,
                 db=db,
             )
+            data = await _enrich_missing_ratio_metrics(
+                symbol=symbol_upper,
+                period=normalized_period,
+                rows=data,
+                db=db,
+            )
             usable_data = [item for item in data if _ratio_has_metric_value(item)]
             if usable_data:
                 return StandardResponse(data=usable_data, meta=MetaData(count=len(usable_data)))
@@ -1010,6 +1453,12 @@ async def get_financial_ratios(
             FinancialRatiosQueryParams(symbol=symbol_upper, period=normalized_period)
         )
         data = await _enrich_ratio_ev_sales_from_income(
+            symbol=symbol_upper,
+            period=normalized_period,
+            rows=data,
+            db=db,
+        )
+        data = await _enrich_missing_ratio_metrics(
             symbol=symbol_upper,
             period=normalized_period,
             rows=data,

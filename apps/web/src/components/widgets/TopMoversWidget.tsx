@@ -65,14 +65,14 @@ export function TopMoversWidget({
       noPadding
     >
       <div className="h-full flex flex-col">
-        <div className="flex items-center justify-center px-3 py-2 border-b border-gray-800/50">
-          <div className="flex bg-gray-900 rounded-lg p-0.5 text-[10px]">
+        <div className="flex items-center justify-center px-3 py-2 border-b border-[var(--border-subtle)]">
+          <div className="flex bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg p-0.5 text-[10px]">
             <button
               onClick={() => setMode('gainer')}
               className={`px-4 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
                 mode === 'gainer'
                   ? 'bg-green-600 text-white shadow-lg shadow-green-600/20'
-                  : 'text-gray-500 hover:text-gray-300'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
             >
               <TrendingUp size={12} /> Gainers
@@ -82,7 +82,7 @@ export function TopMoversWidget({
               className={`px-4 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
                 mode === 'loser'
                   ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                  : 'text-gray-500 hover:text-gray-300'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
             >
               <TrendingDown size={12} /> Losers
@@ -90,7 +90,7 @@ export function TopMoversWidget({
           </div>
         </div>
 
-        <div className="px-3 py-2 border-b border-gray-800/30">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
@@ -136,7 +136,7 @@ export function TopMoversWidget({
                             ? isUp
                               ? 'bg-green-600/20 text-green-400'
                               : 'bg-red-600/20 text-red-400'
-                            : 'bg-gray-800/50 text-gray-500'
+                            : 'bg-[var(--bg-secondary)] text-[var(--text-muted)]'
                         }`}
                       >
                         {index + 1}
@@ -146,7 +146,7 @@ export function TopMoversWidget({
                       </span>
                     </div>
                     <div className="flex items-center gap-4">
-                      <span className="text-white text-xs font-mono tabular-nums">
+                      <span className="text-[var(--text-primary)] text-xs font-mono tabular-nums">
                         {stock.last_price?.toLocaleString() || '--'}
                       </span>
                       <span

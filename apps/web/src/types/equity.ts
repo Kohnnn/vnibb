@@ -142,6 +142,10 @@ export interface FinancialRatioData {
   ocf_debt?: number;
   fcf_yield?: number;
   ocf_sales?: number;
+  dps?: number;
+  dividend_yield?: number;
+  payout_ratio?: number;
+  peg_ratio?: number;
 }
 
 export interface FinancialRatiosResponse {
@@ -206,10 +210,18 @@ export interface BalanceSheetData {
   total_liabilities?: number;
   current_liabilities?: number;
   long_term_liabilities?: number;
+  short_term_debt?: number;
+  long_term_debt?: number;
   equity?: number;
+  total_equity?: number;
+  retained_earnings?: number;
   cash?: number;
   inventory?: number;
   receivables?: number;
+  accounts_receivable?: number;
+  accounts_payable?: number;
+  goodwill?: number;
+  intangible_assets?: number;
 }
 
 export interface BalanceSheetResponse {
@@ -224,13 +236,19 @@ export interface IncomeStatementData {
   revenue?: number;
   cost_of_revenue?: number;
   gross_profit?: number;
+  selling_general_admin?: number;
+  research_development?: number;
+  depreciation?: number;
   operating_expense?: number;
   operating_income?: number;
   interest_expense?: number;
+  other_income?: number;
+  pre_tax_profit?: number;
   profit_before_tax?: number;
   tax_expense?: number;
   net_income?: number;
   eps?: number;
+  eps_diluted?: number;
 }
 
 export interface IncomeStatementResponse {
@@ -246,9 +264,13 @@ export interface CashFlowData {
   investing_cash_flow?: number;
   financing_cash_flow?: number;
   net_cash_flow?: number;
+  net_change_in_cash?: number;
   free_cash_flow?: number;
+  capex?: number;
   capital_expenditure?: number;
   dividends_paid?: number;
+  debt_repayment?: number;
+  stock_repurchased?: number;
 }
 
 export interface CashFlowResponse {
