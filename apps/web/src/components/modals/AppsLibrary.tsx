@@ -172,16 +172,16 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
             />
 
                 {/* Modal */}
-                <div className="relative w-full max-w-3xl max-h-[80vh] bg-[#0b1021] border border-[#1e2a3b] rounded-lg shadow-2xl overflow-hidden flex flex-col">
+                <div className="relative w-full max-w-3xl max-h-[80vh] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl overflow-hidden flex flex-col">
                     {/* Header */}
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e2a3b] shrink-0">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] shrink-0">
                         <div>
-                            <h2 className="text-base font-semibold text-white">Apps Library</h2>
-                            <p className="text-xs text-gray-500 mt-0.5">Pre-configured dashboard templates</p>
+                            <h2 className="text-base font-semibold text-[var(--text-primary)]">Apps Library</h2>
+                            <p className="text-xs text-[var(--text-muted)] mt-0.5">Pre-configured dashboard templates</p>
                         </div>
                         <button
                             onClick={onClose}
-                            className="p-1.5 rounded hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                            className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                             aria-label="Close apps library"
                         >
                             <X size={18} />
@@ -189,17 +189,20 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
                     </div>
 
                     {/* Search and Filters */}
-                    <div className="px-4 py-3 border-b border-[#1e2a3b] shrink-0">
+                    <div className="px-4 py-3 border-b border-[var(--border-color)] shrink-0">
                         <div className="flex items-center gap-3">
                             <div className="relative flex-1">
-                                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                                <Search
+                                    size={14}
+                                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
+                                />
                                 <input
                                     type="text"
                                     placeholder="Search templates..."
                                     value={searchQuery}
                                     aria-label="Search templates"
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full pl-8 pr-3 py-1.5 rounded bg-[#0f1629] border border-[#1e2a3b] text-white text-xs placeholder-gray-500 focus:outline-none focus:border-blue-500/50"
+                                    className="w-full pl-8 pr-3 py-1.5 rounded bg-[var(--bg-primary)] border border-[var(--border-default)] text-[var(--text-primary)] text-xs placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50"
                                 />
                             </div>
                             <div className="flex gap-1">
@@ -209,7 +212,7 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
                                         onClick={() => setSelectedCategory(cat)}
                                         className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${selectedCategory === cat
                                             ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                                            : 'text-gray-400 hover:text-gray-200 hover:bg-[#1e2a3b]'
+                                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                                             }`}
                                     >
                                         {cat.charAt(0).toUpperCase() + cat.slice(1)}
@@ -226,7 +229,7 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
                                 <button
                                     key={template.id}
                                     onClick={() => handleApplyTemplate(template)}
-                                    className="group flex flex-col p-4 rounded-lg border border-[#1e2a3b] bg-[#0f1629]/50 hover:bg-[#1e2a3b]/50 hover:border-[#2e3a4b] transition-all text-left"
+                                    className="group flex flex-col p-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] hover:border-[var(--border-accent)] transition-all text-left"
                                 >
                                     {/* Icon */}
                                     <div
@@ -237,17 +240,17 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
                                     </div>
 
                                     {/* Content */}
-                                    <h3 className="text-sm font-medium text-white group-hover:text-blue-400 transition-colors">
+                                    <h3 className="text-sm font-medium text-[var(--text-primary)] group-hover:text-blue-400 transition-colors">
                                         {template.name}
                                     </h3>
-                                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                                    <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">
                                         {template.description}
                                     </p>
 
                                     {/* Widget count */}
                                     <div className="mt-3 flex items-center gap-1.5">
-                                        <Layout size={12} className="text-gray-600" />
-                                        <span className="text-[10px] text-gray-600">
+                                        <Layout size={12} className="text-[var(--text-muted)]" />
+                                        <span className="text-[10px] text-[var(--text-muted)]">
                                             {template.widgets.length} widgets
                                         </span>
                                     </div>
@@ -257,7 +260,7 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
 
                         {filteredTemplates.length === 0 && (
                             <div className="text-center py-8">
-                                <p className="text-gray-500 text-sm">No templates found</p>
+                                <p className="text-[var(--text-muted)] text-sm">No templates found</p>
                             </div>
                         )}
                     </div>

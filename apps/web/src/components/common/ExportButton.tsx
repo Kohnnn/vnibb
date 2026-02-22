@@ -88,17 +88,17 @@ export function ExportButton({
             </button>
 
             {isOpen && (
-                <div className="absolute right-0 z-50 mt-2 w-40 origin-top-right rounded-md border border-gray-700 bg-[#0b1021] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                <div className="absolute right-0 z-50 mt-2 w-40 origin-top-right rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
                     <div className="py-1">
                         <button
                             onClick={() => handleExport('csv')}
-                            className="block w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-800 hover:text-white"
+                            className="block w-full px-4 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                         >
                             Export as CSV
                         </button>
                         <button
                             onClick={() => handleExport('excel')}
-                            className="block w-full px-4 py-2 text-left text-sm text-gray-300 hover:bg-gray-800 hover:text-white"
+                            className="block w-full px-4 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                         >
                             Export as Excel
                         </button>

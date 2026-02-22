@@ -18,7 +18,7 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
                     aria-labelledby={props['aria-labelledby']}
                     onChange={(e) => onCheckedChange?.(e.target.checked)}
                     className={`
-                        peer h-4 w-4 shrink-0 rounded border border-gray-700 bg-[#0d0d0d] 
+                        peer h-4 w-4 shrink-0 rounded border border-[var(--border-default)] bg-[var(--bg-secondary)]
                         text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 
                         disabled:cursor-not-allowed disabled:opacity-50 transition-all duration-200
                         appearance-none cursor-pointer checked:bg-blue-600 checked:border-blue-600

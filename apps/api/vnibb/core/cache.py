@@ -24,7 +24,10 @@ R = TypeVar("R")
 
 CACHE_TTLS: Dict[str, int] = {
     "screener": 3600,
-    "quote": 60,
+    "quote": 30,
+    "market_indices": 60,
+    "world_indices": 300,
+    "market_heatmap": 120,
     "ratios": 86400,
     "ratios_history": 86400,
     "financials": 86400,
@@ -50,6 +53,9 @@ CACHE_PREFIX_SHORT = {
     "company_news_v26": "cn",
     "company_events_v26": "ce",
     "profile": "p",
+    "market_indices": "mi",
+    "world_indices": "wi",
+    "market_heatmap": "mh",
 }
 
 # In-memory fallback cache: {key: (data, expiry)}

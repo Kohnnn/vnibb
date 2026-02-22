@@ -186,9 +186,9 @@ export function ScreenerWidget({
             exportData={filteredData}
             hideHeader={hideHeader}
         >
-            <div className="flex flex-col h-full overflow-hidden bg-black font-sans">
+            <div className="flex flex-col h-full overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)] font-sans">
                 {/* Primary Toolbar */}
-                <div className="flex flex-wrap items-center gap-2 p-2 border-b border-gray-800 bg-[#0a0a0a]">
+                <div className="flex flex-wrap items-center gap-2 p-2 border-b border-[var(--border-color)] bg-[var(--bg-primary)]">
                     <SavedScreensDropdown
                         activeScreenId={activeScreenId}
                         customScreens={customScreens}
@@ -197,26 +197,28 @@ export function ScreenerWidget({
                         onDelete={handleDeleteScreen}
                     />
 
-                    <div className="h-4 w-[1px] bg-gray-800 mx-1" />
+                    <div className="h-4 w-[1px] bg-[var(--border-color)] mx-1" />
 
                     <div className="relative flex-1 max-w-[200px]">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-600" />
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--text-muted)]" />
                         <input
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
                             placeholder="Quick search..."
-                            className="w-full pl-8 pr-3 h-8 bg-gray-900/50 border border-gray-800 rounded-lg text-[11px] text-white focus:border-blue-500/50 focus:bg-gray-900 outline-none transition-all placeholder:text-gray-700"
+                            className="w-full pl-8 pr-3 h-8 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[11px] text-[var(--text-primary)] focus:border-blue-500/50 focus:bg-[var(--bg-secondary)] outline-none transition-all placeholder:text-[var(--text-muted)]"
                         />
                     </div>
 
                     <MarketToggle value={market} onChange={setMarket} />
 
-                    <div className="flex bg-gray-900/50 rounded-lg p-0.5 border border-gray-800">
+                    <div className="flex bg-[var(--bg-secondary)] rounded-lg p-0.5 border border-[var(--border-color)]">
                         <button
                             onClick={() => setViewMode('table')}
                             className={cn(
                                 "p-1.5 rounded-md transition-all",
-                                viewMode === 'table' ? "bg-gray-800 text-blue-400 shadow-inner" : "text-gray-600 hover:text-gray-400"
+                                viewMode === 'table'
+                                    ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-inner"
+                                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                             )}
                             title="Table View"
                         >
@@ -226,7 +228,9 @@ export function ScreenerWidget({
                             onClick={() => setViewMode('performance')}
                             className={cn(
                                 "p-1.5 rounded-md transition-all",
-                                viewMode === 'performance' ? "bg-gray-800 text-blue-400 shadow-inner" : "text-gray-600 hover:text-gray-400"
+                                viewMode === 'performance'
+                                    ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-inner"
+                                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                             )}
                             title="Performance View"
                         >
@@ -236,7 +240,9 @@ export function ScreenerWidget({
                             onClick={() => setViewMode('chart')}
                             className={cn(
                                 "p-1.5 rounded-md transition-all",
-                                viewMode === 'chart' ? "bg-gray-800 text-blue-400 shadow-inner" : "text-gray-600 hover:text-gray-400"
+                                viewMode === 'chart'
+                                    ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-inner"
+                                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                             )}
                             title="Chart Grid"
                         >
@@ -251,7 +257,7 @@ export function ScreenerWidget({
                                 "flex items-center gap-1.5 h-8 px-3 rounded-lg text-[10px] font-bold uppercase transition-all border",
                                 showAdvancedFilters
                                     ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-900/20"
-                                    : "bg-gray-900/50 border-gray-800 text-gray-500 hover:bg-gray-800 hover:text-gray-300"
+                                    : "bg-[var(--bg-secondary)] border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]"
                             )}
                         >
                             <ListFilter size={12} />
@@ -270,7 +276,7 @@ export function ScreenerWidget({
 
                 {/* Advanced Filter Builder (Overlay/Panel) */}
                 {showAdvancedFilters && advancedFilterGroup && (
-                    <div className="px-3 py-2 bg-secondary/30 border-b border-gray-800">
+                    <div className="px-3 py-2 bg-[var(--bg-secondary)]/30 border-b border-[var(--border-color)]">
                         <FilterBuilderPanel
                             filterGroup={advancedFilterGroup}
                             onFilterChange={setAdvancedFilterGroup}
@@ -323,7 +329,7 @@ export function ScreenerWidget({
                 </div>
 
                 {/* Status Bar Footer */}
-                <div className="px-3 py-2 border-t border-gray-800 bg-[#050505] flex items-center justify-between text-[10px] font-bold text-gray-600 uppercase tracking-widest shadow-[0_-5px_15px_rgba(0,0,0,0.5)] z-20">
+                <div className="px-3 py-2 border-t border-[var(--border-color)] bg-[var(--bg-primary)] flex items-center justify-between text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest shadow-[0_-5px_15px_rgba(0,0,0,0.2)] z-20">
                     <div className="flex items-center gap-6">
                         <div className="flex items-center gap-2">
                             <span className="text-blue-400 font-black text-xs drop-shadow-md">{filteredData.length.toLocaleString()}</span>
@@ -331,8 +337,8 @@ export function ScreenerWidget({
                         </div>
                         {market !== 'ALL' && (
                             <div className="hidden sm:flex items-center gap-2">
-                                <span className="w-1 h-1 rounded-full bg-gray-600" />
-                                <span className="text-gray-500">{market}</span>
+                                <span className="w-1 h-1 rounded-full bg-[var(--text-muted)]" />
+                                <span className="text-[var(--text-muted)]">{market}</span>
                             </div>
                         )}
                     </div>

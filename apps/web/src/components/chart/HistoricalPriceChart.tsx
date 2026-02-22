@@ -84,24 +84,24 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
           data={chartData}
           margin={{ top: 8, right: 16, left: 12, bottom: 8 }}
         >
-          <CartesianGrid stroke="#1f2937" strokeDasharray="3 3" />
+          <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
           <XAxis
             dataKey="date"
-            tick={{ fill: '#9ca3af', fontSize: 10 }}
+            tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
             tickFormatter={formatShortDate}
             axisLine={false}
             tickLine={false}
           />
           <YAxis
-            tick={{ fill: '#9ca3af', fontSize: 10 }}
+            tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
             axisLine={false}
             tickLine={false}
             domain={['auto', 'auto']}
-            label={{ value: 'VND', angle: -90, position: 'insideLeft', fill: '#9ca3af', fontSize: 10 }}
+            label={{ value: 'VND', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 10 }}
           />
           <Tooltip
-            contentStyle={{ background: '#0b1221', border: '1px solid #1f2937', fontSize: '11px' }}
-            labelStyle={{ color: '#9ca3af' }}
+            contentStyle={{ background: 'var(--bg-tooltip)', border: '1px solid var(--border-default)', fontSize: '11px' }}
+            labelStyle={{ color: 'var(--text-muted)' }}
           />
           <Line type="monotone" dataKey="close" stroke="#38bdf8" strokeWidth={2} dot={false} />
         </LineChart>

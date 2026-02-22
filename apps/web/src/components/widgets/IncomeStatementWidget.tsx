@@ -31,8 +31,8 @@ import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
-import { Sparkline } from '@/components/ui/Sparkline';
 import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 
 interface IncomeStatementWidgetProps {
     id: string;
@@ -51,6 +51,8 @@ const labels: Record<string, string> = {
     net_income: 'Net Income',
     eps: 'EPS',
 };
+
+const TABLE_YEAR_LIMIT = 10;
 
 function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: IncomeStatementWidgetProps) {
     const { period, setPeriod } = usePeriodState({
@@ -111,56 +113,79 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
         [unitLegend]
     );
 
+    const tableColumns = useMemo(
+        () =>
+            items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => ({
+                key: entry.period ?? `period_${index}`,
+                label: formatFinancialPeriodLabel(entry.period, {
+                    mode: periodMode,
+                    index,
+                    total: Math.min(items.length, TABLE_YEAR_LIMIT),
+                }),
+                align: 'right' as const,
+            })),
+        [items, periodMode]
+    );
+
+    const tableRows = useMemo<DenseTableRow[]>(() => {
+        const primaryMetrics = ['revenue', 'gross_profit', 'operating_income', 'profit_before_tax', 'net_income'] as const;
+        const rows: DenseTableRow[] = [
+            {
+                id: 'group:profitability',
+                label: 'Profitability',
+                values: {},
+                isGroup: true,
+            },
+            ...primaryMetrics.map((metricKey) => ({
+                id: metricKey,
+                label: labels[metricKey] || metricKey,
+                parentId: 'group:profitability',
+                indent: 12,
+                values: Object.fromEntries(
+                    items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
+                        tableColumns[index]?.key ?? `period_${index}`,
+                        entry[metricKey],
+                    ])
+                ),
+            })),
+            {
+                id: 'group:per-share',
+                label: 'Per-share',
+                values: {},
+                isGroup: true,
+            },
+            {
+                id: 'eps',
+                label: labels.eps,
+                parentId: 'group:per-share',
+                indent: 12,
+                values: Object.fromEntries(
+                    items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
+                        tableColumns[index]?.key ?? `period_${index}`,
+                        entry.eps,
+                    ])
+                ),
+            },
+        ];
+
+        return rows;
+    }, [items, tableColumns]);
+
     const renderTable = () => (
         <div className="space-y-1">
-            <table className="data-table financial-dense freeze-first-col w-full text-[11px] text-left">
-                <thead className="text-gray-500 sticky top-0 bg-[#0a0a0a] z-10">
-                    <tr className="border-b border-gray-800">
-                        <th className="py-2 px-1 font-bold uppercase tracking-tighter">Item</th>
-                        {items.slice(0, 4).map((d, i) => (
-                            <th key={`${d.period ?? i}-${i}`} className="text-right py-2 px-1 font-bold">
-                                {formatFinancialPeriodLabel(d.period, {
-                                    mode: periodMode,
-                                    index: i,
-                                    total: Math.min(items.length, 4),
-                                })}
-                            </th>
-                        ))}
-                        <th className="py-2 px-1 font-bold uppercase tracking-tighter text-center">Trend</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {['revenue', 'gross_profit', 'operating_income', 'net_income', 'eps'].map((key) => {
-                        const points = items
-                            .slice(0, 4)
-                            .slice()
-                            .reverse()
-                            .map((d) => Number(d[key as keyof typeof d]))
-                            .filter((value) => Number.isFinite(value));
-
-                        return (
-                            <tr key={key} className="border-b border-gray-800/30 hover:bg-white/5 transition-colors">
-                                <td className="py-2 px-1 text-gray-400 font-medium">{labels[key] || key}</td>
-                                {items.slice(0, 4).map((d, i) => (
-                                    <td key={`${d.period ?? i}-${i}`} data-type="number" className="text-right py-2 px-1 text-white font-mono">
-                                        {key === 'eps'
-                                            ? formatNumber(d.eps, { decimals: 2 })
-                                            : formatUnitValuePlain(d[key as keyof typeof d] as number, tableScale, unitConfig)}
-                                    </td>
-                                ))}
-                                <td className="py-2 px-1 text-center">
-                                    {points.length < 2 ? (
-                                        <span className="text-[10px] text-muted-foreground">—</span>
-                                    ) : (
-                                        <Sparkline data={points} width={70} height={18} />
-                                    )}
-                                </td>
-                            </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
-            <div className="px-1 pt-1 text-[10px] text-gray-500 italic">{unitNote}</div>
+            <DenseFinancialTable
+                columns={tableColumns}
+                rows={tableRows}
+                sortable
+                storageKey={`income:${id}:${symbol}:${period}`}
+                valueFormatter={(value, row) => {
+                    if (row.id === 'eps') {
+                        return formatNumber(value as number | null | undefined, { decimals: 2 });
+                    }
+                    return formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig);
+                }}
+            />
+            <div className="px-1 pt-1 text-[10px] text-[var(--text-muted)] italic">{unitNote}</div>
         </div>
     );
 
@@ -169,7 +194,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
     const renderChart = () => {
         if (!chartData.length) {
             return (
-                <div className="flex flex-col items-center justify-center h-48 text-gray-600 gap-2">
+                <div className="flex flex-col items-center justify-center h-48 text-[var(--text-muted)] gap-2">
                     <BarChart3 size={32} className="opacity-20" />
                     <p className="text-[10px] font-bold uppercase tracking-widest">No visualization available</p>
                 </div>
@@ -182,7 +207,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                     <select
                         value={chartType}
                         onChange={(e) => setChartType(e.target.value as any)}
-                        className="bg-gray-900 text-[10px] font-bold text-gray-400 border border-gray-800 rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-white transition-colors"
+                        className="bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
                     >
                         <option value="overview">Revenue & Profit</option>
                         <option value="margins">Margins %</option>
@@ -193,17 +218,22 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                     <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
                         {chartType === 'overview' ? (
                             <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fill: '#666', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                                <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
                                 <YAxis
                                     tickFormatter={(value) => formatAxisValue(value, unitConfig)}
-                                    tick={{ fill: '#666', fontSize: 9 }}
+                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                     axisLine={false}
                                     tickLine={false}
-                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: '#666', fontSize: 9 }}
+                                    label={{ value: getUnitCaption(unitConfig), angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
                                 />
                                 <Tooltip
-                                    contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }}
+                                    contentStyle={{
+                                        backgroundColor: 'var(--bg-tooltip)',
+                                        border: '1px solid var(--border-default)',
+                                        borderRadius: '8px',
+                                        fontSize: '11px',
+                                    }}
                                     itemStyle={{ padding: '0px' }}
                                 />
                                 <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
@@ -212,17 +242,22 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                             </ComposedChart>
                         ) : (
                             <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
-                                <XAxis dataKey="period" tick={{ fill: '#666', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+                                <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
                                 <YAxis
                                     tickFormatter={(val) => `${val}%`}
-                                    tick={{ fill: '#666', fontSize: 9 }}
+                                    tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                     axisLine={false}
                                     tickLine={false}
-                                    label={{ value: '%', angle: -90, position: 'insideLeft', fill: '#666', fontSize: 9 }}
+                                    label={{ value: '%', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 9 }}
                                 />
                                 <Tooltip
-                                    contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }}
+                                    contentStyle={{
+                                        backgroundColor: 'var(--bg-tooltip)',
+                                        border: '1px solid var(--border-default)',
+                                        borderRadius: '8px',
+                                        fontSize: '11px',
+                                    }}
                                 />
                                 <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                 <Line type="monotone" dataKey="grossMargin" name="Gross %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
@@ -237,12 +272,14 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
 
     const headerActions = (
         <div className="flex items-center gap-1.5 mr-1">
-            <div className="flex bg-gray-900 rounded p-0.5 border border-gray-800">
+            <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-color)]">
                 <button
                     onClick={() => setViewMode('table')}
                     className={cn(
                         "p-1 rounded transition-all",
-                        viewMode === 'table' ? "bg-gray-800 text-blue-400 shadow-sm" : "text-gray-500 hover:text-gray-300"
+                        viewMode === 'table'
+                            ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     )}
                     title="Table View"
                 >
@@ -252,7 +289,9 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                     onClick={() => setViewMode('chart')}
                     className={cn(
                         "p-1 rounded transition-all",
-                        viewMode === 'chart' ? "bg-gray-800 text-blue-400 shadow-sm" : "text-gray-500 hover:text-gray-300"
+                        viewMode === 'chart'
+                            ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     )}
                     title="Chart View"
                 >
@@ -277,7 +316,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
             exportData={items}
         >
             <div className="h-full flex flex-col px-2 py-1.5">
-                <div className="pb-1 border-b border-gray-800/50">
+                <div className="pb-1 border-b border-[var(--border-subtle)]">
                     <WidgetMeta
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}

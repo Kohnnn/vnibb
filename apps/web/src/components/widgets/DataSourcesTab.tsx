@@ -86,14 +86,14 @@ export function DataSourcesTab() {
     return (
         <div className="flex-1 flex flex-col">
             {/* Header Bar */}
-            <div className="flex items-center justify-between p-4 border-b border-[#1e293b]">
+            <div className="flex items-center justify-between p-4 border-b border-[var(--border-color)]">
                 <div className="flex items-center gap-3">
                     <div className="p-2 bg-cyan-500/10 rounded-lg text-cyan-400">
                         <Database size={20} />
                     </div>
                     <div>
-                        <h3 className="font-semibold text-white">Data Sources</h3>
-                        <p className="text-xs text-gray-500">
+                        <h3 className="font-semibold text-[var(--text-primary)]">Data Sources</h3>
+                        <p className="text-xs text-[var(--text-muted)]">
                             {dataSources.length} backend{dataSources.length !== 1 ? 's' : ''} configured
                         </p>
                     </div>
@@ -110,7 +110,7 @@ export function DataSourcesTab() {
                                 }
                             }}
                             disabled={refreshing}
-                            className="flex items-center gap-2 px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-[#1e293b] rounded-lg transition-colors disabled:opacity-50"
+                            className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors disabled:opacity-50"
                             aria-label="Refresh all connections"
                         >
                             <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
@@ -135,7 +135,7 @@ export function DataSourcesTab() {
             </div>
 
             {/* VnStock Provider Selection */}
-            <div className="p-4 border-b border-[#1e293b]">
+            <div className="p-4 border-b border-[var(--border-color)]">
                 <div className="max-w-3xl mx-auto">
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-3 min-w-[200px]">
@@ -143,8 +143,8 @@ export function DataSourcesTab() {
                                 <Layers size={18} />
                             </div>
                             <div>
-                                <h4 className="text-sm font-medium text-white">VnStock Provider</h4>
-                                <p className="text-xs text-gray-500">Data source for Vietnamese stocks</p>
+                                <h4 className="text-sm font-medium text-[var(--text-primary)]">VnStock Provider</h4>
+                                <p className="text-xs text-[var(--text-muted)]">Data source for Vietnamese stocks</p>
                             </div>
                         </div>
 
@@ -157,17 +157,17 @@ export function DataSourcesTab() {
                                         setVnstockDropdownOpen(!vnstockDropdownOpen);
                                     }
                                 }}
-                                className="w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-[#1e293b]/70 border border-[#334155] hover:border-[#475569] rounded-lg text-sm text-white transition-colors"
+                                className="w-full flex items-center justify-between gap-2 px-4 py-2.5 bg-[var(--bg-secondary)] border border-[var(--border-default)] hover:border-[var(--border-color)] rounded-lg text-sm text-[var(--text-primary)] transition-colors"
                                 aria-label="Select VnStock provider"
                             >
                                 <span className="font-medium">
                                     {VNSTOCK_SOURCES.find(s => s.value === preferredVnstockSource)?.label}
                                 </span>
-                                <ChevronDown size={16} className={`text-gray-400 transition-transform ${vnstockDropdownOpen ? 'rotate-180' : ''}`} />
+                                <ChevronDown size={16} className={`text-[var(--text-muted)] transition-transform ${vnstockDropdownOpen ? 'rotate-180' : ''}`} />
                             </button>
 
                             {vnstockDropdownOpen && (
-                                <div className="absolute top-full left-0 right-0 mt-1 bg-[#1e293b] border border-[#334155] rounded-lg shadow-xl z-20 overflow-hidden">
+                                <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--bg-dropdown)] border border-[var(--border-default)] rounded-lg shadow-xl z-20 overflow-hidden">
                                     {VNSTOCK_SOURCES.map((source) => (
                                         <button
                                             key={source.value}
@@ -175,13 +175,13 @@ export function DataSourcesTab() {
                                                 setPreferredVnstockSource(source.value);
                                                 setVnstockDropdownOpen(false);
                                             }}
-                                            className={`w-full flex flex-col items-start px-4 py-3 text-left hover:bg-[#334155] transition-colors ${preferredVnstockSource === source.value ? 'bg-blue-600/10 border-l-2 border-blue-500' : ''
+                                            className={`w-full flex flex-col items-start px-4 py-3 text-left hover:bg-[var(--bg-hover)] transition-colors ${preferredVnstockSource === source.value ? 'bg-blue-600/10 border-l-2 border-blue-500' : ''
                                                 }`}
                                         >
-                                            <span className={`text-sm font-medium ${preferredVnstockSource === source.value ? 'text-blue-400' : 'text-white'}`}>
+                                            <span className={`text-sm font-medium ${preferredVnstockSource === source.value ? 'text-blue-400' : 'text-[var(--text-primary)]'}`}>
                                                 {source.label}
                                             </span>
-                                            <span className="text-xs text-gray-500">{source.description}</span>
+                                            <span className="text-xs text-[var(--text-muted)]">{source.description}</span>
                                         </button>
                                     ))}
                                 </div>
@@ -196,11 +196,11 @@ export function DataSourcesTab() {
                 {dataSources.length === 0 ? (
                     // Empty State
                     <div className="flex flex-col items-center justify-center h-full text-center">
-                        <div className="p-4 bg-[#1e293b]/50 rounded-2xl mb-4">
-                            <Server size={48} className="text-gray-600" />
+                        <div className="p-4 bg-[var(--bg-secondary)]/60 rounded-2xl mb-4">
+                            <Server size={48} className="text-[var(--text-muted)]" />
                         </div>
-                        <h3 className="text-lg font-semibold text-white mb-2">No Data Sources</h3>
-                        <p className="text-gray-500 mb-6 max-w-sm">
+                        <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">No Data Sources</h3>
+                        <p className="text-[var(--text-muted)] mb-6 max-w-sm">
                             Connect your backend APIs to fetch real-time data for your widgets.
                         </p>
                         <button
@@ -224,7 +224,7 @@ export function DataSourcesTab() {
                         {dataSources.map((source) => (
                             <div
                                 key={source.id}
-                                className="group bg-[#1e293b]/50 border border-[#334155] hover:border-[#475569] rounded-xl p-4 transition-all"
+                                className="group bg-[var(--bg-secondary)]/70 border border-[var(--border-default)] hover:border-[var(--border-color)] rounded-xl p-4 transition-all"
                             >
                                 <div className="flex items-start justify-between">
                                     <div className="flex items-start gap-4">
@@ -239,7 +239,7 @@ export function DataSourcesTab() {
                                         {/* Info */}
                                         <div className="min-w-0">
                                             <div className="flex items-center gap-2 mb-1">
-                                                <h4 className="font-semibold text-white truncate">
+                                                <h4 className="font-semibold text-[var(--text-primary)] truncate">
                                                     {source.name}
                                                 </h4>
                                                 <span className={`text-xs px-2 py-0.5 rounded ${source.status === 'connected'
@@ -252,7 +252,7 @@ export function DataSourcesTab() {
                                                 </span>
                                             </div>
 
-                                            <div className="flex items-center gap-2 text-sm text-gray-400">
+                                            <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                                                 <ExternalLink size={14} />
                                                 <span className="font-mono text-xs truncate max-w-md">
                                                     {source.endpoint}
@@ -265,7 +265,7 @@ export function DataSourcesTab() {
                                                 </p>
                                             )}
 
-                                            <div className="flex items-center gap-1 mt-2 text-xs text-gray-500">
+                                            <div className="flex items-center gap-1 mt-2 text-xs text-[var(--text-muted)]">
                                                 <Clock size={12} />
                                                 Last checked: {formatLastChecked(source.lastChecked)}
                                             </div>
@@ -282,7 +282,7 @@ export function DataSourcesTab() {
                                                     checkConnection(source.id);
                                                 }
                                             }}
-                                            className="p-2 text-gray-400 hover:text-white hover:bg-[#334155] rounded-lg transition-colors"
+                                            className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
                                             title="Test Connection"
                                             aria-label={`Test connection for ${source.name}`}
                                         >
@@ -296,7 +296,7 @@ export function DataSourcesTab() {
                                                     removeDataSource(source.id);
                                                 }
                                             }}
-                                            className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                            className="p-2 text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                                             title="Remove"
                                             aria-label={`Remove ${source.name}`}
                                         >

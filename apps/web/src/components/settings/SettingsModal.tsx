@@ -40,7 +40,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#0a0a0a] rounded-xl border border-gray-700 w-full max-w-3xl max-h-[80vh] flex shadow-2xl overflow-hidden">
+      <div className="bg-[var(--bg-modal)] rounded-xl border border-[var(--border-default)] w-full max-w-3xl max-h-[80vh] flex shadow-2xl overflow-hidden">
         {/* Sidebar */}
         <div className="w-48 bg-gray-900 border-r border-gray-800 p-4 shrink-0 hidden md:block">
           <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
@@ -67,7 +67,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 flex flex-col min-w-0 bg-[#0a0a0a]">
+        <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-primary)]">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
             <h3 className="text-lg font-bold text-white">

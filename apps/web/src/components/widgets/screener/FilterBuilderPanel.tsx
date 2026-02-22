@@ -251,7 +251,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
     };
 
     return (
-        <div className="flex flex-col gap-4 bg-[#0a0a0a] border border-[#1e1e1e] rounded-xl p-5 shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
+        <div className="flex flex-col gap-4 bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-xl p-5 shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -259,17 +259,17 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                         <Settings2 className="text-blue-500" size={18} />
                     </div>
                     <div>
-                        <h3 className="text-sm font-semibold text-white">Advanced Filter Builder</h3>
-                        <p className="text-xs text-gray-500">84 metrics available • Combine with AND/OR logic</p>
+                        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Advanced Filter Builder</h3>
+                        <p className="text-xs text-[var(--text-muted)]">84 metrics available • Combine with AND/OR logic</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="flex items-center bg-[#1e1e1e] rounded-lg p-0.5">
+                    <div className="flex items-center bg-[var(--bg-secondary)] rounded-lg p-0.5">
                         <button
                             onClick={() => handleLogicChange('AND')}
                             className={`px-3 py-1 text-xs rounded-md transition-all ${filterGroup.logic === 'AND'
                                 ? 'bg-blue-600 text-white shadow-lg'
-                                : 'text-gray-400 hover:text-white'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                                 }`}
                         >
                             AND
@@ -278,14 +278,14 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                             onClick={() => handleLogicChange('OR')}
                             className={`px-3 py-1 text-xs rounded-md transition-all ${filterGroup.logic === 'OR'
                                 ? 'bg-orange-600 text-white shadow-lg'
-                                : 'text-gray-400 hover:text-white'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                                 }`}
                         >
                             OR
                         </button>
                     </div>
                     {onClose && (
-                        <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-gray-400 hover:text-white">
+                        <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
                             <X size={18} />
                         </Button>
                     )}
@@ -295,13 +295,13 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
             {/* Conditions List */}
             <div className="space-y-3 min-h-[100px] max-h-[400px] overflow-y-auto px-1">
                 {filterGroup.conditions.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-10 text-gray-600 border-2 border-dashed border-[#1e1e1e] rounded-xl">
+                    <div className="flex flex-col items-center justify-center py-10 text-[var(--text-muted)] border-2 border-dashed border-[var(--border-default)] rounded-xl">
                         <p className="text-sm">No conditions defined</p>
                         <p className="text-xs mt-1">Click "Add Condition" to start filtering</p>
                     </div>
                 ) : (
                     filterGroup.conditions.map((cond, index) => (
-                        <div key={cond.id} className="flex items-center gap-3 bg-[#161616] border border-[#222] hover:border-[#333] p-3 rounded-lg group transition-all">
+                        <div key={cond.id} className="flex items-center gap-3 bg-[var(--bg-secondary)] border border-[var(--border-default)] hover:border-[var(--border-color)] p-3 rounded-lg group transition-all">
                             {/* Logic connector */}
                             {index > 0 && (
                                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${filterGroup.logic === 'AND' ? 'bg-blue-600/20 text-blue-400' : 'bg-orange-600/20 text-orange-400'}`}>
@@ -316,26 +316,26 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                                         value={cond.field}
                                         onValueChange={(val: string) => updateCondition(cond.id, { field: val })}
                                     >
-                                        <SelectTrigger className="bg-[#0a0a0a] border-[#222] text-xs h-9">
+                                        <SelectTrigger className="bg-[var(--bg-primary)] border-[var(--border-default)] text-xs h-9">
                                             <SelectValue>{getMetricLabel(cond.field)}</SelectValue>
                                         </SelectTrigger>
-                                        <SelectContent className="bg-[#0a0a0a] border-[#222] max-h-[300px]">
+                                        <SelectContent className="bg-[var(--bg-dropdown)] border-[var(--border-default)] max-h-[300px]">
                                             {/* Search input */}
-                                            <div className="p-2 border-b border-[#222]">
+                                            <div className="p-2 border-b border-[var(--border-default)]">
                                                 <div className="relative">
-                                                    <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+                                                    <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
                                                     <input
                                                         type="text"
                                                         placeholder="Search metrics..."
                                                         value={searchQuery}
                                                         onChange={(e) => setSearchQuery(e.target.value)}
-                                                        className="w-full bg-[#161616] border border-[#222] rounded pl-7 pr-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                                        className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded pl-7 pr-2 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
                                                     />
                                                 </div>
                                             </div>
                                             {filteredGroups.map(group => (
                                                 <div key={group.name} className="px-2 py-1.5">
-                                                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1 px-2 sticky top-0 bg-[#0a0a0a]">
+                                                    <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1 px-2 sticky top-0 bg-[var(--bg-dropdown)]">
                                                         {group.name}
                                                     </div>
                                                     {group.metrics.map(metric => (
@@ -355,10 +355,10 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                                         value={cond.operator}
                                         onValueChange={(val: FilterCondition['operator']) => updateCondition(cond.id, { operator: val })}
                                     >
-                                        <SelectTrigger className="bg-[#0a0a0a] border-[#222] text-xs h-9 text-gray-300">
+                                        <SelectTrigger className="bg-[var(--bg-primary)] border-[var(--border-default)] text-xs h-9 text-[var(--text-secondary)]">
                                             <SelectValue />
                                         </SelectTrigger>
-                                        <SelectContent className="bg-[#0a0a0a] border-[#222]">
+                                        <SelectContent className="bg-[var(--bg-dropdown)] border-[var(--border-default)]">
                                             {OPERATORS.map(op => (
                                                 <SelectItem key={op.id} value={op.id} className="text-xs">
                                                     <span className="font-mono mr-2 text-blue-400">{op.symbol}</span>
@@ -381,10 +381,10 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                                                     const maxVal = Array.isArray(cond.value) && typeof cond.value[1] === 'number' ? cond.value[1] : 100;
                                                     updateCondition(cond.id, { value: [minVal, maxVal] as number[] });
                                                 }}
-                                                className="bg-[#0a0a0a] border-[#222] h-9 text-xs"
+                                                className="bg-[var(--bg-primary)] border-[var(--border-default)] h-9 text-xs"
                                                 placeholder="Min"
                                             />
-                                            <span className="text-gray-600 text-xs">to</span>
+                                            <span className="text-[var(--text-muted)] text-xs">to</span>
                                             <Input
                                                 type="number"
                                                 value={String(Array.isArray(cond.value) ? cond.value[1] : 100)}
@@ -393,7 +393,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                                                     const maxVal = parseFloat(e.target.value) || 100;
                                                     updateCondition(cond.id, { value: [minVal, maxVal] as number[] });
                                                 }}
-                                                className="bg-[#0a0a0a] border-[#222] h-9 text-xs"
+                                                className="bg-[var(--bg-primary)] border-[var(--border-default)] h-9 text-xs"
                                                 placeholder="Max"
                                             />
                                         </div>
@@ -404,7 +404,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                                             onChange={(e) => updateCondition(cond.id, {
                                                 value: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
                                             })}
-                                            className="bg-[#0a0a0a] border-[#222] h-9 text-xs"
+                                            className="bg-[var(--bg-primary)] border-[var(--border-default)] h-9 text-xs"
                                             placeholder="comma, separated, values"
                                         />
                                     ) : (
@@ -412,7 +412,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                                             type="number"
                                             value={typeof cond.value === 'number' ? cond.value : 0}
                                             onChange={(e) => updateCondition(cond.id, { value: parseFloat(e.target.value) || 0 })}
-                                            className="bg-[#0a0a0a] border-[#222] h-9 text-xs"
+                                            className="bg-[var(--bg-primary)] border-[var(--border-default)] h-9 text-xs"
                                             placeholder="Value"
                                         />
                                     )}
@@ -423,7 +423,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => removeCondition(cond.id)}
-                                className="h-8 w-8 text-gray-600 hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="h-8 w-8 text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
                             >
                                 <Trash2 size={16} />
                             </Button>
@@ -433,26 +433,26 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between mt-2 pt-4 border-t border-[#1e1e1e]">
+            <div className="flex items-center justify-between mt-2 pt-4 border-t border-[var(--border-subtle)]">
                 <Button
                     variant="outline"
                     size="sm"
                     onClick={addCondition}
-                    className="bg-transparent border-[#222] hover:bg-[#1e1e1e] text-xs h-9 flex items-center gap-2"
+                    className="bg-transparent border-[var(--border-default)] hover:bg-[var(--bg-hover)] text-xs h-9 flex items-center gap-2"
                 >
                     <Plus size={14} />
                     Add Condition
                 </Button>
 
                 <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-[var(--text-muted)]">
                         {filterGroup.conditions.length} condition{filterGroup.conditions.length !== 1 ? 's' : ''}
                     </span>
                     <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => onFilterChange({ logic: 'AND', conditions: [] })}
-                        className="text-xs text-gray-500 hover:text-white h-9"
+                        className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] h-9"
                     >
                         Clear All
                     </Button>

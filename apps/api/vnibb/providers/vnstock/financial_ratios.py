@@ -134,6 +134,21 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
         if not data:
             return []
 
+        def _to_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        def _pick_float(*values: Any) -> Optional[float]:
+            for value in values:
+                numeric = _to_float(value)
+                if numeric is not None:
+                    return numeric
+            return None
+
         has_row_items = any("item_id" in row for row in data)
         if has_row_items:
             metric_map = {
@@ -142,6 +157,8 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 "p_s": "ps",
                 "ev_ebitda": "ev_ebitda",
                 "ev_sales": "ev_sales",
+                "ev_to_sales": "ev_sales",
+                "enterprise_value_to_sales": "ev_sales",
                 "roe": "roe",
                 "roa": "roa",
                 "trailing_eps": "eps",
@@ -184,26 +201,40 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
             }
             liabilities_by_year: dict[str, float] = {}
             equity_by_year: dict[str, float] = {}
+            enterprise_value_by_year: dict[str, float] = {}
+            revenue_by_year: dict[str, float] = {}
 
             for row in data:
                 item_id = row.get("item_id")
                 if not item_id:
                     continue
+                item_id_lower = str(item_id).strip().lower()
                 for year in year_fields:
                     if year not in row:
                         continue
-                    value = row.get(year)
+                    value = _to_float(row.get(year))
                     if value is None:
                         continue
-                    if item_id in metric_map:
-                        field = metric_map[item_id]
+                    if item_id_lower in metric_map:
+                        field = metric_map[item_id_lower]
                         by_year[year][field] = value
                         continue
-                    if item_id == "liabilities":
+                    if item_id_lower == "liabilities":
                         liabilities_by_year[year] = value
                         continue
-                    if item_id == "owners_equity":
+                    if item_id_lower == "owners_equity":
                         equity_by_year[year] = value
+                        continue
+                    if item_id_lower in {"enterprise_value", "ev"}:
+                        enterprise_value_by_year[year] = value
+                        continue
+                    if item_id_lower in {
+                        "revenue",
+                        "net_revenue",
+                        "total_revenue",
+                        "sales_revenue",
+                    }:
+                        revenue_by_year[year] = value
 
             for year in year_fields:
                 if by_year[year].get("debt_equity") is None:
@@ -211,6 +242,12 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                     equity = equity_by_year.get(year)
                     if liabilities is not None and equity not in (None, 0):
                         by_year[year]["debt_equity"] = liabilities / equity
+
+                if by_year[year].get("ev_sales") is None:
+                    enterprise_value = enterprise_value_by_year.get(year)
+                    revenue = revenue_by_year.get(year)
+                    if enterprise_value is not None and revenue not in (None, 0):
+                        by_year[year]["ev_sales"] = enterprise_value / revenue
 
             results = []
             for year in year_fields:
@@ -223,6 +260,21 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
         results = []
         for row in data:
             try:
+                enterprise_value = _pick_float(
+                    row.get("enterpriseValue"),
+                    row.get("enterprise_value"),
+                    row.get("ev"),
+                )
+                revenue = _pick_float(
+                    row.get("revenue"),
+                    row.get("netRevenue"),
+                    row.get("totalRevenue"),
+                    row.get("salesRevenue"),
+                )
+                computed_ev_sales = None
+                if enterprise_value is not None and revenue not in (None, 0):
+                    computed_ev_sales = enterprise_value / revenue
+
                 results.append(
                     FinancialRatioData(
                         symbol=params.symbol.upper(),
@@ -239,10 +291,19 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         ev_ebitda=row.get("evToEbitda")
                         or row.get("evEbitda")
                         or row.get("ev_ebitda"),
-                        ev_sales=row.get("evToSales") or row.get("evSales") or row.get("ev_sales"),
+                        ev_sales=_pick_float(
+                            row.get("evToSales"),
+                            row.get("evSales"),
+                            row.get("ev_sales"),
+                            row.get("enterpriseValueToSales"),
+                            row.get("ev_to_sales"),
+                            computed_ev_sales,
+                        ),
                         roe=row.get("roe"),
                         roa=row.get("roa"),
-                        eps=row.get("earningPerShare") or row.get("eps"),
+                        eps=row.get("earningPerShare")
+                        or row.get("earningsPerShare")
+                        or row.get("eps"),
                         bvps=row.get("bookValuePerShare") or row.get("bvps"),
                         debt_equity=row.get("debtOnEquity") or row.get("de"),
                         debt_assets=row.get("debtOnAssets") or row.get("debtAssets"),

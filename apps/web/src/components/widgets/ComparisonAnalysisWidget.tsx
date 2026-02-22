@@ -57,7 +57,7 @@ const CATEGORY_DEFINITIONS = [
   },
 ] as const
 
-const COLOR_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']
+const COLOR_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#14b8a6', '#06b6d4']
 const PERFORMANCE_PERIODS = ['1M', '3M', '6M', '1Y', '3Y', '5Y'] as const
 
 type PerformancePeriod = (typeof PERFORMANCE_PERIODS)[number]

@@ -159,10 +159,10 @@ function SectorColumn({
   const isPositive = avgChange >= 0;
 
   return (
-    <div className="min-w-[150px] border-r border-gray-800/50 last:border-r-0 flex flex-col bg-[#050505]">
+    <div className="min-w-[150px] border-r border-[var(--border-subtle)] last:border-r-0 flex flex-col bg-[var(--bg-primary)]">
       <div
         className={cn(
-          'px-3 py-2 border-b border-gray-800 transition-colors sticky top-0 bg-[#0d0d0d] z-10',
+          'px-3 py-2 border-b border-[var(--border-default)] transition-colors sticky top-0 bg-[var(--bg-secondary)] z-10',
           isPositive ? 'border-b-green-900/30' : 'border-b-red-900/30'
         )}
       >

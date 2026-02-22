@@ -1989,6 +1989,7 @@ class DataPipeline:
                             "ps_ratio": ratio.ps,
                             "peg_ratio": None,
                             "ev_ebitda": ratio.ev_ebitda,
+                            "ev_sales": ratio.ev_sales,
                             "roe": ratio.roe,
                             "roa": ratio.roa,
                             "roic": None,

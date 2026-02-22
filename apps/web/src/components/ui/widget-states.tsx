@@ -159,7 +159,7 @@ export function CompactError({ message = 'Error', onRetry }: { message?: string;
             <AlertTriangle size={14} />
             <span className="text-xs">{message}</span>
             {onRetry && (
-                <button onClick={onRetry} className="ml-1 hover:bg-gray-800/50 rounded p-1">
+                <button onClick={onRetry} className="ml-1 hover:bg-[var(--bg-hover)] rounded p-1">
                     <RefreshCw size={10} />
                 </button>
             )}

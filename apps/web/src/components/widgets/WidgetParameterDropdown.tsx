@@ -58,21 +58,21 @@ export function WidgetParameterDropdown({
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className={`
-                    flex items-center gap-1 text-gray-400 hover:text-gray-200 
-                    hover:bg-white/5 rounded px-1.5 py-0.5 transition-colors
+                    flex items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]
+                    hover:bg-[var(--bg-hover)] rounded px-1.5 py-0.5 transition-colors
                     ${compact ? 'text-[10px]' : 'text-xs'}
                 `}
             >
-                <span className="text-gray-500">{parameter.label}:</span>
-                <span className="text-gray-300 font-medium">
+                <span className="text-[var(--text-muted)]">{parameter.label}:</span>
+                <span className="text-[var(--text-secondary)] font-medium">
                     {currentOption?.label || parameter.currentValue}
                 </span>
-                <ChevronDown size={compact ? 10 : 12} className="text-gray-500" />
+                <ChevronDown size={compact ? 10 : 12} className="text-[var(--text-muted)]" />
             </button>
 
             {/* Dropdown Menu */}
             {isOpen && (
-                <div className="absolute top-full left-0 mt-1 z-50 min-w-[140px] py-1 bg-[#0f1629] border border-[#1e2a3b] rounded-md shadow-xl">
+                <div className="absolute top-full left-0 mt-1 z-50 min-w-[140px] py-1 bg-[var(--bg-dropdown)] border border-[var(--border-default)] rounded-md shadow-xl">
                     {parameter.options.map((option) => (
                         <button
                             key={option.value}
@@ -82,14 +82,14 @@ export function WidgetParameterDropdown({
                                 text-xs hover:bg-blue-500/10 transition-colors
                                 ${option.value === parameter.currentValue
                                     ? 'text-blue-400 bg-blue-500/5'
-                                    : 'text-gray-300'
+                                    : 'text-[var(--text-secondary)]'
                                 }
                             `}
                         >
                             <span className="flex-1">
                                 {option.label}
                                 {option.description && (
-                                    <span className="block text-[10px] text-gray-500">
+                                    <span className="block text-[10px] text-[var(--text-muted)]">
                                         {option.description}
                                     </span>
                                 )}
@@ -220,21 +220,21 @@ export function WidgetMultiSelectDropdown({
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className={`
-                    flex items-center gap-1 text-gray-400 hover:text-gray-200 
-                    hover:bg-white/5 rounded px-1.5 py-0.5 transition-colors
+                    flex items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]
+                    hover:bg-[var(--bg-hover)] rounded px-1.5 py-0.5 transition-colors
                     ${compact ? 'text-[10px]' : 'text-xs'}
                 `}
             >
-                <span className="text-gray-500">{label}:</span>
-                <span className="text-gray-300 font-medium max-w-[80px] truncate">
+                <span className="text-[var(--text-muted)]">{label}:</span>
+                <span className="text-[var(--text-secondary)] font-medium max-w-[80px] truncate">
                     {displayValue}
                 </span>
-                <ChevronDown size={compact ? 10 : 12} className="text-gray-500" />
+                <ChevronDown size={compact ? 10 : 12} className="text-[var(--text-muted)]" />
             </button>
 
             {/* Dropdown Menu */}
             {isOpen && (
-                <div className="absolute top-full left-0 mt-1 z-50 min-w-[180px] py-1 bg-[#0f1629] border border-[#1e2a3b] rounded-md shadow-xl max-h-[200px] overflow-y-auto">
+                <div className="absolute top-full left-0 mt-1 z-50 min-w-[180px] py-1 bg-[var(--bg-dropdown)] border border-[var(--border-default)] rounded-md shadow-xl max-h-[200px] overflow-y-auto">
                     {options.map((option) => (
                         <button
                             key={option.value}
@@ -244,7 +244,7 @@ export function WidgetMultiSelectDropdown({
                                 text-xs hover:bg-blue-500/10 transition-colors
                                 ${currentValues.includes(option.value)
                                     ? 'text-blue-400 bg-blue-500/5'
-                                    : 'text-gray-300'
+                                    : 'text-[var(--text-secondary)]'
                                 }
                             `}
                         >
@@ -253,7 +253,7 @@ export function WidgetMultiSelectDropdown({
                                 w-3.5 h-3.5 rounded border flex items-center justify-center
                                 ${currentValues.includes(option.value)
                                     ? 'bg-blue-500 border-blue-500'
-                                    : 'border-gray-600'
+                                    : 'border-[var(--border-default)]'
                                 }
                             `}>
                                 {currentValues.includes(option.value) && (
@@ -263,7 +263,7 @@ export function WidgetMultiSelectDropdown({
                             <span className="flex-1">
                                 {option.label}
                                 {option.description && (
-                                    <span className="block text-[10px] text-gray-500">
+                                    <span className="block text-[10px] text-[var(--text-muted)]">
                                         {option.description}
                                     </span>
                                 )}

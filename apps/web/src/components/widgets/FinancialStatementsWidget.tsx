@@ -129,8 +129,8 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
     }
 
     return (
-        <div className="h-full flex flex-col bg-[#0b1221]">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-[#1e293b]">
+        <div className="h-full flex flex-col bg-[var(--bg-primary)]">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-color)]">
                 <div className="flex items-center gap-1">
                     {(['income', 'balance', 'cashflow'] as StatementType[]).map((type) => (
                         <button
@@ -138,7 +138,7 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                             onClick={() => setStatementType(type)}
                             className={`px-2 py-1 text-xs font-medium rounded transition-colors ${statementType === type
                                 ? 'bg-blue-600/20 text-blue-400'
-                                : 'text-gray-400 hover:text-white hover:bg-[#1e293b]'}`}
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
                             type="button"
                         >
                             {type === 'income' ? 'Income' : type === 'balance' ? 'Balance' : 'Cash Flow'}
@@ -146,14 +146,14 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                     ))}
                 </div>
                 <div className="flex items-center gap-2">
-                    <div className="inline-flex items-center gap-1 rounded-md border border-[#334155] bg-[#1e293b] p-0.5">
+                    <div className="inline-flex items-center gap-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5">
                         {(['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'] as Period[]).map((opt) => (
                             <button
                                 key={opt}
                                 type="button"
                                 onClick={() => setPeriod(opt)}
                                 className={`px-2 py-1 text-[10px] font-black uppercase rounded transition-colors ${
-                                    period === opt ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200'
+                                    period === opt ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                                 }`}
                             >
                                 {opt}
@@ -172,7 +172,7 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                 </div>
             </div>
 
-            <div className="px-3 py-2 border-b border-[#1e293b]">
+            <div className="px-3 py-2 border-b border-[var(--border-color)]">
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
@@ -191,10 +191,10 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                     <WidgetEmpty message={`No ${statementType} data for ${symbol}`} />
                 ) : (
                     <div className="space-y-1">
-                        <div className="px-3 text-[10px] text-gray-500 italic">{unitLegend}</div>
+                        <div className="px-3 text-[10px] text-[var(--text-muted)] italic">{unitLegend}</div>
                         <table className="data-table financial-dense freeze-first-col w-full text-xs">
-                            <thead className="sticky top-0 bg-[#0f172a]">
-                                <tr className="text-gray-500">
+                            <thead className="sticky top-0 bg-[var(--bg-secondary)]">
+                                <tr className="text-[var(--text-muted)]">
                                     <th className="text-left px-3 py-2 font-medium min-w-[140px]">Item</th>
                                     {periodLabels.map((label) => (
                                         <th key={label} className="text-right px-3 py-2 font-medium min-w-[80px]">{label}</th>
@@ -214,10 +214,10 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                                     return (
                                         <tr
                                             key={index}
-                                            className={`border-b border-[#1e293b]/30 hover:bg-[#1e293b]/20 ${row.isHeader ? 'bg-[#1e293b]/10' : ''}`}
+                                            className={`border-b border-[var(--border-subtle)] hover:bg-[var(--bg-hover)] ${row.isHeader ? 'bg-[var(--bg-secondary)]/50' : ''}`}
                                         >
                                             <td
-                                                className={`px-3 py-2 ${row.isHeader ? 'font-semibold text-white' : 'text-gray-300'}`}
+                                                className={`px-3 py-2 ${row.isHeader ? 'font-semibold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}
                                                 style={{ paddingLeft: row.indent ? `${12 + row.indent * 16}px` : '12px' }}
                                             >
                                                 {row.label}
@@ -226,13 +226,13 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                                                 <td
                                                     key={i}
                                                     data-type="number"
-                                                    className={`text-right px-3 py-2 font-mono ${val && val < 0 ? 'text-red-400' : row.isHeader ? 'text-white' : 'text-gray-300'}`}
+                                                    className={`text-right px-3 py-2 font-mono ${val && val < 0 ? 'text-red-400' : row.isHeader ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}
                                                 >
                                                     {formatUnitValuePlain(val, tableScale, unitConfig)}
                                                 </td>
                                             ))}
                                             <td
-                                                className={`text-right px-3 py-2 font-mono ${yoyChange > 0 ? 'text-green-400' : yoyChange < 0 ? 'text-red-400' : 'text-gray-400'}`}
+                                                className={`text-right px-3 py-2 font-mono ${yoyChange > 0 ? 'text-green-400' : yoyChange < 0 ? 'text-red-400' : 'text-[var(--text-muted)]'}`}
                                             >
                                                 {yoyChange > 0 ? '+' : ''}{formatPercent(yoyChange, { decimals: 1, input: 'percent' })}
                                             </td>
@@ -252,7 +252,7 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
                 )}
             </div>
 
-            <div className="px-3 py-2 border-t border-[#1e293b] text-[10px] text-gray-500 italic">
+            <div className="px-3 py-2 border-t border-[var(--border-color)] text-[10px] text-[var(--text-muted)] italic">
                 Note: {unitLegend} except per-share values. Data for {symbol}.
             </div>
         </div>

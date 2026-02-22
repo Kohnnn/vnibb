@@ -140,8 +140,8 @@ export function PriceChartWidget({
       noPadding
       widgetId={id}
     >
-      <div className="h-full flex flex-col bg-[#0a0a0a]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
+      <div className="h-full flex flex-col bg-[var(--bg-primary)]">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1">
               <button
@@ -150,7 +150,7 @@ export function PriceChartWidget({
                 className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
                   !shouldUseLocalHistory
                     ? 'border-blue-500/50 bg-blue-500/15 text-blue-200'
-                    : 'border-gray-700 bg-black/20 text-gray-400 hover:text-gray-200'
+                    : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                 }`}
               >
                 TradingView
@@ -162,7 +162,7 @@ export function PriceChartWidget({
                 className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
                   shouldUseLocalHistory
                     ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
-                    : 'border-gray-700 bg-black/20 text-gray-400 hover:text-gray-200'
+                    : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                 } disabled:cursor-not-allowed disabled:opacity-50`}
                 title={isVietnamExchange ? 'Use VNIBB historical prices' : 'Local mode is available for VN exchanges only'}
               >
@@ -190,23 +190,23 @@ export function PriceChartWidget({
               <ChartSizeBox className="h-full" minHeight={180}>
                 {({ width, height }) => (
                 <LineChart width={width} height={height} data={localChartData} margin={{ top: 12, right: 16, left: 12, bottom: 12 }}>
-                  <CartesianGrid stroke="#1f2937" strokeDasharray="3 3" />
+                  <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
                   <XAxis
                     dataKey="date"
-                    tick={{ fill: '#9ca3af', fontSize: 10 }}
+                    tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
                     axisLine={false}
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fill: '#9ca3af', fontSize: 10 }}
+                    tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
                     axisLine={false}
                     tickLine={false}
                     domain={['auto', 'auto']}
-                    label={{ value: 'VND', angle: -90, position: 'insideLeft', fill: '#9ca3af', fontSize: 10 }}
+                    label={{ value: 'VND', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 10 }}
                   />
                   <Tooltip
-                    contentStyle={{ background: '#0b1221', border: '1px solid #1f2937', fontSize: '11px' }}
-                    labelStyle={{ color: '#9ca3af' }}
+                    contentStyle={{ background: 'var(--bg-tooltip)', border: '1px solid var(--border-default)', fontSize: '11px' }}
+                    labelStyle={{ color: 'var(--text-muted)' }}
                   />
                   <Line
                     type="monotone"
@@ -222,15 +222,15 @@ export function PriceChartWidget({
           ) : (
             <div className="relative h-full w-full">
               <TradingViewAdvancedChart symbol={tvSymbol || symbol} interval={interval} />
-              <div className="pointer-events-none absolute bottom-1 left-2 text-[9px] text-gray-500">
+              <div className="pointer-events-none absolute bottom-1 left-2 text-[9px] text-[var(--text-muted)]">
                 Powered by TradingView
               </div>
             </div>
           )}
         </div>
-        <div className="border-t border-gray-800/60">
+        <div className="border-t border-[var(--border-subtle)]">
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Fundamentals</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Fundamentals</span>
             <WidgetMeta
               updatedAt={metricsUpdatedAt}
               isFetching={metricsFetching && hasMetrics}
@@ -242,9 +242,9 @@ export function PriceChartWidget({
             {metricsLoading && !hasMetrics ? (
               <WidgetSkeleton lines={2} />
             ) : metricsError && !hasMetrics ? (
-              <div className="text-xs text-gray-500">Fundamentals not available yet.</div>
+              <div className="text-xs text-[var(--text-muted)]">Fundamentals not available yet.</div>
             ) : !hasMetrics ? (
-              <div className="text-xs text-gray-500">Fundamentals not available yet.</div>
+              <div className="text-xs text-[var(--text-muted)]">Fundamentals not available yet.</div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 {[
@@ -255,12 +255,12 @@ export function PriceChartWidget({
                 ].map((item) => (
                   <div
                     key={item.label}
-                    className="rounded-lg border border-gray-800/60 bg-black/20 px-2 py-2"
+                    className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-2"
                   >
-                    <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">
+                    <div className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                       {item.label}
                     </div>
-                    <div className="text-xs font-mono text-gray-200">{item.value}</div>
+                    <div className="text-xs font-mono text-[var(--text-secondary)]">{item.value}</div>
                   </div>
                 ))}
               </div>

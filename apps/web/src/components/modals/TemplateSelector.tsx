@@ -33,20 +33,20 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-4xl max-h-[85vh] bg-[#0a0a0a] border border-gray-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+        className="w-full max-w-4xl max-h-[85vh] bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-gray-800 bg-[#0d0d0d]">
+        <div className="flex items-center justify-between p-5 border-b border-[var(--border-default)] bg-[var(--bg-surface)]">
           <div>
-            <h2 className="text-xl font-black text-white uppercase tracking-tighter flex items-center gap-2">
+            <h2 className="text-xl font-black text-[var(--text-primary)] uppercase tracking-tighter flex items-center gap-2">
                 <Layout className="text-blue-500" size={20} />
                 Dashboard Templates
             </h2>
-            <p className="text-xs text-gray-500 font-medium">Quickly setup your workspace with professional layouts</p>
+            <p className="text-xs text-[var(--text-muted)] font-medium">Quickly setup your workspace with professional layouts</p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-white/5 rounded-full transition-colors text-gray-400 hover:text-white"
+            className="p-2 hover:bg-[var(--bg-hover)] rounded-full transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             aria-label="Close template selector"
           >
             <X className="w-5 h-5" />
@@ -54,12 +54,12 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
         </div>
 
         {/* Category Filter */}
-        <div className="flex gap-2 p-4 border-b border-gray-800 bg-black/40">
+        <div className="flex gap-2 p-4 border-b border-[var(--border-default)] bg-[var(--bg-surface)]/70">
           <button
             onClick={() => setSelectedCategory(null)}
             className={cn(
                 "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                !selectedCategory ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-gray-500 hover:text-gray-300 bg-gray-900'
+                !selectedCategory ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-[var(--bg-secondary)]'
             )}
           >
             All Templates
@@ -70,7 +70,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
               onClick={() => setSelectedCategory(cat)}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                selectedCategory === cat ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-gray-500 hover:text-gray-300 bg-gray-900'
+                selectedCategory === cat ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-[var(--bg-secondary)]'
               )}
             >
               <Icon className="w-3 h-3" />
@@ -80,7 +80,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
         </div>
 
         {/* Templates Grid */}
-        <div className="flex-1 p-6 overflow-y-auto scrollbar-hide bg-black/20">
+        <div className="flex-1 p-6 overflow-y-auto scrollbar-hide bg-[var(--bg-primary)]">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredTemplates.map(template => (
               <button
@@ -92,8 +92,8 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
                 className="group flex flex-col text-left transition-all duration-300 focus:outline-none"
               >
                 {/* Thumbnail Placeholder */}
-                <div className="aspect-video w-full mb-3 rounded-xl bg-gray-900 border border-gray-800 flex items-center justify-center relative overflow-hidden group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] transition-all">
-                  <Box className="w-12 h-12 text-gray-800 group-hover:text-blue-500/30 transition-colors" strokeWidth={1} />
+                <div className="aspect-video w-full mb-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-default)] flex items-center justify-center relative overflow-hidden group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] transition-all">
+                  <Box className="w-12 h-12 text-[var(--text-muted)]/40 group-hover:text-blue-500/30 transition-colors" strokeWidth={1} />
                   
                   {/* Hover Overlay */}
                   <div className="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/5 transition-colors flex items-center justify-center">
@@ -103,16 +103,16 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
                   </div>
                 </div>
                 
-                <h3 className="font-bold text-white text-sm group-hover:text-blue-400 transition-colors">{template.name}</h3>
-                <p className="text-[11px] text-gray-500 mt-1 line-clamp-2 leading-relaxed">
+                <h3 className="font-bold text-[var(--text-primary)] text-sm group-hover:text-blue-400 transition-colors">{template.name}</h3>
+                <p className="text-[11px] text-[var(--text-muted)] mt-1 line-clamp-2 leading-relaxed">
                     {template.description}
                 </p>
                 
-                <div className="mt-auto pt-3 flex items-center justify-between border-t border-gray-800/50">
-                    <span className="text-[9px] font-black text-gray-600 uppercase tracking-tighter">
+                <div className="mt-auto pt-3 flex items-center justify-between border-t border-[var(--border-default)]/70">
+                    <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tighter">
                       {template.widgets.length} Components
                     </span>
-                    <ChevronRight size={14} className="text-gray-700 group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
+                    <ChevronRight size={14} className="text-[var(--text-muted)] group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
                 </div>
               </button>
             ))}

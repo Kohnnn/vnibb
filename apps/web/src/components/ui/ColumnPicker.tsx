@@ -37,7 +37,7 @@ export function ColumnPicker({ selectedColumns, onColumnsChange }: ColumnPickerP
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
             "flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase rounded transition-colors",
-            isOpen ? "bg-blue-600 text-white" : "text-gray-500 hover:text-white hover:bg-white/10"
+            isOpen ? "bg-blue-600 text-white" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
         )}
         title="Customize columns"
       >
@@ -46,12 +46,12 @@ export function ColumnPicker({ selectedColumns, onColumnsChange }: ColumnPickerP
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-72 bg-[#0a0a0a] border border-gray-800 rounded-xl shadow-2xl z-50 overflow-hidden">
-          <div className="p-3 border-b border-gray-800 flex items-center justify-between">
-            <span className="text-xs font-bold text-white uppercase tracking-wider">Display Columns</span>
+        <div className="absolute right-0 top-full mt-1 w-72 bg-[var(--bg-dropdown)] border border-[var(--border-default)] rounded-xl shadow-2xl z-50 overflow-hidden">
+          <div className="p-3 border-b border-[var(--border-default)] flex items-center justify-between">
+            <span className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">Display Columns</span>
             <button
               onClick={() => setIsOpen(false)}
-              className="text-gray-500 hover:text-white"
+              className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               aria-label="Close column picker"
             >
                 <X size={14} />
@@ -61,7 +61,7 @@ export function ColumnPicker({ selectedColumns, onColumnsChange }: ColumnPickerP
           <div className="max-h-80 overflow-y-auto p-2 space-y-4">
             {categories.map(category => (
               <div key={category}>
-                <div className="text-[9px] uppercase text-gray-500 font-bold mb-1.5 px-1 tracking-widest">
+                <div className="text-[9px] uppercase text-[var(--text-muted)] font-bold mb-1.5 px-1 tracking-widest">
                   {category}
                 </div>
                 <div className="grid grid-cols-1 gap-0.5">
@@ -73,14 +73,14 @@ export function ColumnPicker({ selectedColumns, onColumnsChange }: ColumnPickerP
                         "w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-xs transition-all",
                         selectedColumns.includes(column.id)
                           ? "bg-blue-600/10 text-blue-400 font-medium"
-                          : "text-gray-400 hover:bg-white/5 hover:text-gray-200"
+                          : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                       )}
                     >
                       <div className={cn(
                         "w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors",
                         selectedColumns.includes(column.id)
                           ? "bg-blue-600 border-blue-600"
-                          : "border-gray-700 bg-gray-900"
+                          : "border-[var(--border-default)] bg-[var(--bg-secondary)]"
                       )}>
                         {selectedColumns.includes(column.id) && <Check className="w-2.5 h-2.5 text-white" />}
                       </div>
@@ -92,10 +92,10 @@ export function ColumnPicker({ selectedColumns, onColumnsChange }: ColumnPickerP
             ))}
           </div>
           
-          <div className="p-2 border-t border-gray-800 flex justify-between items-center bg-gray-900/30">
+          <div className="p-2 border-t border-[var(--border-default)] flex justify-between items-center bg-[var(--bg-secondary)]/60">
             <button
               onClick={() => onColumnsChange(ALL_COLUMNS.slice(0, 7).map(c => c.id))}
-              className="px-2 py-1 text-[10px] text-gray-500 hover:text-gray-300 font-bold uppercase"
+              className="px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] font-bold uppercase"
             >
               Reset
             </button>

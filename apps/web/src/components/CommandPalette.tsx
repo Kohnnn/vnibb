@@ -181,17 +181,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             initial={{ opacity: 0, scale: 0.95, y: -20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            className="w-full max-w-xl bg-[#0a0a0a] border border-gray-800 rounded-xl shadow-2xl overflow-hidden"
+            className="w-full max-w-xl bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-2xl overflow-hidden"
           >
             <Command className="flex flex-col h-full">
-              <div className="flex items-center gap-3 px-4 border-b border-gray-800">
-                <Search className="w-5 h-5 text-gray-500" />
+              <div className="flex items-center gap-3 px-4 border-b border-[var(--border-default)]">
+                <Search className="w-5 h-5 text-[var(--text-muted)]" />
                 <Command.Input
                   value={search}
                   onValueChange={setSearch}
                   placeholder="Type a command or search..."
                   aria-label="Command palette search"
-                  className="flex-1 h-12 bg-transparent text-white placeholder-gray-500 focus:outline-none text-sm"
+                  className="flex-1 h-12 bg-transparent text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none text-sm"
                   autoFocus
                 />
                 <button
@@ -202,7 +202,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       onOpenChange(false);
                     }
                   }}
-                  className="p-1 text-gray-500 hover:text-white rounded"
+                  className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded"
                   aria-label="Close command palette"
                 >
                     <X size={16} />
@@ -210,14 +210,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </div>
 
               <Command.List className="max-h-[400px] overflow-y-auto p-2 scrollbar-hide">
-                <Command.Empty className="py-10 text-center text-gray-500 text-sm">
+                <Command.Empty className="py-10 text-center text-[var(--text-muted)] text-sm">
                     <Box className="w-8 h-8 mx-auto mb-3 opacity-20" />
                     No results found for "{search}"
                 </Command.Empty>
 
                 {groupedCommands.navigation.length > 0 && (
                   <Command.Group heading="Navigation" className="mb-2">
-                    <div className="px-2 py-1.5 text-[10px] font-bold text-gray-600 uppercase tracking-widest">
+                    <div className="px-2 py-1.5 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                       Navigation
                     </div>
                     {groupedCommands.navigation.map(cmd => (
@@ -228,14 +228,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
                 {groupedCommands.widgets.length > 0 && (
                   <Command.Group heading="Add Widget" className="mb-2">
-                    <div className="px-2 py-1.5 text-[10px] font-bold text-gray-600 uppercase tracking-widest">
+                    <div className="px-2 py-1.5 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                       Add Widget
                     </div>
                     {groupedCommands.widgets.slice(0, 8).map(cmd => (
                       <CommandItem key={cmd.id} command={cmd} />
                     ))}
                     {groupedCommands.widgets.length > 8 && (
-                       <div className="px-3 py-1.5 text-[10px] text-gray-600 italic">
+                       <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] italic">
                          +{groupedCommands.widgets.length - 8} more widgets...
                        </div>
                     )}
@@ -244,7 +244,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
                 {groupedCommands.actions.length > 0 && (
                   <Command.Group heading="Actions" className="mb-2">
-                    <div className="px-2 py-1.5 text-[10px] font-bold text-gray-600 uppercase tracking-widest">
+                    <div className="px-2 py-1.5 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                       Actions
                     </div>
                     {groupedCommands.actions.map(cmd => (
@@ -255,7 +255,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
                 {groupedCommands.settings.length > 0 && (
                   <Command.Group heading="Settings">
-                    <div className="px-2 py-1.5 text-[10px] font-bold text-gray-600 uppercase tracking-widest">
+                    <div className="px-2 py-1.5 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                       Settings
                     </div>
                     {groupedCommands.settings.map(cmd => (
@@ -265,13 +265,13 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 )}
               </Command.List>
               
-              <div className="px-4 py-2 border-t border-gray-800 bg-gray-900/30 flex items-center justify-between text-[10px] text-gray-500">
+              <div className="px-4 py-2 border-t border-[var(--border-default)] bg-[var(--bg-surface)]/90 flex items-center justify-between text-[10px] text-[var(--text-muted)]">
                  <div className="flex items-center gap-4">
                     <div className="flex items-center gap-1">
-                        <kbd className="px-1 py-0.5 bg-gray-800 rounded">↑↓</kbd> <span>Navigate</span>
+                        <kbd className="px-1 py-0.5 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded">↑↓</kbd> <span>Navigate</span>
                     </div>
                     <div className="flex items-center gap-1">
-                        <kbd className="px-1 py-0.5 bg-gray-800 rounded">↵</kbd> <span>Select</span>
+                        <kbd className="px-1 py-0.5 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded">↵</kbd> <span>Select</span>
                     </div>
                  </div>
                  <div className="font-mono">
@@ -290,14 +290,14 @@ function CommandItem({ command }: { command: CommandItem }) {
   return (
     <Command.Item
       onSelect={command.action}
-      className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer text-gray-400 aria-selected:bg-blue-600/10 aria-selected:text-blue-400 transition-colors group"
+      className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer text-[var(--text-secondary)] aria-selected:bg-blue-600/10 aria-selected:text-blue-400 transition-colors group"
     >
-      <div className="w-8 h-8 rounded bg-gray-900 border border-gray-800 flex items-center justify-center group-aria-selected:border-blue-500/30">
+      <div className="w-8 h-8 rounded bg-[var(--bg-secondary)] border border-[var(--border-default)] flex items-center justify-center group-aria-selected:border-blue-500/30">
         {command.icon}
       </div>
       <span className="flex-1 text-sm font-medium">{command.label}</span>
       {command.shortcut && (
-        <kbd className="px-1.5 py-0.5 text-[10px] text-gray-600 bg-gray-950 border border-gray-800 rounded font-sans">
+        <kbd className="px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] bg-[var(--bg-primary)] border border-[var(--border-default)] rounded font-sans">
           {command.shortcut}
         </kbd>
       )}

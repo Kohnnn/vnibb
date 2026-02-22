@@ -95,8 +95,8 @@ function MarketNewsWidgetComponent() {
       isLoading={isLoading && !hasData}
       noPadding
     >
-      <div className="h-full flex flex-col bg-black/20">
-        <div className="px-3 py-2 border-b border-gray-800/40">
+      <div className="h-full flex flex-col bg-[var(--bg-primary)]">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
@@ -117,30 +117,30 @@ function MarketNewsWidgetComponent() {
               action={{ label: 'Refresh', onClick: () => refetch() }}
             />
           ) : (
-            <div className="divide-y divide-gray-800/30">
+            <div className="divide-y divide-[var(--border-subtle)]">
               {news.map((item: any, index: number) => (
                 <a
                   key={`${item.id ?? item.url ?? item.title}-${index}`}
                   href={item.url || '#'}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block p-3 hover:bg-white/5 transition-colors group"
+                  className="block p-3 hover:bg-[var(--bg-tertiary)]/30 transition-colors group"
                 >
-                  <div className="text-sm text-gray-200 font-medium line-clamp-2 mb-1 group-hover:text-blue-400 transition-colors">
+                  <div className="text-sm text-[var(--text-primary)] font-medium line-clamp-2 mb-1 group-hover:text-blue-400 transition-colors">
                     {item.title}
                   </div>
                   {item.summary && (
-                    <div className="text-[11px] text-gray-400 line-clamp-2 mb-1.5">
+                    <div className="text-[11px] text-[var(--text-secondary)] line-clamp-2 mb-1.5">
                       {item.summary}
                     </div>
                   )}
-                  <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                  <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
                     <div className="flex items-center gap-1">
                       <Clock className="w-2.5 h-2.5" />
                       {formatPublishedDistance(item.publishedDate)}
                     </div>
-                    <span className="text-gray-700">•</span>
-                    <span className="px-1.5 py-0.5 bg-gray-900 rounded border border-gray-800 uppercase font-bold text-[9px]">
+                    <span className="text-[var(--text-muted)]/60">•</span>
+                    <span className="px-1.5 py-0.5 bg-[var(--bg-secondary)] rounded border border-[var(--border-color)] uppercase font-bold text-[9px]">
                       {item.source || 'Unknown'}
                     </span>
                     <ExternalLink className="w-2.5 h-2.5 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />

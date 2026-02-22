@@ -94,18 +94,18 @@ export function ConnectBackendModal({ isOpen, onClose, onConnect }: ConnectBacke
 
     return (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-150">
-            <div className="bg-[#0f172a] border border-[#334155] rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-in zoom-in-95 duration-200">
+            <div className="bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-in zoom-in-95 duration-200">
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e293b]">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-color)]">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
                             <LinkIcon size={20} />
                         </div>
-                        <h3 className="text-lg font-semibold text-white">Connect Backend</h3>
+                        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Connect Backend</h3>
                     </div>
                     <button
                         onClick={handleClose}
-                        className="p-2 text-gray-400 hover:text-white hover:bg-[#1e293b] rounded-lg transition-colors"
+                        className="p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
                     >
                         <X size={20} />
                     </button>
@@ -115,7 +115,7 @@ export function ConnectBackendModal({ isOpen, onClose, onConnect }: ConnectBacke
                 <div className="p-6 space-y-5">
                     {/* Endpoint URL */}
                     <div className="space-y-2">
-                        <label className="block text-sm font-medium text-gray-300">
+                        <label className="block text-sm font-medium text-[var(--text-secondary)]">
                             API Endpoint <span className="text-red-400">*</span>
                         </label>
                         <input
@@ -127,24 +127,24 @@ export function ConnectBackendModal({ isOpen, onClose, onConnect }: ConnectBacke
                                 setTestResult(null);
                             }}
                             placeholder="https://vnibb.zeabur.app/api/v1"
-                            className="w-full bg-[#1e293b] border border-[#334155] text-white px-4 py-3 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-gray-500 transition-all"
+                            className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] text-[var(--text-primary)] px-4 py-3 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-[var(--text-muted)] transition-all"
                             autoFocus
                         />
                     </div>
 
                     {/* Name (optional) */}
                     <div className="space-y-2">
-                        <label className="block text-sm font-medium text-gray-300">
-                            Display Name <span className="text-gray-500">(optional)</span>
+                        <label className="block text-sm font-medium text-[var(--text-secondary)]">
+                            Display Name <span className="text-[var(--text-muted)]">(optional)</span>
                         </label>
                         <input
                             type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                             placeholder="My Backend Server"
-                            className="w-full bg-[#1e293b] border border-[#334155] text-white px-4 py-3 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-gray-500 transition-all"
+                            className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] text-[var(--text-primary)] px-4 py-3 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-[var(--text-muted)] transition-all"
                         />
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-[var(--text-muted)]">
                             If empty, the hostname will be used as the name
                         </p>
                     </div>
@@ -179,11 +179,11 @@ export function ConnectBackendModal({ isOpen, onClose, onConnect }: ConnectBacke
                 </div>
 
                 {/* Footer */}
-                <div className="flex items-center justify-between px-6 py-4 border-t border-[#1e293b] bg-[#0b1221]/50 rounded-b-2xl">
+                <div className="flex items-center justify-between px-6 py-4 border-t border-[var(--border-color)] bg-[var(--bg-secondary)]/50 rounded-b-2xl">
                     <button
                         onClick={handleTestConnection}
                         disabled={testing || !endpoint.trim()}
-                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-300 hover:text-white hover:bg-[#1e293b] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {testing ? (
                             <>
@@ -198,7 +198,7 @@ export function ConnectBackendModal({ isOpen, onClose, onConnect }: ConnectBacke
                     <div className="flex items-center gap-3">
                         <button
                             onClick={handleClose}
-                            className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white hover:bg-[#1e293b] rounded-lg transition-colors"
+                            className="px-4 py-2 text-sm font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
                         >
                             Cancel
                         </button>

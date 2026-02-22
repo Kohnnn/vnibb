@@ -82,7 +82,7 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove }: NewsF
       <div className="h-full flex flex-col bg-black">
         <NewsFilterBar filters={filters} onFiltersChange={setFilters} />
 
-        <div className="px-3 py-2 border-b border-gray-800/50 bg-[#0a0a0a]">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}

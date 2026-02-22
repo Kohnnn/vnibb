@@ -22,7 +22,7 @@ const SENTIMENTS = [
 
 function NewsFilterBarComponent({ filters, onFiltersChange }: NewsFilterBarProps) {
   return (
-    <div className="flex items-center gap-2 p-2 border-b border-gray-800 bg-[#0a0a0a]">
+    <div className="flex items-center gap-2 p-2 border-b border-[var(--border-default)] bg-[var(--bg-primary)]">
       <div className="flex items-center gap-1.5 shrink-0 px-1 border-r border-gray-800 mr-1">
           <Filter size={12} className="text-gray-600" />
           <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest hidden sm:inline">Filters</span>

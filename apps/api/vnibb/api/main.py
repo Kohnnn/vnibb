@@ -178,6 +178,39 @@ class PerformanceLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class RequestTimeoutMiddleware(BaseHTTPMiddleware):
+    """Enforce a global timeout for non-health HTTP requests."""
+
+    BYPASS_PATHS = ("/live", "/ready", "/health", "/docs", "/openapi.json", "/redoc")
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        timeout_seconds = settings.api_request_timeout_seconds
+        if timeout_seconds <= 0:
+            return await call_next(request)
+
+        if request.url.path.startswith(self.BYPASS_PATHS):
+            return await call_next(request)
+
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Request timed out after %ss: %s %s",
+                timeout_seconds,
+                request.method,
+                request.url.path,
+            )
+            return JSONResponse(
+                status_code=504,
+                content={
+                    "error": True,
+                    "code": "REQUEST_TIMEOUT",
+                    "message": "Request timed out. Please try again.",
+                },
+                headers=get_cors_headers(request),
+            )
+
+
 class ResponseCacheControlMiddleware(BaseHTTPMiddleware):
     """
     Apply consistent cache headers by endpoint class for GET/HEAD responses.
@@ -509,6 +542,9 @@ def create_app() -> FastAPI:
 
     # Add Performance Logging Middleware
     app.add_middleware(PerformanceLoggingMiddleware)
+
+    # Protect API workers from hanging requests
+    app.add_middleware(RequestTimeoutMiddleware)
 
     # Add response cache policy middleware for GET/HEAD endpoints
     app.add_middleware(ResponseCacheControlMiddleware)

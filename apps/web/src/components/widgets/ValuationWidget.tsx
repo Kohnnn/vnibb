@@ -60,47 +60,47 @@ export function ValuationWidget({ symbol, onDataChange }: ValuationWidgetProps) 
       />
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-[#0d0d0d] p-3 rounded-lg border border-[#1a1a1a]">
-          <span className="text-[10px] text-gray-500 uppercase font-bold">P/E Ratio</span>
-          <div className="text-xl font-bold text-white mt-1">
+        <div className="bg-[var(--bg-secondary)] p-3 rounded-lg border border-[var(--border-default)]">
+          <span className="text-[10px] text-[var(--text-muted)] uppercase font-bold">P/E Ratio</span>
+          <div className="text-xl font-bold text-[var(--text-primary)] mt-1">
             {formatRatio(currentStock?.pe)}
           </div>
         </div>
-        <div className="bg-[#0d0d0d] p-3 rounded-lg border border-[#1a1a1a]">
-          <span className="text-[10px] text-gray-500 uppercase font-bold">P/B Ratio</span>
-          <div className="text-xl font-bold text-white mt-1">
+        <div className="bg-[var(--bg-secondary)] p-3 rounded-lg border border-[var(--border-default)]">
+          <span className="text-[10px] text-[var(--text-muted)] uppercase font-bold">P/B Ratio</span>
+          <div className="text-xl font-bold text-[var(--text-primary)] mt-1">
             {formatRatio(currentStock?.pb)}
           </div>
         </div>
       </div>
 
       <div className="flex-1 w-full">
-        <h3 className="text-[10px] text-gray-500 uppercase font-bold mb-3">Peer P/E Comparison</h3>
+        <h3 className="text-[10px] text-[var(--text-muted)] uppercase font-bold mb-3">Peer P/E Comparison</h3>
         <ChartSizeBox className="h-full" minHeight={140}>
           {({ width, height }) => (
             <BarChart width={width} height={height} data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
               <XAxis
                 dataKey="name"
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: '#666', fontSize: 10 }}
+                tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
               />
               <YAxis
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: '#666', fontSize: 10 }}
+                tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
               />
               <Tooltip
-                contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #222', fontSize: '12px' }}
-                itemStyle={{ color: '#fff' }}
+                contentStyle={{ backgroundColor: 'var(--bg-tooltip)', border: '1px solid var(--border-default)', fontSize: '12px' }}
+                itemStyle={{ color: 'var(--text-primary)' }}
               />
               <Bar dataKey="pe" radius={[4, 4, 0, 0]}>
                 {chartData.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={entry.isCurrent ? '#3b82f6' : '#1e1e1e'}
-                    stroke={entry.isCurrent ? '#60a5fa' : '#333'}
+                    fill={entry.isCurrent ? '#3b82f6' : 'var(--bg-secondary)'}
+                    stroke={entry.isCurrent ? '#60a5fa' : 'var(--border-default)'}
                   />
                 ))}
               </Bar>

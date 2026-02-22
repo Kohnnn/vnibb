@@ -11,7 +11,7 @@ from typing import List, Optional, Literal, Any, Callable, Awaitable
 from fastapi import APIRouter, Query, Depends, Path
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 
 from vnibb.api.v1.schemas import StandardResponse, MetaData
 from vnibb.core.database import get_db
@@ -198,6 +198,15 @@ def _to_historical_data(row: StockPrice) -> EquityHistoricalData:
     )
 
 
+def _coerce_optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
     period_value = (row.period or "").strip()
     if period_value.isdigit() and int(period_value) < 1900 and row.fiscal_year >= 1900:
@@ -206,6 +215,19 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
         else:
             period_value = str(row.fiscal_year)
 
+    raw_payload = getattr(row, "raw_data", None)
+    raw_data = raw_payload if isinstance(raw_payload, dict) else {}
+
+    ev_sales = _coerce_optional_float(getattr(row, "ev_sales", None))
+    if ev_sales is None:
+        ev_sales = _coerce_optional_float(raw_data.get("ev_sales"))
+    if ev_sales is None:
+        ev_sales = _coerce_optional_float(raw_data.get("evToSales"))
+    if ev_sales is None:
+        ev_sales = _coerce_optional_float(raw_data.get("evSales"))
+    if ev_sales is None:
+        ev_sales = _coerce_optional_float(raw_data.get("enterpriseValueToSales"))
+
     return FinancialRatioData(
         symbol=row.symbol,
         period=period_value,
@@ -213,6 +235,7 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
         pb=row.pb_ratio,
         ps=row.ps_ratio,
         ev_ebitda=row.ev_ebitda,
+        ev_sales=ev_sales,
         roe=row.roe,
         roa=row.roa,
         eps=row.eps,
@@ -263,6 +286,205 @@ def _ratio_has_metric_value(item: FinancialRatioData) -> bool:
     return any(value is not None for value in metric_values)
 
 
+def _extract_year_quarter(period_value: str) -> tuple[Optional[int], Optional[int]]:
+    period_text = str(period_value or "").strip().upper()
+    if not period_text:
+        return None, None
+
+    year_match = re.search(r"(20\d{2})", period_text)
+    year = int(year_match.group(1)) if year_match else None
+
+    quarter_match = re.search(r"Q([1-4])", period_text)
+    quarter = int(quarter_match.group(1)) if quarter_match else None
+    if quarter is None:
+        alt_quarter_match = re.match(r"([1-4])[/_-](20\d{2})", period_text)
+        if alt_quarter_match:
+            quarter = int(alt_quarter_match.group(1))
+            year = int(alt_quarter_match.group(2))
+
+    return year, quarter
+
+
+def _build_ratio_eps_lookups(
+    ratio_rows: List[FinancialRatioData],
+) -> tuple[dict[tuple[int, int], float], dict[int, float]]:
+    eps_by_year_quarter: dict[tuple[int, int], float] = {}
+    eps_by_year: dict[int, float] = {}
+
+    for item in ratio_rows:
+        eps_value = _coerce_optional_float(item.eps)
+        if eps_value is None:
+            continue
+
+        year, quarter = _extract_year_quarter(item.period or "")
+        if year is None:
+            continue
+
+        if year not in eps_by_year:
+            eps_by_year[year] = eps_value
+
+        if quarter is not None and (year, quarter) not in eps_by_year_quarter:
+            eps_by_year_quarter[(year, quarter)] = eps_value
+
+    return eps_by_year_quarter, eps_by_year
+
+
+async def _enrich_income_eps_from_ratios(
+    symbol: str,
+    period: str,
+    rows: List[FinancialStatementData],
+    db: AsyncSession,
+) -> List[FinancialStatementData]:
+    if not rows:
+        return rows
+
+    missing_eps_rows = [row for row in rows if row.eps is None]
+    if not missing_eps_rows:
+        return rows
+
+    period_upper = (period or "").upper()
+    normalized_period = "year" if period_upper in {"YEAR", "FY"} else "quarter"
+
+    ratio_data: List[FinancialRatioData] = []
+
+    try:
+        stmt = (
+            select(FinancialRatio)
+            .where(
+                FinancialRatio.symbol == symbol,
+                FinancialRatio.period_type == normalized_period,
+            )
+            .order_by(desc(FinancialRatio.fiscal_year), desc(FinancialRatio.fiscal_quarter))
+        )
+        db_rows = (await db.execute(stmt)).scalars().all()
+        ratio_data = [_to_ratio_data(item) for item in db_rows]
+    except Exception as db_error:
+        logger.warning("EPS enrichment ratio DB lookup failed for %s: %s", symbol, db_error)
+
+    if not ratio_data:
+        return rows
+
+    eps_by_year_quarter, eps_by_year = _build_ratio_eps_lookups(ratio_data)
+    if not eps_by_year_quarter and not eps_by_year:
+        return rows
+
+    for row in rows:
+        if row.eps is not None:
+            continue
+
+        year, quarter = _extract_year_quarter(row.period)
+        if year is None:
+            continue
+
+        eps_value: Optional[float] = None
+        if quarter is not None:
+            eps_value = eps_by_year_quarter.get((year, quarter))
+        if eps_value is None:
+            eps_value = eps_by_year.get(year)
+
+        if eps_value is not None:
+            row.eps = eps_value
+
+    return rows
+
+
+async def _enrich_ratio_ev_sales_from_income(
+    symbol: str,
+    period: str,
+    rows: List[FinancialRatioData],
+    db: AsyncSession,
+) -> List[FinancialRatioData]:
+    if not rows:
+        return rows
+
+    missing_rows = [item for item in rows if item.ev_sales is None]
+    if not missing_rows:
+        return rows
+
+    normalized_period = "year" if period in {"year", "FY"} else "quarter"
+
+    stmt = (
+        select(
+            IncomeStatement.fiscal_year,
+            IncomeStatement.fiscal_quarter,
+            IncomeStatement.revenue,
+            IncomeStatement.ebitda,
+        )
+        .where(
+            IncomeStatement.symbol == symbol,
+            IncomeStatement.period_type == normalized_period,
+            IncomeStatement.revenue.is_not(None),
+        )
+        .order_by(desc(IncomeStatement.fiscal_year), desc(IncomeStatement.fiscal_quarter))
+    )
+    income_rows = (await db.execute(stmt)).all()
+    if not income_rows:
+        income_rows = []
+
+    latest_snapshot_date = (
+        await db.execute(select(func.max(ScreenerSnapshot.snapshot_date)))
+    ).scalar()
+    latest_market_cap = None
+    if latest_snapshot_date is not None:
+        latest_market_cap = (
+            await db.execute(
+                select(ScreenerSnapshot.market_cap).where(
+                    ScreenerSnapshot.symbol == symbol,
+                    ScreenerSnapshot.snapshot_date == latest_snapshot_date,
+                    ScreenerSnapshot.market_cap.is_not(None),
+                )
+            )
+        ).scalar_one_or_none()
+    latest_market_cap_value = _coerce_optional_float(latest_market_cap)
+
+    quarterly_metrics: dict[tuple[int, int], tuple[float, float | None]] = {}
+    annual_metrics: dict[int, tuple[float, float | None]] = {}
+    for year, quarter, revenue, ebitda in income_rows:
+        revenue_value = _coerce_optional_float(revenue)
+        if revenue_value in (None, 0):
+            continue
+        ebitda_value = _coerce_optional_float(ebitda)
+        if year is None:
+            continue
+        if quarter is not None and 1 <= int(quarter) <= 4:
+            quarterly_metrics[(int(year), int(quarter))] = (revenue_value, ebitda_value)
+        if int(year) not in annual_metrics:
+            annual_metrics[int(year)] = (revenue_value, ebitda_value)
+
+    for item in rows:
+        if item.ev_sales is not None:
+            continue
+
+        ev_ebitda = _coerce_optional_float(item.ev_ebitda)
+
+        year, quarter = _extract_year_quarter(item.period or "")
+        if year is None:
+            continue
+
+        metrics = None
+        if quarter is not None:
+            metrics = quarterly_metrics.get((year, quarter))
+        if metrics is None:
+            metrics = annual_metrics.get(year)
+        if metrics is None:
+            continue
+
+        revenue_value, ebitda_value = metrics
+        if revenue_value in (None, 0):
+            continue
+
+        computed_ev_sales = None
+        if ev_ebitda is not None and ebitda_value not in (None, 0):
+            computed_ev_sales = (ev_ebitda * ebitda_value) / revenue_value
+        elif latest_market_cap_value not in (None, 0):
+            computed_ev_sales = latest_market_cap_value / revenue_value
+
+        if computed_ev_sales is not None:
+            item.ev_sales = computed_ev_sales
+
+    return rows
+
+
 @router.get("/historical", response_model=StandardResponse[List[EquityHistoricalData]])
 @cached(ttl=300, key_prefix="historical")
 async def get_historical_prices(
@@ -302,7 +524,7 @@ async def get_historical_prices(
 
 
 @router.get("/{symbol}/quote", response_model=StandardResponse[StockQuoteData])
-@cached(ttl=60, key_prefix="quote")
+@cached(ttl=30, key_prefix="quote")
 async def get_quote(
     symbol: str,
     source: str = Query(default="VCI"),
@@ -766,6 +988,12 @@ async def get_financial_ratios(
         rows = result.scalars().all()
         if rows:
             data = [_to_ratio_data(row) for row in rows]
+            data = await _enrich_ratio_ev_sales_from_income(
+                symbol=symbol_upper,
+                period=normalized_period,
+                rows=data,
+                db=db,
+            )
             usable_data = [item for item in data if _ratio_has_metric_value(item)]
             if usable_data:
                 return StandardResponse(data=usable_data, meta=MetaData(count=len(usable_data)))
@@ -780,6 +1008,12 @@ async def get_financial_ratios(
     try:
         data = await VnstockFinancialRatiosFetcher.fetch(
             FinancialRatiosQueryParams(symbol=symbol_upper, period=normalized_period)
+        )
+        data = await _enrich_ratio_ev_sales_from_income(
+            symbol=symbol_upper,
+            period=normalized_period,
+            rows=data,
+            db=db,
         )
         usable_data = [item for item in data if _ratio_has_metric_value(item)]
         payload = usable_data if usable_data else data
@@ -929,6 +1163,7 @@ async def get_income_statement(
     limit: int = Query(5, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ):
+    symbol_upper = symbol.upper()
     try:
         data = await get_financials_with_ttm(
             symbol=symbol,
@@ -944,6 +1179,12 @@ async def get_income_statement(
                 period=period,
                 limit=limit,
             )
+        data = await _enrich_income_eps_from_ratios(
+            symbol=symbol_upper,
+            period=period,
+            rows=data,
+            db=db,
+        )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         try:
@@ -953,6 +1194,12 @@ async def get_income_statement(
                 statement_type=StatementType.INCOME.value,
                 period=period,
                 limit=limit,
+            )
+            fallback_data = await _enrich_income_eps_from_ratios(
+                symbol=symbol_upper,
+                period=period,
+                rows=fallback_data,
+                db=db,
             )
             if fallback_data:
                 return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
