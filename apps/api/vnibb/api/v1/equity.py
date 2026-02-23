@@ -32,6 +32,7 @@ from vnibb.providers.vnstock.equity_profile import (
     EquityProfileData,
 )
 from vnibb.models.stock import Stock, StockPrice
+from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.trading import FinancialRatio
 from vnibb.providers.vnstock.financials import (
@@ -292,6 +293,12 @@ async def _resolve_profile_market_cap(
     outstanding_shares: Optional[float],
     fallback_market_cap: Optional[float] = None,
 ) -> Optional[float]:
+    shares_value = _coerce_optional_float(outstanding_shares)
+    latest_price = await _get_latest_price(db, symbol)
+
+    if shares_value not in (None, 0) and latest_price not in (None, 0):
+        return shares_value * latest_price
+
     direct_market_cap = _coerce_optional_float(fallback_market_cap)
     if direct_market_cap not in (None, 0):
         return direct_market_cap
@@ -311,6 +318,31 @@ async def _resolve_profile_market_cap(
     if latest_snapshot_market_cap_value not in (None, 0):
         return latest_snapshot_market_cap_value
 
+    return None
+
+
+async def _get_outstanding_shares(db: AsyncSession, symbol: str) -> Optional[float]:
+    company_row = (
+        await db.execute(
+            select(Company.outstanding_shares, Company.listed_shares, Company.raw_data).where(
+                Company.symbol == symbol
+            )
+        )
+    ).first()
+    if not company_row:
+        return None
+
+    raw_payload = company_row[2] if isinstance(company_row[2], dict) else {}
+    return _pick_optional_float(
+        company_row[0],
+        company_row[1],
+        raw_payload.get("outstanding_shares"),
+        raw_payload.get("issue_share"),
+        raw_payload.get("financial_ratio_issue_share"),
+    )
+
+
+async def _get_latest_price(db: AsyncSession, symbol: str) -> Optional[float]:
     latest_close = (
         await db.execute(
             select(StockPrice.close)
@@ -320,23 +352,33 @@ async def _resolve_profile_market_cap(
         )
     ).scalar_one_or_none()
     latest_price = _coerce_optional_float(latest_close)
+    if latest_price not in (None, 0):
+        return latest_price
 
-    if latest_price in (None, 0):
-        latest_snapshot_price = (
-            await db.execute(
-                select(ScreenerSnapshot.price)
-                .where(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.price.is_not(None))
-                .order_by(ScreenerSnapshot.snapshot_date.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        latest_price = _coerce_optional_float(latest_snapshot_price)
+    latest_snapshot_price = (
+        await db.execute(
+            select(ScreenerSnapshot.price)
+            .where(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.price.is_not(None))
+            .order_by(ScreenerSnapshot.snapshot_date.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return _coerce_optional_float(latest_snapshot_price)
 
-    shares_value = _coerce_optional_float(outstanding_shares)
-    if shares_value not in (None, 0) and latest_price not in (None, 0):
-        return shares_value * latest_price
 
-    return None
+async def _get_latest_financial_row(
+    db: AsyncSession,
+    symbol: str,
+    model: Any,
+    period: str,
+) -> Any | None:
+    result = await db.execute(
+        select(model)
+        .where(model.symbol == symbol, model.period_type == period)
+        .order_by(desc(model.fiscal_year), desc(model.fiscal_quarter))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
@@ -700,6 +742,7 @@ async def _enrich_missing_ratio_metrics(
             IncomeStatement.net_income,
             IncomeStatement.cost_of_revenue,
             IncomeStatement.eps,
+            IncomeStatement.interest_expense,
         )
         .where(IncomeStatement.symbol == symbol, IncomeStatement.period_type == normalized_period)
         .order_by(desc(IncomeStatement.fiscal_year), desc(IncomeStatement.fiscal_quarter))
@@ -717,13 +760,35 @@ async def _enrich_missing_ratio_metrics(
         .where(BalanceSheet.symbol == symbol, BalanceSheet.period_type == normalized_period)
         .order_by(desc(BalanceSheet.fiscal_year), desc(BalanceSheet.fiscal_quarter))
     )
+    cashflow_stmt = (
+        select(
+            CashFlow.fiscal_year,
+            CashFlow.fiscal_quarter,
+            CashFlow.operating_cash_flow,
+            CashFlow.free_cash_flow,
+            CashFlow.dividends_paid,
+            CashFlow.debt_repayment,
+        )
+        .where(CashFlow.symbol == symbol, CashFlow.period_type == normalized_period)
+        .order_by(desc(CashFlow.fiscal_year), desc(CashFlow.fiscal_quarter))
+    )
 
     income_rows = (await db.execute(income_stmt)).all()
     balance_rows = (await db.execute(balance_stmt)).all()
+    cashflow_rows = (await db.execute(cashflow_stmt)).all()
 
     income_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
     prev_income_lookup: dict[tuple[int, int], tuple[float | None, float | None, float | None]] = {}
-    for year, quarter, revenue, operating_income, net_income, cost_of_revenue, eps in income_rows:
+    for (
+        year,
+        quarter,
+        revenue,
+        operating_income,
+        net_income,
+        cost_of_revenue,
+        eps,
+        interest_expense,
+    ) in income_rows:
         if year is None:
             continue
         key = (int(year), int(quarter or 0))
@@ -733,17 +798,23 @@ async def _enrich_missing_ratio_metrics(
             "net_income": _coerce_optional_float(net_income),
             "cost_of_revenue": _coerce_optional_float(cost_of_revenue),
             "eps": _coerce_optional_float(eps),
+            "interest_expense": _coerce_optional_float(interest_expense),
         }
 
-    for year, quarter, revenue, _operating_income, net_income, _cost_of_revenue, eps in income_rows:
+    for (
+        year,
+        quarter,
+        revenue,
+        _operating_income,
+        net_income,
+        _cost_of_revenue,
+        eps,
+        _interest,
+    ) in income_rows:
         if year is None:
             continue
         y = int(year)
         q = int(quarter or 0)
-        if normalized_period == "quarter" and 1 <= q <= 4:
-            prev_key = (y - 1, q)
-        else:
-            prev_key = (y - 1, 0)
         prev_income_lookup[(y, q)] = (
             _coerce_optional_float(revenue),
             _coerce_optional_float(net_income),
@@ -781,7 +852,24 @@ async def _enrich_missing_ratio_metrics(
             "accounts_receivable": _coerce_optional_float(receivables),
         }
 
-    latest_price = None
+    cashflow_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
+    for (
+        year,
+        quarter,
+        operating_cash_flow,
+        free_cash_flow,
+        dividends_paid,
+        debt_repayment,
+    ) in cashflow_rows:
+        if year is None:
+            continue
+        cashflow_lookup[(int(year), int(quarter or 0))] = {
+            "operating_cash_flow": _coerce_optional_float(operating_cash_flow),
+            "free_cash_flow": _coerce_optional_float(free_cash_flow),
+            "dividends_paid": _coerce_optional_float(dividends_paid),
+            "debt_repayment": _coerce_optional_float(debt_repayment),
+        }
+
     latest_price_stmt = (
         select(ScreenerSnapshot.price)
         .where(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.price.is_not(None))
@@ -791,6 +879,13 @@ async def _enrich_missing_ratio_metrics(
     latest_price = _coerce_optional_float(
         (await db.execute(latest_price_stmt)).scalar_one_or_none()
     )
+    outstanding_shares = await _get_outstanding_shares(db, symbol)
+    market_cap = await _resolve_profile_market_cap(
+        db=db,
+        symbol=symbol,
+        outstanding_shares=outstanding_shares,
+        fallback_market_cap=None,
+    )
 
     for item in rows:
         year, quarter = _extract_year_quarter(item.period or "")
@@ -799,10 +894,19 @@ async def _enrich_missing_ratio_metrics(
         key = (year, quarter or 0)
         income = income_lookup.get(key)
         balance = balance_lookup.get(key)
+        cashflow = cashflow_lookup.get(key)
         if income is None and quarter is not None:
             income = income_lookup.get((year, 0))
         if balance is None and quarter is not None:
             balance = balance_lookup.get((year, 0))
+        if cashflow is None and quarter is not None:
+            cashflow = cashflow_lookup.get((year, 0))
+
+        balance_prev = None
+        if normalized_period == "quarter" and quarter is not None and 1 <= quarter <= 4:
+            balance_prev = balance_lookup.get((year - 1, quarter))
+        if balance_prev is None:
+            balance_prev = balance_lookup.get((year - 1, 0))
 
         revenue = None if income is None else _coerce_optional_float(income.get("revenue"))
         operating_income = (
@@ -811,6 +915,9 @@ async def _enrich_missing_ratio_metrics(
         net_income = None if income is None else _coerce_optional_float(income.get("net_income"))
         cost_of_revenue = (
             None if income is None else _coerce_optional_float(income.get("cost_of_revenue"))
+        )
+        interest_expense = (
+            None if income is None else _coerce_optional_float(income.get("interest_expense"))
         )
 
         total_assets = (
@@ -825,6 +932,29 @@ async def _enrich_missing_ratio_metrics(
         inventory = None if balance is None else _coerce_optional_float(balance.get("inventory"))
         receivables = (
             None if balance is None else _coerce_optional_float(balance.get("accounts_receivable"))
+        )
+        inventory_prev = (
+            None if balance_prev is None else _coerce_optional_float(balance_prev.get("inventory"))
+        )
+        receivables_prev = (
+            None
+            if balance_prev is None
+            else _coerce_optional_float(balance_prev.get("accounts_receivable"))
+        )
+
+        operating_cash_flow = (
+            None
+            if cashflow is None
+            else _coerce_optional_float(cashflow.get("operating_cash_flow"))
+        )
+        free_cash_flow = (
+            None if cashflow is None else _coerce_optional_float(cashflow.get("free_cash_flow"))
+        )
+        dividends_paid = (
+            None if cashflow is None else _coerce_optional_float(cashflow.get("dividends_paid"))
+        )
+        debt_repayment = (
+            None if cashflow is None else _coerce_optional_float(cashflow.get("debt_repayment"))
         )
 
         if (
@@ -844,13 +974,17 @@ async def _enrich_missing_ratio_metrics(
             and cost_of_revenue not in (None, 0)
             and inventory not in (None, 0)
         ):
-            item.inventory_turnover = cost_of_revenue / inventory
+            avg_inventory = (inventory + (inventory_prev or inventory)) / 2
+            if avg_inventory not in (None, 0):
+                item.inventory_turnover = cost_of_revenue / avg_inventory
         if (
             item.receivables_turnover is None
             and revenue not in (None, 0)
             and receivables not in (None, 0)
         ):
-            item.receivables_turnover = revenue / receivables
+            avg_receivables = (receivables + (receivables_prev or receivables)) / 2
+            if avg_receivables not in (None, 0):
+                item.receivables_turnover = revenue / avg_receivables
         if (
             item.debt_assets is None
             and total_liabilities not in (None, 0)
@@ -878,16 +1012,52 @@ async def _enrich_missing_ratio_metrics(
         ):
             item.earnings_growth = ((net_income - prev_net_income) / prev_net_income) * 100
 
+        if item.debt_service_coverage is None and operating_income is not None:
+            debt_service = 0.0
+            if interest_expense is not None:
+                debt_service += abs(interest_expense)
+            if debt_repayment is not None:
+                debt_service += abs(debt_repayment)
+            if debt_service > 0:
+                item.debt_service_coverage = operating_income / debt_service
+
+        if (
+            item.ocf_debt is None
+            and operating_cash_flow is not None
+            and total_liabilities not in (None, 0)
+        ):
+            item.ocf_debt = operating_cash_flow / total_liabilities
+
+        if item.ocf_sales is None and operating_cash_flow is not None and revenue not in (None, 0):
+            item.ocf_sales = operating_cash_flow / revenue
+
+        if item.fcf_yield is None and free_cash_flow is not None and market_cap not in (None, 0):
+            item.fcf_yield = free_cash_flow / market_cap
+
+        if item.dps is None and dividends_paid is not None and outstanding_shares not in (None, 0):
+            item.dps = abs(dividends_paid) / outstanding_shares
+
         if item.dividend_yield is None and latest_price not in (None, 0):
             dps = _coerce_optional_float(getattr(item, "dps", None))
             if dps is not None:
                 item.dividend_yield = (dps / latest_price) * 100
 
         if item.payout_ratio is None:
-            dps = _coerce_optional_float(getattr(item, "dps", None))
-            eps = _coerce_optional_float(item.eps)
-            if dps is not None and eps not in (None, 0):
-                item.payout_ratio = (dps / eps) * 100
+            if dividends_paid is not None and net_income not in (None, 0) and net_income > 0:
+                item.payout_ratio = (abs(dividends_paid) / net_income) * 100
+            else:
+                dps = _coerce_optional_float(getattr(item, "dps", None))
+                eps = _coerce_optional_float(item.eps)
+                if dps is not None and eps not in (None, 0):
+                    item.payout_ratio = (dps / eps) * 100
+
+        if item.peg_ratio is None:
+            pe_value = _coerce_optional_float(item.pe)
+            growth_value = _coerce_optional_float(item.earnings_growth)
+            if pe_value is not None and growth_value not in (None, 0):
+                growth_base = growth_value if abs(growth_value) > 1 else growth_value * 100
+                if growth_base > 0:
+                    item.peg_ratio = pe_value / growth_base
 
     return rows
 
@@ -1048,6 +1218,7 @@ async def get_profile(
             cache_result = await cache_manager.get_profile_data(symbol_upper)
             if cache_result.hit:
                 company = cache_result.data
+                raw_profile = company.raw_data if isinstance(company.raw_data, dict) else {}
                 stock_row = (
                     await db.execute(
                         select(Stock.exchange, Stock.listing_date).where(
@@ -1057,30 +1228,45 @@ async def get_profile(
                 ).first()
 
                 exchange = company.exchange or (stock_row[0] if stock_row else None)
-                listing_date = _coerce_iso_date(company.listing_date) or _coerce_iso_date(
-                    stock_row[1] if stock_row else None
+                listing_date = (
+                    _coerce_iso_date(company.listing_date)
+                    or _coerce_iso_date(raw_profile.get("listing_date"))
+                    or _coerce_iso_date(raw_profile.get("listed_date"))
+                    or _coerce_iso_date(raw_profile.get("ipo_date"))
+                    or _coerce_iso_date(stock_row[1] if stock_row else None)
+                )
+
+                established_date = (
+                    _coerce_iso_date(company.established_date)
+                    or _coerce_iso_date(raw_profile.get("established_date"))
+                    or _coerce_iso_date(raw_profile.get("founded_date"))
+                    or _coerce_iso_date(raw_profile.get("founded"))
                 )
 
                 outstanding_shares = _pick_optional_float(
                     company.outstanding_shares,
                     company.listed_shares,
-                    (company.raw_data or {}).get("outstanding_shares")
-                    if company.raw_data
-                    else None,
-                    (company.raw_data or {}).get("issue_share") if company.raw_data else None,
+                    raw_profile.get("outstanding_shares"),
+                    raw_profile.get("issue_share"),
                 )
                 market_cap = await _resolve_profile_market_cap(
                     db=db,
                     symbol=symbol_upper,
                     outstanding_shares=outstanding_shares,
-                    fallback_market_cap=(company.raw_data or {}).get("market_cap")
-                    if company.raw_data
-                    else None,
+                    fallback_market_cap=raw_profile.get("market_cap"),
                 )
 
                 website = company.website
-                if not website and company.raw_data:
-                    website = company.raw_data.get("website") or company.raw_data.get("web_site")
+                if not website:
+                    website = raw_profile.get("website") or raw_profile.get("web_site")
+
+                description = company.business_description or raw_profile.get("company_profile")
+                if not description:
+                    description = raw_profile.get("description")
+
+                address = company.address or raw_profile.get("address")
+                phone = company.phone or raw_profile.get("phone") or raw_profile.get("telephone")
+                email = company.email or raw_profile.get("email")
 
                 if cache_result.is_stale:
                     await _schedule_refresh(
@@ -1095,16 +1281,16 @@ async def get_profile(
                         exchange=exchange,
                         industry=company.industry,
                         sector=company.sector,
-                        established_date=_coerce_iso_date(company.established_date),
+                        established_date=established_date,
                         listing_date=listing_date,
                         website=website,
-                        description=company.business_description,
+                        description=description,
                         outstanding_shares=outstanding_shares,
                         listed_shares=company.listed_shares,
                         market_cap=market_cap,
-                        address=company.address,
-                        phone=company.phone,
-                        email=company.email,
+                        address=address,
+                        phone=phone,
+                        email=email,
                     ),
                     meta=MetaData(count=1),
                 )
@@ -1145,6 +1331,10 @@ async def get_profile(
         )
         profile_data = data[0] if data else None
         if profile_data:
+            raw_profile = {}
+            if hasattr(profile_data, "model_extra") and isinstance(profile_data.model_extra, dict):
+                raw_profile = profile_data.model_extra
+
             stock_row = (
                 await db.execute(
                     select(Stock.exchange, Stock.listing_date).where(Stock.symbol == symbol_upper)
@@ -1156,8 +1346,36 @@ async def get_profile(
             if not profile_data.listing_date and stock_row:
                 profile_data.listing_date = _coerce_iso_date(stock_row[1])
 
+            if not profile_data.listing_date:
+                profile_data.listing_date = (
+                    _coerce_iso_date(raw_profile.get("listing_date"))
+                    or _coerce_iso_date(raw_profile.get("listed_date"))
+                    or _coerce_iso_date(raw_profile.get("ipo_date"))
+                )
+
             if profile_data.established_date:
                 profile_data.established_date = _coerce_iso_date(profile_data.established_date)
+            else:
+                profile_data.established_date = (
+                    _coerce_iso_date(raw_profile.get("established_date"))
+                    or _coerce_iso_date(raw_profile.get("founded_date"))
+                    or _coerce_iso_date(raw_profile.get("founded"))
+                )
+
+            if not profile_data.website:
+                profile_data.website = raw_profile.get("website") or raw_profile.get("web_site")
+
+            if not profile_data.description:
+                profile_data.description = raw_profile.get("company_profile") or raw_profile.get(
+                    "description"
+                )
+
+            if not profile_data.address:
+                profile_data.address = raw_profile.get("address")
+            if not profile_data.phone:
+                profile_data.phone = raw_profile.get("phone") or raw_profile.get("telephone")
+            if not profile_data.email:
+                profile_data.email = raw_profile.get("email")
 
             profile_data.market_cap = await _resolve_profile_market_cap(
                 db=db,
@@ -1165,6 +1383,8 @@ async def get_profile(
                 outstanding_shares=_pick_optional_float(
                     profile_data.outstanding_shares,
                     profile_data.listed_shares,
+                    raw_profile.get("outstanding_shares"),
+                    raw_profile.get("issue_share"),
                 ),
                 fallback_market_cap=profile_data.market_cap,
             )

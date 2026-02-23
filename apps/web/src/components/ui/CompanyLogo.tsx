@@ -46,7 +46,7 @@ export function CompanyLogo({ symbol, name, website, size = 20, className }: Com
   if (!domain || sourceIndex >= sources.length) {
     return (
       <div
-        className={`inline-flex items-center justify-center rounded-full border border-white/10 bg-blue-600/20 text-[10px] font-black text-blue-200 ${className ?? ''}`.trim()}
+        className={`inline-flex items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[10px] font-black text-[var(--accent-blue)] ${className ?? ''}`.trim()}
         style={{ width: size, height: size }}
         title={name || symbol}
       >
@@ -61,7 +61,7 @@ export function CompanyLogo({ symbol, name, website, size = 20, className }: Com
       alt={name || symbol}
       width={size}
       height={size}
-      className={`rounded-full border border-white/10 bg-[var(--bg-secondary)] object-cover ${className ?? ''}`.trim()}
+      className={`rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] object-cover ${className ?? ''}`.trim()}
       onError={() => setSourceIndex((current) => current + 1)}
       loading="lazy"
       decoding="async"
