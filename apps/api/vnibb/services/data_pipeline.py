@@ -1139,16 +1139,54 @@ class DataPipeline:
                         "price": price_value,
                         "volume": volume_value,
                         "market_cap": market_cap_value,
-                        "pe": row.get("pe") or row.get("pe_ratio") or row.get("priceToEarning"),
-                        "pb": row.get("pb") or row.get("priceToBook"),
-                        "ps": row.get("ps") or row.get("priceToSales"),
-                        "ev_ebitda": row.get("ev_ebitda") or row.get("value_before_ebitda"),
-                        "roe": row.get("roe"),
-                        "roa": row.get("roa"),
-                        "debt_to_equity": row.get("de") or row.get("debt_to_equity"),
-                        "current_ratio": row.get("current_ratio"),
-                        "quick_ratio": row.get("quick_ratio"),
-                        "eps": row.get("eps"),
+                        "pe": _parse_float(
+                            row.get("pe") or row.get("pe_ratio") or row.get("priceToEarning")
+                        ),
+                        "pb": _parse_float(row.get("pb") or row.get("priceToBook")),
+                        "ps": _parse_float(row.get("ps") or row.get("priceToSales")),
+                        "ev_ebitda": _parse_float(
+                            row.get("ev_ebitda")
+                            or row.get("value_before_ebitda")
+                            or row.get("evToEbitda")
+                        ),
+                        "roe": _parse_float(row.get("roe")),
+                        "roa": _parse_float(row.get("roa")),
+                        "roic": _parse_float(row.get("roic")),
+                        "gross_margin": _parse_float(
+                            row.get("gross_margin") or row.get("grossProfitMargin")
+                        ),
+                        "net_margin": _parse_float(
+                            row.get("net_margin")
+                            or row.get("netProfitMargin")
+                            or row.get("postTaxMargin")
+                        ),
+                        "operating_margin": _parse_float(
+                            row.get("operating_margin")
+                            or row.get("operatingMargin")
+                            or row.get("operatingProfitMargin")
+                        ),
+                        "revenue_growth": _parse_float(
+                            row.get("revenue_growth") or row.get("revenueGrowth")
+                        ),
+                        "earnings_growth": _parse_float(
+                            row.get("earnings_growth")
+                            or row.get("earningsGrowth")
+                            or row.get("net_profit_growth")
+                            or row.get("netProfitGrowth")
+                        ),
+                        "dividend_yield": _parse_float(
+                            row.get("dividend_yield")
+                            or row.get("dividendYield")
+                            or row.get("dividend")
+                        ),
+                        "debt_to_equity": _parse_float(row.get("de") or row.get("debt_to_equity")),
+                        "current_ratio": _parse_float(row.get("current_ratio")),
+                        "quick_ratio": _parse_float(row.get("quick_ratio")),
+                        "eps": _parse_float(row.get("eps")),
+                        "bvps": _parse_float(row.get("bvps") or row.get("book_value_per_share")),
+                        "foreign_ownership": _parse_float(
+                            row.get("foreign_ownership") or row.get("foreignOwnership")
+                        ),
                         "source": "vnstock_ratio",
                         "created_at": datetime.utcnow(),
                     }
@@ -1176,8 +1214,16 @@ class DataPipeline:
                             "pb": values.get("pb"),
                             "roe": values.get("roe"),
                             "roa": values.get("roa"),
+                            "roic": values.get("roic"),
+                            "gross_margin": values.get("gross_margin"),
+                            "net_margin": values.get("net_margin"),
+                            "operating_margin": values.get("operating_margin"),
+                            "revenue_growth": values.get("revenue_growth"),
+                            "earnings_growth": values.get("earnings_growth"),
+                            "dividend_yield": values.get("dividend_yield"),
                             "industry": values.get("industry"),
                             "eps": values.get("eps"),
+                            "bvps": values.get("bvps"),
                         }
                     )
                     if progress is not None:
@@ -1779,6 +1825,34 @@ class DataPipeline:
 
             return str(fiscal_year), fiscal_year, None
 
+        def _coerce_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                return None
+            if pd.isna(parsed):
+                return None
+            return parsed
+
+        def _pick_float(*values: Any) -> Optional[float]:
+            for value in values:
+                parsed = _coerce_float(value)
+                if parsed is not None:
+                    return parsed
+            return None
+
+        def _extract_raw_float(payload: Dict[str, Any], *keys: str) -> Optional[float]:
+            if not payload:
+                return None
+            for key in keys:
+                if key in payload:
+                    parsed = _coerce_float(payload.get(key))
+                    if parsed is not None:
+                        return parsed
+            return None
+
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             await self.rate_limiters["financials"].wait()
@@ -1807,6 +1881,10 @@ class DataPipeline:
                             period_value, fiscal_year, fiscal_quarter = _parse_period_fields(
                                 entry.period
                             )
+                            payload = entry.model_dump(mode="json")
+                            raw_payload = (
+                                entry.raw_data if isinstance(entry.raw_data, dict) else payload
+                            )
 
                             common = {
                                 "symbol": symbol,
@@ -1819,26 +1897,123 @@ class DataPipeline:
                             }
 
                             if statement_type == StatementType.INCOME:
+                                operating_expenses = _pick_float(
+                                    _extract_raw_float(
+                                        payload,
+                                        "operating_expenses",
+                                        "operatingExpenses",
+                                    ),
+                                    _extract_raw_float(
+                                        raw_payload,
+                                        "operating_expenses",
+                                        "operatingExpenses",
+                                    ),
+                                )
+                                if operating_expenses is None:
+                                    sga = _coerce_float(entry.selling_general_admin)
+                                    rnd = _coerce_float(entry.research_development)
+                                    if sga is not None or rnd is not None:
+                                        operating_expenses = (sga or 0.0) + (rnd or 0.0)
+
                                 values = {
                                     **common,
-                                    "revenue": entry.revenue,
-                                    "gross_profit": entry.gross_profit,
-                                    "operating_income": entry.operating_income,
-                                    "net_income": entry.net_income,
-                                    "ebitda": entry.ebitda,
-                                    "eps": entry.eps,
-                                    "eps_diluted": entry.eps_diluted,
-                                    "raw_data": entry.raw_data,
+                                    "revenue": _coerce_float(entry.revenue),
+                                    "cost_of_revenue": _coerce_float(entry.cost_of_revenue),
+                                    "gross_profit": _coerce_float(entry.gross_profit),
+                                    "operating_expenses": operating_expenses,
+                                    "operating_income": _coerce_float(entry.operating_income),
+                                    "interest_expense": _coerce_float(entry.interest_expense),
+                                    "other_income": _coerce_float(entry.other_income),
+                                    "income_before_tax": _pick_float(
+                                        entry.pre_tax_profit,
+                                        entry.profit_before_tax,
+                                        _extract_raw_float(
+                                            payload,
+                                            "pre_tax_profit",
+                                            "profit_before_tax",
+                                            "income_before_tax",
+                                        ),
+                                        _extract_raw_float(
+                                            raw_payload,
+                                            "pre_tax_profit",
+                                            "profit_before_tax",
+                                            "income_before_tax",
+                                        ),
+                                    ),
+                                    "income_tax": _pick_float(
+                                        entry.tax_expense,
+                                        _extract_raw_float(payload, "tax_expense", "income_tax"),
+                                        _extract_raw_float(
+                                            raw_payload, "tax_expense", "income_tax"
+                                        ),
+                                    ),
+                                    "net_income": _coerce_float(entry.net_income),
+                                    "ebitda": _coerce_float(entry.ebitda),
+                                    "eps": _coerce_float(entry.eps),
+                                    "eps_diluted": _coerce_float(entry.eps_diluted),
+                                    "raw_data": raw_payload,
                                 }
                             elif statement_type == StatementType.BALANCE:
                                 values = {
                                     **common,
-                                    "total_assets": entry.total_assets,
-                                    "total_liabilities": entry.total_liabilities,
-                                    "total_equity": entry.total_equity,
-                                    "cash_and_equivalents": entry.cash_and_equivalents,
-                                    "inventory": entry.inventory,
-                                    "raw_data": entry.raw_data,
+                                    "total_assets": _coerce_float(entry.total_assets),
+                                    "current_assets": _coerce_float(entry.current_assets),
+                                    "cash_and_equivalents": _pick_float(
+                                        entry.cash_and_equivalents,
+                                        entry.cash,
+                                    ),
+                                    "short_term_investments": _pick_float(
+                                        _extract_raw_float(
+                                            payload,
+                                            "short_term_investments",
+                                            "shortTermInvestments",
+                                        ),
+                                        _extract_raw_float(
+                                            raw_payload,
+                                            "short_term_investments",
+                                            "shortTermInvestments",
+                                        ),
+                                    ),
+                                    "accounts_receivable": _coerce_float(entry.accounts_receivable),
+                                    "inventory": _coerce_float(entry.inventory),
+                                    "non_current_assets": _pick_float(
+                                        _extract_raw_float(
+                                            payload,
+                                            "non_current_assets",
+                                            "nonCurrentAssets",
+                                        ),
+                                        _extract_raw_float(
+                                            raw_payload,
+                                            "non_current_assets",
+                                            "nonCurrentAssets",
+                                        ),
+                                    ),
+                                    "fixed_assets": _coerce_float(entry.fixed_assets),
+                                    "total_liabilities": _coerce_float(entry.total_liabilities),
+                                    "current_liabilities": _coerce_float(entry.current_liabilities),
+                                    "accounts_payable": _coerce_float(entry.accounts_payable),
+                                    "short_term_debt": _coerce_float(entry.short_term_debt),
+                                    "non_current_liabilities": _coerce_float(
+                                        entry.long_term_liabilities
+                                    ),
+                                    "long_term_debt": _coerce_float(entry.long_term_debt),
+                                    "total_equity": _pick_float(entry.total_equity, entry.equity),
+                                    "retained_earnings": _coerce_float(entry.retained_earnings),
+                                    "book_value_per_share": _pick_float(
+                                        _extract_raw_float(
+                                            payload,
+                                            "book_value_per_share",
+                                            "bookValuePerShare",
+                                            "bvps",
+                                        ),
+                                        _extract_raw_float(
+                                            raw_payload,
+                                            "book_value_per_share",
+                                            "bookValuePerShare",
+                                            "bvps",
+                                        ),
+                                    ),
+                                    "raw_data": raw_payload,
                                 }
                             else:
                                 net_change = None
@@ -1855,12 +2030,44 @@ class DataPipeline:
 
                                 values = {
                                     **common,
-                                    "operating_cash_flow": entry.operating_cash_flow,
-                                    "investing_cash_flow": entry.investing_cash_flow,
-                                    "financing_cash_flow": entry.financing_cash_flow,
-                                    "free_cash_flow": entry.free_cash_flow,
-                                    "net_change_in_cash": net_change,
-                                    "raw_data": entry.raw_data,
+                                    "operating_cash_flow": _coerce_float(entry.operating_cash_flow),
+                                    "depreciation": _pick_float(
+                                        entry.depreciation,
+                                        _extract_raw_float(
+                                            payload,
+                                            "depreciation",
+                                            "depreciation_and_amortization",
+                                        ),
+                                        _extract_raw_float(
+                                            raw_payload,
+                                            "depreciation",
+                                            "depreciation_and_amortization",
+                                        ),
+                                    ),
+                                    "investing_cash_flow": _coerce_float(entry.investing_cash_flow),
+                                    "capital_expenditure": _pick_float(
+                                        entry.capital_expenditure,
+                                        entry.capex,
+                                        _extract_raw_float(
+                                            payload,
+                                            "capital_expenditure",
+                                            "capex",
+                                        ),
+                                        _extract_raw_float(
+                                            raw_payload,
+                                            "capital_expenditure",
+                                            "capex",
+                                        ),
+                                    ),
+                                    "financing_cash_flow": _coerce_float(entry.financing_cash_flow),
+                                    "dividends_paid": _coerce_float(entry.dividends_paid),
+                                    "debt_repayment": _coerce_float(entry.debt_repayment),
+                                    "free_cash_flow": _coerce_float(entry.free_cash_flow),
+                                    "net_change_in_cash": _pick_float(
+                                        entry.net_change_in_cash,
+                                        net_change,
+                                    ),
+                                    "raw_data": raw_payload,
                                 }
 
                             stmt = get_upsert_stmt(
@@ -1868,8 +2075,7 @@ class DataPipeline:
                             )
                             await session.execute(stmt)
 
-                            if not latest_cache_payload:
-                                latest_cache_payload.append(entry.model_dump(mode="json"))
+                            latest_cache_payload.append(payload)
 
                         await session.commit()
 
@@ -1942,6 +2148,24 @@ class DataPipeline:
         total = 0
         normalized_period = "year" if period in {"year", "FY"} else "quarter"
 
+        def _coerce_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                return None
+            if pd.isna(parsed):
+                return None
+            return parsed
+
+        def _pick_float(*values: Any) -> Optional[float]:
+            for value in values:
+                parsed = _coerce_float(value)
+                if parsed is not None:
+                    return parsed
+            return None
+
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             await self.rate_limiters["financials"].wait()
@@ -1970,6 +2194,11 @@ class DataPipeline:
                         quarter_match = re.search(r"Q([1-4])", period_upper)
                         if quarter_match:
                             fiscal_quarter = int(quarter_match.group(1))
+                        elif normalized_period == "quarter":
+                            alt_quarter_match = re.match(r"([1-4])[/_-](20\d{2})", period_upper)
+                            if alt_quarter_match:
+                                fiscal_quarter = int(alt_quarter_match.group(1))
+                                fiscal_year = int(alt_quarter_match.group(2))
 
                         if not period_str:
                             period_str = (
@@ -1978,36 +2207,88 @@ class DataPipeline:
                                 else str(fiscal_year)
                             )
 
+                        ratio_payload = ratio.model_dump(mode="json")
+
                         values = {
                             "symbol": symbol,
                             "period": period_str,
                             "period_type": normalized_period,
                             "fiscal_year": fiscal_year,
                             "fiscal_quarter": fiscal_quarter,
-                            "pe_ratio": ratio.pe,
-                            "pb_ratio": ratio.pb,
-                            "ps_ratio": ratio.ps,
-                            "peg_ratio": None,
-                            "ev_ebitda": ratio.ev_ebitda,
-                            "ev_sales": ratio.ev_sales,
-                            "roe": ratio.roe,
-                            "roa": ratio.roa,
-                            "roic": None,
-                            "gross_margin": ratio.gross_margin,
-                            "operating_margin": ratio.operating_margin,
-                            "net_margin": ratio.net_margin,
-                            "current_ratio": ratio.current_ratio,
-                            "quick_ratio": ratio.quick_ratio,
-                            "cash_ratio": ratio.cash_ratio,
-                            "debt_to_equity": ratio.debt_equity,
-                            "debt_to_assets": ratio.debt_assets,
-                            "interest_coverage": ratio.interest_coverage,
-                            "eps": ratio.eps,
-                            "bvps": ratio.bvps,
-                            "dps": None,
-                            "revenue_growth": None,
-                            "earnings_growth": None,
-                            "raw_data": ratio.model_dump(mode="json"),
+                            "pe_ratio": _pick_float(ratio.pe, ratio_payload.get("pe")),
+                            "pb_ratio": _pick_float(ratio.pb, ratio_payload.get("pb")),
+                            "ps_ratio": _pick_float(ratio.ps, ratio_payload.get("ps")),
+                            "peg_ratio": _pick_float(
+                                ratio.peg_ratio,
+                                ratio_payload.get("peg_ratio"),
+                                ratio_payload.get("pegRatio"),
+                            ),
+                            "ev_ebitda": _pick_float(
+                                ratio.ev_ebitda, ratio_payload.get("ev_ebitda")
+                            ),
+                            "ev_sales": _pick_float(ratio.ev_sales, ratio_payload.get("ev_sales")),
+                            "roe": _pick_float(ratio.roe, ratio_payload.get("roe")),
+                            "roa": _pick_float(ratio.roa, ratio_payload.get("roa")),
+                            "roic": _pick_float(ratio.roic, ratio_payload.get("roic")),
+                            "gross_margin": _pick_float(
+                                ratio.gross_margin,
+                                ratio_payload.get("gross_margin"),
+                                ratio_payload.get("grossProfitMargin"),
+                            ),
+                            "operating_margin": _pick_float(
+                                ratio.operating_margin,
+                                ratio_payload.get("operating_margin"),
+                                ratio_payload.get("operatingMargin"),
+                            ),
+                            "net_margin": _pick_float(
+                                ratio.net_margin,
+                                ratio_payload.get("net_margin"),
+                                ratio_payload.get("netMargin"),
+                            ),
+                            "current_ratio": _pick_float(
+                                ratio.current_ratio,
+                                ratio_payload.get("current_ratio"),
+                            ),
+                            "quick_ratio": _pick_float(
+                                ratio.quick_ratio,
+                                ratio_payload.get("quick_ratio"),
+                            ),
+                            "cash_ratio": _pick_float(
+                                ratio.cash_ratio,
+                                ratio_payload.get("cash_ratio"),
+                            ),
+                            "debt_to_equity": _pick_float(
+                                ratio.debt_equity,
+                                ratio_payload.get("debt_equity"),
+                                ratio_payload.get("de"),
+                            ),
+                            "debt_to_assets": _pick_float(
+                                ratio.debt_assets,
+                                ratio_payload.get("debt_assets"),
+                            ),
+                            "interest_coverage": _pick_float(
+                                ratio.interest_coverage,
+                                ratio_payload.get("interest_coverage"),
+                            ),
+                            "eps": _pick_float(ratio.eps, ratio_payload.get("eps")),
+                            "bvps": _pick_float(ratio.bvps, ratio_payload.get("bvps")),
+                            "dps": _pick_float(
+                                ratio.dps,
+                                ratio_payload.get("dps"),
+                                ratio_payload.get("dividends_per_share"),
+                                ratio_payload.get("dividendPerShare"),
+                            ),
+                            "revenue_growth": _pick_float(
+                                ratio.revenue_growth,
+                                ratio_payload.get("revenue_growth"),
+                                ratio_payload.get("revenueGrowth"),
+                            ),
+                            "earnings_growth": _pick_float(
+                                ratio.earnings_growth,
+                                ratio_payload.get("earnings_growth"),
+                                ratio_payload.get("earningsGrowth"),
+                            ),
+                            "raw_data": ratio_payload,
                             "source": "vnstock",
                             "updated_at": datetime.utcnow(),
                         }
@@ -3997,6 +4278,9 @@ class DataPipeline:
                         await self.sync_financials(
                             period="year", progress=progress, sync_id=sync_id
                         )
+                        await self.sync_financials(period="quarter")
+                        await self.sync_financial_ratios(period="year")
+                        await self.sync_financial_ratios(period="quarter")
                     except Exception as e:
                         logger.warning(f"Financials sync failed: {e}")
 

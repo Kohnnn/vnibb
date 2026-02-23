@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-02-23 - Sprint V53 to V56
+
+### Backend data completeness and intelligence
+- Expanded financial statement and ratio persistence in the sync pipeline to reduce null-heavy income, balance, cashflow, and ratio payloads.
+- Upgraded peer selection to prioritize same-industry peers, then same-exchange candidates, then market-cap proximity with deterministic ranking.
+- Reworked market heatmap aggregation to use real DB-derived change percentages and robust sector/industry grouping instead of mock/random change values.
+- Added dynamic `/sectors` symbol population from database metadata and market-cap ranking; enhanced `/sectors/{sector}/stocks` with richer matching and computed `change_pct`.
+- Improved profile enrichment fallback in equity API with derived market cap and listing date/contact-aware projection from cached/company data.
+
+### Frontend stability and UX hardening
+- Fixed Sector Top Movers null-formatting crash and hardened payload compatibility across `sectors`/`data` response variants.
+- Restored legacy widget compatibility by mapping `tradingview_chart` to the current `price_chart` widget and advanced dashboard migration version.
+- Reduced light-mode dark artifacts by replacing hardcoded dark surfaces with tokenized backgrounds and light-theme overrides.
+- Improved modal readability and backdrop quality for Apps Library and Template Selector.
+- Added resilient company logo fallback chain (Clearbit, favicon services, initials fallback).
+- Improved admin health dashboard endpoint resolution so `/health/detailed` is requested from the root API host even when API base includes `/api/v1`.
+- Updated dividend widget rendering to suppress null-value rows and align table styling with theme variables.
+
+### Quality gates completed
+- Backend tests: `pytest apps/api/tests -q` (71 passed)
+- Frontend checks: `pnpm --filter frontend exec tsc --noEmit`, `pnpm --filter frontend lint`, `pnpm --filter frontend build`
+
 ## 2026-02-22 - Sprint V46 to V52
 
 ### Data fixes

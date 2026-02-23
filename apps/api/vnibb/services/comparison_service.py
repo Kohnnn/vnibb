@@ -367,58 +367,118 @@ class ComparisonService:
             if not all_stocks:
                 return PeersResponse(symbol=symbol, count=0, peers=[])
 
+            def _value(stock: Any, *keys: str) -> Any:
+                for key in keys:
+                    if isinstance(stock, dict):
+                        candidate = stock.get(key)
+                    else:
+                        candidate = getattr(stock, key, None)
+                    if candidate not in (None, ""):
+                        return candidate
+                return None
+
+            def _text(stock: Any, *keys: str) -> Optional[str]:
+                value = _value(stock, *keys)
+                if value is None:
+                    return None
+                cleaned = str(value).strip()
+                return cleaned or None
+
+            def _market_cap(stock: Any) -> Optional[float]:
+                value = _value(stock, "market_cap", "marketCap")
+                try:
+                    return float(value) if value is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            def _symbol(stock: Any) -> Optional[str]:
+                value = _text(stock, "symbol", "ticker")
+                return value.upper() if value else None
+
             def to_peer(stock: Any, industry: Optional[str]) -> PeerCompany:
                 return PeerCompany(
-                    symbol=getattr(stock, "symbol", ""),
-                    name=getattr(stock, "company_name", getattr(stock, "organ_name", None)),
-                    market_cap=getattr(stock, "market_cap", None),
-                    pe_ratio=getattr(stock, "pe", None),
+                    symbol=_symbol(stock) or "",
+                    name=_text(stock, "company_name", "organ_name", "organName"),
+                    market_cap=_market_cap(stock),
+                    pe_ratio=_value(stock, "pe", "pe_ratio"),
                     industry=industry,
                 )
 
             def fallback_peers() -> PeersResponse:
                 ranked = sorted(
-                    [s for s in all_stocks if getattr(s, "symbol", None) != symbol],
-                    key=lambda s: getattr(s, "market_cap", 0) or 0,
+                    [s for s in universe.values() if _symbol(s) and _symbol(s) != symbol],
+                    key=lambda s: ((_market_cap(s) or 0), _symbol(s) or ""),
                     reverse=True,
                 )
                 peers = [
-                    to_peer(stock, getattr(stock, "industry", None)) for stock in ranked[:limit]
+                    to_peer(stock, _text(stock, "industry", "industry_name", "industryName"))
+                    for stock in ranked[:limit]
                 ]
                 return PeersResponse(symbol=symbol, count=len(peers), peers=peers)
 
-            target = next((s for s in all_stocks if getattr(s, "symbol", None) == symbol), None)
+            universe: Dict[str, Any] = {}
+            for stock in all_stocks:
+                stock_symbol = _symbol(stock)
+                if not stock_symbol:
+                    continue
+                if stock_symbol not in universe:
+                    universe[stock_symbol] = stock
+
+            target = universe.get(symbol)
             if not target:
                 return fallback_peers()
 
-            target_industry = getattr(target, "industry", None) or getattr(
-                target, "industry_name", None
-            )
-            target_market_cap = getattr(target, "market_cap", 0) or 0
+            target_industry = _text(target, "industry", "industry_name", "industryName")
+            target_exchange = _text(target, "exchange")
+            target_market_cap = _market_cap(target) or 0.0
 
             if not target_industry:
                 profile_result = await self.cache_manager.get_profile_data(symbol, allow_stale=True)
                 if profile_result.hit and profile_result.data:
                     target_industry = profile_result.data.industry
+                if not target_exchange and profile_result.hit and profile_result.data:
+                    target_exchange = profile_result.data.exchange
 
-            if not target_industry:
-                return fallback_peers()
-
-            peers_list = [
-                s
-                for s in all_stocks
-                if (getattr(s, "industry", None) or getattr(s, "industry_name", None))
-                == target_industry
-                and getattr(s, "symbol", None) != symbol
+            candidate_pool = [
+                stock for stock_symbol, stock in universe.items() if stock_symbol != symbol
             ]
 
-            if target_market_cap > 0:
-                peers_list.sort(
-                    key=lambda s: abs((getattr(s, "market_cap", 0) or 0) - target_market_cap)
-                )
+            if target_industry:
+                peers_list = [
+                    stock
+                    for stock in candidate_pool
+                    if _text(stock, "industry", "industry_name", "industryName") == target_industry
+                ]
+            else:
+                peers_list = []
+
+            if not peers_list and target_exchange:
+                peers_list = [
+                    stock
+                    for stock in candidate_pool
+                    if (_text(stock, "exchange") or "") == target_exchange
+                ]
 
             if not peers_list:
                 return fallback_peers()
+
+            def _rank(stock: Any) -> tuple[float, float, float, str]:
+                exchange_penalty = (
+                    0.0
+                    if not target_exchange or (_text(stock, "exchange") or "") == target_exchange
+                    else 1.0
+                )
+                candidate_market_cap = _market_cap(stock)
+                if target_market_cap > 0 and candidate_market_cap not in (None, 0):
+                    cap_distance = abs(candidate_market_cap - target_market_cap) / target_market_cap
+                else:
+                    cap_distance = 10_000.0
+
+                # Larger market caps are generally more comparable and liquid.
+                market_cap_priority = -(candidate_market_cap or 0.0)
+                return exchange_penalty, cap_distance, market_cap_priority, _symbol(stock) or ""
+
+            peers_list.sort(key=_rank)
 
             formatted_peers = [to_peer(stock, target_industry) for stock in peers_list[:limit]]
 

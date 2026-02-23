@@ -35,7 +35,7 @@ import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
 const STORAGE_KEY = 'vnibb_dashboards';
 const FOLDERS_KEY = 'vnibb_folders';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 7;
+const CURRENT_MIGRATION_VERSION = 8;
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
@@ -988,6 +988,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
                 if (migrationVersion < 7) {
                     dashboards = migrateStaleNewTabs(dashboards);
+                }
+
+                if (migrationVersion < 8) {
+                    dashboards = migrateLegacyChartWidgets(dashboards);
                 }
 
                 // Final safety validation for all widgets

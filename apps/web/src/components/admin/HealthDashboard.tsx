@@ -19,9 +19,14 @@ export function HealthDashboard() {
   const fetchHealth = async () => {
     setLoading(true);
     try {
-      // Use the new env helper
       const { env } = await import('@/lib/env');
-      const res = await fetch(`${env.apiUrl}/health/detailed`);
+      const { getRuntimeApiBaseUrl } = await import('@/lib/backendHealth');
+      const baseUrl = getRuntimeApiBaseUrl(env.apiUrl);
+      if (!baseUrl) {
+        throw new Error('API base URL unavailable');
+      }
+
+      const res = await fetch(`${baseUrl}/health/detailed`);
       if (!res.ok) throw new Error('Health check failed');
       setHealth(await res.json());
       setError(null);
@@ -44,7 +49,12 @@ export function HealthDashboard() {
     return <AlertCircle className="w-5 h-5 text-yellow-400" />;
   };
 
-  const statusColor = health?.status === 'healthy' ? 'green' : health?.status === 'degraded' ? 'yellow' : 'red';
+  const statusClass =
+    health?.status === 'healthy'
+      ? 'bg-green-500/10 border-green-500/30'
+      : health?.status === 'degraded'
+        ? 'bg-yellow-500/10 border-yellow-500/30'
+        : 'bg-red-500/10 border-red-500/30';
 
   return (
     <div className="p-6 bg-gray-900 rounded-lg border border-gray-800">
@@ -78,7 +88,7 @@ export function HealthDashboard() {
       {health && (
         <div className="space-y-4">
           {/* Overall Status */}
-          <div className={`flex items-center gap-3 p-4 rounded-lg bg-${statusColor}-500/10 border border-${statusColor}-500/30`}>
+          <div className={`flex items-center gap-3 p-4 rounded-lg border ${statusClass}`}>
             <StatusIcon status={health.status} />
             <div>
               <span className="text-white font-medium capitalize">{health.status}</span>
