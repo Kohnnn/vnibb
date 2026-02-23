@@ -5,13 +5,11 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { API_BASE_URL } from '@/lib/api';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
-import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
+import { useSectorTopMovers } from '@/lib/queries';
 
 interface StockPerformance {
   symbol: string;
@@ -43,17 +41,12 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
   const [viewType, setViewType] = useState<'gainers' | 'losers'>('gainers');
   const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
 
-  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuery({
-    queryKey: ['sector-top-movers-v2', viewType],
-    queryFn: async () => {
-      const res = await fetch(`${API_BASE_URL}/sectors/top-movers?type=${viewType}`);
-      if (!res.ok) throw new Error('Sector data failed');
-      return res.json() as Promise<SectorTopMoversPayload>;
-    },
-    refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.movers),
-    refetchIntervalInBackground: false,
-    networkMode: 'online',
+  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorTopMovers({
+    type: viewType,
+    limit: 5,
   });
+
+  const payload = data as unknown as SectorTopMoversPayload;
 
   const scroll = (direction: 'left' | 'right') => {
     if (scrollRef.current) {
@@ -85,14 +78,14 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
     </div>
   );
 
-  const sectors = Array.isArray(data?.sectors)
-    ? data.sectors
-    : Array.isArray(data?.data)
-      ? data.data
+  const sectors = Array.isArray(payload?.sectors)
+    ? payload.sectors
+    : Array.isArray(payload?.data)
+      ? payload.data
       : [];
   const hasData = sectors.length > 0;
   const isFallback = Boolean(error && hasData);
-  const updatedAt = data?.updated_at || dataUpdatedAt;
+  const updatedAt = payload?.updated_at || dataUpdatedAt;
 
   return (
     <WidgetContainer
@@ -224,7 +217,7 @@ function StockRow({ stock, onSelect }: { stock: StockPerformance; onSelect: (sym
       )}
     >
       <div className="flex flex-col">
-        <span className="text-xs font-black text-blue-400 group-hover:text-blue-300 transition-colors">
+        <span className="text-xs font-black text-[var(--accent-blue)] transition-colors">
           {stock.symbol}
         </span>
         {stock.volume && (

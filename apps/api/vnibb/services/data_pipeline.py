@@ -16,7 +16,7 @@ from typing import Optional, List, Dict, Any, Union, Tuple
 
 import pandas as pd
 from zoneinfo import ZoneInfo
-from sqlalchemy import select, and_, func, text, update, delete
+from sqlalchemy import select, and_, or_, func, text, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
@@ -1251,6 +1251,135 @@ class DataPipeline:
                 cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
                 await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
 
+            backfilled_rows = 0
+            pending_rows = (
+                (
+                    await session.execute(
+                        select(ScreenerSnapshot)
+                        .where(
+                            ScreenerSnapshot.snapshot_date == today,
+                            or_(
+                                ScreenerSnapshot.revenue_growth.is_(None),
+                                ScreenerSnapshot.earnings_growth.is_(None),
+                                ScreenerSnapshot.operating_margin.is_(None),
+                                ScreenerSnapshot.dividend_yield.is_(None),
+                                ScreenerSnapshot.ev_ebitda.is_(None),
+                            ),
+                        )
+                        .limit(500)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            for screener_row in pending_rows:
+                ratio = (
+                    await session.execute(
+                        select(FinancialRatio)
+                        .where(FinancialRatio.symbol == screener_row.symbol)
+                        .order_by(
+                            FinancialRatio.fiscal_year.desc(),
+                            FinancialRatio.fiscal_quarter.desc(),
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if ratio is None:
+                    continue
+
+                ratio_payload = ratio.raw_data if isinstance(ratio.raw_data, dict) else {}
+                changed = False
+
+                if screener_row.revenue_growth is None:
+                    revenue_growth_value = _pick_float(
+                        ratio.revenue_growth,
+                        ratio_payload.get("revenue_growth"),
+                        ratio_payload.get("revenueGrowth"),
+                    )
+                    if revenue_growth_value is not None:
+                        screener_row.revenue_growth = revenue_growth_value
+                        changed = True
+
+                if screener_row.earnings_growth is None:
+                    earnings_growth_value = _pick_float(
+                        ratio.earnings_growth,
+                        ratio_payload.get("earnings_growth"),
+                        ratio_payload.get("earningsGrowth"),
+                    )
+                    if earnings_growth_value is not None:
+                        screener_row.earnings_growth = earnings_growth_value
+                        changed = True
+
+                if screener_row.operating_margin is None:
+                    operating_margin_value = _pick_float(
+                        ratio.operating_margin,
+                        ratio_payload.get("operating_margin"),
+                        ratio_payload.get("operatingMargin"),
+                    )
+                    if operating_margin_value is not None:
+                        screener_row.operating_margin = operating_margin_value
+                        changed = True
+
+                if screener_row.dividend_yield is None:
+                    dividend_yield_value = _pick_float(
+                        ratio_payload.get("dividend_yield"),
+                        ratio_payload.get("dividendYield"),
+                    )
+                    if dividend_yield_value is None:
+                        dps_value = _pick_float(
+                            ratio.dps,
+                            ratio_payload.get("dps"),
+                            ratio_payload.get("dividends_per_share"),
+                        )
+                        price_value = _pick_float(screener_row.price)
+                        if dps_value is not None and price_value not in (None, 0):
+                            dividend_yield_value = (dps_value / price_value) * 100
+
+                    if dividend_yield_value is not None:
+                        screener_row.dividend_yield = dividend_yield_value
+                        changed = True
+
+                if screener_row.ev_ebitda is None:
+                    ev_ebitda_value = _pick_float(
+                        ratio.ev_ebitda,
+                        ratio_payload.get("ev_ebitda"),
+                        ratio_payload.get("evToEbitda"),
+                    )
+                    if ev_ebitda_value is not None:
+                        screener_row.ev_ebitda = ev_ebitda_value
+                        changed = True
+
+                if screener_row.debt_to_equity is None:
+                    debt_to_equity_value = _pick_float(
+                        ratio.debt_to_equity,
+                        ratio_payload.get("debt_to_equity"),
+                        ratio_payload.get("de"),
+                    )
+                    if debt_to_equity_value is not None:
+                        screener_row.debt_to_equity = debt_to_equity_value
+                        changed = True
+
+                debt_to_asset_value = _pick_float(
+                    ratio.debt_to_assets,
+                    ratio_payload.get("debt_assets"),
+                    ratio_payload.get("debt_to_assets"),
+                    ratio_payload.get("debt_to_asset"),
+                )
+                if debt_to_asset_value is not None:
+                    extended_metrics = dict(screener_row.extended_metrics or {})
+                    if extended_metrics.get("debt_to_asset") is None:
+                        extended_metrics["debt_to_asset"] = debt_to_asset_value
+                        screener_row.extended_metrics = extended_metrics
+                        changed = True
+
+                if changed:
+                    backfilled_rows += 1
+
+            if backfilled_rows:
+                await session.commit()
+                logger.info("Back-filled %d screener rows from financial ratios", backfilled_rows)
+
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = None
                 progress["last_index"] = None
@@ -1864,6 +1993,8 @@ class DataPipeline:
                 ]
 
                 symbol_synced = False
+                income_depreciation_lookup: Dict[Tuple[int, int], float] = {}
+                annual_income_depreciation: Dict[int, float] = {}
                 for statement_type, model, cache_slug in statement_specs:
                     params = FinancialsQueryParams(
                         symbol=symbol,
@@ -1882,9 +2013,10 @@ class DataPipeline:
                                 entry.period
                             )
                             payload = entry.model_dump(mode="json")
-                            raw_payload = (
-                                entry.raw_data if isinstance(entry.raw_data, dict) else payload
-                            )
+                            if isinstance(entry.raw_data, dict):
+                                raw_payload = dict(entry.raw_data)
+                            else:
+                                raw_payload = dict(payload)
 
                             common = {
                                 "symbol": symbol,
@@ -1915,13 +2047,52 @@ class DataPipeline:
                                     if sga is not None or rnd is not None:
                                         operating_expenses = (sga or 0.0) + (rnd or 0.0)
 
+                                income_depreciation = _pick_float(
+                                    entry.depreciation,
+                                    _extract_raw_float(
+                                        payload,
+                                        "depreciation",
+                                        "depreciation_and_amortization",
+                                        "depreciation_and_amortisation",
+                                        "khau_hao_tai_san_co_dinh",
+                                        "chi_phi_khau_hao",
+                                        "khau_hao_tscd",
+                                    ),
+                                    _extract_raw_float(
+                                        raw_payload,
+                                        "depreciation",
+                                        "depreciation_and_amortization",
+                                        "depreciation_and_amortisation",
+                                        "khau_hao_tai_san_co_dinh",
+                                        "chi_phi_khau_hao",
+                                        "khau_hao_tscd",
+                                    ),
+                                )
+
+                                lookup_key = (fiscal_year, fiscal_quarter or 0)
+                                if income_depreciation is not None:
+                                    income_depreciation_lookup[lookup_key] = income_depreciation
+                                    annual_income_depreciation[fiscal_year] = income_depreciation
+
+                                operating_income_value = _coerce_float(entry.operating_income)
+                                ebitda_value = _coerce_float(entry.ebitda)
+                                if ebitda_value is None:
+                                    if (
+                                        operating_income_value is not None
+                                        and income_depreciation is not None
+                                    ):
+                                        ebitda_value = operating_income_value + abs(
+                                            income_depreciation
+                                        )
+                                        raw_payload["_ebitda_computed_from_operating_income"] = True
+
                                 values = {
                                     **common,
                                     "revenue": _coerce_float(entry.revenue),
                                     "cost_of_revenue": _coerce_float(entry.cost_of_revenue),
                                     "gross_profit": _coerce_float(entry.gross_profit),
                                     "operating_expenses": operating_expenses,
-                                    "operating_income": _coerce_float(entry.operating_income),
+                                    "operating_income": operating_income_value,
                                     "interest_expense": _coerce_float(entry.interest_expense),
                                     "other_income": _coerce_float(entry.other_income),
                                     "income_before_tax": _pick_float(
@@ -1948,7 +2119,7 @@ class DataPipeline:
                                         ),
                                     ),
                                     "net_income": _coerce_float(entry.net_income),
-                                    "ebitda": _coerce_float(entry.ebitda),
+                                    "ebitda": ebitda_value,
                                     "eps": _coerce_float(entry.eps),
                                     "eps_diluted": _coerce_float(entry.eps_diluted),
                                     "raw_data": raw_payload,
@@ -2028,37 +2199,61 @@ class DataPipeline:
                                         + entry.financing_cash_flow
                                     )
 
+                                lookup_key = (fiscal_year, fiscal_quarter or 0)
+                                depreciation_value = _pick_float(
+                                    entry.depreciation,
+                                    _extract_raw_float(
+                                        payload,
+                                        "depreciation",
+                                        "depreciation_and_amortization",
+                                        "depreciation_and_amortisation",
+                                    ),
+                                    _extract_raw_float(
+                                        raw_payload,
+                                        "depreciation",
+                                        "depreciation_and_amortization",
+                                        "depreciation_and_amortisation",
+                                    ),
+                                )
+                                if depreciation_value is None:
+                                    depreciation_value = income_depreciation_lookup.get(lookup_key)
+                                    if depreciation_value is None and fiscal_quarter is not None:
+                                        depreciation_value = annual_income_depreciation.get(
+                                            fiscal_year
+                                        )
+                                    if depreciation_value is not None:
+                                        raw_payload["_depreciation_cross_fill"] = "income_statement"
+
+                                investing_cash_flow_value = _coerce_float(entry.investing_cash_flow)
+                                capital_expenditure_value = _pick_float(
+                                    entry.capital_expenditure,
+                                    entry.capex,
+                                    _extract_raw_float(
+                                        payload,
+                                        "capital_expenditure",
+                                        "capex",
+                                    ),
+                                    _extract_raw_float(
+                                        raw_payload,
+                                        "capital_expenditure",
+                                        "capex",
+                                    ),
+                                )
+                                if (
+                                    capital_expenditure_value is None
+                                    and investing_cash_flow_value is not None
+                                ):
+                                    capital_expenditure_value = investing_cash_flow_value
+                                    raw_payload["_capital_expenditure_proxy"] = (
+                                        "investing_cash_flow"
+                                    )
+
                                 values = {
                                     **common,
                                     "operating_cash_flow": _coerce_float(entry.operating_cash_flow),
-                                    "depreciation": _pick_float(
-                                        entry.depreciation,
-                                        _extract_raw_float(
-                                            payload,
-                                            "depreciation",
-                                            "depreciation_and_amortization",
-                                        ),
-                                        _extract_raw_float(
-                                            raw_payload,
-                                            "depreciation",
-                                            "depreciation_and_amortization",
-                                        ),
-                                    ),
-                                    "investing_cash_flow": _coerce_float(entry.investing_cash_flow),
-                                    "capital_expenditure": _pick_float(
-                                        entry.capital_expenditure,
-                                        entry.capex,
-                                        _extract_raw_float(
-                                            payload,
-                                            "capital_expenditure",
-                                            "capex",
-                                        ),
-                                        _extract_raw_float(
-                                            raw_payload,
-                                            "capital_expenditure",
-                                            "capex",
-                                        ),
-                                    ),
+                                    "depreciation": depreciation_value,
+                                    "investing_cash_flow": investing_cash_flow_value,
+                                    "capital_expenditure": capital_expenditure_value,
                                     "financing_cash_flow": _coerce_float(entry.financing_cash_flow),
                                     "dividends_paid": _coerce_float(entry.dividends_paid),
                                     "debt_repayment": _coerce_float(entry.debt_repayment),
@@ -2165,6 +2360,390 @@ class DataPipeline:
                 if parsed is not None:
                     return parsed
             return None
+
+        def _resolve_lookup(
+            keyed: Dict[Tuple[int, int], Dict[str, Optional[float]]],
+            annual: Dict[int, Dict[str, Optional[float]]],
+            year: int,
+            quarter: Optional[int],
+        ) -> Dict[str, Optional[float]] | None:
+            key = (year, quarter or 0)
+            row = keyed.get(key)
+            if row is None and quarter not in (None, 0):
+                row = keyed.get((year, 0))
+            if row is None:
+                row = annual.get(year)
+            return row
+
+        async def _enrich_ratio_rows(session: AsyncSession, symbol_value: str) -> int:
+            ratio_rows = (
+                (
+                    await session.execute(
+                        select(FinancialRatio)
+                        .where(
+                            FinancialRatio.symbol == symbol_value,
+                            FinancialRatio.period_type == normalized_period,
+                        )
+                        .order_by(
+                            FinancialRatio.fiscal_year.desc(), FinancialRatio.fiscal_quarter.desc()
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not ratio_rows:
+                return 0
+
+            income_rows = (
+                await session.execute(
+                    select(
+                        IncomeStatement.fiscal_year,
+                        IncomeStatement.fiscal_quarter,
+                        IncomeStatement.revenue,
+                        IncomeStatement.operating_income,
+                        IncomeStatement.net_income,
+                        IncomeStatement.cost_of_revenue,
+                        IncomeStatement.interest_expense,
+                    )
+                    .where(
+                        IncomeStatement.symbol == symbol_value,
+                        IncomeStatement.period_type == normalized_period,
+                    )
+                    .order_by(
+                        IncomeStatement.fiscal_year.desc(), IncomeStatement.fiscal_quarter.desc()
+                    )
+                )
+            ).all()
+
+            balance_rows = (
+                await session.execute(
+                    select(
+                        BalanceSheet.fiscal_year,
+                        BalanceSheet.fiscal_quarter,
+                        BalanceSheet.inventory,
+                        BalanceSheet.accounts_receivable,
+                        BalanceSheet.total_liabilities,
+                        BalanceSheet.total_assets,
+                        BalanceSheet.total_equity,
+                    )
+                    .where(
+                        BalanceSheet.symbol == symbol_value,
+                        BalanceSheet.period_type == normalized_period,
+                    )
+                    .order_by(BalanceSheet.fiscal_year.desc(), BalanceSheet.fiscal_quarter.desc())
+                )
+            ).all()
+
+            cashflow_rows = (
+                await session.execute(
+                    select(
+                        CashFlow.fiscal_year,
+                        CashFlow.fiscal_quarter,
+                        CashFlow.operating_cash_flow,
+                        CashFlow.free_cash_flow,
+                        CashFlow.dividends_paid,
+                        CashFlow.debt_repayment,
+                    )
+                    .where(
+                        CashFlow.symbol == symbol_value,
+                        CashFlow.period_type == normalized_period,
+                    )
+                    .order_by(CashFlow.fiscal_year.desc(), CashFlow.fiscal_quarter.desc())
+                )
+            ).all()
+
+            income_lookup: Dict[Tuple[int, int], Dict[str, Optional[float]]] = {}
+            income_annual: Dict[int, Dict[str, Optional[float]]] = {}
+            for (
+                year,
+                quarter,
+                revenue,
+                op_income,
+                net_income,
+                cogs,
+                interest_expense,
+            ) in income_rows:
+                if year is None:
+                    continue
+                period_key = (int(year), int(quarter or 0))
+                row_value = {
+                    "revenue": _coerce_float(revenue),
+                    "operating_income": _coerce_float(op_income),
+                    "net_income": _coerce_float(net_income),
+                    "cost_of_revenue": _coerce_float(cogs),
+                    "interest_expense": _coerce_float(interest_expense),
+                }
+                income_lookup[period_key] = row_value
+                income_annual.setdefault(int(year), row_value)
+
+            balance_lookup: Dict[Tuple[int, int], Dict[str, Optional[float]]] = {}
+            balance_annual: Dict[int, Dict[str, Optional[float]]] = {}
+            for (
+                year,
+                quarter,
+                inventory,
+                receivables,
+                total_liabilities,
+                total_assets,
+                total_equity,
+            ) in balance_rows:
+                if year is None:
+                    continue
+                period_key = (int(year), int(quarter or 0))
+                row_value = {
+                    "inventory": _coerce_float(inventory),
+                    "accounts_receivable": _coerce_float(receivables),
+                    "total_liabilities": _coerce_float(total_liabilities),
+                    "total_assets": _coerce_float(total_assets),
+                    "total_equity": _coerce_float(total_equity),
+                }
+                balance_lookup[period_key] = row_value
+                balance_annual.setdefault(int(year), row_value)
+
+            cashflow_lookup: Dict[Tuple[int, int], Dict[str, Optional[float]]] = {}
+            cashflow_annual: Dict[int, Dict[str, Optional[float]]] = {}
+            for year, quarter, ocf, fcf, dividends_paid, debt_repayment in cashflow_rows:
+                if year is None:
+                    continue
+                period_key = (int(year), int(quarter or 0))
+                row_value = {
+                    "operating_cash_flow": _coerce_float(ocf),
+                    "free_cash_flow": _coerce_float(fcf),
+                    "dividends_paid": _coerce_float(dividends_paid),
+                    "debt_repayment": _coerce_float(debt_repayment),
+                }
+                cashflow_lookup[period_key] = row_value
+                cashflow_annual.setdefault(int(year), row_value)
+
+            company_row = (
+                await session.execute(
+                    select(
+                        Company.outstanding_shares, Company.listed_shares, Company.raw_data
+                    ).where(Company.symbol == symbol_value)
+                )
+            ).first()
+            outstanding_shares = None
+            if company_row:
+                company_raw = company_row[2] if isinstance(company_row[2], dict) else {}
+                outstanding_shares = _pick_float(
+                    company_row[0],
+                    company_row[1],
+                    company_raw.get("outstanding_shares"),
+                    company_raw.get("issue_share"),
+                )
+
+            latest_price = _coerce_float(
+                (
+                    await session.execute(
+                        select(StockPrice.close)
+                        .where(StockPrice.symbol == symbol_value)
+                        .order_by(StockPrice.time.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+            )
+            if latest_price in (None, 0):
+                latest_price = _coerce_float(
+                    (
+                        await session.execute(
+                            select(ScreenerSnapshot.price)
+                            .where(
+                                ScreenerSnapshot.symbol == symbol_value,
+                                ScreenerSnapshot.price.is_not(None),
+                            )
+                            .order_by(ScreenerSnapshot.snapshot_date.desc())
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                )
+
+            market_cap = None
+            if outstanding_shares not in (None, 0) and latest_price not in (None, 0):
+                market_cap = outstanding_shares * latest_price
+            if market_cap in (None, 0):
+                market_cap = _coerce_float(
+                    (
+                        await session.execute(
+                            select(ScreenerSnapshot.market_cap)
+                            .where(
+                                ScreenerSnapshot.symbol == symbol_value,
+                                ScreenerSnapshot.market_cap.is_not(None),
+                            )
+                            .order_by(ScreenerSnapshot.snapshot_date.desc())
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                )
+
+            changed_count = 0
+            for ratio_row in ratio_rows:
+                year = int(ratio_row.fiscal_year)
+                quarter = (
+                    int(ratio_row.fiscal_quarter or 0) if normalized_period == "quarter" else 0
+                )
+
+                income = _resolve_lookup(
+                    income_lookup,
+                    income_annual,
+                    year,
+                    quarter if quarter else None,
+                )
+                balance = _resolve_lookup(
+                    balance_lookup,
+                    balance_annual,
+                    year,
+                    quarter if quarter else None,
+                )
+                cashflow = _resolve_lookup(
+                    cashflow_lookup,
+                    cashflow_annual,
+                    year,
+                    quarter if quarter else None,
+                )
+
+                prev_quarter = quarter if normalized_period == "quarter" and quarter else 0
+                balance_prev = _resolve_lookup(
+                    balance_lookup, balance_annual, year - 1, prev_quarter
+                )
+
+                raw_payload = dict(ratio_row.raw_data or {})
+                changed = False
+
+                revenue = _pick_float(None if income is None else income.get("revenue"))
+                operating_income = _pick_float(
+                    None if income is None else income.get("operating_income")
+                )
+                net_income = _pick_float(None if income is None else income.get("net_income"))
+                cost_of_revenue = _pick_float(
+                    None if income is None else income.get("cost_of_revenue")
+                )
+                interest_expense = _pick_float(
+                    None if income is None else income.get("interest_expense")
+                )
+
+                inventory_current = _pick_float(
+                    None if balance is None else balance.get("inventory")
+                )
+                inventory_prev = _pick_float(
+                    None if balance_prev is None else balance_prev.get("inventory")
+                )
+                receivables_current = _pick_float(
+                    None if balance is None else balance.get("accounts_receivable")
+                )
+                receivables_prev = _pick_float(
+                    None if balance_prev is None else balance_prev.get("accounts_receivable")
+                )
+                total_liabilities = _pick_float(
+                    None if balance is None else balance.get("total_liabilities")
+                )
+
+                operating_cash_flow = _pick_float(
+                    None if cashflow is None else cashflow.get("operating_cash_flow")
+                )
+                free_cash_flow = _pick_float(
+                    None if cashflow is None else cashflow.get("free_cash_flow")
+                )
+                dividends_paid = _pick_float(
+                    None if cashflow is None else cashflow.get("dividends_paid")
+                )
+                debt_repayment = _pick_float(
+                    None if cashflow is None else cashflow.get("debt_repayment")
+                )
+
+                if _pick_float(raw_payload.get("inventory_turnover")) is None:
+                    if cost_of_revenue not in (None, 0) and inventory_current not in (None, 0):
+                        avg_inventory = (
+                            inventory_current + (inventory_prev or inventory_current)
+                        ) / 2
+                        if avg_inventory > 0:
+                            raw_payload["inventory_turnover"] = round(
+                                cost_of_revenue / avg_inventory, 4
+                            )
+                            changed = True
+
+                if _pick_float(raw_payload.get("receivables_turnover")) is None:
+                    if revenue not in (None, 0) and receivables_current not in (None, 0):
+                        avg_receivables = (
+                            receivables_current + (receivables_prev or receivables_current)
+                        ) / 2
+                        if avg_receivables > 0:
+                            raw_payload["receivables_turnover"] = round(
+                                revenue / avg_receivables,
+                                4,
+                            )
+                            changed = True
+
+                if _pick_float(raw_payload.get("debt_service_coverage")) is None:
+                    denominator = 0.0
+                    if interest_expense is not None:
+                        denominator += abs(interest_expense)
+                    if debt_repayment is not None:
+                        denominator += abs(debt_repayment)
+                    if operating_income is not None and denominator > 0:
+                        raw_payload["debt_service_coverage"] = round(
+                            operating_income / denominator,
+                            4,
+                        )
+                        changed = True
+
+                if _pick_float(raw_payload.get("ocf_debt")) is None:
+                    if operating_cash_flow is not None and total_liabilities not in (None, 0):
+                        raw_payload["ocf_debt"] = round(operating_cash_flow / total_liabilities, 4)
+                        changed = True
+
+                if _pick_float(raw_payload.get("ocf_sales")) is None:
+                    if operating_cash_flow is not None and revenue not in (None, 0):
+                        raw_payload["ocf_sales"] = round(operating_cash_flow / revenue, 4)
+                        changed = True
+
+                if _pick_float(raw_payload.get("fcf_yield")) is None:
+                    if free_cash_flow is not None and market_cap not in (None, 0):
+                        raw_payload["fcf_yield"] = round(free_cash_flow / market_cap, 4)
+                        changed = True
+
+                if ratio_row.dps is None:
+                    if dividends_paid is not None and outstanding_shares not in (None, 0):
+                        ratio_row.dps = round(abs(dividends_paid) / outstanding_shares, 4)
+                        raw_payload["dps"] = ratio_row.dps
+                        changed = True
+
+                dps_value = _pick_float(ratio_row.dps, raw_payload.get("dps"))
+                if _pick_float(raw_payload.get("dividend_yield")) is None:
+                    if dps_value is not None and latest_price not in (None, 0):
+                        raw_payload["dividend_yield"] = round((dps_value / latest_price) * 100, 4)
+                        changed = True
+
+                if _pick_float(raw_payload.get("payout_ratio")) is None:
+                    if dividends_paid is not None and net_income not in (None, 0):
+                        if net_income > 0:
+                            raw_payload["payout_ratio"] = round(
+                                (abs(dividends_paid) / net_income) * 100,
+                                4,
+                            )
+                            changed = True
+
+                if ratio_row.peg_ratio is None:
+                    pe_value = _pick_float(ratio_row.pe_ratio, raw_payload.get("pe"))
+                    earnings_growth = _pick_float(
+                        ratio_row.earnings_growth,
+                        raw_payload.get("earnings_growth"),
+                        raw_payload.get("earningsGrowth"),
+                    )
+                    if pe_value is not None and earnings_growth not in (None, 0):
+                        growth_base = (
+                            earnings_growth if abs(earnings_growth) > 1 else earnings_growth * 100
+                        )
+                        if growth_base > 0:
+                            ratio_row.peg_ratio = round(pe_value / growth_base, 4)
+                            raw_payload["peg_ratio"] = ratio_row.peg_ratio
+                            changed = True
+
+                if changed:
+                    ratio_row.raw_data = raw_payload
+                    changed_count += 1
+
+            return changed_count
 
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
@@ -2297,7 +2876,15 @@ class DataPipeline:
                         )
                         await session.execute(stmt)
 
+                    await session.flush()
+                    enriched_rows = await _enrich_ratio_rows(session, symbol)
                     await session.commit()
+                    if enriched_rows:
+                        logger.info(
+                            "Enriched %d computed ratio rows for %s",
+                            enriched_rows,
+                            symbol,
+                        )
 
                 total += 1
                 if progress is not None:

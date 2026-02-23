@@ -850,7 +850,7 @@ async def get_market_indices(
             timeout=30,
         )
         normalized = [
-            item.model_dump(mode="json", by_alias=True) if hasattr(item, "model_dump") else item
+            item.model_dump(mode="json", by_alias=False) if hasattr(item, "model_dump") else item
             for item in indices
         ]
         return MarketIndicesResponse(count=len(normalized[:limit]), data=normalized[:limit])
@@ -871,7 +871,7 @@ async def get_market_top_movers(
             timeout=30,
         )
         payload = [
-            item.model_dump(mode="json", by_alias=True) if hasattr(item, "model_dump") else item
+            item.model_dump(mode="json", by_alias=False) if hasattr(item, "model_dump") else item
             for item in movers
         ]
 
@@ -882,7 +882,9 @@ async def get_market_top_movers(
                 timeout=30,
             )
             payload = [
-                item.model_dump(mode="json", by_alias=True) if hasattr(item, "model_dump") else item
+                item.model_dump(mode="json", by_alias=False)
+                if hasattr(item, "model_dump")
+                else item
                 for item in fallback
             ]
 

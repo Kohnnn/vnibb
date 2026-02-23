@@ -45,7 +45,7 @@ export function WidgetHeader({
       <div className="flex items-center gap-2 min-w-0 flex-1 text-left">
         <h3 className="text-sm font-medium text-[var(--text-primary)] truncate">{title}</h3>
         {symbol && (
-          <span className="text-xs px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded font-mono">
+          <span className="text-xs px-1.5 py-0.5 bg-[var(--bg-secondary)] text-[var(--accent-blue)] border border-[var(--border-subtle)] rounded font-mono">
             {symbol}
           </span>
         )}
@@ -136,7 +136,7 @@ function LinkToggleButton({ widgetId }: { widgetId: string }) {
       className={cn(
         "p-1.5 rounded transition-colors",
         isLinked 
-          ? "text-blue-400 bg-blue-500/20 hover:bg-blue-500/30" 
+          ? "text-[var(--accent-blue)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]" 
           : "text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/80"
       )}
       title={isLinked ? 'Unlink from global symbol' : 'Link to global symbol'}

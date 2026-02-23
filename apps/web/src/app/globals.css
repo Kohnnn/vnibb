@@ -39,11 +39,14 @@ body {
   --glass-widget-bg: var(--widget-bg-glass, rgba(12, 16, 24, 0.88));
 }
 
-:root.light {
+:root.light,
+:root[data-theme="light"] {
   --color-bg-primary: #f5f7fb;
   --color-bg-secondary: #ffffff;
   --color-bg-tertiary: #eef2f7;
   --color-bg-elevated: #ffffff;
+
+  --bg-card: #ffffff;
 
   --color-border-default: #d8dee8;
   --color-border-subtle: #e9edf4;
@@ -85,6 +88,16 @@ body {
   --table-sticky-cell-bg: color-mix(in srgb, var(--bg-secondary) 94%, #e2e8f0 6%);
   --table-sticky-cell-alt-bg: color-mix(in srgb, var(--bg-secondary) 90%, #dbe5f2 10%);
   --table-sticky-cell-hover-bg: color-mix(in srgb, var(--bg-hover) 90%, #dbe5f2 10%);
+}
+
+[data-theme="light"] {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --text-primary: #1a1a2e;
+  --text-secondary: #4a4a6a;
+  --text-muted: #6b7280;
+  --border-color: #e2e8f0;
 }
 
 /* React-Grid-Layout overrides */
@@ -882,7 +895,8 @@ body {
   background: rgba(255, 255, 255, 0.2);
 }
 
-:root.light .widget-card-premium {
+:root.light .widget-card-premium,
+:root[data-theme="light"] .widget-card-premium {
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
   border: 1px solid rgba(148, 163, 184, 0.35);
   box-shadow:
@@ -891,7 +905,8 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
-:root.light .widget-card-premium:hover {
+:root.light .widget-card-premium:hover,
+:root[data-theme="light"] .widget-card-premium:hover {
   border-color: rgba(59, 130, 246, 0.35);
   box-shadow:
     0 10px 28px rgba(15, 23, 42, 0.12),
@@ -899,18 +914,83 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
-:root.light .widget-header-premium__title {
+:root.light .widget-header-premium,
+:root[data-theme="light"] .widget-header-premium {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.03) 0%, transparent 100%);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+}
+
+:root.light .widget-header-premium__title,
+:root[data-theme="light"] .widget-header-premium__title {
   background: linear-gradient(135deg, #0f172a 0%, #475569 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-:root.light .widget-header-premium__action {
+:root.light .widget-header-premium__symbol,
+:root[data-theme="light"] .widget-header-premium__symbol {
+  color: #1d4ed8;
+}
+
+:root.light .widget-header-premium__action,
+:root[data-theme="light"] .widget-header-premium__action {
   color: #64748b;
 }
 
-:root.light .widget-header-premium__action:hover {
+:root.light .widget-header-premium__action:hover,
+:root[data-theme="light"] .widget-header-premium__action:hover {
   color: #1e293b;
   background: rgba(148, 163, 184, 0.2);
+}
+
+:root.light .empty-state-premium__title,
+:root[data-theme="light"] .empty-state-premium__title,
+:root.light .stat-card-premium__value,
+:root[data-theme="light"] .stat-card-premium__value,
+:root.light .index-card__name,
+:root[data-theme="light"] .index-card__name {
+  color: #334155;
+}
+
+:root.light .empty-state-premium__description,
+:root[data-theme="light"] .empty-state-premium__description,
+:root.light .stat-card-premium__label,
+:root[data-theme="light"] .stat-card-premium__label {
+  color: #64748b;
+}
+
+:root.light .stat-card-premium,
+:root[data-theme="light"] .stat-card-premium {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+:root.light .index-card,
+:root[data-theme="light"] .index-card {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(248, 250, 252, 0.9);
+}
+
+:root.light .index-card:hover,
+:root[data-theme="light"] .index-card:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: #ffffff;
+}
+
+:root.light .data-value-up,
+:root[data-theme="light"] .data-value-up,
+:root.light .data-value-down,
+:root[data-theme="light"] .data-value-down {
+  text-shadow: none;
+}
+
+:root.light .data-table tbody tr:nth-child(even) td,
+:root[data-theme="light"] .data-table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--bg-secondary) 92%, #f1f5f9 8%);
+}
+
+:root.light .data-table tr:hover td,
+:root[data-theme="light"] .data-table tr:hover td {
+  background: color-mix(in srgb, var(--bg-secondary) 84%, #dbeafe 16%);
 }

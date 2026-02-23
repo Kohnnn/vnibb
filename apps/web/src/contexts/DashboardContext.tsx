@@ -213,6 +213,7 @@ const DASHBOARD_TEMPLATES: Record<string, TemplateWidget[]> = {
 // Map tab names to template names for migration
 const TAB_NAME_TO_TEMPLATE: Record<string, string> = {
     'overview': 'overview',
+    'overview 1': 'overview',
     'financials': 'financials',
     'technical analysis': 'technical',
     'technical': 'technical',
@@ -369,7 +370,7 @@ const migrateLegacyManageTabs = (dashboards: Dashboard[]): Dashboard[] => {
                 filteredTabs.length === 0 &&
                 index === 0 &&
                 LEGACY_MANAGE_TAB_NAME_RE.test(tab.name.trim())
-                    ? 'Overview'
+                    ? 'Overview 1'
                     : tab.name,
             order: index,
         }));
@@ -387,7 +388,7 @@ const migrateStaleNewTabs = (dashboards: Dashboard[]): Dashboard[] => {
         if (dashboard.tabs.length === 0) {
             return {
                 ...dashboard,
-                tabs: [createDefaultTab('Overview', 0)],
+                tabs: [createDefaultTab('Overview 1', 0)],
                 updatedAt: new Date().toISOString(),
             };
         }
@@ -403,13 +404,13 @@ const migrateStaleNewTabs = (dashboards: Dashboard[]): Dashboard[] => {
 
         const fallbackTabs = filteredTabs.length > 0 ? filteredTabs : sortedTabs.slice(0, 1);
         const normalizedTabs = fallbackTabs.map((tab, index) => ({
-            ...tab,
-            name:
-                index === 0 && LEGACY_STALE_TAB_RE.test(tab.name.trim())
-                    ? 'Overview'
-                    : tab.name,
-            order: index,
-        }));
+                ...tab,
+                name:
+                    index === 0 && LEGACY_STALE_TAB_RE.test(tab.name.trim())
+                        ? 'Overview 1'
+                        : tab.name,
+                order: index,
+            }));
 
         return {
             ...dashboard,
@@ -499,16 +500,7 @@ const createDefaultTab = (name: string, order: number): DashboardTab => ({
 });
 
 const createDefaultDashboard = (): Dashboard => {
-    // Stagger tab creation to ensure unique timestamps
-    const tabs: DashboardTab[] = [];
-
-    // Create tabs with templates - small delay between each to ensure unique IDs
-    tabs.push(createTabWithTemplate('Overview', 0, 'overview'));
-    tabs.push(createTabWithTemplate('Financials', 1, 'financials'));
-    tabs.push(createTabWithTemplate('Technical Analysis', 2, 'technical'));
-    tabs.push(createTabWithTemplate('Comparison Analysis', 3, 'comparison'));
-    tabs.push(createTabWithTemplate('Ownership', 4, 'ownership'));
-    tabs.push(createTabWithTemplate('Calendar', 5, 'calendar'));
+    const tabs: DashboardTab[] = [createTabWithTemplate('Overview 1', 0, 'overview')];
 
     return {
         id: `dash-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
@@ -1086,7 +1078,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             order: state.dashboards.length,
             isDefault: data.isDefault || false,
             showGroupLabels: true,
-            tabs: [createDefaultTab('Overview', 0)],
+            tabs: [createDefaultTab('Overview 1', 0)],
             syncGroups: [
                 { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: 'VNM' },
             ],

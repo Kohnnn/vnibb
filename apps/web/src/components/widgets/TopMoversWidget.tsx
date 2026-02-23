@@ -8,6 +8,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import type { WidgetGroupId } from '@/types/widget';
 
 interface TopMoversWidgetProps {
@@ -110,7 +111,8 @@ export function TopMoversWidget({
           ) : (
             <div className="space-y-0.5">
               {stocks.map((stock, index) => {
-                const changePct = stock.price_change_pct ?? 0;
+                const camelChangePct = (stock as unknown as Record<string, unknown>)['priceChangePct'];
+                const changePct = Number(stock.price_change_pct ?? camelChangePct ?? 0);
                 const isUp = changePct >= 0;
                 return (
                   <button
@@ -134,14 +136,15 @@ export function TopMoversWidget({
                         className={`text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded ${
                           index < 3
                             ? isUp
-                              ? 'bg-green-600/20 text-green-400'
-                              : 'bg-red-600/20 text-red-400'
+                              ? 'bg-green-600/20 text-green-600'
+                              : 'bg-red-600/20 text-red-600'
                             : 'bg-[var(--bg-secondary)] text-[var(--text-muted)]'
                         }`}
                       >
                         {index + 1}
                       </span>
-                      <span className="font-bold text-blue-400 group-hover:text-blue-300 text-xs tracking-wide">
+                      <CompanyLogo symbol={stock.symbol} name={stock.symbol} size={18} className="shrink-0" />
+                      <span className="font-bold text-[var(--accent-blue)] text-xs tracking-wide">
                         {stock.symbol}
                       </span>
                     </div>
@@ -152,8 +155,8 @@ export function TopMoversWidget({
                       <span
                         className={`text-[11px] font-bold min-w-[55px] text-right px-1.5 py-0.5 rounded ${
                           isUp
-                            ? 'text-green-400 bg-green-500/10'
-                            : 'text-red-400 bg-red-500/10'
+                            ? 'text-green-600 bg-green-500/10'
+                            : 'text-red-600 bg-red-500/10'
                         }`}
                       >
                         {isUp ? '+' : ''}{changePct.toFixed(2)}%

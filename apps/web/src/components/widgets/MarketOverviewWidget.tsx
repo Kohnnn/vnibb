@@ -58,28 +58,37 @@ export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
           ) : (
             <div className="index-cards-grid">
               {indices.map((idx, i) => {
-                const isUp = (idx.change_pct || 0) >= 0;
+                const indexPayload = idx as unknown as Record<string, unknown>;
+                const changePct = Number(idx.change_pct ?? indexPayload.changePct ?? 0);
+                const changeValue = Number(idx.change ?? indexPayload.changeValue ?? 0);
+                const currentValue = Number(idx.current_value ?? indexPayload.currentValue ?? 0);
+                const indexName =
+                  (idx.index_name as string | undefined) ||
+                  (indexPayload.indexName as string | undefined) ||
+                  (indexPayload.index_code as string | undefined) ||
+                  `Index ${i + 1}`;
+                const isUp = changePct >= 0;
 
                 return (
                   <div key={i} className={`index-card ${isUp ? 'up' : 'down'}`}>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="index-card__name">{idx.index_name}</span>
+                      <span className="index-card__name">{indexName}</span>
                       {isUp ? (
-                        <TrendingUp size={14} className="text-green-400" />
+                        <TrendingUp size={14} className="text-green-600" />
                       ) : (
-                        <TrendingDown size={14} className="text-red-400" />
+                        <TrendingDown size={14} className="text-red-600" />
                       )}
                     </div>
 
                     <div className={`index-card__value ${isUp ? 'data-value-up' : 'data-value-down'}`}>
-                      {formatValue(idx.current_value)}
+                      {formatValue(currentValue)}
                     </div>
 
                     <div className={`index-card__change ${isUp ? 'data-value-up' : 'data-value-down'}`}>
-                      {formatPct(idx.change_pct)}
+                      {formatValue(changeValue)} ({formatPct(changePct)})
                     </div>
 
-                    <div className="flex items-center gap-2 mt-2 text-[9px] text-gray-500">
+                    <div className="flex items-center gap-2 mt-2 text-[9px] text-[var(--text-muted)]">
                       <span>Vol: {idx.volume?.toLocaleString() || '-'}</span>
                       <span>H: {formatValue(idx.high)}</span>
                       <span>L: {formatValue(idx.low)}</span>
