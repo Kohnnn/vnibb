@@ -30,7 +30,7 @@ export function DividendPaymentWidget({ symbol }: DividendPaymentWidgetProps) {
         dataUpdatedAt,
     } = useDividends(symbol, isEnabled);
 
-    const rows = data?.data || [];
+    const rows = (data?.data || []).filter((row) => row.value !== null && row.value !== undefined);
     const hasData = rows.length > 0;
     const isFallback = Boolean(error && hasData);
 
@@ -40,7 +40,7 @@ export function DividendPaymentWidget({ symbol }: DividendPaymentWidgetProps) {
 
     return (
         <div aria-label="Dividend payment history" className="h-full flex flex-col">
-            <div className="pb-2 border-b border-gray-800/50">
+            <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
@@ -63,7 +63,7 @@ export function DividendPaymentWidget({ symbol }: DividendPaymentWidgetProps) {
                 ) : (
                     <table className="data-table w-full text-sm">
                         <thead>
-                            <tr className="text-left text-xs text-gray-500 uppercase">
+                            <tr className="text-left text-xs text-[var(--text-muted)] uppercase">
                                 <th className="pb-2 pr-3">Ex Date</th>
                                 <th className="pb-2 pr-3">Record Date</th>
                                 <th className="pb-2 pr-3">Payment Date</th>
@@ -73,11 +73,14 @@ export function DividendPaymentWidget({ symbol }: DividendPaymentWidgetProps) {
                         </thead>
                         <tbody>
                             {rows.map((row, idx) => (
-                                <tr key={`${row.ex_date}-${idx}`} className="border-t border-gray-800/50 hover:bg-gray-800/30">
-                                    <td className="py-2 pr-3 text-gray-300">{row.ex_date || '-'}</td>
-                                    <td className="py-2 pr-3 text-gray-400">{row.record_date || '-'}</td>
-                                    <td className="py-2 pr-3 text-gray-400">{row.payment_date || '-'}</td>
-                                    <td className="py-2 pr-3 text-gray-400">{row.dividend_type || '-'}</td>
+                                <tr
+                                    key={`${row.ex_date}-${idx}`}
+                                    className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]"
+                                >
+                                    <td className="py-2 pr-3 text-[var(--text-primary)]">{row.ex_date || '-'}</td>
+                                    <td className="py-2 pr-3 text-[var(--text-secondary)]">{row.record_date || '-'}</td>
+                                    <td className="py-2 pr-3 text-[var(--text-secondary)]">{row.payment_date || '-'}</td>
+                                    <td className="py-2 pr-3 text-[var(--text-secondary)]">{row.dividend_type || '-'}</td>
                                     <td className="py-2 text-right text-green-400 font-medium">{formatValue(row.value)}</td>
                                 </tr>
                             ))}

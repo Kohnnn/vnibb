@@ -109,6 +109,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     ticker_info: TickerInfoWidget as ComponentType<WidgetProps>,
     ticker_profile: TickerProfileWidget as ComponentType<WidgetProps>,
     price_chart: PriceChartLocalWidget as ComponentType<WidgetProps>,
+    tradingview_chart: PriceChartLocalWidget as ComponentType<WidgetProps>,
     key_metrics: KeyMetricsWidget as ComponentType<WidgetProps>,
     share_statistics: ShareStatisticsWidget as ComponentType<WidgetProps>,
     screener: ScreenerWidget as ComponentType<WidgetProps>,

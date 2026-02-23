@@ -22,8 +22,14 @@ interface StockPerformance {
 
 interface SectorData {
   sector: string;
-  sector_vi: string;
+  sector_vi?: string;
   stocks: StockPerformance[];
+}
+
+interface SectorTopMoversPayload {
+  sectors?: SectorData[];
+  data?: SectorData[];
+  updated_at?: string;
 }
 
 interface SectorTopMoversWidgetProps {
@@ -42,7 +48,7 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
     queryFn: async () => {
       const res = await fetch(`${API_BASE_URL}/sectors/top-movers?type=${viewType}`);
       if (!res.ok) throw new Error('Sector data failed');
-      return res.json();
+      return res.json() as Promise<SectorTopMoversPayload>;
     },
     refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.movers),
     refetchIntervalInBackground: false,
@@ -79,7 +85,11 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
     </div>
   );
 
-  const sectors = data?.sectors || [];
+  const sectors = Array.isArray(data?.sectors)
+    ? data.sectors
+    : Array.isArray(data?.data)
+      ? data.data
+      : [];
   const hasData = sectors.length > 0;
   const isFallback = Boolean(error && hasData);
   const updatedAt = data?.updated_at || dataUpdatedAt;
@@ -150,7 +160,7 @@ function SectorColumn({
   sector: SectorData;
   onSelectSymbol: (symbol: string) => void;
 }) {
-  const stocks = sector.stocks || [];
+  const stocks = Array.isArray(sector.stocks) ? sector.stocks : [];
   const avgChange = useMemo(() => {
     if (stocks.length === 0) return 0;
     return stocks.reduce((acc, s) => acc + (s.change_pct || 0), 0) / stocks.length;
@@ -233,7 +243,7 @@ function StockRow({ stock, onSelect }: { stock: StockPerformance; onSelect: (sym
           {isPositive ? '+' : ''}{(stock.change_pct || 0).toFixed(1)}%
         </div>
         <div className="text-[9px] font-bold text-[var(--text-secondary)] font-mono">
-          {stock.price.toLocaleString()}
+          {typeof stock.price === 'number' ? stock.price.toLocaleString() : '--'}
         </div>
       </div>
     </button>

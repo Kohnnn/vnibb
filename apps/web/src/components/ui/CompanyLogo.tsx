@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 interface CompanyLogoProps {
   symbol: string;
@@ -22,15 +22,28 @@ function normalizeDomain(website?: string | null): string | null {
 }
 
 export function CompanyLogo({ symbol, name, website, size = 20, className }: CompanyLogoProps) {
-  const [broken, setBroken] = useState(false);
+  const [sourceIndex, setSourceIndex] = useState(0);
 
   const domain = useMemo(() => {
     return normalizeDomain(website);
   }, [website]);
 
+  const sources = useMemo(() => {
+    if (!domain) return [];
+    return [
+      `https://logo.clearbit.com/${domain}`,
+      `https://api.faviconkit.com/${domain}/${Math.max(size, 16)}`,
+      `https://www.google.com/s2/favicons?domain=${domain}&sz=${Math.max(size * 2, 32)}`,
+    ];
+  }, [domain, size]);
+
+  useEffect(() => {
+    setSourceIndex(0);
+  }, [domain]);
+
   const initials = (name || symbol || '?').trim().charAt(0).toUpperCase();
 
-  if (broken || !domain) {
+  if (!domain || sourceIndex >= sources.length) {
     return (
       <div
         className={`inline-flex items-center justify-center rounded-full border border-white/10 bg-blue-600/20 text-[10px] font-black text-blue-200 ${className ?? ''}`.trim()}
@@ -44,12 +57,12 @@ export function CompanyLogo({ symbol, name, website, size = 20, className }: Com
 
   return (
     <img
-      src={`https://logo.clearbit.com/${domain}`}
+      src={sources[sourceIndex]}
       alt={name || symbol}
       width={size}
       height={size}
       className={`rounded-full border border-white/10 bg-[var(--bg-secondary)] object-cover ${className ?? ''}`.trim()}
-      onError={() => setBroken(true)}
+      onError={() => setSourceIndex((current) => current + 1)}
       loading="lazy"
       decoding="async"
       referrerPolicy="no-referrer"

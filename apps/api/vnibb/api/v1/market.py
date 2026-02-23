@@ -17,8 +17,11 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import select, func
 
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker
+from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
     StockScreenerParams,
@@ -31,6 +34,8 @@ from vnibb.providers.vnstock.market_overview import (
 from vnibb.providers.vnstock.top_movers import VnstockTopMoversFetcher
 from vnibb.core.cache import cached
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock, StockPrice
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
 from vnibb.providers.vnstock import get_vnstock
@@ -151,6 +156,9 @@ RSS_FEED_URLS: dict[str, list[str]] = {
 WORLD_INDEX_POINT_TIMEOUT_SECONDS = 5
 WORLD_INDEX_FALLBACK_TIMEOUT_SECONDS = 5
 HEATMAP_FETCH_TIMEOUT_SECONDS = 20
+SECTOR_CLASSIFICATION_IDS = [
+    sector_id for sector_id in VN_SECTORS.keys() if sector_id not in {"vn30"}
+]
 
 
 async def _fetch_rss_content(url: str) -> str:
@@ -187,6 +195,286 @@ def _extract_close_from_row(row: dict[str, Any]) -> Optional[float]:
         parsed = _to_float(row.get(key))
         if parsed is not None:
             return parsed
+    return None
+
+
+def _first_non_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _normalize_symbol(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().upper()
+
+
+def _normalize_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_screener_row(item: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if hasattr(item, "model_dump"):
+        payload = item.model_dump(mode="json", by_alias=False)
+    elif isinstance(item, dict):
+        payload = item
+
+    symbol = _normalize_symbol(_first_non_none(payload.get("symbol"), payload.get("ticker")))
+    if not symbol:
+        return {}
+
+    industry = _normalize_text(
+        _first_non_none(
+            payload.get("industry"),
+            payload.get("industry_name"),
+            payload.get("industryName"),
+            payload.get("icb_name4"),
+            payload.get("icb_name3"),
+            payload.get("icb_name2"),
+        )
+    )
+    sector = _normalize_text(_first_non_none(payload.get("sector"), payload.get("sector_name")))
+
+    return {
+        "symbol": symbol,
+        "name": _normalize_text(
+            _first_non_none(
+                payload.get("organ_name"), payload.get("organName"), payload.get("company_name")
+            )
+        )
+        or symbol,
+        "exchange": _normalize_text(payload.get("exchange")),
+        "industry": industry,
+        "sector": sector,
+        "price": _to_float(_first_non_none(payload.get("price"), payload.get("close"))),
+        "volume": _to_float(payload.get("volume")),
+        "market_cap": _to_float(
+            _first_non_none(payload.get("market_cap"), payload.get("marketCap"))
+        ),
+        "shares_outstanding": _to_float(
+            _first_non_none(payload.get("shares_outstanding"), payload.get("sharesOutstanding"))
+        ),
+        "change_pct": _to_float(
+            _first_non_none(
+                payload.get("price_change_1d_pct"),
+                payload.get("change_pct"),
+                payload.get("changePct"),
+                payload.get("price_change_pct"),
+                payload.get("priceChangePct"),
+            )
+        ),
+        "weekly_pct": _to_float(
+            _first_non_none(
+                payload.get("price_change_1w_pct"),
+                payload.get("weekly_pct"),
+                payload.get("weeklyPct"),
+            )
+        ),
+        "monthly_pct": _to_float(
+            _first_non_none(
+                payload.get("price_change_1m_pct"),
+                payload.get("monthly_pct"),
+                payload.get("monthlyPct"),
+            )
+        ),
+        "ytd_pct": _to_float(
+            _first_non_none(
+                payload.get("price_change_ytd_pct"),
+                payload.get("ytd_pct"),
+                payload.get("ytdPct"),
+            )
+        ),
+        "value_traded": _to_float(
+            _first_non_none(
+                payload.get("value_traded"),
+                payload.get("valueTraded"),
+                payload.get("trading_value"),
+            )
+        ),
+    }
+
+
+def _resolve_sector_name(symbol: str, industry: Optional[str], sector_hint: Optional[str]) -> str:
+    if sector_hint:
+        return sector_hint
+
+    symbol_upper = _normalize_symbol(symbol)
+    for sector_id in SECTOR_CLASSIFICATION_IDS:
+        config = VN_SECTORS.get(sector_id)
+        if not config:
+            continue
+        if symbol_upper in {s.upper() for s in config.symbols}:
+            return config.name
+
+    industry_text = (industry or "").strip().lower()
+    if industry_text:
+        for sector_id in SECTOR_CLASSIFICATION_IDS:
+            config = VN_SECTORS.get(sector_id)
+            if not config:
+                continue
+            for keyword in config.keywords:
+                if keyword.lower() in industry_text:
+                    return config.name
+
+    return "Other"
+
+
+async def _load_stock_metadata(symbols: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
+    unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
+    if not unique_symbols:
+        return {}
+
+    async with async_session_maker() as session:
+        rows = (
+            await session.execute(
+                select(Stock.symbol, Stock.exchange, Stock.industry, Stock.sector).where(
+                    Stock.symbol.in_(unique_symbols)
+                )
+            )
+        ).all()
+
+    return {
+        _normalize_symbol(symbol): {
+            "exchange": _normalize_text(exchange),
+            "industry": _normalize_text(industry),
+            "sector": _normalize_text(sector),
+        }
+        for symbol, exchange, industry, sector in rows
+    }
+
+
+async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
+    unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
+    if not unique_symbols:
+        return {}
+
+    change_map: Dict[str, float] = {}
+
+    async with async_session_maker() as session:
+        ranked_prices = (
+            select(
+                StockPrice.symbol.label("symbol"),
+                StockPrice.close.label("close"),
+                func.row_number()
+                .over(partition_by=StockPrice.symbol, order_by=StockPrice.time.desc())
+                .label("rn"),
+            )
+            .where(StockPrice.interval == "1D", StockPrice.symbol.in_(unique_symbols))
+            .subquery()
+        )
+        price_rows = (
+            await session.execute(
+                select(ranked_prices.c.symbol, ranked_prices.c.close, ranked_prices.c.rn).where(
+                    ranked_prices.c.rn <= 2
+                )
+            )
+        ).all()
+
+        price_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
+        for symbol, close, rn in price_rows:
+            close_value = _to_float(close)
+            if close_value is None:
+                continue
+            price_lookup[_normalize_symbol(symbol)][int(rn)] = close_value
+
+        for symbol, data in price_lookup.items():
+            latest = data.get(1)
+            previous = data.get(2)
+            if latest is not None and previous not in (None, 0):
+                change_map[symbol] = ((latest - previous) / previous) * 100.0
+
+        missing_symbols = [symbol for symbol in unique_symbols if symbol not in change_map]
+        if missing_symbols:
+            ranked_snapshots = (
+                select(
+                    ScreenerSnapshot.symbol.label("symbol"),
+                    ScreenerSnapshot.price.label("price"),
+                    func.row_number()
+                    .over(
+                        partition_by=ScreenerSnapshot.symbol,
+                        order_by=ScreenerSnapshot.snapshot_date.desc(),
+                    )
+                    .label("rn"),
+                )
+                .where(
+                    ScreenerSnapshot.symbol.in_(missing_symbols),
+                    ScreenerSnapshot.price.is_not(None),
+                )
+                .subquery()
+            )
+            snapshot_rows = (
+                await session.execute(
+                    select(
+                        ranked_snapshots.c.symbol,
+                        ranked_snapshots.c.price,
+                        ranked_snapshots.c.rn,
+                    ).where(ranked_snapshots.c.rn <= 2)
+                )
+            ).all()
+
+            snapshot_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
+            for symbol, price, rn in snapshot_rows:
+                price_value = _to_float(price)
+                if price_value is None:
+                    continue
+                snapshot_lookup[_normalize_symbol(symbol)][int(rn)] = price_value
+
+            for symbol, data in snapshot_lookup.items():
+                latest = data.get(1)
+                previous = data.get(2)
+                if latest is not None and previous not in (None, 0):
+                    change_map[symbol] = ((latest - previous) / previous) * 100.0
+
+    return change_map
+
+
+def _resolve_hnx30_symbols(rows: List[dict[str, Any]]) -> set[str]:
+    hnx_rows = [
+        row
+        for row in rows
+        if (row.get("exchange") or "").strip().upper() == "HNX" and (row.get("symbol") or "")
+    ]
+    hnx_rows.sort(key=lambda row: row.get("market_cap") or 0.0, reverse=True)
+    return {_normalize_symbol(row.get("symbol")) for row in hnx_rows[:30]}
+
+
+def _resolve_color_value(row: dict[str, Any], metric: str) -> float:
+    preferred = _to_float(row.get(metric))
+    if preferred is not None:
+        return preferred
+
+    fallback = _to_float(row.get("change_pct"))
+    return fallback if fallback is not None else 0.0
+
+
+def _resolve_size_value(row: dict[str, Any], metric: str) -> Optional[float]:
+    preferred = _to_float(row.get(metric))
+    if preferred is not None and preferred > 0:
+        return preferred
+
+    market_cap = _to_float(row.get("market_cap"))
+    if market_cap is not None and market_cap > 0:
+        return market_cap
+
+    price = _to_float(row.get("price"))
+    shares_outstanding = _to_float(row.get("shares_outstanding"))
+    if price not in (None, 0) and shares_outstanding not in (None, 0):
+        derived_market_cap = price * shares_outstanding
+        if derived_market_cap > 0:
+            return derived_market_cap
+
+    volume = _to_float(row.get("volume"))
+    if price not in (None, 0) and volume not in (None, 0):
+        traded_value = price * volume
+        if traded_value > 0:
+            return traded_value
+
     return None
 
 
@@ -359,77 +647,95 @@ async def get_heatmap_data(
                 raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
             logger.info(f"Fetched {len(screener_data)} stocks from API for heatmap")
 
-        # Step 2: Filter by exchange if needed
+        # Step 2: Normalize input rows and enrich missing metadata/returns from DB snapshots.
+        normalized_rows = [_normalize_screener_row(item) for item in screener_data]
+        normalized_rows = [row for row in normalized_rows if row.get("symbol")]
+
         if exchange != "ALL":
-            screener_data = [s for s in screener_data if not s.exchange or s.exchange == exchange]
+            exchange_upper = exchange.upper()
+            normalized_rows = [
+                row
+                for row in normalized_rows
+                if not row.get("exchange") or (row.get("exchange") or "").upper() == exchange_upper
+            ]
 
-        # Step 3: Calculate change_pct (for now, use mock data since we don't have historical prices)
-        # In production, you'd fetch yesterday's close price and calculate actual change
-        # For now, we'll use a simple heuristic based on volume/market_cap
-        import random
+        symbols = [row["symbol"] for row in normalized_rows]
+        metadata_map = await _load_stock_metadata(symbols)
+        change_map = await _load_change_pct_map(symbols)
 
-        random.seed(42)  # Deterministic for demo
+        for row in normalized_rows:
+            symbol = row["symbol"]
+            metadata = metadata_map.get(symbol) or {}
+            if not row.get("exchange") and metadata.get("exchange"):
+                row["exchange"] = metadata.get("exchange")
+            if not row.get("industry") and metadata.get("industry"):
+                row["industry"] = metadata.get("industry")
+            if not row.get("sector") and metadata.get("sector"):
+                row["sector"] = metadata.get("sector")
+            if row.get("change_pct") is None and symbol in change_map:
+                row["change_pct"] = change_map[symbol]
 
-        def _build_groups(rows: List[ScreenerData]) -> Dict[str, List[HeatmapStock]]:
+        hnx30_symbols = _resolve_hnx30_symbols(normalized_rows) if group_by == "hnx30" else set()
+        vn30_symbols = {
+            symbol.upper()
+            for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
+        }
+
+        def _build_groups(rows: List[dict[str, Any]]) -> Dict[str, List[HeatmapStock]]:
             groups: Dict[str, List[HeatmapStock]] = defaultdict(list)
 
-            for stock in rows:
-                if not stock.price or stock.price <= 0:
+            for row in rows:
+                symbol = _normalize_symbol(row.get("symbol"))
+                if not symbol:
                     continue
 
-                # Market cap is sparse in some provider payloads; use a proxy when missing.
-                effective_market_cap = stock.market_cap
-                if not effective_market_cap or effective_market_cap <= 0:
-                    if stock.shares_outstanding and stock.shares_outstanding > 0:
-                        effective_market_cap = stock.shares_outstanding * stock.price
-                    elif stock.volume and stock.volume > 0:
-                        effective_market_cap = stock.volume * stock.price
-
-                if not effective_market_cap or effective_market_cap <= 0:
+                price = _to_float(row.get("price"))
+                if price is None or price <= 0:
                     continue
 
-                # Determine grouping key
+                if group_by == "vn30" and symbol not in vn30_symbols:
+                    continue
+                if group_by == "hnx30" and symbol not in hnx30_symbols:
+                    continue
+
+                size_value = _resolve_size_value(row, size_metric)
+                if size_value is None or size_value <= 0:
+                    continue
+
+                industry = _normalize_text(row.get("industry"))
+                sector_hint = _normalize_text(row.get("sector"))
+
                 if group_by == "sector":
-                    # Extract sector from industry_name (e.g., "Ngân hàng" from "Ngân hàng - Dịch vụ tài chính")
-                    group_key = (
-                        stock.industry_name.split("-")[0].strip()
-                        if stock.industry_name
-                        else "Other"
-                    )
+                    group_key = _resolve_sector_name(symbol, industry, sector_hint)
                 elif group_by == "industry":
-                    group_key = stock.industry_name or "Other"
+                    group_key = industry or _resolve_sector_name(symbol, industry, sector_hint)
                 elif group_by == "vn30":
-                    # TODO: Filter only VN30 stocks (need VN30 list)
                     group_key = "VN30"
                 elif group_by == "hnx30":
-                    # TODO: Filter only HNX30 stocks
                     group_key = "HNX30"
                 else:
                     group_key = "Other"
 
-                # Mock change_pct calculation (replace with real data in production)
-                # Use a normal distribution centered around 0
-                change_pct = random.gauss(0, 2.5)  # Mean 0%, StdDev 2.5%
-                change = stock.price * (change_pct / 100)
+                change_pct = _resolve_color_value(row, color_metric)
+                change = price * (change_pct / 100.0)
 
                 heatmap_stock = HeatmapStock(
-                    symbol=stock.symbol,
-                    name=stock.organ_name or stock.symbol,
+                    symbol=symbol,
+                    name=_normalize_text(row.get("name")) or symbol,
                     sector=group_key,
-                    industry=stock.industry_name,
-                    market_cap=effective_market_cap,
-                    price=stock.price,
+                    industry=industry,
+                    market_cap=size_value,
+                    price=price,
                     change=change,
                     change_pct=change_pct,
-                    volume=stock.volume,
+                    volume=_to_float(row.get("volume")),
                 )
-
                 groups[group_key].append(heatmap_stock)
 
             return groups
 
-        # Step 4: Group stocks by sector/industry
-        groups = _build_groups(screener_data)
+        # Step 3: Group stocks by selected view
+        groups = _build_groups(normalized_rows)
 
         # If cached payload is stale/sparse enough to produce an empty heatmap,
         # fall back to a fresh provider fetch once before returning empty data.
@@ -442,11 +748,37 @@ async def get_heatmap_data(
                 )
             except asyncio.TimeoutError as exc:
                 raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
+
+            refreshed_rows = [_normalize_screener_row(item) for item in screener_data]
+            refreshed_rows = [row for row in refreshed_rows if row.get("symbol")]
             if exchange != "ALL":
-                screener_data = [
-                    s for s in screener_data if not s.exchange or s.exchange == exchange
+                exchange_upper = exchange.upper()
+                refreshed_rows = [
+                    row
+                    for row in refreshed_rows
+                    if not row.get("exchange")
+                    or (row.get("exchange") or "").upper() == exchange_upper
                 ]
-            groups = _build_groups(screener_data)
+
+            refreshed_symbols = [row["symbol"] for row in refreshed_rows]
+            refreshed_metadata = await _load_stock_metadata(refreshed_symbols)
+            refreshed_change_map = await _load_change_pct_map(refreshed_symbols)
+            for row in refreshed_rows:
+                symbol = row["symbol"]
+                metadata = refreshed_metadata.get(symbol) or {}
+                if not row.get("exchange") and metadata.get("exchange"):
+                    row["exchange"] = metadata.get("exchange")
+                if not row.get("industry") and metadata.get("industry"):
+                    row["industry"] = metadata.get("industry")
+                if not row.get("sector") and metadata.get("sector"):
+                    row["sector"] = metadata.get("sector")
+                if row.get("change_pct") is None and symbol in refreshed_change_map:
+                    row["change_pct"] = refreshed_change_map[symbol]
+
+            if group_by == "hnx30":
+                hnx30_symbols = _resolve_hnx30_symbols(refreshed_rows)
+
+            groups = _build_groups(refreshed_rows)
             cached = False
 
         # Step 5: Create sector aggregations

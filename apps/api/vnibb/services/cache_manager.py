@@ -372,6 +372,34 @@ class CacheManager:
             now = datetime.utcnow()
             symbol = symbol.upper()
 
+            def _parse_optional_date(value: Any) -> Optional[date]:
+                if value is None:
+                    return None
+                if isinstance(value, date) and not isinstance(value, datetime):
+                    return value
+                if isinstance(value, datetime):
+                    return value.date()
+
+                raw = str(value).strip()
+                if not raw:
+                    return None
+
+                for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%d-%m-%Y"):
+                    try:
+                        return datetime.strptime(raw, fmt).date()
+                    except ValueError:
+                        continue
+
+                try:
+                    return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+                except ValueError:
+                    return None
+
+            established_date = _parse_optional_date(
+                data.get("established_date") or data.get("founded_date") or data.get("foundedDate")
+            )
+            listing_date = _parse_optional_date(data.get("listing_date") or data.get("listingDate"))
+
             # Check if company exists
             result = await session.execute(select(Company).where(Company.symbol == symbol))
             company = result.scalar_one_or_none()
@@ -384,6 +412,8 @@ class CacheManager:
                 company.exchange = data.get("exchange") or company.exchange
                 company.industry = data.get("industry") or company.industry
                 company.sector = data.get("sector") or company.sector
+                company.established_date = established_date or company.established_date
+                company.listing_date = listing_date or company.listing_date
                 company.website = data.get("website") or company.website
                 company.business_description = (
                     data.get("description") or company.business_description
@@ -407,6 +437,8 @@ class CacheManager:
                     exchange=data.get("exchange"),
                     industry=data.get("industry"),
                     sector=data.get("sector"),
+                    established_date=established_date,
+                    listing_date=listing_date,
                     website=data.get("website"),
                     business_description=data.get("description"),
                     outstanding_shares=data.get("outstanding_shares"),

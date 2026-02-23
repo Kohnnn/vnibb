@@ -254,6 +254,91 @@ def _coerce_optional_float(value: Any) -> Optional[float]:
         return None
 
 
+def _pick_optional_float(*values: Any) -> Optional[float]:
+    for value in values:
+        parsed = _coerce_optional_float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _coerce_iso_date(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(raw, fmt).date().isoformat()
+        except ValueError:
+            continue
+
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date().isoformat()
+    except ValueError:
+        return None
+
+
+async def _resolve_profile_market_cap(
+    db: AsyncSession,
+    symbol: str,
+    outstanding_shares: Optional[float],
+    fallback_market_cap: Optional[float] = None,
+) -> Optional[float]:
+    direct_market_cap = _coerce_optional_float(fallback_market_cap)
+    if direct_market_cap not in (None, 0):
+        return direct_market_cap
+
+    latest_snapshot_market_cap = (
+        await db.execute(
+            select(ScreenerSnapshot.market_cap)
+            .where(
+                ScreenerSnapshot.symbol == symbol,
+                ScreenerSnapshot.market_cap.is_not(None),
+            )
+            .order_by(ScreenerSnapshot.snapshot_date.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    latest_snapshot_market_cap_value = _coerce_optional_float(latest_snapshot_market_cap)
+    if latest_snapshot_market_cap_value not in (None, 0):
+        return latest_snapshot_market_cap_value
+
+    latest_close = (
+        await db.execute(
+            select(StockPrice.close)
+            .where(StockPrice.symbol == symbol)
+            .order_by(StockPrice.time.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    latest_price = _coerce_optional_float(latest_close)
+
+    if latest_price in (None, 0):
+        latest_snapshot_price = (
+            await db.execute(
+                select(ScreenerSnapshot.price)
+                .where(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.price.is_not(None))
+                .order_by(ScreenerSnapshot.snapshot_date.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        latest_price = _coerce_optional_float(latest_snapshot_price)
+
+    shares_value = _coerce_optional_float(outstanding_shares)
+    if shares_value not in (None, 0) and latest_price not in (None, 0):
+        return shares_value * latest_price
+
+    return None
+
+
 def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
     period_value = (row.period or "").strip()
     if period_value.isdigit() and int(period_value) < 1900 and row.fiscal_year >= 1900:
@@ -278,27 +363,57 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
     return FinancialRatioData(
         symbol=row.symbol,
         period=period_value,
-        pe=row.pe_ratio,
-        pb=row.pb_ratio,
-        ps=row.ps_ratio,
-        ev_ebitda=row.ev_ebitda,
+        pe=_pick_optional_float(row.pe_ratio, raw_data.get("pe"), raw_data.get("priceToEarning")),
+        pb=_pick_optional_float(row.pb_ratio, raw_data.get("pb"), raw_data.get("priceToBook")),
+        ps=_pick_optional_float(row.ps_ratio, raw_data.get("ps"), raw_data.get("priceToSales")),
+        ev_ebitda=_pick_optional_float(row.ev_ebitda, raw_data.get("ev_ebitda")),
         ev_sales=ev_sales,
-        roe=row.roe,
-        roa=row.roa,
-        eps=row.eps,
-        bvps=row.bvps,
-        debt_equity=row.debt_to_equity,
-        debt_assets=row.debt_to_assets,
-        current_ratio=row.current_ratio,
-        quick_ratio=row.quick_ratio,
-        cash_ratio=row.cash_ratio,
-        gross_margin=row.gross_margin,
-        net_margin=row.net_margin,
-        operating_margin=row.operating_margin,
-        interest_coverage=row.interest_coverage,
-        revenue_growth=row.revenue_growth,
-        earnings_growth=row.earnings_growth,
-        dps=getattr(row, "dps", _coerce_optional_float(raw_data.get("dps"))),
+        roe=_pick_optional_float(row.roe, raw_data.get("roe")),
+        roa=_pick_optional_float(row.roa, raw_data.get("roa")),
+        eps=_pick_optional_float(row.eps, raw_data.get("eps"), raw_data.get("earningPerShare")),
+        bvps=_pick_optional_float(
+            row.bvps, raw_data.get("bvps"), raw_data.get("bookValuePerShare")
+        ),
+        debt_equity=_pick_optional_float(
+            row.debt_to_equity,
+            raw_data.get("debt_equity"),
+            raw_data.get("de"),
+        ),
+        debt_assets=_pick_optional_float(row.debt_to_assets, raw_data.get("debt_assets")),
+        current_ratio=_pick_optional_float(row.current_ratio, raw_data.get("current_ratio")),
+        quick_ratio=_pick_optional_float(row.quick_ratio, raw_data.get("quick_ratio")),
+        cash_ratio=_pick_optional_float(row.cash_ratio, raw_data.get("cash_ratio")),
+        gross_margin=_pick_optional_float(row.gross_margin, raw_data.get("gross_margin")),
+        net_margin=_pick_optional_float(row.net_margin, raw_data.get("net_margin")),
+        operating_margin=_pick_optional_float(
+            row.operating_margin,
+            raw_data.get("operating_margin"),
+            raw_data.get("operatingMargin"),
+        ),
+        interest_coverage=_pick_optional_float(
+            row.interest_coverage,
+            raw_data.get("interest_coverage"),
+        ),
+        debt_service_coverage=_pick_optional_float(raw_data.get("debt_service_coverage")),
+        ocf_debt=_pick_optional_float(raw_data.get("ocf_debt"), raw_data.get("ocf_to_debt")),
+        fcf_yield=_pick_optional_float(raw_data.get("fcf_yield")),
+        ocf_sales=_pick_optional_float(raw_data.get("ocf_sales")),
+        revenue_growth=_pick_optional_float(
+            row.revenue_growth,
+            raw_data.get("revenue_growth"),
+            raw_data.get("revenueGrowth"),
+        ),
+        earnings_growth=_pick_optional_float(
+            row.earnings_growth,
+            raw_data.get("earnings_growth"),
+            raw_data.get("earningsGrowth"),
+        ),
+        dps=_pick_optional_float(
+            getattr(row, "dps", None),
+            raw_data.get("dps"),
+            raw_data.get("dividends_per_share"),
+            raw_data.get("dividendPerShare"),
+        ),
         asset_turnover=getattr(
             row, "asset_turnover", _coerce_optional_float(raw_data.get("asset_turnover"))
         ),
@@ -933,12 +1048,40 @@ async def get_profile(
             cache_result = await cache_manager.get_profile_data(symbol_upper)
             if cache_result.hit:
                 company = cache_result.data
-                exchange = company.exchange
-                if not exchange:
-                    result = await db.execute(
-                        select(Stock.exchange).where(Stock.symbol == symbol_upper)
+                stock_row = (
+                    await db.execute(
+                        select(Stock.exchange, Stock.listing_date).where(
+                            Stock.symbol == symbol_upper
+                        )
                     )
-                    exchange = result.scalar_one_or_none()
+                ).first()
+
+                exchange = company.exchange or (stock_row[0] if stock_row else None)
+                listing_date = _coerce_iso_date(company.listing_date) or _coerce_iso_date(
+                    stock_row[1] if stock_row else None
+                )
+
+                outstanding_shares = _pick_optional_float(
+                    company.outstanding_shares,
+                    company.listed_shares,
+                    (company.raw_data or {}).get("outstanding_shares")
+                    if company.raw_data
+                    else None,
+                    (company.raw_data or {}).get("issue_share") if company.raw_data else None,
+                )
+                market_cap = await _resolve_profile_market_cap(
+                    db=db,
+                    symbol=symbol_upper,
+                    outstanding_shares=outstanding_shares,
+                    fallback_market_cap=(company.raw_data or {}).get("market_cap")
+                    if company.raw_data
+                    else None,
+                )
+
+                website = company.website
+                if not website and company.raw_data:
+                    website = company.raw_data.get("website") or company.raw_data.get("web_site")
+
                 if cache_result.is_stale:
                     await _schedule_refresh(
                         f"profile:{symbol_upper}",
@@ -952,10 +1095,16 @@ async def get_profile(
                         exchange=exchange,
                         industry=company.industry,
                         sector=company.sector,
-                        website=company.website,
+                        established_date=_coerce_iso_date(company.established_date),
+                        listing_date=listing_date,
+                        website=website,
                         description=company.business_description,
-                        outstanding_shares=company.outstanding_shares,
+                        outstanding_shares=outstanding_shares,
                         listed_shares=company.listed_shares,
+                        market_cap=market_cap,
+                        address=company.address,
+                        phone=company.phone,
+                        email=company.email,
                     ),
                     meta=MetaData(count=1),
                 )
@@ -965,6 +1114,12 @@ async def get_profile(
             stock_result = await db.execute(select(Stock).where(Stock.symbol == symbol_upper))
             stock = stock_result.scalar_one_or_none()
             if stock:
+                market_cap = await _resolve_profile_market_cap(
+                    db=db,
+                    symbol=symbol_upper,
+                    outstanding_shares=None,
+                    fallback_market_cap=None,
+                )
                 fallback_profile = EquityProfileData(
                     symbol=stock.symbol,
                     company_name=stock.company_name,
@@ -972,6 +1127,8 @@ async def get_profile(
                     exchange=stock.exchange,
                     industry=stock.industry,
                     sector=stock.sector,
+                    listing_date=_coerce_iso_date(stock.listing_date),
+                    market_cap=market_cap,
                 )
 
         if fallback_profile and not refresh:
@@ -988,13 +1145,30 @@ async def get_profile(
         )
         profile_data = data[0] if data else None
         if profile_data:
-            if not profile_data.exchange:
-                result = await db.execute(
-                    select(Stock.exchange).where(Stock.symbol == symbol_upper)
+            stock_row = (
+                await db.execute(
+                    select(Stock.exchange, Stock.listing_date).where(Stock.symbol == symbol_upper)
                 )
-                exchange = result.scalar_one_or_none()
-                if exchange:
-                    profile_data.exchange = exchange
+            ).first()
+            if not profile_data.exchange and stock_row and stock_row[0]:
+                profile_data.exchange = stock_row[0]
+
+            if not profile_data.listing_date and stock_row:
+                profile_data.listing_date = _coerce_iso_date(stock_row[1])
+
+            if profile_data.established_date:
+                profile_data.established_date = _coerce_iso_date(profile_data.established_date)
+
+            profile_data.market_cap = await _resolve_profile_market_cap(
+                db=db,
+                symbol=symbol_upper,
+                outstanding_shares=_pick_optional_float(
+                    profile_data.outstanding_shares,
+                    profile_data.listed_shares,
+                ),
+                fallback_market_cap=profile_data.market_cap,
+            )
+
             await cache_manager.store_profile_data(
                 symbol_upper, profile_data.model_dump(mode="json")
             )
