@@ -287,6 +287,68 @@ def _coerce_iso_date(value: Any) -> Optional[str]:
         return None
 
 
+def _extract_calendar_year(*values: Any) -> Optional[int]:
+    for value in values:
+        numeric = _coerce_optional_float(value)
+        if numeric is not None:
+            year = int(numeric)
+            if 1900 <= year <= 2100:
+                return year
+
+        iso_date = _coerce_iso_date(value)
+        if iso_date:
+            try:
+                year = int(iso_date[:4])
+                if 1900 <= year <= 2100:
+                    return year
+            except ValueError:
+                continue
+
+    return None
+
+
+def _classify_dividend_type(
+    raw_type: Any,
+    cash_dividend: Optional[float],
+    stock_dividend: Optional[float],
+    dividend_ratio: Any,
+    description: Any,
+) -> str:
+    text_parts = [
+        str(raw_type).strip().lower() if raw_type is not None else "",
+        str(dividend_ratio).strip().lower() if dividend_ratio is not None else "",
+        str(description).strip().lower() if description is not None else "",
+    ]
+    combined = " ".join(part for part in text_parts if part)
+
+    cash_keywords = ("cash", "tiền", "tien", "tm")
+    stock_keywords = (
+        "stock",
+        "share",
+        "cổ phiếu",
+        "co phieu",
+        "cp",
+        "cổ tức bằng cổ phiếu",
+        "co tuc bang co phieu",
+    )
+
+    has_cash = cash_dividend not in (None, 0)
+    has_stock = stock_dividend not in (None, 0)
+
+    if any(keyword in combined for keyword in cash_keywords):
+        has_cash = True
+    if any(keyword in combined for keyword in stock_keywords):
+        has_stock = True
+
+    if has_cash and has_stock:
+        return "mixed"
+    if has_cash:
+        return "cash"
+    if has_stock:
+        return "stock"
+    return "other"
+
+
 async def _resolve_profile_market_cap(
     db: AsyncSession,
     symbol: str,
@@ -2134,9 +2196,113 @@ async def get_cash_flow(
 
 
 @router.get("/{symbol}/dividends", response_model=StandardResponse[List[Any]])
-async def get_dividends(symbol: str):
+@cached(ttl=86400, key_prefix="dividends")
+async def get_dividends(
+    symbol: str,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
     try:
-        data = await VnstockDividendsFetcher.fetch(symbol=symbol.upper())
+        symbol_upper = symbol.upper()
+        raw_items = await VnstockDividendsFetcher.fetch(symbol=symbol_upper)
+        latest_price = await _get_latest_price(db, symbol_upper)
+
+        rows: list[dict[str, Any]] = []
+        for item in raw_items:
+            payload = item.model_dump(mode="json", by_alias=False)
+
+            cash_dividend = _coerce_optional_float(
+                payload.get("cash_dividend")
+                or payload.get("cashDividend")
+                or payload.get("value")
+            )
+            stock_dividend = _coerce_optional_float(
+                payload.get("stock_dividend") or payload.get("stockDividend")
+            )
+            dividend_ratio = payload.get("dividend_ratio") or payload.get("ratio")
+            if isinstance(dividend_ratio, str):
+                dividend_ratio = dividend_ratio.strip() or None
+
+            if cash_dividend is None and stock_dividend is None and dividend_ratio is None:
+                continue
+
+            ex_date = _coerce_iso_date(payload.get("ex_date") or payload.get("exDate"))
+            record_date = _coerce_iso_date(payload.get("record_date") or payload.get("recordDate"))
+            payment_date = _coerce_iso_date(
+                payload.get("payment_date") or payload.get("paymentDate")
+            )
+            fiscal_year = _extract_calendar_year(
+                payload.get("fiscal_year"),
+                payload.get("fiscalYear"),
+            )
+            issue_year = _extract_calendar_year(
+                payload.get("issue_year"),
+                payload.get("issueYear"),
+            )
+            event_year = _extract_calendar_year(
+                fiscal_year,
+                issue_year,
+                ex_date,
+                record_date,
+                payment_date,
+            )
+            raw_type = payload.get("dividend_type") or payload.get("type")
+            description = payload.get("description")
+            dividend_type = _classify_dividend_type(
+                raw_type=raw_type,
+                cash_dividend=cash_dividend,
+                stock_dividend=stock_dividend,
+                dividend_ratio=dividend_ratio,
+                description=description,
+            )
+
+            rows.append(
+                {
+                    "symbol": symbol_upper,
+                    "ex_date": ex_date,
+                    "record_date": record_date,
+                    "payment_date": payment_date,
+                    "type": dividend_type,
+                    "dividend_type": dividend_type,
+                    "raw_dividend_type": raw_type,
+                    "cash_dividend": cash_dividend,
+                    "stock_dividend": stock_dividend,
+                    "dividend_ratio": dividend_ratio,
+                    "value": cash_dividend if cash_dividend is not None else stock_dividend,
+                    "fiscal_year": fiscal_year,
+                    "issue_year": issue_year,
+                    "year": event_year,
+                    "annual_dps": None,
+                    "dividend_yield": None,
+                    "description": description,
+                }
+            )
+
+        rows.sort(
+            key=lambda row: row.get("ex_date")
+            or row.get("record_date")
+            or row.get("payment_date")
+            or "",
+            reverse=True,
+        )
+
+        annual_cash_by_year: dict[int, float] = {}
+        for row in rows:
+            year = row.get("year")
+            cash_value = row.get("cash_dividend")
+            if isinstance(year, int) and cash_value is not None:
+                annual_cash_by_year[year] = annual_cash_by_year.get(year, 0.0) + float(cash_value)
+
+        if latest_price not in (None, 0):
+            for row in rows:
+                year = row.get("year")
+                annual_dps = annual_cash_by_year.get(year) if isinstance(year, int) else None
+                if annual_dps is None:
+                    continue
+                row["annual_dps"] = round(annual_dps, 4)
+                row["dividend_yield"] = round((annual_dps / float(latest_price)) * 100, 4)
+
+        data = rows[:limit]
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         return StandardResponse(data=[], error=str(e))

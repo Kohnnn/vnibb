@@ -19,6 +19,7 @@ from vnibb.api.v1.listing import router as listing_router
 from vnibb.api.v1.trading import router as trading_router
 from vnibb.api.v1.derivatives import router as derivatives_router
 from vnibb.api.v1.user import router as user_router
+from vnibb.api.v1.health import router as health_router
 from vnibb.api.v1.rs_rating import router as rs_rating_router
 from vnibb.api.v1.market import router as market_router
 
@@ -39,6 +40,12 @@ api_router.include_router(
     sectors_router,
     prefix="/sectors",
     tags=["Sectors"],
+)
+
+api_router.include_router(
+    health_router,
+    prefix="/health",
+    tags=["Health"],
 )
 
 

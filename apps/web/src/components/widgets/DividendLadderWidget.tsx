@@ -8,7 +8,8 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useDividends } from '@/lib/queries';
 import { formatRelativeTime, formatDate } from '@/lib/format';
-import { formatVND } from '@/lib/formatters';
+import { formatPercent, formatVND } from '@/lib/formatters';
+import type { DividendRecord } from '@/lib/api';
 
 interface DividendLadderWidgetProps {
   id: string;
@@ -20,7 +21,33 @@ interface DividendEvent {
   type: 'ex' | 'record' | 'payment';
   label: string;
   date: string;
-  value: number | null | undefined;
+  payoutLabel: string;
+  payoutType: string;
+  dividendYield: number | null | undefined;
+}
+
+function formatPayout(row: DividendRecord): string {
+  if (row.cash_dividend !== null && row.cash_dividend !== undefined) {
+    return formatVND(row.cash_dividend)
+  }
+  if (row.stock_dividend !== null && row.stock_dividend !== undefined) {
+    return `${row.stock_dividend.toFixed(2)}% stock`
+  }
+  if (row.dividend_ratio !== null && row.dividend_ratio !== undefined) {
+    return String(row.dividend_ratio)
+  }
+  if (row.value !== null && row.value !== undefined) {
+    return formatVND(row.value)
+  }
+  return '-'
+}
+
+function formatDividendType(type: string | null | undefined): string {
+  const normalized = String(type || '').toLowerCase()
+  if (normalized === 'cash') return 'Cash'
+  if (normalized === 'stock') return 'Stock'
+  if (normalized === 'mixed') return 'Mixed'
+  return 'Other'
 }
 
 export function DividendLadderWidget({ id, symbol, onRemove }: DividendLadderWidgetProps) {
@@ -37,15 +64,41 @@ export function DividendLadderWidget({ id, symbol, onRemove }: DividendLadderWid
 
   const events = useMemo(() => {
     const all: DividendEvent[] = [];
+
     dividends.forEach((dividend) => {
+      const payoutLabel = formatPayout(dividend)
+      const payoutType = formatDividendType(dividend.dividend_type || dividend.type)
+      const dividendYield = dividend.dividend_yield
+
       if (dividend.ex_date) {
-        all.push({ type: 'ex', label: 'Ex-Date', date: dividend.ex_date, value: dividend.value });
+        all.push({
+          type: 'ex',
+          label: 'Ex-Date',
+          date: dividend.ex_date,
+          payoutLabel,
+          payoutType,
+          dividendYield,
+        });
       }
       if (dividend.record_date) {
-        all.push({ type: 'record', label: 'Record Date', date: dividend.record_date, value: dividend.value });
+        all.push({
+          type: 'record',
+          label: 'Record Date',
+          date: dividend.record_date,
+          payoutLabel,
+          payoutType,
+          dividendYield,
+        });
       }
       if (dividend.payment_date) {
-        all.push({ type: 'payment', label: 'Payment', date: dividend.payment_date, value: dividend.value });
+        all.push({
+          type: 'payment',
+          label: 'Payment',
+          date: dividend.payment_date,
+          payoutLabel,
+          payoutType,
+          dividendYield,
+        });
       }
     });
 
@@ -108,8 +161,13 @@ export function DividendLadderWidget({ id, symbol, onRemove }: DividendLadderWid
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs font-mono text-[var(--text-primary)]">{formatVND(event.value)}</div>
-                    <div className="text-[10px] text-[var(--text-muted)]">{symbol}</div>
+                    <div className="text-xs font-mono text-[var(--text-primary)]">{event.payoutLabel}</div>
+                    <div className="text-[10px] text-[var(--text-muted)]">
+                      {event.payoutType}
+                      {event.dividendYield !== null && event.dividendYield !== undefined
+                        ? ` • ${formatPercent(event.dividendYield)}`
+                        : ''}
+                    </div>
                   </div>
                 </div>
               ))}

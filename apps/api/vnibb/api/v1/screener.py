@@ -58,6 +58,16 @@ async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]])
 
 
 def _to_screener_data_row(row: object) -> ScreenerData:
+    extended_metrics = getattr(row, "extended_metrics", None)
+    if not isinstance(extended_metrics, dict):
+        extended_metrics = {}
+
+    def _pick(*values: Any) -> Any:
+        for value in values:
+            if value is not None:
+                return value
+        return None
+
     return ScreenerData(
         symbol=getattr(row, "symbol", None),
         organ_name=getattr(row, "company_name", None),
@@ -80,8 +90,32 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         earnings_growth=getattr(row, "earnings_growth", None),
         dividend_yield=getattr(row, "dividend_yield", None),
         debt_to_equity=getattr(row, "debt_to_equity", None),
+        debt_to_asset=_pick(
+            getattr(row, "debt_to_asset", None),
+            extended_metrics.get("debt_to_asset"),
+            extended_metrics.get("debt_to_assets"),
+        ),
         current_ratio=getattr(row, "current_ratio", None),
         quick_ratio=getattr(row, "quick_ratio", None),
+        days_receivable=_pick(
+            getattr(row, "days_receivable", None),
+            extended_metrics.get("days_receivable"),
+            extended_metrics.get("dso"),
+        ),
+        days_payable=_pick(
+            getattr(row, "days_payable", None),
+            extended_metrics.get("days_payable"),
+            extended_metrics.get("dpo"),
+        ),
+        equity_on_total_asset=_pick(
+            getattr(row, "equity_on_total_asset", None),
+            extended_metrics.get("equity_on_total_asset"),
+        ),
+        revenue_on_asset=_pick(
+            getattr(row, "revenue_on_asset", None),
+            extended_metrics.get("revenue_on_asset"),
+            extended_metrics.get("asset_turnover"),
+        ),
         eps=getattr(row, "eps", None),
         bvps=getattr(row, "bvps", None),
         foreign_ownership=getattr(row, "foreign_ownership", None),

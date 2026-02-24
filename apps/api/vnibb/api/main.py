@@ -123,11 +123,6 @@ class CORSErrorMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        # Handle preflight OPTIONS requests
-        if request.method == "OPTIONS":
-            headers = get_cors_headers(request)
-            return Response(status_code=200, headers=headers)
-
         try:
             response = await call_next(request)
             return response
@@ -523,21 +518,10 @@ def create_app() -> FastAPI:
     # Add Rate Limiting Middleware
     app.add_middleware(RateLimitMiddleware, requests_per_minute=120)
 
-    # CORS Middleware (must be added AFTER CORSErrorMiddleware for proper order)
-
     logger.info(
         "CORS configuration loaded: origins=%s regex=%s",
         settings.cors_origins,
         settings.cors_origin_regex,
-    )
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_origin_regex=settings.cors_origin_regex,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
     )
 
     # Add Performance Logging Middleware
@@ -549,10 +533,20 @@ def create_app() -> FastAPI:
     # Add response cache policy middleware for GET/HEAD endpoints
     app.add_middleware(ResponseCacheControlMiddleware)
 
-    # Add CORS Error Middleware to catch exceptions before CORS middleware
-    # Middleware order: Request -> CORSErrorMiddleware -> CORSMiddleware -> Route
-    # Response order: Route -> CORSMiddleware -> CORSErrorMiddleware -> Client
+    # Add CORS error middleware to preserve CORS headers on uncaught exceptions.
     app.add_middleware(CORSErrorMiddleware)
+
+    # Keep CORS as the outermost middleware so all responses, including
+    # middleware-generated errors and preflight requests, receive CORS headers.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_origin_regex=settings.cors_origin_regex,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
+    )
 
     # Exception Handlers with explicit CORS headers and standardized error format
 

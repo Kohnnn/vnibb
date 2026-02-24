@@ -7,12 +7,37 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { Building2, Globe, Users, Calendar, MapPin, AlertTriangle } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
-import { formatNumber, formatVND } from '@/lib/formatters';
+import { formatNumber, formatPercent, formatVND } from '@/lib/formatters';
+import type { DividendRecord } from '@/lib/api';
 
 interface TickerProfileWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+}
+
+function formatDividendType(type: string | null | undefined): string {
+    const normalized = String(type || '').toLowerCase();
+    if (normalized === 'cash') return 'Cash';
+    if (normalized === 'stock') return 'Stock';
+    if (normalized === 'mixed') return 'Mixed';
+    return 'Other';
+}
+
+function formatDividendValue(row: DividendRecord): string {
+    if (row.cash_dividend !== null && row.cash_dividend !== undefined) {
+        return formatVND(row.cash_dividend);
+    }
+    if (row.stock_dividend !== null && row.stock_dividend !== undefined) {
+        return `${row.stock_dividend.toFixed(2)}% stock`;
+    }
+    if (row.dividend_ratio !== null && row.dividend_ratio !== undefined) {
+        return String(row.dividend_ratio);
+    }
+    if (row.value !== null && row.value !== undefined) {
+        return formatVND(row.value);
+    }
+    return '-';
 }
 
 export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
@@ -159,9 +184,12 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
                                         className="flex items-center justify-between rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2"
                                     >
                                         <div>
-                                            <div className="text-xs font-semibold text-gray-200">{formatVND(dividend.value)}</div>
+                                            <div className="text-xs font-semibold text-gray-200">{formatDividendValue(dividend)}</div>
                                             <div className="text-[10px] text-gray-500">
-                                                {dividend.dividend_type || 'Dividend'}
+                                                {formatDividendType(dividend.dividend_type || dividend.type)}
+                                                {dividend.dividend_yield !== null && dividend.dividend_yield !== undefined
+                                                    ? ` • ${formatPercent(dividend.dividend_yield)}`
+                                                    : ''}
                                                 {dividend.ex_date ? ` • Ex ${formatRelativeTime(dividend.ex_date)}` : ''}
                                             </div>
                                         </div>

@@ -9,12 +9,19 @@ Uses CacheManager for efficient data retrieval instead of fetching
 """
 
 import logging
+import re
+import unicodedata
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
+from sqlalchemy import desc, select
 
+from vnibb.core.database import async_session_maker
 from vnibb.services.cache_manager import CacheManager
 from vnibb.core.config import settings
+from vnibb.core.vn_sectors import VN_SECTORS
+from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +74,9 @@ class PeerCompany(BaseModel):
     name: Optional[str] = None
     market_cap: Optional[float] = None
     pe_ratio: Optional[float] = None
+    roe: Optional[float] = None
+    price: Optional[float] = None
+    change_pct: Optional[float] = None
     industry: Optional[str] = None
 
 
@@ -367,6 +377,16 @@ class ComparisonService:
             if not all_stocks:
                 return PeersResponse(symbol=symbol, count=0, peers=[])
 
+            def _normalize_text(value: Any) -> str:
+                raw = str(value or "").strip().lower()
+                if not raw:
+                    return ""
+                normalized = (
+                    unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+                )
+                normalized = re.sub(r"\s+", " ", normalized)
+                return normalized.strip()
+
             def _value(stock: Any, *keys: str) -> Any:
                 for key in keys:
                     if isinstance(stock, dict):
@@ -377,6 +397,49 @@ class ComparisonService:
                         return candidate
                 return None
 
+            def _as_payload(stock: Any) -> dict[str, Any]:
+                if isinstance(stock, dict):
+                    return dict(stock)
+
+                payload: dict[str, Any] = {}
+                for key in (
+                    "symbol",
+                    "ticker",
+                    "company_name",
+                    "organ_name",
+                    "organName",
+                    "industry",
+                    "industry_name",
+                    "industryName",
+                    "sector",
+                    "sector_name",
+                    "sectorName",
+                    "exchange",
+                    "market_cap",
+                    "marketCap",
+                    "pe",
+                    "pe_ratio",
+                    "roe",
+                    "price",
+                    "close",
+                    "change_pct",
+                    "changePct",
+                    "price_change_1d_pct",
+                    "price_change_pct",
+                    "priceChangePct",
+                ):
+                    if hasattr(stock, key):
+                        payload[key] = getattr(stock, key)
+                return payload
+
+            def _to_float(value: Any) -> Optional[float]:
+                if value is None:
+                    return None
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+
             def _text(stock: Any, *keys: str) -> Optional[str]:
                 value = _value(stock, *keys)
                 if value is None:
@@ -385,36 +448,69 @@ class ComparisonService:
                 return cleaned or None
 
             def _market_cap(stock: Any) -> Optional[float]:
-                value = _value(stock, "market_cap", "marketCap")
-                try:
-                    return float(value) if value is not None else None
-                except (TypeError, ValueError):
-                    return None
+                return _to_float(_value(stock, "market_cap", "marketCap"))
+
+            def _price(stock: Any) -> Optional[float]:
+                return _to_float(_value(stock, "price", "close"))
+
+            def _change_pct(stock: Any) -> Optional[float]:
+                return _to_float(
+                    _value(
+                        stock,
+                        "change_pct",
+                        "changePct",
+                        "price_change_1d_pct",
+                        "price_change_pct",
+                        "priceChangePct",
+                    )
+                )
 
             def _symbol(stock: Any) -> Optional[str]:
                 value = _text(stock, "symbol", "ticker")
                 return value.upper() if value else None
 
-            def to_peer(stock: Any, industry: Optional[str]) -> PeerCompany:
+            def _industry(stock: Any) -> Optional[str]:
+                return _text(stock, "industry", "industry_name", "industryName")
+
+            def _exchange(stock: Any) -> Optional[str]:
+                return _text(stock, "exchange")
+
+            def _sector(stock: Any) -> Optional[str]:
+                return _text(stock, "sector", "sector_name", "sectorName")
+
+            def _resolve_sector_id(
+                industry: Optional[str], sector_hint: Optional[str]
+            ) -> Optional[str]:
+                combined = " ".join(
+                    part
+                    for part in [_normalize_text(industry), _normalize_text(sector_hint)]
+                    if part
+                )
+                if not combined:
+                    return None
+
+                for sector_id, cfg in VN_SECTORS.items():
+                    if sector_id == "vn30":
+                        continue
+                    tokens = [sector_id, cfg.name, cfg.name_en, *cfg.keywords]
+                    for token in tokens:
+                        token_text = _normalize_text(token)
+                        if token_text and token_text in combined:
+                            return sector_id
+
+                return None
+
+            def to_peer(stock: Any) -> PeerCompany:
                 return PeerCompany(
                     symbol=_symbol(stock) or "",
                     name=_text(stock, "company_name", "organ_name", "organName"),
                     market_cap=_market_cap(stock),
-                    pe_ratio=_value(stock, "pe", "pe_ratio"),
-                    industry=industry,
+                    pe_ratio=_to_float(_value(stock, "pe", "pe_ratio")),
+                    roe=_to_float(_value(stock, "roe")),
+                    price=_price(stock),
+                    change_pct=_change_pct(stock),
+                    industry=_industry(stock),
                 )
-
-            def fallback_peers() -> PeersResponse:
-                ranked = sorted(
-                    [s for s in universe.values() if _symbol(s) and _symbol(s) != symbol],
-                    key=lambda s: ((_market_cap(s) or 0), _symbol(s) or ""),
-                    reverse=True,
-                )
-                peers = [
-                    to_peer(stock, _text(stock, "industry", "industry_name", "industryName"))
-                    for stock in ranked[:limit]
-                ]
-                return PeersResponse(symbol=symbol, count=len(peers), peers=peers)
 
             universe: Dict[str, Any] = {}
             for stock in all_stocks:
@@ -422,50 +518,204 @@ class ComparisonService:
                 if not stock_symbol:
                     continue
                 if stock_symbol not in universe:
-                    universe[stock_symbol] = stock
+                    universe[stock_symbol] = _as_payload(stock)
+
+            async with async_session_maker() as session:
+                latest_snapshot_date = (
+                    await session.execute(
+                        select(ScreenerSnapshot.snapshot_date)
+                        .order_by(desc(ScreenerSnapshot.snapshot_date))
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+
+                if latest_snapshot_date is not None:
+                    snapshot_rows = (
+                        await session.execute(
+                            select(
+                                ScreenerSnapshot.symbol,
+                                ScreenerSnapshot.company_name,
+                                ScreenerSnapshot.industry,
+                                ScreenerSnapshot.exchange,
+                                ScreenerSnapshot.market_cap,
+                                ScreenerSnapshot.pe,
+                                ScreenerSnapshot.roe,
+                                ScreenerSnapshot.price,
+                            ).where(ScreenerSnapshot.snapshot_date == latest_snapshot_date)
+                        )
+                    ).all()
+
+                    stock_rows = (
+                        await session.execute(
+                            select(
+                                Stock.symbol, Stock.sector, Stock.industry, Stock.exchange
+                            ).where(Stock.is_active == 1)
+                        )
+                    ).all()
+
+                    stock_lookup: dict[str, tuple[Optional[str], Optional[str], Optional[str]]] = {
+                        str(symbol).upper(): (sector, industry, exchange)
+                        for symbol, sector, industry, exchange in stock_rows
+                        if symbol
+                    }
+
+                    for (
+                        snap_symbol,
+                        company_name,
+                        industry,
+                        exchange,
+                        market_cap,
+                        pe,
+                        roe,
+                        price,
+                    ) in snapshot_rows:
+                        if not snap_symbol:
+                            continue
+                        symbol_key = str(snap_symbol).upper()
+                        payload = universe.get(symbol_key) or {"symbol": symbol_key}
+
+                        if payload.get("company_name") in (None, "") and company_name:
+                            payload["company_name"] = company_name
+                        if payload.get("industry") in (None, "") and industry:
+                            payload["industry"] = industry
+                        if payload.get("exchange") in (None, "") and exchange:
+                            payload["exchange"] = exchange
+                        if payload.get("market_cap") in (None, "") and market_cap is not None:
+                            payload["market_cap"] = market_cap
+                        if payload.get("pe") in (None, "") and pe is not None:
+                            payload["pe"] = pe
+                        if payload.get("roe") in (None, "") and roe is not None:
+                            payload["roe"] = roe
+                        if payload.get("price") in (None, "") and price is not None:
+                            payload["price"] = price
+
+                        stock_sector, stock_industry, stock_exchange = stock_lookup.get(
+                            symbol_key, (None, None, None)
+                        )
+                        if payload.get("sector") in (None, "") and stock_sector:
+                            payload["sector"] = stock_sector
+                        if payload.get("industry") in (None, "") and stock_industry:
+                            payload["industry"] = stock_industry
+                        if payload.get("exchange") in (None, "") and stock_exchange:
+                            payload["exchange"] = stock_exchange
+
+                        universe[symbol_key] = payload
 
             target = universe.get(symbol)
-            if not target:
-                return fallback_peers()
-
-            target_industry = _text(target, "industry", "industry_name", "industryName")
-            target_exchange = _text(target, "exchange")
+            target_industry = _industry(target)
+            target_sector = _sector(target)
+            target_exchange = _exchange(target)
             target_market_cap = _market_cap(target) or 0.0
+
+            if (
+                target is None
+                or not target_industry
+                or not target_exchange
+                or not target_sector
+                or target_market_cap <= 0
+            ):
+                async with async_session_maker() as session:
+                    latest_snapshot = (
+                        await session.execute(
+                            select(
+                                ScreenerSnapshot.industry,
+                                ScreenerSnapshot.exchange,
+                                ScreenerSnapshot.market_cap,
+                                ScreenerSnapshot.price,
+                                ScreenerSnapshot.pe,
+                                ScreenerSnapshot.roe,
+                            )
+                            .where(ScreenerSnapshot.symbol == symbol)
+                            .order_by(
+                                desc(ScreenerSnapshot.snapshot_date),
+                                desc(ScreenerSnapshot.created_at),
+                            )
+                            .limit(1)
+                        )
+                    ).first()
+
+                    stock_row = (
+                        await session.execute(
+                            select(Stock.industry, Stock.sector, Stock.exchange)
+                            .where(Stock.symbol == symbol)
+                            .limit(1)
+                        )
+                    ).first()
+
+                if latest_snapshot is not None:
+                    if not target_industry and latest_snapshot[0]:
+                        target_industry = str(latest_snapshot[0]).strip()
+                    if not target_exchange and latest_snapshot[1]:
+                        target_exchange = str(latest_snapshot[1]).strip()
+                    if target_market_cap <= 0:
+                        target_market_cap = _to_float(latest_snapshot[2]) or target_market_cap
+
+                if stock_row is not None:
+                    if not target_industry and stock_row[0]:
+                        target_industry = str(stock_row[0]).strip()
+                    if not target_sector and stock_row[1]:
+                        target_sector = str(stock_row[1]).strip()
+                    if not target_exchange and stock_row[2]:
+                        target_exchange = str(stock_row[2]).strip()
 
             if not target_industry:
                 profile_result = await self.cache_manager.get_profile_data(symbol, allow_stale=True)
                 if profile_result.hit and profile_result.data:
-                    target_industry = profile_result.data.industry
-                if not target_exchange and profile_result.hit and profile_result.data:
-                    target_exchange = profile_result.data.exchange
+                    target_industry = target_industry or profile_result.data.industry
+                    target_sector = target_sector or profile_result.data.sector
+                    target_exchange = target_exchange or profile_result.data.exchange
+
+            target_industry_norm = _normalize_text(target_industry)
+            target_sector_id = _resolve_sector_id(target_industry, target_sector)
 
             candidate_pool = [
                 stock for stock_symbol, stock in universe.items() if stock_symbol != symbol
             ]
 
-            if target_industry:
-                peers_list = [
-                    stock
-                    for stock in candidate_pool
-                    if _text(stock, "industry", "industry_name", "industryName") == target_industry
-                ]
-            else:
-                peers_list = []
+            def _is_same_industry(stock: Any) -> bool:
+                return bool(
+                    target_industry_norm
+                    and _normalize_text(_industry(stock)) == target_industry_norm
+                )
 
-            if not peers_list and target_exchange:
-                peers_list = [
+            def _is_same_sector(stock: Any) -> bool:
+                if not target_sector_id:
+                    return False
+                return _resolve_sector_id(_industry(stock), _sector(stock)) == target_sector_id
+
+            peers_list: List[Any] = [stock for stock in candidate_pool if _is_same_industry(stock)]
+
+            if len(peers_list) < min(3, limit):
+                existing_symbols = {_symbol(stock) for stock in peers_list if _symbol(stock)}
+                sector_candidates = [stock for stock in candidate_pool if _is_same_sector(stock)]
+                for candidate in sector_candidates:
+                    candidate_symbol = _symbol(candidate)
+                    if not candidate_symbol or candidate_symbol in existing_symbols:
+                        continue
+                    peers_list.append(candidate)
+                    existing_symbols.add(candidate_symbol)
+
+            if len(peers_list) < min(3, limit) and target_exchange:
+                existing_symbols = {_symbol(stock) for stock in peers_list if _symbol(stock)}
+                exchange_candidates = [
                     stock
                     for stock in candidate_pool
-                    if (_text(stock, "exchange") or "") == target_exchange
+                    if (_exchange(stock) or "").upper() == target_exchange.upper()
                 ]
+                for candidate in exchange_candidates:
+                    candidate_symbol = _symbol(candidate)
+                    if not candidate_symbol or candidate_symbol in existing_symbols:
+                        continue
+                    peers_list.append(candidate)
+                    existing_symbols.add(candidate_symbol)
 
             if not peers_list:
-                return fallback_peers()
+                peers_list = candidate_pool
 
-            def _rank(stock: Any) -> tuple[float, float, float, str]:
+            def _rank(stock: Any) -> tuple[float, float, float, float, float, str]:
                 exchange_penalty = (
                     0.0
-                    if not target_exchange or (_text(stock, "exchange") or "") == target_exchange
+                    if not target_exchange or (_exchange(stock) or "") == target_exchange
                     else 1.0
                 )
                 candidate_market_cap = _market_cap(stock)
@@ -474,13 +724,32 @@ class ComparisonService:
                 else:
                     cap_distance = 10_000.0
 
+                industry_penalty = 0.0 if _is_same_industry(stock) else 1.0
+                sector_penalty = 0.0 if _is_same_sector(stock) else 1.0
+
                 # Larger market caps are generally more comparable and liquid.
                 market_cap_priority = -(candidate_market_cap or 0.0)
-                return exchange_penalty, cap_distance, market_cap_priority, _symbol(stock) or ""
+                return (
+                    industry_penalty,
+                    sector_penalty,
+                    exchange_penalty,
+                    cap_distance,
+                    market_cap_priority,
+                    _symbol(stock) or "",
+                )
 
             peers_list.sort(key=_rank)
 
-            formatted_peers = [to_peer(stock, target_industry) for stock in peers_list[:limit]]
+            unique_ranked: List[Any] = []
+            seen_symbols: set[str] = set()
+            for stock in peers_list:
+                stock_symbol = _symbol(stock)
+                if not stock_symbol or stock_symbol in seen_symbols:
+                    continue
+                unique_ranked.append(stock)
+                seen_symbols.add(stock_symbol)
+
+            formatted_peers = [to_peer(stock) for stock in unique_ranked[:limit]]
 
             return PeersResponse(
                 symbol=symbol,

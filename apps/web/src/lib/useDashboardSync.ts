@@ -18,8 +18,8 @@ interface UseDashboardSyncOptions {
  * Check if backend is available
  */
 export async function checkBackendHealth(): Promise<boolean> {
-    const { liveOk, readyOk } = await probeBackendReadiness(8000)
-    return liveOk && readyOk
+    const { healthOk, dataOk } = await probeBackendReadiness(8000)
+    return healthOk && dataOk
 }
 
 /**

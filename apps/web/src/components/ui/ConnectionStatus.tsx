@@ -15,12 +15,12 @@ export function ConnectionStatus() {
   const checkConnection = useCallback(async (isRetry = false) => {
     setIsChecking(true);
     try {
-      const { liveOk, readyOk } = await probeBackendReadiness(8000);
+      const { healthOk, dataOk } = await probeBackendReadiness(8000);
 
-      if (liveOk && readyOk) {
+      if (healthOk && dataOk) {
         setStatus('online');
         retriesRef.current = 0;
-      } else if (liveOk) {
+      } else if (healthOk) {
         setStatus('degraded');
         retriesRef.current = 0;
       } else {
