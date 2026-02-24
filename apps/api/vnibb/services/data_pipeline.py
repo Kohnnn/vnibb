@@ -1104,6 +1104,34 @@ class DataPipeline:
                     if not market_cap_value and shares_for_market_cap and price_value:
                         market_cap_value = float(shares_for_market_cap) * float(price_value)
 
+                    extended_metrics = {
+                        "debt_to_asset": _parse_float(
+                            row.get("debt_to_asset")
+                            or row.get("debtOnAsset")
+                            or row.get("debt_on_asset")
+                        ),
+                        "days_receivable": _parse_float(
+                            row.get("days_receivable")
+                            or row.get("daysReceivable")
+                            or row.get("dso")
+                        ),
+                        "days_payable": _parse_float(
+                            row.get("days_payable") or row.get("daysPayable") or row.get("dpo")
+                        ),
+                        "equity_on_total_asset": _parse_float(
+                            row.get("equity_on_total_asset") or row.get("equityOnTotalAsset")
+                        ),
+                        "revenue_on_asset": _parse_float(
+                            row.get("revenue_on_asset")
+                            or row.get("revenueOnAsset")
+                            or row.get("asset_turnover")
+                            or row.get("at")
+                        ),
+                    }
+                    extended_metrics = {
+                        key: value for key, value in extended_metrics.items() if value is not None
+                    }
+
                     values = {
                         "symbol": symbol,
                         "snapshot_date": today,
@@ -1187,6 +1215,7 @@ class DataPipeline:
                         "foreign_ownership": _parse_float(
                             row.get("foreign_ownership") or row.get("foreignOwnership")
                         ),
+                        "extended_metrics": extended_metrics or None,
                         "source": "vnstock_ratio",
                         "created_at": datetime.utcnow(),
                     }
@@ -1366,12 +1395,53 @@ class DataPipeline:
                     ratio_payload.get("debt_to_assets"),
                     ratio_payload.get("debt_to_asset"),
                 )
-                if debt_to_asset_value is not None:
-                    extended_metrics = dict(screener_row.extended_metrics or {})
-                    if extended_metrics.get("debt_to_asset") is None:
-                        extended_metrics["debt_to_asset"] = debt_to_asset_value
-                        screener_row.extended_metrics = extended_metrics
-                        changed = True
+                extended_metrics = dict(screener_row.extended_metrics or {})
+
+                def _set_extended_metric(key: str, value: Optional[float]) -> None:
+                    nonlocal changed
+                    if value is None:
+                        return
+                    if extended_metrics.get(key) is not None:
+                        return
+                    extended_metrics[key] = value
+                    changed = True
+
+                _set_extended_metric("debt_to_asset", debt_to_asset_value)
+                _set_extended_metric(
+                    "days_receivable",
+                    _pick_float(
+                        ratio_payload.get("days_receivable"),
+                        ratio_payload.get("daysReceivable"),
+                        ratio_payload.get("dso"),
+                    ),
+                )
+                _set_extended_metric(
+                    "days_payable",
+                    _pick_float(
+                        ratio_payload.get("days_payable"),
+                        ratio_payload.get("daysPayable"),
+                        ratio_payload.get("dpo"),
+                    ),
+                )
+                _set_extended_metric(
+                    "equity_on_total_asset",
+                    _pick_float(
+                        ratio_payload.get("equity_on_total_asset"),
+                        ratio_payload.get("equityOnTotalAsset"),
+                    ),
+                )
+                _set_extended_metric(
+                    "revenue_on_asset",
+                    _pick_float(
+                        ratio_payload.get("revenue_on_asset"),
+                        ratio_payload.get("revenueOnAsset"),
+                        ratio_payload.get("asset_turnover"),
+                        ratio_payload.get("at"),
+                    ),
+                )
+
+                if extended_metrics:
+                    screener_row.extended_metrics = extended_metrics
 
                 if changed:
                     backfilled_rows += 1

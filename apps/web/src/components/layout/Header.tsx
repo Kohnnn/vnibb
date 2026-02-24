@@ -177,7 +177,7 @@ export function Header({
 
                 {onUnitDisplayChange && (
                     <div className="hidden lg:flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1 py-1">
-                        <span className="px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                        <span className="px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                             Unit
                         </span>
                         {UNIT_OPTIONS.map((option) => {
@@ -190,8 +190,8 @@ export function Header({
                                     className={cn(
                                         'rounded px-1.5 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors',
                                         isActive
-                                            ? 'bg-blue-600/20 text-blue-300 border border-blue-500/30'
-                                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]/70 border border-transparent'
+                                            ? 'bg-blue-600/15 text-[var(--accent-blue)] border border-blue-500/30'
+                                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]/70 border border-transparent'
                                     )}
                                     title={`Display numbers as ${option.label}`}
                                 >

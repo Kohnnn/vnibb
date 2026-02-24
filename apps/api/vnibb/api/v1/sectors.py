@@ -1,4 +1,6 @@
 import logging
+import re
+import unicodedata
 from collections import defaultdict
 from datetime import datetime
 from typing import Literal
@@ -25,8 +27,85 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Sectors"])
 
 
+INDUSTRY_TO_SECTOR_ID: dict[str, str] = {
+    "ngan hang": "banking",
+    "chung khoan": "securities",
+    "bat dong san": "real_estate",
+    "vat lieu xay dung": "construction_materials",
+    "xay dung va vat lieu": "construction_materials",
+    "ban le": "retail",
+    "ban buon": "retail",
+    "thuc pham do uong": "food",
+    "san xuat thuc pham": "food",
+    "bia va do uong": "food",
+    "cong nghe va thong tin": "technology",
+    "truyen thong": "technology",
+    "vien thong co dinh": "technology",
+    "vien thong di dong": "technology",
+    "bao hiem": "insurance",
+    "bao hiem phi nhan tho": "insurance",
+    "sx nhua hoa chat": "chemicals_fertilizer",
+    "hoa chat": "chemicals_fertilizer",
+    "thiet bi dien": "power_energy",
+    "san xuat phan phoi dien": "power_energy",
+    "dien tu thiet bi dien": "power_energy",
+    "sx thiet bi may moc": "power_energy",
+    "tien ich": "power_energy",
+    "van tai kho bai": "port_logistics",
+    "van tai": "port_logistics",
+    "che bien thuy san": "seafood",
+    "xay dung": "public_investment",
+    "tu van ho tro kinh doanh": "public_investment",
+    "sx phu tro": "construction_materials",
+    "khai khoang": "oil_gas",
+    "thiet bi dich vu va phan phoi dau khi": "oil_gas",
+    "dich vu luu tru an uong giai tri": "aviation_tourism",
+    "du lich giai tri": "aviation_tourism",
+    "sx hang gia dung": "textile",
+    "hang ca nhan": "textile",
+    "det may": "textile",
+    "kim loai": "steel",
+    "cong nghiep nang": "steel",
+    "lam nghiep va giay": "sugar_wood_paper",
+    "duong": "sugar_wood_paper",
+    "go": "sugar_wood_paper",
+    "o to va phu tung": "auto_parts",
+    "duoc pham": "pharma_healthcare",
+    "cham soc suc khoe": "pharma_healthcare",
+    "thiet bi va dich vu y te": "pharma_healthcare",
+    "tai chinh khac": "securities",
+    "nuoc khi dot": "water_plastic",
+}
+
+
 def _normalize_text(value: str | None) -> str:
     return (value or "").strip().lower()
+
+
+def _normalize_lookup_text(value: str | None) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    normalized = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def _map_industry_to_sector_id(value: str | None) -> str | None:
+    normalized = _normalize_lookup_text(value)
+    if not normalized:
+        return None
+
+    direct = INDUSTRY_TO_SECTOR_ID.get(normalized)
+    if direct:
+        return direct
+
+    for industry_key, sector_id in INDUSTRY_TO_SECTOR_ID.items():
+        if industry_key in normalized or normalized in industry_key:
+            return sector_id
+
+    return None
 
 
 def _coerce_optional_float(value) -> float | None:
@@ -73,7 +152,12 @@ def _build_sector_symbol_list(
 
         keyword_hit = any(term in haystack for term in keyword_terms) if keyword_terms else False
         sector_name_hit = any(term and term in sector_text for term in sector_name_terms)
-        if not keyword_hit and not sector_name_hit:
+        mapped_sector_hit = (
+            _map_industry_to_sector_id(industry) == sector_id
+            or _map_industry_to_sector_id(sector) == sector_id
+        )
+
+        if not keyword_hit and not sector_name_hit and not mapped_sector_hit:
             continue
 
         if symbol_upper in seen_symbols:
@@ -148,6 +232,8 @@ async def list_sectors(
         )
     ).all()
 
+    snapshot_industry_rows: list[tuple[str, str | None, str | None]] = []
+
     market_cap_by_symbol: dict[str, float] = {}
     if latest_snapshot_date is not None:
         snapshot_rows = (
@@ -163,12 +249,24 @@ async def list_sectors(
             if market_cap_value is not None:
                 market_cap_by_symbol[str(symbol).strip().upper()] = market_cap_value
 
+        snapshot_industry_rows = (
+            await db.execute(
+                select(ScreenerSnapshot.symbol, ScreenerSnapshot.industry).where(
+                    ScreenerSnapshot.snapshot_date == latest_snapshot_date,
+                    ScreenerSnapshot.industry.is_not(None),
+                )
+            )
+        ).all()
+
+    combined_rows = list(stock_rows)
+    combined_rows.extend((symbol, industry, None) for symbol, industry in snapshot_industry_rows)
+
     payload: dict[str, dict] = {}
     for sector_id, sector_cfg in sectors.items():
         dynamic_symbols = _build_sector_symbol_list(
             sector_id=sector_id,
             sector_cfg=sector_cfg,
-            stock_rows=stock_rows,
+            stock_rows=combined_rows,
             market_cap_by_symbol=market_cap_by_symbol,
             symbol_limit=symbol_limit,
         )

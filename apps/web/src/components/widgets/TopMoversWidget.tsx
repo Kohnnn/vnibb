@@ -57,6 +57,17 @@ export function TopMoversWidget({
     setLinkedSymbol(symbol);
   };
 
+  const toNumber = (value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value.replace(/,/g, '').trim());
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+
   return (
     <WidgetContainer
       title="Market Movers"
@@ -111,8 +122,28 @@ export function TopMoversWidget({
           ) : (
             <div className="space-y-0.5">
               {stocks.map((stock, index) => {
-                const camelChangePct = (stock as unknown as Record<string, unknown>)['priceChangePct'];
-                const changePct = Number(stock.price_change_pct ?? camelChangePct ?? 0);
+                const payload = stock as unknown as Record<string, unknown>;
+                const price = toNumber(stock.last_price ?? payload['lastPrice']);
+                const absChange = toNumber(stock.price_change ?? payload['priceChange'] ?? payload['change']);
+                const explicitPct = toNumber(
+                  stock.price_change_pct
+                  ?? payload['priceChangePct']
+                  ?? payload['change_pct']
+                  ?? payload['changePct']
+                );
+
+                let changePct = explicitPct;
+                if ((changePct === null || Math.abs(changePct) < 0.001) && absChange !== null && price !== null) {
+                  const referencePrice = price - absChange;
+                  if (referencePrice !== 0) {
+                    changePct = (absChange / referencePrice) * 100;
+                  }
+                }
+
+                if (changePct === null) {
+                  changePct = 0;
+                }
+
                 const isUp = changePct >= 0;
                 return (
                   <button
@@ -150,7 +181,7 @@ export function TopMoversWidget({
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-[var(--text-primary)] text-xs font-mono tabular-nums">
-                        {stock.last_price?.toLocaleString() || '--'}
+                        {price !== null ? price.toLocaleString() : '--'}
                       </span>
                       <span
                         className={`text-[11px] font-bold min-w-[55px] text-right px-1.5 py-0.5 rounded ${

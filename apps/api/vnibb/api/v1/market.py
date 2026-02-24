@@ -9,6 +9,8 @@ Provides endpoints for:
 
 import asyncio
 import logging
+import re
+import unicodedata
 from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional
 from collections import defaultdict
@@ -34,6 +36,7 @@ from vnibb.providers.vnstock.market_overview import (
 from vnibb.providers.vnstock.top_movers import VnstockTopMoversFetcher
 from vnibb.core.cache import cached
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.services.cache_manager import CacheManager
@@ -159,6 +162,90 @@ HEATMAP_FETCH_TIMEOUT_SECONDS = 20
 SECTOR_CLASSIFICATION_IDS = [
     sector_id for sector_id in VN_SECTORS.keys() if sector_id not in {"vn30"}
 ]
+
+INDUSTRY_TO_SECTOR_ID: dict[str, str] = {
+    "Ngân hàng": "banking",
+    "Chứng khoán": "securities",
+    "Bất động sản": "real_estate",
+    "Vật liệu xây dựng": "construction_materials",
+    "Bán lẻ": "retail",
+    "Thực phẩm - Đồ uống": "food",
+    "Sản xuất thực phẩm": "food",
+    "Bia và đồ uống": "food",
+    "Công nghệ và thông tin": "technology",
+    "Bảo hiểm": "insurance",
+    "SX Nhựa - Hóa chất": "chemicals_fertilizer",
+    "Hóa chất": "chemicals_fertilizer",
+    "Thiết bị điện": "power_energy",
+    "Vận tải - kho bãi": "port_logistics",
+    "Vận tải": "port_logistics",
+    "Chế biến Thủy sản": "seafood",
+    "Xây dựng": "public_investment",
+    "Tiện ích": "power_energy",
+    "SX Phụ trợ": "construction_materials",
+    "Khai khoáng": "oil_gas",
+    "Dịch vụ lưu trú, ăn uống, giải trí": "aviation_tourism",
+    "Du lịch & Giải trí": "aviation_tourism",
+    "SX Hàng gia dụng": "textile",
+    "Hàng cá nhân": "textile",
+    "Kim loại": "steel",
+    "Bán buôn": "retail",
+    "Tư vấn & Hỗ trợ Kinh doanh": "public_investment",
+    "Xây dựng và Vật liệu": "construction_materials",
+    "Nước & Khí đốt": "water_plastic",
+    "Viễn thông cố định": "technology",
+    "Viễn thông di động": "technology",
+    "Dược phẩm": "pharma_healthcare",
+    "Chăm sóc sức khỏe": "pharma_healthcare",
+    "Thiết bị và Dịch vụ Y tế": "pharma_healthcare",
+    "Sản xuất & Phân phối Điện": "power_energy",
+    "Thiết bị, Dịch vụ và Phân phối Dầu khí": "oil_gas",
+    "Điện tử & Thiết bị điện": "power_energy",
+    "Lâm nghiệp và Giấy": "sugar_wood_paper",
+    "Ô tô và phụ tùng": "auto_parts",
+    "SX Thiết bị, máy móc": "power_energy",
+    "Công nghiệp nặng": "steel",
+    "Tài chính khác": "securities",
+    "Bảo hiểm phi nhân thọ": "insurance",
+    "Truyền thông": "technology",
+}
+
+
+def _normalize_lookup_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    normalized = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+INDUSTRY_TO_SECTOR_ID_LOOKUP: dict[str, str] = {
+    _normalize_lookup_text(industry): sector_id
+    for industry, sector_id in INDUSTRY_TO_SECTOR_ID.items()
+}
+
+
+def _map_text_to_sector_name(value: Optional[str]) -> Optional[str]:
+    normalized_value = _normalize_lookup_text(value)
+    if not normalized_value:
+        return None
+
+    sector_id = INDUSTRY_TO_SECTOR_ID_LOOKUP.get(normalized_value)
+    if sector_id is None:
+        for known_industry, mapped_sector in INDUSTRY_TO_SECTOR_ID_LOOKUP.items():
+            if not known_industry:
+                continue
+            if known_industry in normalized_value or normalized_value in known_industry:
+                sector_id = mapped_sector
+                break
+
+    if sector_id is None:
+        return None
+
+    sector_config = VN_SECTORS.get(sector_id)
+    return sector_config.name if sector_config else None
 
 
 async def _fetch_rss_content(url: str) -> str:
@@ -301,8 +388,9 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
 
 
 def _resolve_sector_name(symbol: str, industry: Optional[str], sector_hint: Optional[str]) -> str:
-    if sector_hint:
-        return sector_hint
+    mapped_sector_hint = _map_text_to_sector_name(sector_hint)
+    if mapped_sector_hint:
+        return mapped_sector_hint
 
     symbol_upper = _normalize_symbol(symbol)
     for sector_id in SECTOR_CLASSIFICATION_IDS:
@@ -311,6 +399,10 @@ def _resolve_sector_name(symbol: str, industry: Optional[str], sector_hint: Opti
             continue
         if symbol_upper in {s.upper() for s in config.symbols}:
             return config.name
+
+    mapped_industry = _map_text_to_sector_name(industry)
+    if mapped_industry:
+        return mapped_industry
 
     industry_text = (industry or "").strip().lower()
     if industry_text:
@@ -322,6 +414,9 @@ def _resolve_sector_name(symbol: str, industry: Optional[str], sector_hint: Opti
                 if keyword.lower() in industry_text:
                     return config.name
 
+    if sector_hint:
+        return sector_hint
+
     return "Other"
 
 
@@ -331,7 +426,7 @@ async def _load_stock_metadata(symbols: List[str]) -> Dict[str, Dict[str, Option
         return {}
 
     async with async_session_maker() as session:
-        rows = (
+        stock_rows = (
             await session.execute(
                 select(Stock.symbol, Stock.exchange, Stock.industry, Stock.sector).where(
                     Stock.symbol.in_(unique_symbols)
@@ -339,14 +434,75 @@ async def _load_stock_metadata(symbols: List[str]) -> Dict[str, Dict[str, Option
             )
         ).all()
 
-    return {
+        company_rows = (
+            await session.execute(
+                select(Company.symbol, Company.exchange, Company.industry, Company.sector).where(
+                    Company.symbol.in_(unique_symbols)
+                )
+            )
+        ).all()
+
+        ranked_snapshots = (
+            select(
+                ScreenerSnapshot.symbol.label("symbol"),
+                ScreenerSnapshot.exchange.label("exchange"),
+                ScreenerSnapshot.industry.label("industry"),
+                func.row_number()
+                .over(
+                    partition_by=ScreenerSnapshot.symbol,
+                    order_by=ScreenerSnapshot.snapshot_date.desc(),
+                )
+                .label("rn"),
+            )
+            .where(ScreenerSnapshot.symbol.in_(unique_symbols))
+            .subquery()
+        )
+        latest_snapshot_rows = (
+            await session.execute(
+                select(
+                    ranked_snapshots.c.symbol,
+                    ranked_snapshots.c.exchange,
+                    ranked_snapshots.c.industry,
+                ).where(ranked_snapshots.c.rn == 1)
+            )
+        ).all()
+
+    metadata: Dict[str, Dict[str, Optional[str]]] = {
         _normalize_symbol(symbol): {
             "exchange": _normalize_text(exchange),
             "industry": _normalize_text(industry),
             "sector": _normalize_text(sector),
         }
-        for symbol, exchange, industry, sector in rows
+        for symbol, exchange, industry, sector in stock_rows
     }
+
+    for symbol, exchange, industry, sector in company_rows:
+        symbol_key = _normalize_symbol(symbol)
+        if not symbol_key:
+            continue
+        payload = metadata.setdefault(
+            symbol_key, {"exchange": None, "industry": None, "sector": None}
+        )
+        if not payload.get("exchange") and _normalize_text(exchange):
+            payload["exchange"] = _normalize_text(exchange)
+        if not payload.get("industry") and _normalize_text(industry):
+            payload["industry"] = _normalize_text(industry)
+        if not payload.get("sector") and _normalize_text(sector):
+            payload["sector"] = _normalize_text(sector)
+
+    for symbol, exchange, industry in latest_snapshot_rows:
+        symbol_key = _normalize_symbol(symbol)
+        if not symbol_key:
+            continue
+        payload = metadata.setdefault(
+            symbol_key, {"exchange": None, "industry": None, "sector": None}
+        )
+        if not payload.get("exchange") and _normalize_text(exchange):
+            payload["exchange"] = _normalize_text(exchange)
+        if not payload.get("industry") and _normalize_text(industry):
+            payload["industry"] = _normalize_text(industry)
+
+    return metadata
 
 
 async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:

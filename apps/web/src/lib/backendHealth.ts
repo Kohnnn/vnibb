@@ -39,26 +39,26 @@ async function fetchWithTimeout(url: string, timeoutMs = 8000): Promise<Response
 }
 
 export interface BackendProbeResult {
-  liveOk: boolean
-  readyOk: boolean
+  healthOk: boolean
+  dataOk: boolean
 }
 
 export async function probeBackendReadiness(timeoutMs = 8000): Promise<BackendProbeResult> {
   const baseApiUrl = getRuntimeApiBaseUrl()
   if (!baseApiUrl) {
-    return { liveOk: false, readyOk: false }
+    return { healthOk: false, dataOk: false }
   }
 
   try {
-    const [liveRes, readyRes] = await Promise.allSettled([
-      fetchWithTimeout(`${baseApiUrl}/live`, timeoutMs),
-      fetchWithTimeout(`${baseApiUrl}/ready`, timeoutMs),
+    const [healthRes, dataRes] = await Promise.allSettled([
+      fetchWithTimeout(`${baseApiUrl}/api/v1/health`, timeoutMs),
+      fetchWithTimeout(`${baseApiUrl}/api/v1/equity/VNM/ratios`, timeoutMs),
     ])
 
-    const liveOk = liveRes.status === 'fulfilled' && liveRes.value.ok
-    const readyOk = readyRes.status === 'fulfilled' && readyRes.value.ok
-    return { liveOk, readyOk }
+    const healthOk = healthRes.status === 'fulfilled' && healthRes.value.ok
+    const dataOk = dataRes.status === 'fulfilled' && dataRes.value.ok
+    return { healthOk, dataOk }
   } catch {
-    return { liveOk: false, readyOk: false }
+    return { healthOk: false, dataOk: false }
   }
 }

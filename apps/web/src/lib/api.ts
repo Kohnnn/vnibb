@@ -724,15 +724,33 @@ export interface InsiderDealsResponse {
     }>;
 }
 
+export interface DividendRecord {
+    symbol?: string;
+    ex_date?: string | null;
+    record_date?: string | null;
+    payment_date?: string | null;
+    type?: string | null;
+    dividend_type?: string | null;
+    raw_dividend_type?: string | null;
+    cash_dividend?: number | null;
+    stock_dividend?: number | null;
+    dividend_ratio?: number | string | null;
+    value?: number | null;
+    fiscal_year?: number | null;
+    issue_year?: number | null;
+    year?: number | null;
+    annual_dps?: number | null;
+    dividend_yield?: number | null;
+    description?: string | null;
+}
+
 export interface DividendsResponse {
-    count: number;
-    data: Array<{
-        ex_date: string;
-        record_date: string;
-        payment_date: string;
-        dividend_type: string;
-        value: number;
-    }>;
+    count?: number;
+    data: DividendRecord[];
+    meta?: {
+        count?: number;
+    };
+    error?: string | null;
 }
 
 export interface TradingStatsResponse {

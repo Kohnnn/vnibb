@@ -176,60 +176,72 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             try:
                 from vnstock import Vnstock
 
-                stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
-                finance = stock.finance
-
-                # Select statement type
                 statement_type = query["statement_type"]
                 period = query["period"]
+                candidate_sources: list[str] = []
+                for source in ["VCI", settings.vnstock_source, "KBS"]:
+                    if source and source not in candidate_sources:
+                        candidate_sources.append(source)
 
-                if statement_type == "income":
-                    df = finance.income_statement(period=period)
-                elif statement_type == "balance":
-                    df = finance.balance_sheet(period=period)
-                elif statement_type == "cashflow":
-                    df = finance.cash_flow(period=period)
-                else:
+                def _fetch_df(finance: Any, lang: str | None):
+                    kwargs = {"period": period}
+                    if lang is not None:
+                        kwargs["lang"] = lang
+
+                    if statement_type == "income":
+                        return finance.income_statement(**kwargs)
+                    if statement_type == "balance":
+                        return finance.balance_sheet(**kwargs)
+                    if statement_type == "cashflow":
+                        return finance.cash_flow(**kwargs)
+
                     raise ValueError(f"Unknown statement type: {statement_type}")
 
-                if df is None or df.empty:
-                    logger.warning(f"No {statement_type} data for {query['symbol']}")
-                    return []
+                for source in candidate_sources:
+                    try:
+                        stock = Vnstock().stock(symbol=query["symbol"], source=source)
+                        finance = stock.finance
+                    except Exception as source_init_error:
+                        logger.debug(
+                            "vnstock source init failed for %s source=%s: %s",
+                            query["symbol"],
+                            source,
+                            source_init_error,
+                        )
+                        continue
 
-                def _column_is_period(col: Any) -> bool:
-                    col_str = str(col).strip().upper()
-                    return bool(
-                        re.match(r"^\d{4}$", col_str)
-                        or re.match(r"^Q[1-4]-\d{4}$", col_str)
-                        or re.match(r"^\d{4}-Q[1-4]$", col_str)
-                        or re.match(r"^\d{4}Q[1-4]$", col_str)
-                    )
+                    for lang in ["en", None, "vi"]:
+                        try:
+                            df = _fetch_df(finance, lang)
+                        except TypeError:
+                            # Some vnstock source/method combos do not support lang.
+                            if lang is not None:
+                                continue
+                            df = _fetch_df(finance, None)
+                        except Exception as source_error:
+                            logger.debug(
+                                "vnstock %s fetch failed for %s source=%s lang=%s: %s",
+                                statement_type,
+                                query["symbol"],
+                                source,
+                                lang,
+                                source_error,
+                            )
+                            continue
 
-                row_based = any(
-                    c in df.columns for c in ["item", "item_id", "itemId", "item_name", "itemName"]
-                ) and any(_column_is_period(c) for c in df.columns)
+                        if df is not None and not df.empty:
+                            if source != settings.vnstock_source:
+                                logger.info(
+                                    "Using fallback vnstock source for %s %s: %s (lang=%s)",
+                                    query["symbol"],
+                                    statement_type,
+                                    source,
+                                    lang,
+                                )
+                            return _normalize_financial_frame(df, query["limit"], statement_type)
 
-                # Limit records for period-based data only
-                if not row_based:
-                    df = df.head(query["limit"])
-
-                # Preserve period from index when missing
-                if "period" not in df.columns:
-                    index_name = df.index.name or "index"
-                    df = df.reset_index()
-                    if "period" not in df.columns:
-                        if index_name in df.columns:
-                            df = df.rename(columns={index_name: "period"})
-                        elif "index" in df.columns:
-                            df = df.rename(columns={"index": "period"})
-
-                records = df.to_dict("records")
-
-                # Add metadata
-                for record in records:
-                    record["_statement_type"] = statement_type
-
-                return records
+                logger.warning(f"No {statement_type} data for {query['symbol']}")
+                return []
 
             except Exception as e:
                 logger.error(f"vnstock financials fetch error: {e}")
@@ -238,6 +250,44 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     provider="vnstock",
                     details={"symbol": query["symbol"]},
                 ) from e
+
+        def _normalize_financial_frame(
+            df: Any, limit: int, statement_type: str
+        ) -> list[dict[str, Any]]:
+            def _column_is_period(col: Any) -> bool:
+                col_str = str(col).strip().upper()
+                return bool(
+                    re.match(r"^\d{4}$", col_str)
+                    or re.match(r"^Q[1-4]-\d{4}$", col_str)
+                    or re.match(r"^\d{4}-Q[1-4]$", col_str)
+                    or re.match(r"^\d{4}Q[1-4]$", col_str)
+                )
+
+            row_based = any(
+                c in df.columns for c in ["item", "item_id", "itemId", "item_name", "itemName"]
+            ) and any(_column_is_period(c) for c in df.columns)
+
+            # Limit records for period-based data only
+            if not row_based:
+                df = df.head(limit)
+
+            # Preserve period from index when missing
+            if "period" not in df.columns:
+                index_name = df.index.name or "index"
+                df = df.reset_index()
+                if "period" not in df.columns:
+                    if index_name in df.columns:
+                        df = df.rename(columns={index_name: "period"})
+                    elif "index" in df.columns:
+                        df = df.rename(columns={"index": "period"})
+
+            records = df.to_dict("records")
+
+            # Add metadata
+            for record in records:
+                record["_statement_type"] = statement_type
+
+            return records
 
         try:
             return await asyncio.wait_for(

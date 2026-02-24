@@ -518,7 +518,7 @@ export function Sidebar({
                 {/* Library Section */}
                 {!collapsed && (
                     <div className="px-2 py-1 border-b border-[var(--border-color)] shrink-0">
-                        <h3 className="px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                        <h3 className="px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
                             Library
                         </h3>
                         <button
@@ -551,7 +551,7 @@ export function Sidebar({
                     {!collapsed && (
                         <>
                             <div className="flex items-center justify-between px-1.5 py-0.5 mb-0.5">
-                                <h3 className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                                <h3 className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
                                     My Dashboards
                                 </h3>
                                 <div className="relative">

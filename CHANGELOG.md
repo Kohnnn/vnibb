@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-02-24 - Sprint V61 to V66
+
+### Backend and data pipeline execution
+- Hardened API connectivity flow with CORS/health route alignment, websocket/API routing refinements, and backend health signal handling updates.
+- Extended sector and heatmap intelligence using broader Vietnamese industry normalization and snapshot-aware sector symbol derivation.
+- Improved screener and comparison enrichment pipeline paths in `data_pipeline`/`comparison_service`, including additional ratio fallback hydration.
+- Enriched `/equity/{symbol}/dividends` with normalized payout classification (`cash`/`stock`/`mixed`), cleaned null-only records, annual DPS rollups, and computed dividend yield from latest available price.
+- Added operational repair utilities for batch refreshes:
+  - `apps/api/scripts/v62_financial_resync.py`
+  - `apps/api/scripts/v64_screener_enrich.py`
+
+### Frontend stability and light-mode polish
+- Improved Top Movers data resilience by parsing mixed payload key styles and deriving change percent when only absolute change/price is present.
+- Increased light-theme readability for dashboard controls and labels in header/sidebar/copilot components.
+- Updated dividend-related widgets (`Dividend Payment`, `Dividend Ladder`, `News + Corporate Actions`, `Ticker Profile`) to render normalized payout type/value and yield metadata safely across mixed payload formats.
+- Continued dashboard connectivity hardening via backend status checks and sync handling updates.
+
+### Verification and release notes
+- Backend tests: `pytest tests -q` (74 passed).
+- Frontend quality gate: `pnpm exec tsc --noEmit`, `pnpm lint`, `pnpm build` (all passed).
+- Checklist run: `python -X utf8 .agent/scripts/checklist.py .` (5/6 passed; UX audit still reports repository-wide heuristic issues).
+- Production verification remains blocked by upstream deploy health: `/api/v1/health` and key data endpoints currently return `502`, so post-deploy revalidation is required.
+
 ## 2026-02-23 - Sprint V53 to V56
 
 ### Backend data completeness and intelligence
