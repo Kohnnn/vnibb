@@ -199,9 +199,8 @@ class VnstockStockQuoteFetcher:
             
             return quote_data, False
             
-        except Exception as e:
+        except BaseException as e:
             logger.error(f"Stock quote fetch failed for {symbol}: {e}")
-            # Return empty quote instead of raising - graceful degradation
             empty_quote = StockQuoteData(
                 symbol=symbol,
                 updated_at=datetime.utcnow(),

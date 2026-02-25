@@ -151,10 +151,11 @@ else
 fi
 
 # 3. Start Application
-echo "Starting VNIBB API..."
+APP_PORT="${PORT:-8000}"
+echo "Starting VNIBB API on port ${APP_PORT}..."
 if "$PYTHON_BIN" -c "import uvicorn" >/dev/null 2>&1; then
-    exec "$PYTHON_BIN" -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port 8000
+    exec "$PYTHON_BIN" -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port "$APP_PORT"
 fi
 
 echo "WARNING: Selected interpreter ($PYTHON_BIN) missing uvicorn. Falling back to system python3."
-exec python3 -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port 8000
+exec python3 -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port "$APP_PORT"

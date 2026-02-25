@@ -70,9 +70,9 @@ RUN chmod +x entrypoint.sh
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 
-# Health check (will run as the user defined in USER instruction, but defined here)
+# Health check (support platform-assigned PORT)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD sh -c 'curl -f "http://localhost:${PORT:-8000}/health" || exit 1'
 
 # Switch to non-root user
 # USER appuser
