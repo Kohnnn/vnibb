@@ -246,6 +246,15 @@ def _to_historical_data(row: StockPrice) -> EquityHistoricalData:
     )
 
 
+def _normalize_symbol_input(symbol: str) -> str:
+    raw = (symbol or "").strip().upper()
+    if not raw:
+        return ""
+
+    tokens = [token for token in re.split(r"[^A-Z0-9]+", raw) if token]
+    return tokens[0] if tokens else raw
+
+
 def _coerce_optional_float(value: Any) -> Optional[float]:
     if value is None:
         return None
@@ -1170,7 +1179,23 @@ async def get_quote(
     refresh: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
-    symbol_upper = symbol.upper()
+    symbol_upper = _normalize_symbol_input(symbol)
+    if not re.fullmatch(r"[A-Z0-9]{3}", symbol_upper):
+        logger.warning(f"Rejected invalid quote symbol: '{symbol}' -> '{symbol_upper}'")
+        return StandardResponse(
+            data=StockQuoteData(
+                symbol=symbol_upper or symbol.upper(),
+                price=0,
+                change=0,
+                change_pct=0,
+                high=0,
+                low=0,
+                open=0,
+                volume=0,
+                updated_at=datetime.utcnow(),
+            ),
+            error="Invalid symbol format. Expected a 3-character ticker.",
+        )
 
     async def _get_db_quote() -> Optional[StockQuoteData]:
         try:
