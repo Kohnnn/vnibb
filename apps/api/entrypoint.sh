@@ -151,7 +151,17 @@ else
 fi
 
 # 3. Start Application
-APP_PORT="${PORT:-8000}"
+APP_PORT="${PORT:-${WEB_PORT:-8000}}"
+case "$APP_PORT" in
+    ''|*[!0-9]*)
+        case "${WEB_PORT:-}" in
+            ''|*[!0-9]*) APP_PORT="8000" ;;
+            *) APP_PORT="${WEB_PORT}" ;;
+        esac
+        ;;
+esac
+
+echo "Resolved ports: PORT='${PORT:-}' WEB_PORT='${WEB_PORT:-}' APP_PORT='${APP_PORT}'"
 echo "Starting VNIBB API on port ${APP_PORT}..."
 if "$PYTHON_BIN" -c "import uvicorn" >/dev/null 2>&1; then
     exec "$PYTHON_BIN" -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port "$APP_PORT"
