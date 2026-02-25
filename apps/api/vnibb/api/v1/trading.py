@@ -238,11 +238,9 @@ async def get_sector_top_movers(
                 pass
         
         return SectorTopMoversResponse(count=len(data), type=type, data=data)
-    except ProviderError as e:
-        # Return empty response instead of error
+    except ProviderError:
         return SectorTopMoversResponse(count=0, type=type, data=[])
-    except Exception as e:
-        # Log error but return empty response
+    except BaseException:
         return SectorTopMoversResponse(count=0, type=type, data=[])
 
 
