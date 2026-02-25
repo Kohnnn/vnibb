@@ -246,7 +246,7 @@ class VnstockTopMoversFetcher:
                     if symbols_result is not None and len(symbols_result) > 0:
                         symbols = symbols_result.tolist()
                         logger.info(f"Got {len(symbols)} symbols for group {group}")
-                except Exception as e:
+                except BaseException as e:
                     logger.warning(f"Failed to get symbols for group {group}: {e}")
 
                 # Fallback: get all symbols and filter by exchange
@@ -262,7 +262,7 @@ class VnstockTopMoversFetcher:
                                     all_df = all_df[all_df["exchange"] == "HOSE"]
                             symbols = all_df["symbol"].head(100).tolist()
                             logger.info(f"Got {len(symbols)} symbols from fallback")
-                    except Exception as e:
+                    except BaseException as e:
                         logger.error(f"Failed to get all_symbols: {e}")
                         return []
 
@@ -284,7 +284,7 @@ class VnstockTopMoversFetcher:
                     logger.info(f"Got {len(records)} records from price_board")
                     return records
 
-                except Exception as e:
+                except BaseException as e:
                     logger.error(f"Price board fetch failed: {e}")
                     return []
 
@@ -354,7 +354,7 @@ class VnstockTopMoversFetcher:
             logger.info(f"Returning {len(results)} top movers for {type}/{index}")
             return results
 
-        except Exception as e:
+        except BaseException as e:
             logger.error(f"Top movers fetch failed for {type}/{index}: {e}", exc_info=True)
             return []
 
@@ -392,7 +392,7 @@ class VnstockTopMoversFetcher:
                             if symbol:
                                 industry_map[symbol] = industry
                         logger.info(f"Got industry mapping for {len(industry_map)} symbols")
-                except Exception as e:
+                except BaseException as e:
                     logger.warning(f"Failed to get industry mapping: {e}")
 
                 # Get VN100 symbols for broader coverage
@@ -403,7 +403,7 @@ class VnstockTopMoversFetcher:
                     if vn100_result is not None and len(vn100_result) > 0:
                         symbols = vn100_result.tolist()
                         logger.info(f"Got {len(symbols)} VN100 symbols")
-                except Exception as e:
+                except BaseException as e:
                     logger.warning(f"Failed to get VN100 symbols: {e}")
 
                 if not symbols:
@@ -413,7 +413,7 @@ class VnstockTopMoversFetcher:
                         if all_df is not None and not all_df.empty:
                             symbols = all_df["symbol"].head(100).tolist()
                             logger.info(f"Using {len(symbols)} symbols from all_symbols fallback")
-                    except Exception as e:
+                    except BaseException as e:
                         logger.error(f"Failed to get all_symbols fallback: {e}")
 
                 if not symbols:
@@ -429,7 +429,7 @@ class VnstockTopMoversFetcher:
                     df = _flatten_multiindex_df(df)
                     records = df.to_dict(orient="records")
                     logger.info(f"Got {len(records)} records for sector movers")
-                except Exception as e:
+                except BaseException as e:
                     logger.error(f"Price board fetch failed: {e}")
                     return [], industry_map
 
@@ -501,6 +501,6 @@ class VnstockTopMoversFetcher:
             logger.info(f"Returning {len(results)} sectors for {type}")
             return results
 
-        except Exception as e:
+        except BaseException as e:
             logger.error(f"Sector top movers fetch failed: {e}", exc_info=True)
             return []

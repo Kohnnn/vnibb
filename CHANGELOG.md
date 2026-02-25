@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-02-25 - Sprint V67 to V72 (Readiness + Stability Hardening)
+
+### Backend resilience and orchestration readiness
+- Added `apps/api/scripts/v67_universal_resync.py` for batch financial resync across all active symbols.
+- Added `apps/api/scripts/v68_screener_enrich.py` for batch screener enrichment with ratio refresh.
+- Fixed financial period normalization to prioritize year metadata over ordinal period counters in:
+  - `apps/api/vnibb/providers/vnstock/financials.py`
+  - `apps/api/vnibb/services/data_pipeline.py`
+- Hardened sector top movers to degrade gracefully on vnstock/vnai quota failures that raise `SystemExit`:
+  - `apps/api/vnibb/providers/vnstock/top_movers.py`
+  - `apps/api/vnibb/api/v1/trading.py`
+
+### Frontend connectivity polish
+- Stabilized header backend-status behavior in `apps/web/src/components/ui/ConnectionStatus.tsx` by requiring repeated failures before entering offline state.
+
+### Verification snapshot
+- Backend tests: `pytest tests -q` (74 passed).
+- Frontend checks: `pnpm exec tsc --noEmit`, `pnpm lint`, `pnpm build` (all passed).
+- Checklist: `python -X utf8 .agent/scripts/checklist.py .` (5/6 passed; UX audit still reports repository-wide heuristic issues).
+
 ## 2026-02-24 - Sprint V61 to V66
 
 ### Backend and data pipeline execution

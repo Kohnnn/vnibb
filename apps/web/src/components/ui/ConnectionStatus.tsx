@@ -9,43 +9,39 @@ type ConnectionState = 'checking' | 'online' | 'offline' | 'degraded';
 export function ConnectionStatus() {
   const [status, setStatus] = useState<ConnectionState>('checking');
   const [isChecking, setIsChecking] = useState(false);
-  const retriesRef = useRef(0);
-  const MAX_RETRIES = 2;
+  const consecutiveFailuresRef = useRef(0);
+  const OFFLINE_THRESHOLD = 3;
 
-  const checkConnection = useCallback(async (isRetry = false) => {
+  const checkConnection = useCallback(async () => {
     setIsChecking(true);
     try {
       const { healthOk, dataOk } = await probeBackendReadiness(8000);
 
       if (healthOk && dataOk) {
+        consecutiveFailuresRef.current = 0;
         setStatus('online');
-        retriesRef.current = 0;
       } else if (healthOk) {
+        consecutiveFailuresRef.current = 0;
         setStatus('degraded');
-        retriesRef.current = 0;
       } else {
-        // If first check fails, retry before showing offline
-        if (!isRetry && retriesRef.current < MAX_RETRIES) {
-          retriesRef.current += 1;
-          // Wait 2s and retry
-          setTimeout(() => checkConnection(true), 2000);
-          return; // Don't set offline yet
+        consecutiveFailuresRef.current += 1;
+        if (consecutiveFailuresRef.current >= OFFLINE_THRESHOLD) {
+          setStatus('offline');
+        } else if (status === 'checking') {
+          setStatus('degraded');
         }
-        setStatus('offline');
-        retriesRef.current = 0;
       }
     } catch {
-      if (!isRetry && retriesRef.current < MAX_RETRIES) {
-        retriesRef.current += 1;
-        setTimeout(() => checkConnection(true), 2000);
-        return;
+      consecutiveFailuresRef.current += 1;
+      if (consecutiveFailuresRef.current >= OFFLINE_THRESHOLD) {
+        setStatus('offline');
+      } else if (status === 'checking') {
+        setStatus('degraded');
       }
-      setStatus('offline');
-      retriesRef.current = 0;
     } finally {
       setIsChecking(false);
     }
-  }, []);
+  }, [status]);
 
   useEffect(() => {
     checkConnection();

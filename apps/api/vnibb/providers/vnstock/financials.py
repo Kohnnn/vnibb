@@ -766,16 +766,24 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         mapped_metrics[metric_key] = numeric
 
                 # Extract period identifier
-                period = (
-                    row.get("period")
-                    or row.get("year")
-                    or row.get("quarter")
-                    or row.get("yearReport")
+                year_hint = (
+                    row.get("yearReport")
                     or row.get("fiscalYear")
                     or normalized_row.get("yearreport")
                     or normalized_row.get("nam")
-                    or "Unknown"
                 )
+                raw_period = row.get("period") or row.get("quarter") or row.get("year")
+                period: Any = year_hint or raw_period or "Unknown"
+
+                if params.period == "quarter" and year_hint is not None:
+                    quarter_hint = row.get("quarter") or row.get("period")
+                    try:
+                        quarter_value = int(float(quarter_hint))
+                    except (TypeError, ValueError):
+                        quarter_value = None
+                    if quarter_value is not None and 1 <= quarter_value <= 4:
+                        period = f"Q{quarter_value}-{int(float(year_hint))}"
+
                 if isinstance(period, (int, float)):
                     period = str(int(period))
 

@@ -1981,6 +1981,7 @@ class DataPipeline:
         period: str = "year",
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
+        statement_types: Optional[List[StatementType | str]] = None,
     ) -> int:
         """Sync income, balance, and cashflow for specified symbols."""
         if not symbols:
@@ -2008,16 +2009,43 @@ class DataPipeline:
         normalized_period = "quarter" if period in {"quarter", "Q", "QTR"} else "year"
         fetch_limit = 8 if normalized_period == "quarter" else 6
 
-        def _parse_period_fields(raw_period: Any) -> Tuple[str, int, Optional[int]]:
-            raw_text = str(raw_period or "").strip().upper()
-            if not raw_text:
-                fallback_year = datetime.utcnow().year
-                return str(fallback_year), fallback_year, None
+        def _parse_period_fields(
+            raw_period: Any,
+            raw_payload: Optional[Dict[str, Any]] = None,
+        ) -> Tuple[str, int, Optional[int]]:
+            payload = raw_payload if isinstance(raw_payload, dict) else {}
 
+            year_hint: Optional[int] = None
+            for key in ("yearReport", "fiscalYear", "year_report", "year"):
+                value = payload.get(key)
+                if value is None:
+                    continue
+                try:
+                    parsed_year = int(float(value))
+                except (TypeError, ValueError):
+                    continue
+                if 1900 <= parsed_year <= 2100:
+                    year_hint = parsed_year
+                    break
+
+            raw_text = str(raw_period or "").strip().upper()
             year_match = re.search(r"(20\d{2})", raw_text)
-            fiscal_year = int(year_match.group(1)) if year_match else datetime.utcnow().year
+            fiscal_year = int(year_match.group(1)) if year_match else (year_hint or datetime.utcnow().year)
+
             quarter_match = re.search(r"Q([1-4])", raw_text)
             fiscal_quarter = int(quarter_match.group(1)) if quarter_match else None
+            if fiscal_quarter is None and normalized_period == "quarter":
+                for key in ("quarter", "period"):
+                    value = payload.get(key)
+                    if value is None:
+                        continue
+                    try:
+                        parsed_quarter = int(float(value))
+                    except (TypeError, ValueError):
+                        continue
+                    if 1 <= parsed_quarter <= 4:
+                        fiscal_quarter = parsed_quarter
+                        break
 
             if normalized_period == "quarter" and fiscal_quarter is not None:
                 return f"Q{fiscal_quarter}-{fiscal_year}", fiscal_year, fiscal_quarter
@@ -2056,11 +2084,29 @@ class DataPipeline:
             symbol = symbols[idx]
             await self.rate_limiters["financials"].wait()
             try:
-                statement_specs = [
+                default_statement_specs = [
                     (StatementType.INCOME, IncomeStatement, "income"),
                     (StatementType.BALANCE, BalanceSheet, "balance"),
                     (StatementType.CASHFLOW, CashFlow, "cashflow"),
                 ]
+                if statement_types:
+                    requested_types = {
+                        (item.value if isinstance(item, StatementType) else str(item).strip().lower())
+                        for item in statement_types
+                        if item is not None
+                    }
+                    statement_specs = [
+                        spec for spec in default_statement_specs if spec[0].value in requested_types
+                    ]
+                else:
+                    statement_specs = default_statement_specs
+
+                if not statement_specs:
+                    logger.warning(
+                        "No valid statement types requested for financial sync: %s",
+                        statement_types,
+                    )
+                    continue
 
                 symbol_synced = False
                 income_depreciation_lookup: Dict[Tuple[int, int], float] = {}
@@ -2079,14 +2125,16 @@ class DataPipeline:
                     latest_cache_payload: List[Dict[str, Any]] = []
                     async with async_session_maker() as session:
                         for entry in items:
-                            period_value, fiscal_year, fiscal_quarter = _parse_period_fields(
-                                entry.period
-                            )
                             payload = entry.model_dump(mode="json")
                             if isinstance(entry.raw_data, dict):
                                 raw_payload = dict(entry.raw_data)
                             else:
                                 raw_payload = dict(payload)
+
+                            period_value, fiscal_year, fiscal_quarter = _parse_period_fields(
+                                entry.period,
+                                raw_payload,
+                            )
 
                             common = {
                                 "symbol": symbol,
