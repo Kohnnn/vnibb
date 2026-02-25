@@ -30,8 +30,10 @@ RUN wget -q https://vnstocks.com/files/vnstock-cli-installer.run \
     -O /app/vnstock-cli-installer.run && \
     chmod +x /app/vnstock-cli-installer.run
 
+# Copy application source first (pyproject build needs README/package files)
+COPY . .
+
 # Install Python dependencies
-COPY pyproject.toml ./
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir .
 
@@ -56,11 +58,6 @@ ARG VNSTOCK_API_KEY
 #     echo "WARNING: VNSTOCK_API_KEY not provided. Premium packages not installed."; \
 #     fi
 
-
-
-# Copy application code
-# Copy application code
-COPY . .
 
 # Copy entrypoint script and set permissions (as root)
 COPY entrypoint.sh .

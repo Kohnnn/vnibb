@@ -40,8 +40,10 @@ RUN wget -q https://vnstocks.com/files/vnstock-cli-installer.run \
     -O /app/vnstock-cli-installer.run && \
     chmod +x /app/vnstock-cli-installer.run
 
-# Copy and install Python dependencies first (for caching)
-COPY pyproject.toml .
+# Copy application source (pyproject build needs README/package files)
+COPY . .
+
+# Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir .
 
@@ -63,11 +65,6 @@ RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
 
 # Verify vnstock installation
 RUN python3 -c "import vnstock; print(f'vnstock {vnstock.__version__} installed')" || true
-
-# Copy application code
-COPY vnibb/ ./vnibb/
-COPY migrations/ ./migrations/
-COPY alembic.ini .
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && \

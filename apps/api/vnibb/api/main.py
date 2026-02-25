@@ -15,6 +15,7 @@ import re
 import asyncio
 import sys
 import io
+import os
 
 # Ensure stdout handles emojis even on windows consoles with limited encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -455,9 +456,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning(f"WebSocket broadcaster start failed (non-fatal): {e}")
 
     # Log startup complete
+    effective_port = os.getenv("PORT", str(settings.api_port))
     logger.info(
         f"{settings.app_name} started successfully - "
-        f"listening on {settings.api_host}:{settings.api_port}"
+        f"listening on {settings.api_host}:{effective_port}"
     )
 
     yield
