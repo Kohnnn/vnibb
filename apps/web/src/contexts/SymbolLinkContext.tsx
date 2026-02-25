@@ -2,6 +2,19 @@
 
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 
+const TICKER_PATTERN = /^[A-Z0-9]{3}$/;
+
+function normalizeTickerSymbol(rawSymbol: string): string | null {
+  const raw = String(rawSymbol || '').toUpperCase().trim();
+  if (!raw) return null;
+
+  const tokens = raw.split(/[^A-Z0-9]+/).filter(Boolean);
+  const candidate = tokens[0] || raw;
+
+  if (!TICKER_PATTERN.test(candidate)) return null;
+  return candidate;
+}
+
 interface SymbolLinkContextType {
   globalSymbol: string;
   setGlobalSymbol: (symbol: string) => void;
@@ -13,8 +26,14 @@ interface SymbolLinkContextType {
 const SymbolLinkContext = createContext<SymbolLinkContextType | null>(null);
 
 export function SymbolLinkProvider({ children }: { children: ReactNode }) {
-  const [globalSymbol, setGlobalSymbol] = useState<string>('VNM');
+  const [globalSymbol, setGlobalSymbolState] = useState<string>('VNM');
   const [linkedWidgets, setLinkedWidgets] = useState<Set<string>>(new Set());
+
+  const setGlobalSymbol = useCallback((symbol: string) => {
+    const normalized = normalizeTickerSymbol(symbol);
+    if (!normalized) return;
+    setGlobalSymbolState(normalized);
+  }, []);
 
   const toggleWidgetLink = useCallback((widgetId: string) => {
     setLinkedWidgets(prev => {

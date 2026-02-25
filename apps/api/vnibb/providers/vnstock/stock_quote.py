@@ -200,7 +200,11 @@ class VnstockStockQuoteFetcher:
             return quote_data, False
             
         except BaseException as e:
-            logger.error(f"Stock quote fetch failed for {symbol}: {e}")
+            error_text = str(e).lower()
+            if "invalid symbol" in error_text or "symbol format" in error_text:
+                logger.warning(f"Stock quote rejected for invalid symbol {symbol}: {e}")
+            else:
+                logger.error(f"Stock quote fetch failed for {symbol}: {e}")
             empty_quote = StockQuoteData(
                 symbol=symbol,
                 updated_at=datetime.utcnow(),
