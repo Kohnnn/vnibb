@@ -91,7 +91,7 @@ async def ensure_vnstock_registration() -> RegistrationResult:
             await _write_registration_state(registration_key, payload)
             _local_registered.add(fingerprint)
             return RegistrationResult(True, "registered", lock.source)
-        except Exception as exc:
+        except BaseException as exc:
             logger.warning(f"VNStock API key registration failed: {exc}")
             return RegistrationResult(False, "exception", lock.source)
         finally:
@@ -99,9 +99,13 @@ async def ensure_vnstock_registration() -> RegistrationResult:
 
 
 def _register_api_key(api_key: str) -> bool:
-    from vnstock import change_api_key
+    try:
+        from vnstock import change_api_key
 
-    return bool(change_api_key(api_key))
+        return bool(change_api_key(api_key))
+    except BaseException as exc:
+        logger.warning(f"change_api_key raised non-standard exception: {exc}")
+        return False
 
 
 @dataclass

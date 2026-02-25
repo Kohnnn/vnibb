@@ -22,6 +22,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e "apps/api[dev]"
 
+      - name: Preflight Zeabur status codes
+        run: |
+          set +e
+          echo "health: $(curl -s -o /dev/null -w '%{http_code}' https://vnibb.zeabur.app/health/)"
+          echo "live: $(curl -s -o /dev/null -w '%{http_code}' https://vnibb.zeabur.app/live)"
+          echo "ready: $(curl -s -o /dev/null -w '%{http_code}' https://vnibb.zeabur.app/ready)"
+          set -e
+
       - name: Run core endpoint gate
         working-directory: apps/api
         run: |
@@ -31,3 +39,11 @@ jobs:
             --timeout 10 \
             --fail-on-error \
             --output-json scripts/v34_widget_health_after.json
+
+      - name: Upload reliability artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reliability-gate-${{ github.run_id }}
+          path: apps/api/scripts/v34_widget_health_after.json
+          if-no-files-found: warn

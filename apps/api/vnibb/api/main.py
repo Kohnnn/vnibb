@@ -119,18 +119,20 @@ class CORSErrorMiddleware(BaseHTTPMiddleware):
 
     FastAPI's CORSMiddleware may not add headers when exceptions occur
     before the response is fully processed. This middleware catches
-    any unhandled exceptions and ensures CORS headers are present.
+    unhandled request exceptions, including provider-level SystemExit,
+    and ensures CORS headers are present.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
         try:
             response = await call_next(request)
             return response
-        except Exception as exc:
-            # Log the exception
+        except BaseException as exc:
+            if isinstance(exc, (KeyboardInterrupt, GeneratorExit)):
+                raise
+
             logger.exception(f"Unhandled exception in middleware: {exc}")
 
-            # Return error response with CORS headers
             headers = get_cors_headers(request)
             return JSONResponse(
                 status_code=500,
@@ -295,7 +297,7 @@ async def _safe_warmup():
         from vnibb.services.warmup_service import warmup_cache
 
         await warmup_cache()
-    except Exception as e:
+    except BaseException as e:
         logger.warning(f"Background warmup failed: {e}")
 
 
@@ -315,7 +317,7 @@ def _warmup_vnstock_sync():
         from vnstock import Listing, Company, Finance
 
         logger.info("vnstock modules pre-loaded successfully.")
-    except Exception as e:
+    except BaseException as e:
         logger.warning(f"vnstock pre-initialization failed: {e}")
 
 
@@ -345,7 +347,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             def warmup_with_timeout():
                 try:
                     _warmup_vnstock_sync()
-                except Exception as e:
+                except BaseException as e:
                     logger.warning(f"vnstock pre-init failed (non-fatal): {e}")
 
             # Run in thread with 5s timeout to avoid blocking event loop startup
@@ -432,14 +434,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.info(f"VNStock registration skipped: {result.reason}")
             else:
                 logger.warning(f"VNStock registration skipped: {result.reason}")
-    except Exception as e:
+    except BaseException as e:
         logger.warning(f"VNStock registration failed (non-fatal): {e}")
 
     # Start scheduler for background data sync jobs
     try:
         start_scheduler()
         logger.info("Scheduler started with data sync jobs")
-    except Exception as e:
+    except BaseException as e:
         logger.warning(f"Scheduler start failed (non-fatal): {e}")
 
     # Start WebSocket price broadcaster for real-time updates
@@ -449,7 +451,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         await start_background_fetcher()
         logger.info("WebSocket price broadcaster started")
-    except Exception as e:
+    except BaseException as e:
         logger.warning(f"WebSocket broadcaster start failed (non-fatal): {e}")
 
     # Log startup complete
@@ -469,14 +471,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         await stop_background_fetcher()
         logger.info("WebSocket broadcaster stopped")
-    except Exception as e:
+    except BaseException as e:
         logger.warning(f"WebSocket broadcaster shutdown error: {e}")
 
     # Stop scheduler
     try:
         shutdown_scheduler()
         logger.info("Scheduler stopped")
-    except Exception as e:
+    except BaseException as e:
         logger.warning(f"Scheduler shutdown error: {e}")
 
     if settings.redis_url:

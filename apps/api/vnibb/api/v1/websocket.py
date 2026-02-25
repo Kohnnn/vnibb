@@ -105,7 +105,7 @@ async def fetch_and_broadcast_prices():
                                 timestamp=datetime.now(VN_TZ).isoformat(),
                             )
                             await manager.broadcast_price(symbol, update)
-                    except Exception as e:
+                    except BaseException as e:
                         logger.debug(f"Price fetch failed for {symbol}: {e}")
 
                     await asyncio.sleep(0.1)  # Rate limiting between symbols
@@ -114,7 +114,9 @@ async def fetch_and_broadcast_prices():
             sleep_time = 5 if market_open else 30
             await asyncio.sleep(sleep_time)
 
-        except Exception as e:
+        except BaseException as e:
+            if isinstance(e, (KeyboardInterrupt, GeneratorExit)):
+                raise
             logger.error(f"Price broadcast error: {e}")
             await asyncio.sleep(5)
 
@@ -174,7 +176,9 @@ async def websocket_prices(websocket: WebSocket):
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-    except Exception as e:
+    except BaseException as e:
+        if isinstance(e, (KeyboardInterrupt, GeneratorExit)):
+            raise
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(websocket)
 
