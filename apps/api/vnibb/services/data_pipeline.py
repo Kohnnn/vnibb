@@ -726,6 +726,13 @@ class DataPipeline:
             except (TypeError, ValueError):
                 return None
 
+        def _pick_float(*values: Any) -> Optional[float]:
+            for value in values:
+                parsed = _parse_float(value)
+                if parsed is not None:
+                    return parsed
+            return None
+
         def _extract_listing_metadata(src: str) -> Dict[str, Dict[str, Any]]:
             metadata: Dict[str, Dict[str, Any]] = {}
             try:
@@ -2030,7 +2037,9 @@ class DataPipeline:
 
             raw_text = str(raw_period or "").strip().upper()
             year_match = re.search(r"(20\d{2})", raw_text)
-            fiscal_year = int(year_match.group(1)) if year_match else (year_hint or datetime.utcnow().year)
+            fiscal_year = (
+                int(year_match.group(1)) if year_match else (year_hint or datetime.utcnow().year)
+            )
 
             quarter_match = re.search(r"Q([1-4])", raw_text)
             fiscal_quarter = int(quarter_match.group(1)) if quarter_match else None
@@ -2091,7 +2100,11 @@ class DataPipeline:
                 ]
                 if statement_types:
                     requested_types = {
-                        (item.value if isinstance(item, StatementType) else str(item).strip().lower())
+                        (
+                            item.value
+                            if isinstance(item, StatementType)
+                            else str(item).strip().lower()
+                        )
                         for item in statement_types
                         if item is not None
                     }

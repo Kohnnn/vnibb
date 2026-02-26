@@ -368,7 +368,8 @@ async def _resolve_profile_market_cap(
     latest_price = await _get_latest_price(db, symbol)
 
     if shares_value not in (None, 0) and latest_price not in (None, 0):
-        return shares_value * latest_price
+        multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
+        return shares_value * multiplier * latest_price
 
     direct_market_cap = _coerce_optional_float(fallback_market_cap)
     if direct_market_cap not in (None, 0):
@@ -481,6 +482,7 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
         ps=_pick_optional_float(row.ps_ratio, raw_data.get("ps"), raw_data.get("priceToSales")),
         ev_ebitda=_pick_optional_float(row.ev_ebitda, raw_data.get("ev_ebitda")),
         ev_sales=ev_sales,
+        ebitda=_pick_optional_float(raw_data.get("ebitda"), raw_data.get("ebitdaTtm")),
         roe=_pick_optional_float(row.roe, raw_data.get("roe")),
         roa=_pick_optional_float(row.roa, raw_data.get("roa")),
         eps=_pick_optional_float(row.eps, raw_data.get("eps"), raw_data.get("earningPerShare")),
@@ -566,6 +568,7 @@ def _ratio_has_metric_value(item: FinancialRatioData) -> bool:
         item.ps,
         item.ev_ebitda,
         item.ev_sales,
+        item.ebitda,
         item.roe,
         item.roa,
         item.eps,
@@ -814,6 +817,8 @@ async def _enrich_missing_ratio_metrics(
             IncomeStatement.cost_of_revenue,
             IncomeStatement.eps,
             IncomeStatement.interest_expense,
+            IncomeStatement.ebitda,
+            IncomeStatement.income_tax,
         )
         .where(IncomeStatement.symbol == symbol, IncomeStatement.period_type == normalized_period)
         .order_by(desc(IncomeStatement.fiscal_year), desc(IncomeStatement.fiscal_quarter))
@@ -839,6 +844,7 @@ async def _enrich_missing_ratio_metrics(
             CashFlow.free_cash_flow,
             CashFlow.dividends_paid,
             CashFlow.debt_repayment,
+            CashFlow.depreciation,
         )
         .where(CashFlow.symbol == symbol, CashFlow.period_type == normalized_period)
         .order_by(desc(CashFlow.fiscal_year), desc(CashFlow.fiscal_quarter))
@@ -859,6 +865,8 @@ async def _enrich_missing_ratio_metrics(
         cost_of_revenue,
         eps,
         interest_expense,
+        ebitda,
+        income_tax,
     ) in income_rows:
         if year is None:
             continue
@@ -870,6 +878,8 @@ async def _enrich_missing_ratio_metrics(
             "cost_of_revenue": _coerce_optional_float(cost_of_revenue),
             "eps": _coerce_optional_float(eps),
             "interest_expense": _coerce_optional_float(interest_expense),
+            "ebitda": _coerce_optional_float(ebitda),
+            "tax_expense": _coerce_optional_float(income_tax),
         }
 
     for (
@@ -881,6 +891,8 @@ async def _enrich_missing_ratio_metrics(
         _cost_of_revenue,
         eps,
         _interest,
+        _ebitda,
+        _income_tax,
     ) in income_rows:
         if year is None:
             continue
@@ -931,6 +943,7 @@ async def _enrich_missing_ratio_metrics(
         free_cash_flow,
         dividends_paid,
         debt_repayment,
+        depreciation,
     ) in cashflow_rows:
         if year is None:
             continue
@@ -939,6 +952,7 @@ async def _enrich_missing_ratio_metrics(
             "free_cash_flow": _coerce_optional_float(free_cash_flow),
             "dividends_paid": _coerce_optional_float(dividends_paid),
             "debt_repayment": _coerce_optional_float(debt_repayment),
+            "depreciation": _coerce_optional_float(depreciation),
         }
 
     latest_price_stmt = (
@@ -990,6 +1004,8 @@ async def _enrich_missing_ratio_metrics(
         interest_expense = (
             None if income is None else _coerce_optional_float(income.get("interest_expense"))
         )
+        ebitda_reported = None if income is None else _coerce_optional_float(income.get("ebitda"))
+        tax_expense = None if income is None else _coerce_optional_float(income.get("tax_expense"))
 
         total_assets = (
             None if balance is None else _coerce_optional_float(balance.get("total_assets"))
@@ -1027,6 +1043,12 @@ async def _enrich_missing_ratio_metrics(
         debt_repayment = (
             None if cashflow is None else _coerce_optional_float(cashflow.get("debt_repayment"))
         )
+        depreciation_cashflow = (
+            None if cashflow is None else _coerce_optional_float(cashflow.get("depreciation"))
+        )
+        depreciation = depreciation_cashflow
+
+        turnover_base = cost_of_revenue if cost_of_revenue not in (None, 0) else revenue
 
         if (
             item.operating_margin is None
@@ -1042,12 +1064,12 @@ async def _enrich_missing_ratio_metrics(
             item.asset_turnover = revenue / total_assets
         if (
             item.inventory_turnover is None
-            and cost_of_revenue not in (None, 0)
+            and turnover_base not in (None, 0)
             and inventory not in (None, 0)
         ):
             avg_inventory = (inventory + (inventory_prev or inventory)) / 2
             if avg_inventory not in (None, 0):
-                item.inventory_turnover = cost_of_revenue / avg_inventory
+                item.inventory_turnover = turnover_base / avg_inventory
         if (
             item.receivables_turnover is None
             and revenue not in (None, 0)
@@ -1083,6 +1105,27 @@ async def _enrich_missing_ratio_metrics(
         ):
             item.earnings_growth = ((net_income - prev_net_income) / prev_net_income) * 100
 
+        if item.ebitda is None:
+            ebitda_value = ebitda_reported
+            if ebitda_value is None and operating_income is not None and depreciation is not None:
+                ebitda_value = operating_income + abs(depreciation)
+            if ebitda_value is None and net_income is not None:
+                addbacks = 0.0
+                has_addback = False
+                if tax_expense is not None:
+                    addbacks += abs(tax_expense)
+                    has_addback = True
+                if interest_expense is not None:
+                    addbacks += abs(interest_expense)
+                    has_addback = True
+                if depreciation is not None:
+                    addbacks += abs(depreciation)
+                    has_addback = True
+                if has_addback:
+                    ebitda_value = net_income + addbacks
+            if ebitda_value is not None:
+                item.ebitda = ebitda_value
+
         if item.debt_service_coverage is None and operating_income is not None:
             debt_service = 0.0
             if interest_expense is not None:
@@ -1091,6 +1134,12 @@ async def _enrich_missing_ratio_metrics(
                 debt_service += abs(debt_repayment)
             if debt_service > 0:
                 item.debt_service_coverage = operating_income / debt_service
+        if (
+            item.debt_service_coverage is None
+            and operating_cash_flow is not None
+            and debt_repayment not in (None, 0)
+        ):
+            item.debt_service_coverage = operating_cash_flow / abs(debt_repayment)
 
         if (
             item.ocf_debt is None
@@ -1107,6 +1156,9 @@ async def _enrich_missing_ratio_metrics(
 
         if item.dps is None and dividends_paid is not None and outstanding_shares not in (None, 0):
             item.dps = abs(dividends_paid) / outstanding_shares
+
+        if item.dps is None and item.dividend_yield is not None and latest_price not in (None, 0):
+            item.dps = (item.dividend_yield / 100) * latest_price
 
         if item.dividend_yield is None and latest_price not in (None, 0):
             dps = _coerce_optional_float(getattr(item, "dps", None))
@@ -1335,6 +1387,8 @@ async def get_profile(
                     company.listed_shares,
                     raw_profile.get("outstanding_shares"),
                     raw_profile.get("issue_share"),
+                    raw_profile.get("financial_ratio_issue_share"),
+                    await _get_outstanding_shares(db, symbol_upper),
                 )
                 market_cap = await _resolve_profile_market_cap(
                     db=db,
@@ -1472,6 +1526,8 @@ async def get_profile(
                     profile_data.listed_shares,
                     raw_profile.get("outstanding_shares"),
                     raw_profile.get("issue_share"),
+                    raw_profile.get("financial_ratio_issue_share"),
+                    await _get_outstanding_shares(db, symbol_upper),
                 ),
                 fallback_market_cap=profile_data.market_cap,
             )
@@ -2237,9 +2293,7 @@ async def get_dividends(
             payload = item.model_dump(mode="json", by_alias=False)
 
             cash_dividend = _coerce_optional_float(
-                payload.get("cash_dividend")
-                or payload.get("cashDividend")
-                or payload.get("value")
+                payload.get("cash_dividend") or payload.get("cashDividend") or payload.get("value")
             )
             stock_dividend = _coerce_optional_float(
                 payload.get("stock_dividend") or payload.get("stockDividend")

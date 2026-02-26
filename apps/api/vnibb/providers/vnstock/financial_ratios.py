@@ -39,6 +39,7 @@ class FinancialRatioData(BaseModel):
     ps: Optional[float] = None
     ev_ebitda: Optional[float] = None
     ev_sales: Optional[float] = None
+    ebitda: Optional[float] = None
     roe: Optional[float] = None
     roa: Optional[float] = None
     eps: Optional[float] = None
@@ -165,6 +166,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 "ev_sales": "ev_sales",
                 "ev_to_sales": "ev_sales",
                 "enterprise_value_to_sales": "ev_sales",
+                "ebitda": "ebitda",
                 "roe": "roe",
                 "roa": "roa",
                 "trailing_eps": "eps",
@@ -311,6 +313,11 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                             row.get("enterpriseValueToSales"),
                             row.get("ev_to_sales"),
                             computed_ev_sales,
+                        ),
+                        ebitda=_pick_float(
+                            row.get("ebitda"),
+                            row.get("EBITDA"),
+                            row.get("ebitdaTtm"),
                         ),
                         roe=row.get("roe"),
                         roa=row.get("roa"),

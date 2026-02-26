@@ -37,6 +37,7 @@ body {
   --table-sticky-cell-alt-bg: color-mix(in srgb, var(--bg-secondary) 86%, black 14%);
   --table-sticky-cell-hover-bg: color-mix(in srgb, var(--bg-hover) 86%, black 14%);
   --glass-widget-bg: var(--widget-bg-glass, rgba(12, 16, 24, 0.88));
+  --sidebar-brand-gradient: linear-gradient(120deg, #60a5fa 0%, #22d3ee 100%);
 }
 
 :root.light,
@@ -88,6 +89,7 @@ body {
   --table-sticky-cell-bg: color-mix(in srgb, var(--bg-secondary) 94%, #e2e8f0 6%);
   --table-sticky-cell-alt-bg: color-mix(in srgb, var(--bg-secondary) 90%, #dbe5f2 10%);
   --table-sticky-cell-hover-bg: color-mix(in srgb, var(--bg-hover) 90%, #dbe5f2 10%);
+  --sidebar-brand-gradient: linear-gradient(120deg, #0f172a 0%, #1d4ed8 100%);
 }
 
 [data-theme="light"] {
@@ -912,6 +914,11 @@ body {
     0 10px 28px rgba(15, 23, 42, 0.12),
     0 0 0 1px rgba(59, 130, 246, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+:root.light .widget-card-premium .bg-secondary,
+:root[data-theme="light"] .widget-card-premium .bg-secondary {
+  background-color: #ffffff;
 }
 
 :root.light .widget-header-premium,

@@ -482,7 +482,10 @@ export function Sidebar({
                 <div className="h-10 flex items-center justify-between px-3 border-b border-[var(--border-color)] shrink-0">
                     {!collapsed && (
                         <Link href="/" className="flex items-center gap-2">
-                            <span className="text-lg font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
+                            <span
+                                className="text-lg font-bold bg-clip-text text-transparent"
+                                style={{ backgroundImage: 'var(--sidebar-brand-gradient)' }}
+                            >
                                 VNIBB
                             </span>
                         </Link>

@@ -34,6 +34,8 @@ import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
 
 const STORAGE_KEY = 'vnibb_dashboards';
 const FOLDERS_KEY = 'vnibb_folders';
+const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
+const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
 const CURRENT_MIGRATION_VERSION = 8;
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
@@ -394,9 +396,15 @@ const migrateStaleNewTabs = (dashboards: Dashboard[]): Dashboard[] => {
         }
 
         const sortedTabs = [...dashboard.tabs].sort((a, b) => a.order - b.order);
-        const filteredTabs = sortedTabs.filter(
-            (tab) => !(LEGACY_STALE_TAB_RE.test(tab.name.trim()) && tab.widgets.length === 0)
-        );
+        const filteredTabs = sortedTabs.filter((tab, index) => {
+            const isLegacyStale = LEGACY_STALE_TAB_RE.test(tab.name.trim());
+            if (!isLegacyStale) {
+                return true;
+            }
+
+            const isPrimaryTab = index === 0;
+            return isPrimaryTab && tab.widgets.length > 0;
+        });
 
         if (filteredTabs.length === sortedTabs.length) {
             return dashboard;
@@ -937,6 +945,13 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         if (typeof window === 'undefined') return;
 
         try {
+            const storedStorageVersion = localStorage.getItem(STORAGE_VERSION_KEY);
+            if (storedStorageVersion !== CURRENT_STORAGE_VERSION) {
+                localStorage.removeItem('vnibb-tabs');
+                localStorage.removeItem('vnibb-dashboard');
+                localStorage.setItem(STORAGE_VERSION_KEY, CURRENT_STORAGE_VERSION);
+            }
+
             const storedDashboards = localStorage.getItem(STORAGE_KEY);
             const storedFolders = localStorage.getItem(FOLDERS_KEY);
             const storedMigrationVersion = localStorage.getItem(MIGRATION_VERSION_KEY);

@@ -48,7 +48,7 @@ export function WidgetToolbar({
   actions,
 }: WidgetToolbarProps) {
   return (
-    <div className="flex items-center justify-between h-9 px-2 border-b border-gray-700/50 bg-gray-900/50 select-none">
+    <div className="flex items-center justify-between h-9 px-2 border-b border-[var(--border-default)] bg-[var(--bg-widget-header)]/80 select-none">
       {/* Left: Sync, Symbol, Title, Parameters */}
       <div className="flex items-center gap-2 min-w-0">
         {showGroupSelector && groupSelector}
@@ -56,21 +56,21 @@ export function WidgetToolbar({
         {showSymbolSelector && (tickerSelector || (symbol && (
           <button
             onClick={() => onSymbolChange?.(symbol)}
-            className="text-xs font-bold text-blue-400 hover:text-blue-300 hover:bg-white/5 px-1 py-0.5 rounded transition-colors"
+            className="text-xs font-bold text-[var(--accent-blue)] hover:bg-[var(--bg-hover)] px-1 py-0.5 rounded transition-colors"
           >
             {symbol}
           </button>
         )))}
 
-        {showSymbolSelector && <div className="h-3 w-[1px] bg-gray-700" />}
+        {showSymbolSelector && <div className="h-3 w-[1px] bg-[var(--border-subtle)]" />}
 
-        <span className="text-[11px] font-medium text-gray-400 truncate max-w-[120px]" title={title}>
+        <span className="text-[11px] font-medium text-[var(--text-secondary)] truncate max-w-[120px]" title={title}>
           {title}
         </span>
 
         {parameters && (
           <div className="flex items-center gap-1 ml-1">
-            <div className="h-3 w-[1px] bg-gray-700 mr-1" />
+            <div className="h-3 w-[1px] bg-[var(--border-subtle)] mr-1" />
             {parameters}
           </div>
         )}
@@ -79,7 +79,7 @@ export function WidgetToolbar({
       {/* Right: Controls */}
       <div className="flex items-center gap-1">
         {isEditing && (
-          <div className="widget-drag-handle p-1 text-gray-600 hover:text-gray-300 cursor-grab active:cursor-grabbing">
+          <div className="widget-drag-handle p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-grab active:cursor-grabbing">
             <Move size={12} />
           </div>
         )}
@@ -87,7 +87,7 @@ export function WidgetToolbar({
         {onRefresh && (
           <button
             onClick={onRefresh}
-            className="p-1 text-gray-600 hover:text-gray-300 hover:bg-white/5 rounded transition-colors"
+            className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors"
             title="Refresh"
           >
             <RefreshCw size={12} />
@@ -97,7 +97,7 @@ export function WidgetToolbar({
         {onCopilot && (
           <button
             onClick={onCopilot}
-            className="p-1 text-gray-600 hover:text-blue-400 hover:bg-blue-500/10 rounded transition-colors"
+            className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-blue)] hover:bg-blue-500/10 rounded transition-colors"
             title="AI Copilot"
           >
             <Sparkles size={12} />
@@ -107,7 +107,7 @@ export function WidgetToolbar({
         {onSettings && (
           <button
             onClick={onSettings}
-            className="p-1 text-gray-600 hover:text-gray-300 hover:bg-white/5 rounded transition-colors"
+            className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors"
             title="Settings"
           >
             <Settings size={12} />
@@ -117,7 +117,7 @@ export function WidgetToolbar({
         {onMaximize && (
           <button
             onClick={onMaximize}
-            className="p-1 text-gray-600 hover:text-gray-300 hover:bg-white/5 rounded transition-colors"
+            className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors"
             title={isMaximized ? 'Minimize' : 'Maximize'}
           >
             {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
@@ -127,7 +127,7 @@ export function WidgetToolbar({
         {onClose && (
           <button
             onClick={onClose}
-            className="p-1 text-gray-600 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+            className="p-1 text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 rounded transition-colors"
             title="Close"
           >
             <X size={12} />
