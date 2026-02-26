@@ -175,7 +175,11 @@ export function WidgetWrapper({
         : (symbol || effectiveSymbol);
 
     const { data: profileData } = useProfile(displaySymbol || '', Boolean(displaySymbol));
-    const exchangeBadge = profileData?.data?.exchange?.toString().toUpperCase() || 'VN';
+    const rawExchangeBadge = profileData?.data?.exchange?.toString().trim().toUpperCase();
+    const exchangeBadge =
+        rawExchangeBadge && rawExchangeBadge !== 'VN' && rawExchangeBadge !== 'UNKNOWN'
+            ? rawExchangeBadge
+            : null;
 
 
 
@@ -278,13 +282,20 @@ export function WidgetWrapper({
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <button
-                                    className="flex items-center justify-center w-5 h-5 rounded hover:bg-white/5 transition-colors"
+                                    className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-hover)] transition-colors"
                                     style={{
                                         borderLeft: `2px solid ${getColorForGroup(widgetGroup)}`
                                     }}
                                     title={`Widget Group: ${groups[widgetGroup]?.name || 'Global'}`}
                                 >
-                                    <Users size={12} className={widgetGroup !== 'global' ? 'text-white' : 'text-gray-600'} />
+                                    <Users
+                                        size={12}
+                                        className={
+                                            widgetGroup !== 'global'
+                                                ? 'text-[var(--text-primary)]'
+                                                : 'text-[var(--text-muted)]'
+                                        }
+                                    />
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent className="bg-secondary border-default min-w-[120px]">
@@ -292,7 +303,7 @@ export function WidgetWrapper({
                                     <DropdownMenuItem
                                         key={id}
                                         onClick={() => handleGroupChange(id as WidgetGroupId)}
-                                        className="flex items-center gap-2 text-xs focus:bg-white/5 cursor-pointer text-primary"
+                                        className="flex items-center gap-2 text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary"
                                     >
                                         <div
                                             className="w-2 h-2 rounded-full"
@@ -314,9 +325,11 @@ export function WidgetWrapper({
                                 title="Select widget ticker"
                             >
                                 <span>{displaySymbol}</span>
-                                <span className="rounded bg-blue-900/30 px-1 text-[9px] text-blue-200/80">
-                                    {exchangeBadge}
-                                </span>
+                                {exchangeBadge && (
+                                    <span className="rounded bg-blue-900/30 px-1 text-[9px] text-blue-200/80">
+                                        {exchangeBadge}
+                                    </span>
+                                )}
                             </button>
                             <TickerCombobox
                                 isOpen={isTickerDropdownOpen}
@@ -352,33 +365,33 @@ export function WidgetWrapper({
                     actions={
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <button className="p-1 text-gray-600 hover:text-gray-300 hover:bg-white/5 rounded transition-colors">
+                                <button className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors">
                                     <MoreHorizontal size={11} />
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent className="bg-secondary border-default min-w-[150px]">
                                 <DropdownMenuSub>
-                                    <DropdownMenuSubTrigger className="text-xs focus:bg-white/5 cursor-pointer text-primary">
+                                    <DropdownMenuSubTrigger className="text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary">
                                         <Download size={14} className="mr-2" />
                                         <span>Export</span>
                                     </DropdownMenuSubTrigger>
                                     <DropdownMenuSubContent className="bg-secondary border-default">
-                                        <DropdownMenuItem onClick={() => handleExport('csv')} className="text-xs focus:bg-white/5 cursor-pointer text-primary">
+                                        <DropdownMenuItem onClick={() => handleExport('csv')} className="text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary">
                                             <FileSpreadsheet size={14} className="mr-2" />
                                             <span>Export as CSV</span>
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleExport('json')} className="text-xs focus:bg-white/5 cursor-pointer text-primary">
+                                        <DropdownMenuItem onClick={() => handleExport('json')} className="text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary">
                                             <FileJson size={14} className="mr-2" />
                                             <span>Export as JSON</span>
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleExport('png')} className="text-xs focus:bg-white/5 cursor-pointer text-primary">
+                                        <DropdownMenuItem onClick={() => handleExport('png')} className="text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary">
                                             <Image size={14} className="mr-2" />
                                             <span>Export as PNG</span>
                                         </DropdownMenuItem>
                                     </DropdownMenuSubContent>
                                 </DropdownMenuSub>
                                 {onSettingsClick && (
-                                    <DropdownMenuItem onClick={onSettingsClick} className="text-xs focus:bg-white/5 cursor-pointer text-primary">
+                                    <DropdownMenuItem onClick={onSettingsClick} className="text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary">
                                         <Settings size={14} className="mr-2" />
                                         <span>Widget Settings</span>
                                     </DropdownMenuItem>

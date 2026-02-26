@@ -22,6 +22,8 @@ import pandas as pd
 from vnibb.core.database import get_db
 from vnibb.models.stock import Stock
 from vnibb.models.company import Company
+from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
+from vnibb.models.trading import FinancialRatio
 from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
     StockScreenerParams,
@@ -264,6 +266,300 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
     return hydrated
 
 
+def _coerce_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(numeric):
+        return None
+    return numeric
+
+
+def _pick_float(*values: Any) -> Optional[float]:
+    for value in values:
+        numeric = _coerce_float(value)
+        if numeric is not None:
+            return numeric
+    return None
+
+
+def _shares_multiplier(shares: float) -> float:
+    return 1.0 if shares >= 1_000_000 else 1_000_000.0
+
+
+def _compute_growth(current: Optional[float], previous: Optional[float]) -> Optional[float]:
+    if current is None or previous in (None, 0):
+        return None
+    return ((current - previous) / previous) * 100
+
+
+async def _enrich_screener_metrics(
+    rows: List[ScreenerData], db: AsyncSession
+) -> List[ScreenerData]:
+    if not rows:
+        return rows
+
+    target_symbols = sorted(
+        {
+            row.symbol
+            for row in rows
+            if row.symbol
+            and (
+                row.revenue_growth is None
+                or row.earnings_growth is None
+                or row.operating_margin is None
+                or row.ev_ebitda is None
+                or row.dividend_yield is None
+                or row.debt_to_asset is None
+                or row.equity_on_total_asset is None
+                or row.market_cap is None
+            )
+        }
+    )
+    if not target_symbols:
+        return rows
+
+    ratio_rows = (
+        (
+            await db.execute(
+                select(FinancialRatio)
+                .where(
+                    FinancialRatio.symbol.in_(target_symbols), FinancialRatio.period_type == "year"
+                )
+                .order_by(
+                    FinancialRatio.symbol.asc(),
+                    FinancialRatio.fiscal_year.desc(),
+                    FinancialRatio.fiscal_quarter.desc(),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ratio_by_symbol: dict[str, FinancialRatio] = {}
+    for ratio in ratio_rows:
+        ratio_by_symbol.setdefault(ratio.symbol, ratio)
+
+    income_rows = (
+        await db.execute(
+            select(
+                IncomeStatement.symbol,
+                IncomeStatement.fiscal_year,
+                IncomeStatement.revenue,
+                IncomeStatement.operating_income,
+                IncomeStatement.net_income,
+            )
+            .where(
+                IncomeStatement.symbol.in_(target_symbols),
+                IncomeStatement.period_type == "year",
+            )
+            .order_by(IncomeStatement.symbol.asc(), IncomeStatement.fiscal_year.desc())
+        )
+    ).all()
+    income_by_symbol: dict[str, list[dict[str, Optional[float]]]] = {
+        symbol: [] for symbol in target_symbols
+    }
+    for symbol, _year, revenue, operating_income, net_income in income_rows:
+        bucket = income_by_symbol.setdefault(symbol, [])
+        if len(bucket) >= 2:
+            continue
+        bucket.append(
+            {
+                "revenue": _coerce_float(revenue),
+                "operating_income": _coerce_float(operating_income),
+                "net_income": _coerce_float(net_income),
+            }
+        )
+
+    balance_rows = (
+        await db.execute(
+            select(
+                BalanceSheet.symbol,
+                BalanceSheet.total_assets,
+                BalanceSheet.total_liabilities,
+                BalanceSheet.total_equity,
+            )
+            .where(BalanceSheet.symbol.in_(target_symbols), BalanceSheet.period_type == "year")
+            .order_by(BalanceSheet.symbol.asc(), BalanceSheet.fiscal_year.desc())
+        )
+    ).all()
+    balance_by_symbol: dict[str, dict[str, Optional[float]]] = {}
+    for symbol, total_assets, total_liabilities, total_equity in balance_rows:
+        if symbol in balance_by_symbol:
+            continue
+        balance_by_symbol[symbol] = {
+            "total_assets": _coerce_float(total_assets),
+            "total_liabilities": _coerce_float(total_liabilities),
+            "total_equity": _coerce_float(total_equity),
+        }
+
+    cashflow_rows = (
+        await db.execute(
+            select(CashFlow.symbol, CashFlow.dividends_paid)
+            .where(CashFlow.symbol.in_(target_symbols), CashFlow.period_type == "year")
+            .order_by(CashFlow.symbol.asc(), CashFlow.fiscal_year.desc())
+        )
+    ).all()
+    dividends_by_symbol: dict[str, Optional[float]] = {}
+    for symbol, dividends_paid in cashflow_rows:
+        if symbol not in dividends_by_symbol:
+            dividends_by_symbol[symbol] = _coerce_float(dividends_paid)
+
+    company_rows = (
+        await db.execute(
+            select(
+                Company.symbol,
+                Company.outstanding_shares,
+                Company.listed_shares,
+                Company.raw_data,
+            ).where(Company.symbol.in_(target_symbols))
+        )
+    ).all()
+    shares_by_symbol: dict[str, Optional[float]] = {}
+    for symbol, outstanding_shares, listed_shares, raw_data in company_rows:
+        payload = raw_data if isinstance(raw_data, dict) else {}
+        shares_by_symbol[symbol] = _pick_float(
+            outstanding_shares,
+            listed_shares,
+            payload.get("outstanding_shares"),
+            payload.get("listed_shares"),
+            payload.get("issue_share"),
+            payload.get("financial_ratio_issue_share"),
+        )
+
+    enriched_rows: List[ScreenerData] = []
+    for row in rows:
+        updates: dict[str, Any] = {}
+        symbol = row.symbol
+        ratio_row = ratio_by_symbol.get(symbol)
+        ratio_raw = ratio_row.raw_data if ratio_row and isinstance(ratio_row.raw_data, dict) else {}
+        income = income_by_symbol.get(symbol, [])
+        latest_income = income[0] if income else {}
+        prev_income = income[1] if len(income) > 1 else {}
+        balance = balance_by_symbol.get(symbol, {})
+
+        if row.ev_ebitda is None:
+            ev_ebitda = _pick_float(
+                ratio_row.ev_ebitda if ratio_row else None,
+                ratio_raw.get("ev_ebitda"),
+                ratio_raw.get("valueBeforeEbitda"),
+                ratio_raw.get("evEbitda"),
+            )
+            if ev_ebitda is not None:
+                updates["ev_ebitda"] = ev_ebitda
+
+        if row.operating_margin is None:
+            operating_margin = _pick_float(
+                ratio_row.operating_margin if ratio_row else None,
+                ratio_raw.get("operating_margin"),
+                ratio_raw.get("operatingMargin"),
+            )
+            if operating_margin is None:
+                revenue = _coerce_float(latest_income.get("revenue"))
+                operating_income = _coerce_float(latest_income.get("operating_income"))
+                if revenue not in (None, 0) and operating_income is not None:
+                    operating_margin = (operating_income / revenue) * 100
+            if operating_margin is not None:
+                updates["operating_margin"] = operating_margin
+
+        if row.revenue_growth is None:
+            revenue_growth = _pick_float(
+                ratio_row.revenue_growth if ratio_row else None,
+                ratio_raw.get("revenue_growth"),
+                ratio_raw.get("revenueGrowth"),
+            )
+            if revenue_growth is None:
+                revenue_growth = _compute_growth(
+                    _coerce_float(latest_income.get("revenue")),
+                    _coerce_float(prev_income.get("revenue")),
+                )
+            if revenue_growth is not None:
+                updates["revenue_growth"] = revenue_growth
+
+        if row.earnings_growth is None:
+            earnings_growth = _pick_float(
+                ratio_row.earnings_growth if ratio_row else None,
+                ratio_raw.get("earnings_growth"),
+                ratio_raw.get("earningsGrowth"),
+                ratio_raw.get("net_profit_growth"),
+            )
+            if earnings_growth is None:
+                earnings_growth = _compute_growth(
+                    _coerce_float(latest_income.get("net_income")),
+                    _coerce_float(prev_income.get("net_income")),
+                )
+            if earnings_growth is not None:
+                updates["earnings_growth"] = earnings_growth
+
+        if row.debt_to_asset is None:
+            debt_to_asset = _pick_float(
+                ratio_row.debt_to_assets if ratio_row else None,
+                ratio_raw.get("debt_to_assets"),
+                ratio_raw.get("debt_to_asset"),
+                ratio_raw.get("debtOnAsset"),
+            )
+            if debt_to_asset is None:
+                liabilities = _coerce_float(balance.get("total_liabilities"))
+                assets = _coerce_float(balance.get("total_assets"))
+                if liabilities is not None and assets not in (None, 0):
+                    debt_to_asset = liabilities / assets
+            if debt_to_asset is not None:
+                updates["debt_to_asset"] = debt_to_asset
+
+        if row.equity_on_total_asset is None:
+            equity_on_total_asset = _pick_float(
+                ratio_raw.get("equity_on_total_asset"),
+                ratio_raw.get("equityOnTotalAsset"),
+            )
+            if equity_on_total_asset is None:
+                equity = _coerce_float(balance.get("total_equity"))
+                assets = _coerce_float(balance.get("total_assets"))
+                if equity is not None and assets not in (None, 0):
+                    equity_on_total_asset = (equity / assets) * 100
+            if equity_on_total_asset is not None:
+                updates["equity_on_total_asset"] = equity_on_total_asset
+
+        if row.dividend_yield is None:
+            dividend_yield = _pick_float(
+                ratio_raw.get("dividend_yield"),
+                ratio_raw.get("dividendYield"),
+            )
+            if dividend_yield is None:
+                dps = _pick_float(
+                    ratio_row.dps if ratio_row else None,
+                    ratio_raw.get("dps"),
+                    ratio_raw.get("dividend_per_share"),
+                )
+                if dps is None:
+                    dividends_paid = _coerce_float(dividends_by_symbol.get(symbol))
+                    shares = _coerce_float(shares_by_symbol.get(symbol))
+                    if dividends_paid is not None and shares not in (None, 0):
+                        dps = abs(dividends_paid) / (shares * _shares_multiplier(shares))
+                price = _coerce_float(row.price)
+                if dps is not None and price not in (None, 0):
+                    dividend_yield = (dps / price) * 100
+            if dividend_yield is not None:
+                updates["dividend_yield"] = dividend_yield
+
+        if row.market_cap is None:
+            shares = _coerce_float(row.shares_outstanding) or _coerce_float(
+                shares_by_symbol.get(symbol)
+            )
+            price = _coerce_float(row.price)
+            if shares not in (None, 0) and price not in (None, 0):
+                updates["market_cap"] = price * shares * _shares_multiplier(shares)
+
+        if updates:
+            row = row.model_copy(update=updates)
+
+        enriched_rows.append(row)
+
+    return enriched_rows
+
+
 def apply_advanced_filters(
     data: List[ScreenerData], filters: Optional[str] = None, sort: Optional[str] = None, **kwargs
 ) -> List[ScreenerData]:
@@ -378,6 +674,7 @@ async def get_screener(
                 data = [_to_screener_data_row(s) for s in cache_result.data]
                 data = await _hydrate_screener_rows(data, db)
                 data = fill_market_cap(data)
+                data = await _enrich_screener_metrics(data, db)
                 data = apply_advanced_filters(
                     data,
                     filters=filters,
@@ -420,6 +717,7 @@ async def get_screener(
                     data = [_to_screener_data_row(s) for s in fallback_cache.data]
                     data = await _hydrate_screener_rows(data, db)
                     data = fill_market_cap(data)
+                    data = await _enrich_screener_metrics(data, db)
                     data = apply_advanced_filters(
                         data,
                         filters=filters,
@@ -453,6 +751,7 @@ async def get_screener(
             raise ProviderError(message="API returned empty data", provider="vnstock")
 
         data = fill_market_cap(data)
+        data = await _enrich_screener_metrics(data, db)
         data = apply_advanced_filters(
             data,
             filters=filters,
@@ -487,6 +786,7 @@ async def get_screener(
                 data = [_to_screener_data_row(s) for s in cache_result.data]
                 data = await _hydrate_screener_rows(data, db)
                 data = fill_market_cap(data)
+                data = await _enrich_screener_metrics(data, db)
                 data = apply_advanced_filters(
                     data,
                     filters=filters,

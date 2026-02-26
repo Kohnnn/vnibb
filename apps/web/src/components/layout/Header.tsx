@@ -80,8 +80,10 @@ export function Header({
     }, [currentSymbol, isSearching]);
 
     const handleSearch = useCallback(() => {
-        if (searchValue.trim()) {
-            onSymbolChange(searchValue.trim().toUpperCase());
+        const normalized = searchValue.trim().toUpperCase();
+        if (normalized) {
+            onSymbolChange(normalized);
+            setSearchValue(normalized);
             setIsSearching(false);
         }
     }, [searchValue, onSymbolChange]);
@@ -122,8 +124,14 @@ export function Header({
                                 setIsSearching(true);
                             }}
                             onFocus={(e) => {
-                                e.target.select();
                                 setIsSearching(true);
+                                const normalizedCurrent = currentSymbol.trim().toUpperCase();
+                                const normalizedSearch = searchValue.trim().toUpperCase();
+                                if (normalizedSearch === normalizedCurrent) {
+                                    setSearchValue('');
+                                } else {
+                                    e.target.select();
+                                }
                             }}
                             onKeyDown={handleKeyDown}
                             onBlur={() => {
