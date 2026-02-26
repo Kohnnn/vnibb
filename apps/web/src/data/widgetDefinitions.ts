@@ -392,6 +392,38 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
     },
     {
+        type: 'volume_profile',
+        name: 'Volume Profile',
+        description: 'POC/VAH/VAL volume distribution by price bins',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'obv_divergence',
+        name: 'OBV Divergence',
+        description: 'Price vs OBV divergence signal with confidence score',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'atr_regime',
+        name: 'ATR Regime',
+        description: 'ATR volatility regime with model position sizing',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'gap_fill_stats',
+        name: 'Gap Fill Stats',
+        description: 'Gap-up/down fill probability and average days to fill',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
         type: 'technical_summary',
         name: 'Technical Summary',
         description: 'Technical indicators with buy/sell signals',

@@ -67,7 +67,7 @@ export const DropdownMenuContent = ({ children, className = '', align = 'center'
         <div
             ref={ref}
             className={cn(
-                "absolute z-50 mt-2 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-80 zoom-in-95",
+                "absolute z-50 mt-2 min-w-[8rem] overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/98 p-1 text-[var(--text-primary)] shadow-xl backdrop-blur-md animate-in fade-in-80 zoom-in-95",
                 alignClasses[align as keyof typeof alignClasses] || alignClasses.center,
                 className
             )}
@@ -82,7 +82,7 @@ export const DropdownMenuItem = ({ children, onClick, className }: any) => {
     return (
         <div
             className={cn(
-                "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+                "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
                 className
             )}
             role="menuitem"
@@ -110,7 +110,7 @@ export const DropdownMenuCheckboxItem = ({ children, checked, onCheckedChange, c
     return (
         <div
             className={cn(
-                "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground",
+                "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                 className
             )}
             role="menuitemcheckbox"
@@ -136,13 +136,13 @@ export const DropdownMenuCheckboxItem = ({ children, checked, onCheckedChange, c
 };
 
 export const DropdownMenuLabel = ({ children, className }: any) => (
-    <div className={cn("px-2 py-1.5 text-sm font-semibold", className)}>
+    <div className={cn("px-2 py-1.5 text-sm font-semibold text-[var(--text-primary)]", className)}>
         {children}
     </div>
 );
 
 export const DropdownMenuSeparator = ({ className }: any) => (
-    <div className={cn("-mx-1 my-1 h-px bg-muted", className)} />
+    <div className={cn("-mx-1 my-1 h-px bg-[var(--border-subtle)]", className)} />
 );
 
 export const DropdownMenuSub = ({ children }: { children: React.ReactNode }) => {
@@ -165,8 +165,8 @@ export const DropdownMenuSub = ({ children }: { children: React.ReactNode }) => 
 
 export const DropdownMenuSubTrigger = ({ children, className, isOpen }: any) => (
     <div className={cn(
-        "flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground",
-        isOpen && "bg-accent text-accent-foreground",
+        "flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm text-[var(--text-secondary)] outline-none hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+        isOpen && "bg-[var(--bg-hover)] text-[var(--text-primary)]",
         className
     )}>
         {children}
@@ -178,11 +178,10 @@ export const DropdownMenuSubContent = ({ children, className, isOpen }: any) => 
     if (!isOpen) return null;
     return (
         <div className={cn(
-            "absolute left-full top-0 z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-80 zoom-in-95 ml-1",
+            "absolute left-full top-0 z-50 ml-1 min-w-[8rem] overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/98 p-1 text-[var(--text-primary)] shadow-xl backdrop-blur-md animate-in fade-in-80 zoom-in-95",
             className
         )}>
             {children}
         </div>
     );
 };
-

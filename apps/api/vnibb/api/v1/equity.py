@@ -212,6 +212,7 @@ async def _load_financial_statement_fallback(
             long_term_debt=getattr(row, "long_term_debt", None),
             accounts_receivable=getattr(row, "accounts_receivable", None),
             accounts_payable=getattr(row, "accounts_payable", None),
+            customer_deposits=getattr(row, "customer_deposits", None),
             goodwill=getattr(row, "goodwill", None),
             intangible_assets=getattr(row, "intangible_assets", None),
             operating_cash_flow=getattr(row, "operating_cash_flow", None),

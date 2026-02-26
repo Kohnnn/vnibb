@@ -9,7 +9,7 @@ import { ChevronLeft, ChevronRight, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
-import { useSectorTopMovers } from '@/lib/queries';
+import { useSectorTopMovers, useSectorsCatalog } from '@/lib/queries';
 
 interface StockPerformance {
   symbol: string;
@@ -45,6 +45,7 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
     type: viewType,
     limit: 5,
   });
+  const { data: sectorsCatalog } = useSectorsCatalog({ enabled: true, symbolLimit: 40 });
 
   const payload = data as unknown as SectorTopMoversPayload;
 
@@ -86,6 +87,17 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
   const hasData = sectors.length > 0;
   const isFallback = Boolean(error && hasData);
   const updatedAt = payload?.updated_at || dataUpdatedAt;
+  const sectorUniverseCount = useMemo(() => {
+    if (!sectorsCatalog) return 0;
+    return Object.keys(sectorsCatalog).length;
+  }, [sectorsCatalog]);
+  const trackedSymbols = useMemo(() => {
+    if (!sectorsCatalog) return 0;
+    return Object.values(sectorsCatalog).reduce((total, sectorEntry) => {
+      const symbols = Array.isArray(sectorEntry?.symbols) ? sectorEntry.symbols.length : 0;
+      return total + symbols;
+    }, 0);
+  }, [sectorsCatalog]);
 
   return (
     <WidgetContainer
@@ -106,6 +118,13 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
             note={viewType === 'gainers' ? 'Top gainers by sector' : 'Top losers by sector'}
             align="right"
           />
+          {sectorUniverseCount > 0 && (
+            <div className="mt-1.5 flex items-center justify-end gap-2 text-[10px] text-[var(--text-muted)]">
+              <span>{sectorUniverseCount} sectors tracked</span>
+              <span aria-hidden="true">•</span>
+              <span>{trackedSymbols.toLocaleString()} mapped symbols</span>
+            </div>
+          )}
         </div>
         <button
           onClick={() => scroll('left')}

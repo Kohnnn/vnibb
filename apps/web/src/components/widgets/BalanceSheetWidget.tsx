@@ -48,6 +48,7 @@ const labels: Record<string, string> = {
     short_term_debt: 'Short-term Debt',
     long_term_debt: 'Long-term Debt',
     accounts_payable: 'Accounts Payable',
+    customer_deposits: 'Customer Deposits',
     equity: 'Equity',
     total_equity: 'Total Equity',
     retained_earnings: 'Retained Earnings',
@@ -115,6 +116,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
             item.short_term_debt,
             item.long_term_debt,
             item.accounts_payable,
+            item.customer_deposits,
             item.total_equity,
             item.equity,
             item.retained_earnings,
@@ -243,6 +245,13 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                 indent: 12,
                 values: mapValues('accounts_payable'),
             },
+            {
+                id: 'customer_deposits',
+                label: labels.customer_deposits,
+                parentId: 'group:liabilities',
+                indent: 12,
+                values: mapValues('customer_deposits'),
+            },
             { id: 'group:equity', label: 'Equity', values: {}, isGroup: true },
             {
                 id: 'total_equity',
@@ -303,7 +312,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
 
                 <div className="flex-1 min-h-[132px]">
                     <ChartMountGuard className="h-full" minHeight={120}>
-                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
+                        <ResponsiveContainer width="99%" height="100%" minWidth={240} minHeight={120}>
                             {chartType === 'overview' ? (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />

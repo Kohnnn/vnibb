@@ -146,6 +146,7 @@ async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialState
         ttm_data.long_term_debt = _sanitize_optional(most_recent.long_term_debt)
         ttm_data.accounts_receivable = _sanitize_optional(most_recent.accounts_receivable)
         ttm_data.accounts_payable = _sanitize_optional(most_recent.accounts_payable)
+        ttm_data.customer_deposits = _sanitize_optional(most_recent.customer_deposits)
         ttm_data.goodwill = _sanitize_optional(most_recent.goodwill)
         ttm_data.intangible_assets = _sanitize_optional(most_recent.intangible_assets)
 

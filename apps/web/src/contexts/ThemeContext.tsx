@@ -60,7 +60,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     const root = document.documentElement;
     const resolved = getResolvedTheme(theme);
-    
+    root.classList.add('theme-switching');
+
     // Remove both classes first
     root.classList.remove('light', 'dark');
     
@@ -78,6 +79,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
 
     setResolvedTheme(resolved);
+
+    const transitionResetTimer = window.setTimeout(() => {
+      root.classList.remove('theme-switching');
+    }, 140);
+
+    return () => {
+      window.clearTimeout(transitionResetTimer);
+      root.classList.remove('theme-switching');
+    };
   }, [theme, mounted]);
 
   // Listen for system theme changes

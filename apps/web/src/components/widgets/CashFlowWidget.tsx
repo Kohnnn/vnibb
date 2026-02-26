@@ -250,7 +250,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
 
                 <div className="flex-1 min-h-[132px]">
                     <ChartMountGuard className="h-full" minHeight={120}>
-                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120}>
+                        <ResponsiveContainer width="99%" height="100%" minWidth={240} minHeight={120}>
                             {chartType === 'overview' ? (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />

@@ -105,7 +105,7 @@ export function Header({
     }, [resolvedTheme, setTheme]);
 
     return (
-        <header className="h-12 bg-[var(--bg-secondary)]/90 backdrop-blur-sm border-b border-[var(--border-color)] sticky top-0 z-40">
+        <header className="h-12 bg-[var(--bg-secondary)]/95 backdrop-blur-sm border-b border-[var(--border-color)] sticky top-0 z-40">
             <div className="h-full flex items-center justify-between px-4">
                 {/* Search Bar */}
                 <div className="flex-1 max-w-sm">
@@ -355,7 +355,7 @@ export function Header({
                     </div>
 
                     {/* Profile - Hidden on small mobile */}
-                    <button className="hidden sm:block p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">
+                    <button className="hidden sm:block p-1.5 rounded-md hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                         <User size={16} />
                     </button>
                 </div>
