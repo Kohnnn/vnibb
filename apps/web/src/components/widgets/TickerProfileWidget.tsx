@@ -1,6 +1,6 @@
 'use client';
 
-import { useProfile, useDividends, useInsiderDeals } from '@/lib/queries';
+import { useProfile, useDividends, useInsiderDeals, useScreenerData } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -56,8 +56,14 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
         isFetching: insiderFetching,
         dataUpdatedAt: insiderUpdatedAt,
     } = useInsiderDeals(symbol, { limit: 3, enabled: Boolean(symbol) });
+    const { data: screenerData } = useScreenerData({
+        symbol,
+        limit: 1,
+        enabled: Boolean(symbol),
+    });
 
     const profile = data?.data;
+    const screenerRow = screenerData?.data?.[0];
     const dividends = dividendsData?.data ?? [];
     const insiderDeals = insiderDealsData ?? [];
     const hasData = Boolean(profile);
@@ -82,6 +88,13 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     if (!profileData) {
         return <WidgetEmpty message={`No profile data for ${symbol}`} />;
     }
+    const marketCapValue =
+        (typeof screenerRow?.market_cap === 'number' && Number.isFinite(screenerRow.market_cap)
+            ? screenerRow.market_cap
+            : null) ??
+        (typeof profileData.market_cap === 'number' && Number.isFinite(profileData.market_cap)
+            ? profileData.market_cap
+            : null);
 
     return (
         <div className="space-y-4">
@@ -151,6 +164,12 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
                     <div className="flex items-center gap-2 text-gray-400">
                         <Calendar size={14} className="text-blue-400" />
                         <span>Est. {profileData.established_year}</span>
+                    </div>
+                )}
+                {marketCapValue !== null && (
+                    <div className="flex items-center gap-2 text-gray-400">
+                        <Building2 size={14} className="text-blue-400" />
+                        <span>Mkt Cap {formatNumber(marketCapValue)}</span>
                     </div>
                 )}
             </div>

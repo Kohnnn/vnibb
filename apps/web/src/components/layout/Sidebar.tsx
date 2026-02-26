@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
     LayoutDashboard,
@@ -55,12 +55,40 @@ export function Sidebar({
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [showMoveSubmenu, setShowMoveSubmenu] = useState(false);
+    const createMenuRef = useRef<HTMLDivElement | null>(null);
+    const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         if (mobileMode) {
             setCollapsed(false);
         }
     }, [mobileMode]);
+
+    useEffect(() => {
+        if (!showCreateMenu && !showMoveSubmenu) {
+            return;
+        }
+
+        const handleOutsideClick = (event: MouseEvent) => {
+            const targetNode = event.target as Node;
+
+            if (showCreateMenu && createMenuRef.current && !createMenuRef.current.contains(targetNode)) {
+                setShowCreateMenu(false);
+            }
+
+            if (
+                showMoveSubmenu &&
+                contextMenuRef.current &&
+                !contextMenuRef.current.contains(targetNode)
+            ) {
+                setShowMoveSubmenu(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleOutsideClick);
+        return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }, [showCreateMenu, showMoveSubmenu]);
 
 
     const {
@@ -82,7 +110,6 @@ export function Sidebar({
     const [draggedId, setDraggedId] = useState<string | null>(null);
     const [dragOverId, setDragOverId] = useState<string | null>(null);
     const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
-    const [showMoveSubmenu, setShowMoveSubmenu] = useState(false);
 
     // Group dashboards by folder
     const foldersById = new Map(state.folders.map(f => [f.id, f]));
@@ -188,6 +215,8 @@ export function Sidebar({
 
     const handleContextMenu = (e: React.MouseEvent, id: string, type: 'dashboard' | 'folder') => {
         e.preventDefault();
+        setShowCreateMenu(false);
+        setShowMoveSubmenu(false);
         setContextMenu({ id, type, x: e.clientX, y: e.clientY });
     };
 
@@ -207,6 +236,7 @@ export function Sidebar({
             }
         }
         setContextMenu(null);
+        setShowMoveSubmenu(false);
     };
 
     const handleDelete = () => {
@@ -217,6 +247,7 @@ export function Sidebar({
             deleteFolder(contextMenu.id);
         }
         setContextMenu(null);
+        setShowMoveSubmenu(false);
     };
 
     const handleDuplicate = () => {
@@ -229,6 +260,7 @@ export function Sidebar({
             });
         }
         setContextMenu(null);
+        setShowMoveSubmenu(false);
     };
 
     const submitRename = () => {
@@ -557,7 +589,7 @@ export function Sidebar({
                                 <h3 className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
                                     My Dashboards
                                 </h3>
-                                <div className="relative">
+                                <div ref={createMenuRef} className="relative">
                                     <button
                                         onClick={() => setShowCreateMenu(!showCreateMenu)}
                                         className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
@@ -651,11 +683,16 @@ export function Sidebar({
                             if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
                                 setContextMenu(null);
+                                setShowMoveSubmenu(false);
                             }
                         }}
-                        onClick={() => setContextMenu(null)}
+                        onClick={() => {
+                            setContextMenu(null);
+                            setShowMoveSubmenu(false);
+                        }}
                     />
                     <div
+                        ref={contextMenuRef}
                         className="fixed bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded shadow-xl py-0.5 z-[70] min-w-[140px]"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
@@ -740,27 +777,6 @@ export function Sidebar({
                         </button>
                     </div>
                 </>
-            )}
-
-            {/* Click outside to close create menu and move submenu */}
-            {(showCreateMenu || showMoveSubmenu) && (
-                <div
-                    className="fixed inset-0 z-40"
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Close menus"
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            setShowCreateMenu(false);
-                            setShowMoveSubmenu(false);
-                        }
-                    }}
-                    onClick={() => {
-                        setShowCreateMenu(false);
-                        setShowMoveSubmenu(false);
-                    }}
-                />
             )}
         </>
     );

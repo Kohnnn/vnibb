@@ -54,6 +54,7 @@ export const queryKeys = {
     priceBoard: (symbols: string[]) => ['priceBoard', symbols] as const,
     topMovers: (type: string, index: string, limit: number) => ['topMovers', type, index, limit] as const,
     sectorTopMovers: (type: string, limit: number) => ['sectorTopMovers', type, limit] as const,
+    sectorsCatalog: (symbolLimit: number) => ['sectorsCatalog', symbolLimit] as const,
     // Derivatives
     derivativesContracts: () => ['derivativesContracts'] as const,
     derivativesHistory: (symbol: string) => ['derivativesHistory', symbol] as const,
@@ -592,6 +593,21 @@ export function useSectorTopMovers(options?: {
             (() => getAdaptiveRefetchInterval(POLLING_PRESETS.movers)),
         refetchIntervalInBackground: false,
         networkMode: 'online',
+    });
+}
+
+export function useSectorsCatalog(options?: {
+    symbolLimit?: number;
+    enabled?: boolean;
+}) {
+    const symbolLimit = options?.symbolLimit || 50;
+
+    return useQuery({
+        queryKey: queryKeys.sectorsCatalog(symbolLimit),
+        queryFn: () => api.getSectorsCatalog({ symbolLimit }),
+        enabled: options?.enabled !== false,
+        staleTime: 10 * 60 * 1000,
+        gcTime: 30 * 60 * 1000,
     });
 }
 

@@ -63,7 +63,7 @@ function SectorBreakdownWidgetComponent({ id, onRemove }: SectorBreakdownWidgetP
           ) : (
             <div className="w-full h-full min-h-[220px]">
               <ChartMountGuard className="h-full" minHeight={200}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
+                <ResponsiveContainer width="99%" height="100%" minWidth={260} minHeight={200}>
                   <PieChart>
                     <Pie
                       data={chartData}

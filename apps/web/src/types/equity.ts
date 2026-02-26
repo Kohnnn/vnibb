@@ -27,6 +27,7 @@ export interface EquityProfileData {
   established_year?: number;
   no_employees?: number;
   outstanding_shares?: number;
+  market_cap?: number;
   listed_date?: string;
 }
 
@@ -220,6 +221,7 @@ export interface BalanceSheetData {
   receivables?: number;
   accounts_receivable?: number;
   accounts_payable?: number;
+  customer_deposits?: number;
   goodwill?: number;
   intangible_assets?: number;
 }

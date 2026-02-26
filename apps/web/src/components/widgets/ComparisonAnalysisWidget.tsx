@@ -299,7 +299,7 @@ function ComparisonAnalysisWidgetComponent({
             <WidgetEmpty message="No performance series available for selected symbols." />
           ) : (
             <ChartMountGuard className="h-full" minHeight={120}>
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="99%" height="100%" minWidth={260} minHeight={120}>
                 <LineChart data={performanceQuery.data}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.25)" vertical={false} />
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />

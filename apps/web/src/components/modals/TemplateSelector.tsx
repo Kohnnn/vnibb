@@ -43,10 +43,17 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
     : DASHBOARD_TEMPLATES;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 backdrop-blur-md animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center animate-in fade-in duration-200">
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-950/55 backdrop-blur-md"
+        aria-label="Close template selector"
+      />
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
+        onClick={(event) => event.stopPropagation()}
         className="w-full max-w-4xl max-h-[85vh] bg-[var(--bg-surface)]/95 backdrop-blur-xl border border-[var(--border-subtle)] rounded-2xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col"
       >
         {/* Header */}

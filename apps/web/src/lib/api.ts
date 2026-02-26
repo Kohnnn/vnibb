@@ -937,7 +937,29 @@ export interface SectorTopMoversData {
 export interface SectorTopMoversResponse {
     count: number;
     type: string;
-    data: SectorTopMoversData[];
+    sectors?: SectorTopMoversData[];
+    data?: SectorTopMoversData[];
+    updated_at?: string;
+}
+
+export interface SectorCatalogEntry {
+    name: string;
+    name_en: string;
+    symbols: string[];
+    keywords?: string[];
+    icb_codes?: string[];
+}
+
+export type SectorCatalogResponse = Record<string, SectorCatalogEntry>;
+
+export async function getSectorsCatalog(options?: {
+    symbolLimit?: number;
+}): Promise<SectorCatalogResponse> {
+    return fetchAPI<SectorCatalogResponse>('/sectors', {
+        params: {
+            symbol_limit: options?.symbolLimit,
+        },
+    });
 }
 
 export async function getSectorTopMovers(options?: {
@@ -946,13 +968,17 @@ export async function getSectorTopMovers(options?: {
     source?: 'KBS' | 'VCI' | 'TCBS' | 'DNSE';
 
 }): Promise<SectorTopMoversResponse> {
-    return fetchAPI<SectorTopMoversResponse>('/trading/sector-top-movers', {
-        params: {
-            type: options?.type,
-            limit: options?.limit,
-            source: options?.source,
-        },
-    });
+    const params = {
+        type: options?.type,
+        limit: options?.limit,
+        source: options?.source,
+    };
+
+    try {
+        return await fetchAPI<SectorTopMoversResponse>('/sectors/top-movers', { params });
+    } catch {
+        return fetchAPI<SectorTopMoversResponse>('/trading/sector-top-movers', { params });
+    }
 }
 
 // ============ Sector Performance API ============
@@ -1099,6 +1125,7 @@ export interface FinancialStatementData {
     inventory?: number;
     accounts_receivable?: number;
     accounts_payable?: number;
+    customer_deposits?: number;
     goodwill?: number;
     intangible_assets?: number;
     operating_cash_flow?: number;

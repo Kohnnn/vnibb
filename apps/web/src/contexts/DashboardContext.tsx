@@ -108,7 +108,7 @@ const FINANCIALS_TEMPLATE: TemplateWidget[] = [
     }
 ];
 
-// Technical Analysis Tab: PriceChart (large), Volume, Technical Summary
+// Technical Analysis Tab: Price chart + quant toolkit
 const TECHNICAL_TEMPLATE: TemplateWidget[] = [
     {
         type: 'price_chart',
@@ -117,16 +117,34 @@ const TECHNICAL_TEMPLATE: TemplateWidget[] = [
         layout: { x: 0, y: 0, w: 24, h: 8, minW: 12, minH: 4 }
     },
     {
-        type: 'volume_analysis',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 8, w: 12, h: 6, minW: 6, minH: 4 }
-    },
-    {
         type: 'technical_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 8, w: 12, h: 6, minW: 6, minH: 4 }
+        layout: { x: 0, y: 8, w: 8, h: 6, minW: 6, minH: 4 }
+    },
+    {
+        type: 'volume_profile',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 8, w: 8, h: 6, minW: 6, minH: 4 }
+    },
+    {
+        type: 'obv_divergence',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 8, w: 8, h: 6, minW: 6, minH: 4 }
+    },
+    {
+        type: 'atr_regime',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 14, w: 12, h: 6, minW: 6, minH: 4 }
+    },
+    {
+        type: 'gap_fill_stats',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 14, w: 12, h: 6, minW: 6, minH: 4 }
     }
 ];
 
@@ -512,8 +530,8 @@ const createDefaultDashboard = (): Dashboard => {
 
     return {
         id: `dash-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        name: 'Stock Research',
-        description: 'Default research dashboard with pre-configured widgets',
+        name: 'Default Overview',
+        description: 'Default workspace with pre-configured overview widgets',
         order: 0,
         isDefault: true,
         showGroupLabels: true,
@@ -586,14 +604,44 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
             };
 
         case 'DELETE_DASHBOARD':
-            return {
-                ...state,
-                dashboards: state.dashboards.filter((d) => d.id !== action.payload),
-                activeDashboardId:
-                    state.activeDashboardId === action.payload
-                        ? state.dashboards[0]?.id || null
-                        : state.activeDashboardId,
-            };
+            {
+                const remainingDashboards = state.dashboards.filter((d) => d.id !== action.payload);
+
+                if (remainingDashboards.length === 0) {
+                    const defaultDashboard = createDefaultDashboard();
+                    return {
+                        ...state,
+                        dashboards: [defaultDashboard],
+                        activeDashboardId: defaultDashboard.id,
+                        activeTabId: defaultDashboard.tabs[0]?.id || null,
+                    };
+                }
+
+                const orderedDashboards = [...remainingDashboards].sort((a, b) => a.order - b.order);
+                const nextActiveDashboardId =
+                    state.activeDashboardId === action.payload ||
+                    !remainingDashboards.some((dashboard) => dashboard.id === state.activeDashboardId)
+                        ? orderedDashboards[0]?.id || null
+                        : state.activeDashboardId;
+
+                const nextActiveDashboard =
+                    remainingDashboards.find((dashboard) => dashboard.id === nextActiveDashboardId) ||
+                    orderedDashboards[0];
+                const sortedTabs = [...(nextActiveDashboard?.tabs || [])].sort(
+                    (a, b) => a.order - b.order
+                );
+                const nextActiveTabId =
+                    sortedTabs.find((tab) => tab.id === state.activeTabId)?.id ||
+                    sortedTabs[0]?.id ||
+                    null;
+
+                return {
+                    ...state,
+                    dashboards: remainingDashboards,
+                    activeDashboardId: nextActiveDashboardId,
+                    activeTabId: nextActiveTabId,
+                };
+            }
 
         case 'ADD_FOLDER':
             return {
@@ -962,9 +1010,15 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
             if (storedDashboards) {
                 dashboards = JSON.parse(storedDashboards);
+                if (!Array.isArray(dashboards)) {
+                    dashboards = [];
+                }
             }
             if (storedFolders) {
                 folders = JSON.parse(storedFolders);
+                if (!Array.isArray(folders)) {
+                    folders = [];
+                }
             }
 
             // Create default dashboard if none exist
@@ -1025,6 +1079,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             const cleanedSidebar = migrateSidebarClutter(dashboards, folders);
             dashboards = cleanedSidebar.dashboards;
             folders = cleanedSidebar.folders;
+
+            if (dashboards.length === 0) {
+                dashboards = [createDefaultDashboard()];
+                folders = [];
+            }
 
             const activeDashboardId = dashboards[0]?.id || null;
             const activeTabId = dashboards[0]?.tabs[0]?.id || null;

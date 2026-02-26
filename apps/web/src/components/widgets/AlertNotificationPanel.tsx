@@ -122,7 +122,7 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
       {/* Bell Icon Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+        className="relative rounded-lg border border-transparent p-2 text-[var(--text-secondary)] transition-colors hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
       >
         <Bell size={20} />
         {unreadCount > 0 && (
@@ -142,12 +142,12 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
           />
 
           {/* Panel */}
-          <div className="absolute right-0 top-full mt-2 w-96 max-h-[600px] bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-50 flex flex-col">
+          <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[600px] w-96 flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)]/98 shadow-xl backdrop-blur-md">
             {/* Header */}
-            <div className="flex items-center justify-between p-3 border-b border-zinc-700">
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] p-3">
               <div className="flex items-center gap-2">
-                <Bell size={16} className="text-gray-400" />
-                <h3 className="text-sm font-medium text-zinc-100">Alerts</h3>
+                <Bell size={16} className="text-[var(--text-secondary)]" />
+                <h3 className="text-sm font-medium text-[var(--text-primary)]">Alerts</h3>
                 {unreadCount > 0 && (
                   <span className="px-1.5 py-0.5 text-[10px] font-medium bg-red-500/20 text-red-400 rounded">
                     {unreadCount} new
@@ -156,14 +156,14 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
               </div>
               <button
                 onClick={() => setIsOpen(false)}
-                className="p-1 text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors"
+                className="rounded p-1 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               >
                 <X size={16} />
               </button>
             </div>
 
             {/* Filter Toggle */}
-            <div className="flex items-center justify-between p-3 border-b border-zinc-800">
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] p-3">
               <button
                 onClick={() => setShowUnreadOnly(!showUnreadOnly)}
                 className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
@@ -173,7 +173,7 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
               {unreadCount > 0 && (
                 <button
                   onClick={handleMarkAllAsRead}
-                  className="text-xs text-gray-400 hover:text-white transition-colors"
+                  className="text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
                 >
                   Mark all as read
                 </button>
@@ -186,19 +186,19 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
                 <div className="p-4 space-y-3">
                   {[...Array(3)].map((_, i) => (
                     <div key={i} className="animate-pulse">
-                      <div className="h-4 bg-gray-800 rounded w-3/4 mb-2" />
-                      <div className="h-3 bg-gray-800 rounded w-1/2" />
+                      <div className="mb-2 h-4 w-3/4 rounded bg-[var(--bg-tertiary)]" />
+                      <div className="h-3 w-1/2 rounded bg-[var(--bg-tertiary)]" />
                     </div>
                   ))}
                 </div>
               ) : alerts.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-40 text-gray-500">
+                <div className="flex h-40 flex-col items-center justify-center text-[var(--text-muted)]">
                   <Bell size={32} className="mb-2 opacity-30" />
                   <p className="text-sm">No alerts</p>
                   <p className="text-xs mt-1">You're all caught up!</p>
                 </div>
               ) : (
-                <div className="divide-y divide-zinc-800">
+                <div className="divide-y divide-[var(--border-subtle)]">
                   {alerts.map((alert) => {
                     const Icon = getAlertIcon(alert.alert_type);
                     const colorClass = getAlertColor(alert.severity);
@@ -206,7 +206,7 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
                     return (
                       <div
                         key={alert.id}
-                        className={`p-3 hover:bg-zinc-800/50 transition-colors ${
+                        className={`p-3 transition-colors hover:bg-[var(--bg-hover)] ${
                           !alert.read ? 'bg-blue-500/5' : ''
                         }`}
                       >
@@ -216,7 +216,7 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-2 mb-1">
-                              <h4 className="text-sm font-medium text-zinc-100 truncate">
+                              <h4 className="truncate text-sm font-medium text-[var(--text-primary)]">
                                 {alert.title}
                               </h4>
                               {!alert.read && (
@@ -228,10 +228,10 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
                                 </button>
                               )}
                             </div>
-                            <p className="text-xs text-gray-400 mb-1 line-clamp-2">
+                            <p className="mb-1 line-clamp-2 text-xs text-[var(--text-secondary)]">
                               {alert.description}
                             </p>
-                            <div className="flex items-center gap-2 text-[10px] text-gray-500">
+                            <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
                               <span className="font-medium text-blue-400">{alert.symbol}</span>
                               <span>•</span>
                               <span>{formatTime(alert.timestamp)}</span>

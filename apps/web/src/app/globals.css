@@ -42,21 +42,21 @@ body {
 
 :root.light,
 :root[data-theme="light"] {
-  --color-bg-primary: #f5f7fb;
+  --color-bg-primary: #f8fafc;
   --color-bg-secondary: #ffffff;
-  --color-bg-tertiary: #eef2f7;
+  --color-bg-tertiary: #f1f5f9;
   --color-bg-elevated: #ffffff;
 
   --bg-card: #ffffff;
 
-  --color-border-default: #d8dee8;
-  --color-border-subtle: #e9edf4;
-  --color-border-strong: #c6cfdd;
+  --color-border-default: #e2e8f0;
+  --color-border-subtle: #e8edf3;
+  --color-border-strong: #cbd5e1;
 
   --color-text-primary: #0f172a;
-  --color-text-secondary: #334155;
-  --color-text-tertiary: #475569;
-  --color-text-muted: #64748b;
+  --color-text-secondary: #1e293b;
+  --color-text-tertiary: #334155;
+  --color-text-muted: #475569;
 
   --widget-bg-solid: #ffffff;
   --widget-bg-glass: rgba(255, 255, 255, 0.94);
@@ -85,21 +85,18 @@ body {
   --text-secondary: var(--color-text-secondary);
   --text-muted: var(--color-text-muted);
   --dashboard-shell-bg: color-mix(in srgb, var(--bg-primary) 95%, white 5%);
-  --table-sticky-header-bg: color-mix(in srgb, var(--bg-secondary) 92%, #dbe5f2 8%);
-  --table-sticky-cell-bg: color-mix(in srgb, var(--bg-secondary) 94%, #e2e8f0 6%);
-  --table-sticky-cell-alt-bg: color-mix(in srgb, var(--bg-secondary) 90%, #dbe5f2 10%);
-  --table-sticky-cell-hover-bg: color-mix(in srgb, var(--bg-hover) 90%, #dbe5f2 10%);
+  --table-sticky-header-bg: color-mix(in srgb, var(--bg-secondary) 96%, #e2e8f0 4%);
+  --table-sticky-cell-bg: color-mix(in srgb, var(--bg-secondary) 95%, #e2e8f0 5%);
+  --table-sticky-cell-alt-bg: color-mix(in srgb, var(--bg-secondary) 92%, #e2e8f0 8%);
+  --table-sticky-cell-hover-bg: color-mix(in srgb, var(--bg-hover) 92%, #dbeafe 8%);
   --sidebar-brand-gradient: linear-gradient(120deg, #0f172a 0%, #1d4ed8 100%);
 }
 
-[data-theme="light"] {
-  --bg-primary: #f8fafc;
-  --bg-secondary: #ffffff;
-  --bg-card: #ffffff;
-  --text-primary: #1a1a2e;
-  --text-secondary: #4a4a6a;
-  --text-muted: #6b7280;
-  --border-color: #e2e8f0;
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+  animation-duration: 0s !important;
 }
 
 /* React-Grid-Layout overrides */
@@ -269,6 +266,10 @@ body {
 /* TradingView chart container adjustments */
 .tv-lightweight-charts {
   font-family: var(--font-geist-sans), system-ui, sans-serif !important;
+}
+
+.recharts-responsive-container {
+  min-width: 99% !important;
 }
 
 /* Suppress TradingView symbol-change modal that blocks chart interaction */

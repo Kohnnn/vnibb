@@ -37,6 +37,10 @@ import { PortfolioTrackerWidget } from './PortfolioTrackerWidget';
 import { PriceAlertsWidget } from './PriceAlertsWidget';
 import { EconomicCalendarWidget } from './EconomicCalendarWidget';
 import { VolumeAnalysisWidget } from './VolumeAnalysisWidget';
+import { VolumeProfileWidget } from './VolumeProfileWidget';
+import { OBVDivergenceWidget } from './OBVDivergenceWidget';
+import { ATRRegimeWidget } from './ATRRegimeWidget';
+import { GapFillStatsWidget } from './GapFillStatsWidget';
 import { TechnicalSummaryWidget } from './TechnicalSummaryWidget';
 import { ForexRatesWidget } from './ForexRatesWidget';
 import { CommoditiesWidget } from './CommoditiesWidget';
@@ -173,6 +177,10 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
 
     // Analytics widgets
     volume_analysis: VolumeAnalysisWidget as ComponentType<WidgetProps>,
+    volume_profile: VolumeProfileWidget as ComponentType<WidgetProps>,
+    obv_divergence: OBVDivergenceWidget as ComponentType<WidgetProps>,
+    atr_regime: ATRRegimeWidget as ComponentType<WidgetProps>,
+    gap_fill_stats: GapFillStatsWidget as ComponentType<WidgetProps>,
     technical_summary: TechnicalSummaryWidget as ComponentType<WidgetProps>,
     technical_snapshot: TechnicalSnapshotWidget as ComponentType<WidgetProps>,
     similar_stocks: SimilarStocksWidget as ComponentType<WidgetProps>,
@@ -241,6 +249,10 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     price_alerts: { w: 4, h: 7, minW: 3, minH: 5 },
     economic_calendar: { w: 5, h: 7, minW: 4, minH: 5 },
     volume_analysis: { w: 5, h: 7, minW: 4, minH: 5 },
+    volume_profile: { w: 6, h: 7, minW: 4, minH: 5 },
+    obv_divergence: { w: 6, h: 7, minW: 4, minH: 5 },
+    atr_regime: { w: 6, h: 7, minW: 4, minH: 5 },
+    gap_fill_stats: { w: 6, h: 7, minW: 4, minH: 5 },
     technical_summary: { w: 5, h: 7, minW: 4, minH: 5 },
     technical_snapshot: { w: 5, h: 6, minW: 4, minH: 5 },
     forex_rates: { w: 5, h: 7, minW: 4, minH: 5 },
@@ -316,6 +328,10 @@ export const widgetNames: Record<WidgetType, string> = {
     price_alerts: 'Price Alerts',
     economic_calendar: 'Economic Calendar',
     volume_analysis: 'Volume Analysis',
+    volume_profile: 'Volume Profile',
+    obv_divergence: 'OBV Divergence',
+    atr_regime: 'ATR Regime',
+    gap_fill_stats: 'Gap Fill Stats',
     technical_summary: 'Technical Summary',
     technical_snapshot: 'Technical Snapshot',
     forex_rates: 'Forex Rates',
@@ -388,6 +404,10 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     price_alerts: 'Target price notifications',
     economic_calendar: 'Macroeconomic events',
     volume_analysis: 'Historical volume distribution',
+    volume_profile: 'POC/VAH/VAL volume profile by price range',
+    obv_divergence: 'Price and OBV divergence scanner',
+    atr_regime: 'ATR volatility regime and model sizing',
+    gap_fill_stats: 'Gap fill probability and fill timing',
     technical_summary: 'Indicator-based signals',
     technical_snapshot: 'Daily technical indicator snapshot',
     forex_rates: 'Currency exchange (VND pairs)',

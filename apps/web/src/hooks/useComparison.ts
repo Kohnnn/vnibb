@@ -47,18 +47,23 @@ export interface PeersResponse {
 }
 
 export const useComparison = (symbols: string[], period = '1Y', enabled = true) => {
+    const normalizedSymbols = [...symbols]
+        .map((item) => item.trim().toUpperCase())
+        .filter(Boolean)
+        .sort();
+
     return useQuery<ComparisonResponse>({
-        queryKey: ['comparison', symbols.sort().join(','), period],
+        queryKey: ['comparison', normalizedSymbols.join(','), period],
         queryFn: async () => {
             const { data } = await axios.get(`${API_BASE_URL}/analysis/`, {
                 params: {
-                    symbols: symbols.join(','),
+                    symbols: normalizedSymbols.join(','),
                     period,
                 },
             });
             return data;
         },
-        enabled: enabled && symbols.length > 0,
+        enabled: enabled && normalizedSymbols.length > 0,
         staleTime: 5 * 60 * 1000, // 5 minutes
     });
 };
@@ -67,7 +72,7 @@ export const usePeers = (symbol: string, limit = 5, enabled = true) => {
     return useQuery<PeersResponse>({
         queryKey: ['peers', symbol, limit],
         queryFn: async () => {
-            const { data } = await axios.get(`${API_BASE_URL}/analysis/peers/${symbol}`, {
+            const { data } = await axios.get(`${API_BASE_URL}/equity/${symbol}/peers`, {
                 params: { limit },
             });
             return data;
