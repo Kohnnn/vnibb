@@ -145,6 +145,24 @@ const TECHNICAL_TEMPLATE: TemplateWidget[] = [
         syncGroupId: 1,
         config: {},
         layout: { x: 12, y: 14, w: 12, h: 6, minW: 6, minH: 4 }
+    },
+    {
+        type: 'volume_delta',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 20, w: 8, h: 6, minW: 6, minH: 4 }
+    },
+    {
+        type: 'amihud_illiquidity',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 20, w: 8, h: 6, minW: 6, minH: 4 }
+    },
+    {
+        type: 'seasonality_heatmap',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 20, w: 8, h: 6, minW: 6, minH: 4 }
     }
 ];
 

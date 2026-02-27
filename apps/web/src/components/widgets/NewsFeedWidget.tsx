@@ -193,16 +193,16 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
             <div className="h-full flex flex-col">
                 {/* Header with Market Sentiment */}
                 {!symbol && marketSentiment && (
-                    <div className="px-3 py-2 m-2 bg-gray-800/30 rounded border border-gray-700/50">
+                    <div className="px-3 py-2 m-2 bg-muted/40 rounded border border-border/60">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-400">Market Sentiment:</span>
+                                <span className="text-xs text-muted-foreground">Market Sentiment:</span>
                                 <SentimentBadge
                                     sentiment={marketSentiment.overall}
                                     score={Math.round(marketSentiment.bullish_percentage)}
                                 />
                             </div>
-                            <div className="text-[10px] text-gray-500">
+                            <div className="text-[10px] text-muted-foreground">
                                 {marketSentiment.total_articles} articles analyzed
                             </div>
                         </div>
@@ -219,16 +219,19 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                 </div>
 
                 {/* Filters */}
-                <div className="px-2 py-2 space-y-2 border-b border-gray-800">
+                <div className="px-2 py-2 space-y-2 border-b border-border/60">
                     {/* Search */}
                     <div className="relative">
-                        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+                        <Search
+                            size={12}
+                            className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                        />
                         <input
                             type="text"
                             placeholder="Search news..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full pl-7 pr-2 py-1.5 text-xs bg-gray-800/50 border border-gray-700 rounded focus:outline-none focus:border-blue-500/50"
+                            className="w-full pl-7 pr-2 py-1.5 text-xs rounded bg-background/80 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40"
                         />
                     </div>
 
@@ -240,7 +243,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                         <select
                             value={sentimentFilter}
                             onChange={(e) => setSentimentFilter(e.target.value)}
-                            className="text-[10px] px-2 py-1 bg-gray-800 border border-gray-700 rounded focus:outline-none focus:border-blue-500/50"
+                            className="text-[10px] px-2 py-1 rounded bg-background/80 border border-border text-foreground focus:outline-none focus:border-primary/40"
                         >
                             <option value="">All Sentiment</option>
                             <option value="bullish">Bullish</option>
@@ -253,7 +256,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                             <select
                                 value={sourceFilter}
                                 onChange={(e) => setSourceFilter(e.target.value)}
-                                className="text-[10px] px-2 py-1 bg-gray-800 border border-gray-700 rounded focus:outline-none focus:border-blue-500/50"
+                                className="text-[10px] px-2 py-1 rounded bg-background/80 border border-border text-foreground focus:outline-none focus:border-primary/40"
                             >
                                 <option value="">All Sources</option>
                                 {sources.map(source => (
@@ -285,7 +288,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                             {filteredNews.map((item, index) => (
                                 <div
                                     key={`${item.id ?? item.url ?? item.title}-${index}`}
-                                    className="group p-3 hover:bg-gray-800/30 cursor-pointer transition-colors"
+                                    className="group p-3 hover:bg-muted/40 cursor-pointer transition-colors"
                                     onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
                                 >
                                     {/* Header */}
@@ -306,7 +309,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                                                     </span>
                                                 )}
                                                 {item.source && (
-                                                    <span className="px-1.5 py-0.5 bg-gray-800 rounded">
+                                                    <span className="px-1.5 py-0.5 bg-muted/70 text-foreground rounded">
                                                         {item.source}
                                                     </span>
                                                 )}
@@ -351,7 +354,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
 
                                     {/* Expanded Content */}
                                     {expandedId === item.id && (
-                                        <div className="mt-3 space-y-2 border-t border-gray-800/50 pt-2">
+                                        <div className="mt-3 space-y-2 border-t border-border/60 pt-2">
                                             {/* AI Summary */}
                                             {item.ai_summary && (
                                                 <div className="p-2 bg-blue-500/5 border border-blue-500/20 rounded">
@@ -408,11 +411,10 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                 </div>
 
                 {/* Footer stats */}
-                <div className="px-3 py-2 border-t border-gray-800 text-[10px] text-gray-500 text-left">
+                <div className="px-3 py-2 border-t border-border/60 text-[10px] text-muted-foreground text-left">
                     Showing {filteredNews.length} of {newsItems.length} articles
                 </div>
             </div>
         </WidgetContainer>
     );
 }
-

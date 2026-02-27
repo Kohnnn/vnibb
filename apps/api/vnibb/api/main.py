@@ -49,7 +49,6 @@ from vnibb.core.cache import redis_client
 from vnibb.core.exceptions import VniBBException
 from vnibb.core.logging_config import setup_logging
 from vnibb.core.monitoring import init_monitoring
-from vnibb.api.v1.router import api_router
 from vnibb.models.api_errors import (
     APIError,
     RateLimitError,
@@ -68,6 +67,24 @@ limiter = Limiter(
     storage_uri=settings.redis_url if settings.redis_url else None,
     headers_enabled=True,  # Add X-RateLimit-* headers to responses
 )
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int, minimum: int = 1) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return max(minimum, int(raw))
+    except ValueError:
+        logger.warning("Invalid %s=%s. Falling back to %s", name, raw, default)
+        return default
 
 
 def get_cors_headers(request: Request) -> dict[str, str]:
@@ -376,8 +393,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         return
 
     # Validate database connection
-    logger.info("Checking database connection...")
-    db_ok = await check_database_connection()
+    db_timeout_seconds = _env_int("STARTUP_DB_CHECK_TIMEOUT_SECONDS", 12)
+    logger.info("Checking database connection (timeout=%ss)...", db_timeout_seconds)
+    try:
+        db_ok = await asyncio.wait_for(
+            check_database_connection(),
+            timeout=db_timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        db_ok = False
+        logger.warning("Database connection check timed out after %ss", db_timeout_seconds)
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, GeneratorExit)):
+            raise
+        db_ok = False
+        logger.warning("Database connection check failed (non-fatal): %s", exc)
+
     if not db_ok:
         # Log critical but don't crash - allows health endpoints to work for debugging
         logger.critical("Database connection failed - running in degraded mode")
@@ -426,7 +457,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if settings.vnstock_api_key:
             from vnibb.services.vnstock_registration import ensure_vnstock_registration
 
-            result = await ensure_vnstock_registration()
+            registration_timeout = _env_int("STARTUP_VNSTOCK_REG_TIMEOUT_SECONDS", 10)
+            result = await asyncio.wait_for(
+                ensure_vnstock_registration(),
+                timeout=registration_timeout,
+            )
             if result.registered:
                 logger.info(
                     f"VNStock registration status: {result.reason} (source={result.source})"
@@ -435,25 +470,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.info(f"VNStock registration skipped: {result.reason}")
             else:
                 logger.warning(f"VNStock registration skipped: {result.reason}")
+    except asyncio.TimeoutError:
+        logger.warning("VNStock registration timed out (non-fatal)")
     except BaseException as e:
         logger.warning(f"VNStock registration failed (non-fatal): {e}")
 
     # Start scheduler for background data sync jobs
-    try:
-        start_scheduler()
-        logger.info("Scheduler started with data sync jobs")
-    except BaseException as e:
-        logger.warning(f"Scheduler start failed (non-fatal): {e}")
+    if _env_flag("SKIP_SCHEDULER_STARTUP", False):
+        logger.warning("Scheduler startup skipped (SKIP_SCHEDULER_STARTUP=true)")
+    else:
+        try:
+            start_scheduler()
+            logger.info("Scheduler started with data sync jobs")
+        except BaseException as e:
+            logger.warning(f"Scheduler start failed (non-fatal): {e}")
 
     # Start WebSocket price broadcaster for real-time updates
 
-    try:
-        from vnibb.api.v1.websocket import start_background_fetcher
+    if _env_flag("SKIP_WEBSOCKET_STARTUP", False):
+        logger.warning("WebSocket broadcaster startup skipped (SKIP_WEBSOCKET_STARTUP=true)")
+    else:
+        try:
+            from vnibb.api.v1.websocket import start_background_fetcher
 
-        await start_background_fetcher()
-        logger.info("WebSocket price broadcaster started")
-    except BaseException as e:
-        logger.warning(f"WebSocket broadcaster start failed (non-fatal): {e}")
+            websocket_timeout = _env_int("STARTUP_WS_TIMEOUT_SECONDS", 5)
+            await asyncio.wait_for(start_background_fetcher(), timeout=websocket_timeout)
+            logger.info("WebSocket price broadcaster started")
+        except asyncio.TimeoutError:
+            logger.warning("WebSocket broadcaster startup timed out (non-fatal)")
+        except BaseException as e:
+            logger.warning(f"WebSocket broadcaster start failed (non-fatal): {e}")
 
     # Log startup complete
     effective_port = os.getenv("PORT", str(settings.api_port))
@@ -762,8 +808,15 @@ def create_app() -> FastAPI:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-    # Mount API Router
-    app.include_router(api_router, prefix=settings.api_prefix)
+    # Mount API Router lazily so health endpoints still boot on partial import failures.
+    try:
+        from vnibb.api.v1.router import api_router
+
+        app.include_router(api_router, prefix=settings.api_prefix)
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, GeneratorExit)):
+            raise
+        logger.exception("API router initialization failed. Running health-only mode: %s", exc)
 
     return app
 
