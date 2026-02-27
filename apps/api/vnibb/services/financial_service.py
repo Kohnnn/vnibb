@@ -1,5 +1,6 @@
 import logging
 import math
+import asyncio
 
 from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
@@ -9,6 +10,10 @@ from vnibb.providers.vnstock.financials import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_control_flow_exception(exc: BaseException) -> bool:
+    return isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, GeneratorExit))
 
 
 async def get_financials_with_ttm(
@@ -22,7 +27,18 @@ async def get_financials_with_ttm(
     if normalized_period == "FY":
         period = "year"
     if normalized_period == "TTM":
-        return await calculate_ttm(symbol, statement_type)
+        try:
+            return await calculate_ttm(symbol, statement_type)
+        except BaseException as exc:
+            if _is_control_flow_exception(exc):
+                raise
+            logger.warning(
+                "TTM calculation aborted for %s (%s): %s",
+                symbol.upper(),
+                statement_type,
+                exc,
+            )
+            return []
 
     # Map periods like Q1, Q2, Q3, Q4 to quarter and filter
     actual_period = "quarter" if is_specific_quarter else period
@@ -34,7 +50,19 @@ async def get_financials_with_ttm(
         limit=limit if not is_specific_quarter else 20,
     )
 
-    data = await VnstockFinancialsFetcher.fetch(params)
+    try:
+        data = await VnstockFinancialsFetcher.fetch(params)
+    except BaseException as exc:
+        if _is_control_flow_exception(exc):
+            raise
+        logger.warning(
+            "Financial fetch aborted for %s (%s/%s): %s",
+            symbol.upper(),
+            statement_type,
+            period,
+            exc,
+        )
+        return []
 
     if is_specific_quarter:
         # Filter for specific quarter across years
@@ -61,7 +89,18 @@ async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialState
         symbol=symbol, statement_type=StatementType(statement_type), period="quarter", limit=4
     )
 
-    quarters = await VnstockFinancialsFetcher.fetch(params)
+    try:
+        quarters = await VnstockFinancialsFetcher.fetch(params)
+    except BaseException as exc:
+        if _is_control_flow_exception(exc):
+            raise
+        logger.warning(
+            "TTM source fetch aborted for %s (%s): %s",
+            symbol.upper(),
+            statement_type,
+            exc,
+        )
+        return []
 
     if len(quarters) < 4:
         logger.warning(f"Not enough quarterly data for TTM calculation for {symbol}")

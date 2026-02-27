@@ -424,6 +424,30 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
     },
     {
+        type: 'volume_delta',
+        name: 'Volume Delta',
+        description: 'Order-flow proxy from buy/sell pressure and cumulative delta',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'amihud_illiquidity',
+        name: 'Amihud Illiquidity',
+        description: 'Rolling 20-day illiquidity ratio to track market depth changes',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'seasonality_heatmap',
+        name: 'Seasonality Heatmap',
+        description: 'Year x month return matrix for recurring seasonal patterns',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
         type: 'technical_summary',
         name: 'Technical Summary',
         description: 'Technical indicators with buy/sell signals',

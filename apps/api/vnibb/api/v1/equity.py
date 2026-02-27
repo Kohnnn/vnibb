@@ -54,6 +54,7 @@ from vnibb.providers.vnstock.financial_ratios import (
     FinancialRatiosQueryParams,
     FinancialRatioData,
 )
+from vnibb.providers.vnstock.equity_screener import VnstockScreenerFetcher, StockScreenerParams
 from vnibb.providers.vnstock.foreign_trading import (
     VnstockForeignTradingFetcher,
     ForeignTradingQueryParams,
@@ -90,6 +91,10 @@ async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]])
                 _REFRESH_IN_FLIGHT.discard(key)
 
     asyncio.create_task(runner())
+
+
+def _is_control_flow_exception(exc: BaseException) -> bool:
+    return isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, GeneratorExit))
 
 
 class MetricsHistoryResponse(BaseModel):
@@ -368,6 +373,22 @@ async def _resolve_profile_market_cap(
     shares_value = _coerce_optional_float(outstanding_shares)
     latest_price = await _get_latest_price(db, symbol)
 
+    if latest_price in (None, 0):
+        try:
+            quote_data, _ = await VnstockStockQuoteFetcher.fetch(
+                symbol=symbol,
+                source=settings.vnstock_source,
+            )
+            latest_price = _pick_optional_float(
+                latest_price, quote_data.price, quote_data.prev_close
+            )
+        except BaseException as exc:
+            if _is_control_flow_exception(exc):
+                raise
+            logger.warning(
+                "Quote fallback failed while resolving market cap for %s: %s", symbol, exc
+            )
+
     if shares_value not in (None, 0) and latest_price not in (None, 0):
         multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
         return shares_value * multiplier * latest_price
@@ -390,6 +411,23 @@ async def _resolve_profile_market_cap(
     latest_snapshot_market_cap_value = _coerce_optional_float(latest_snapshot_market_cap)
     if latest_snapshot_market_cap_value not in (None, 0):
         return latest_snapshot_market_cap_value
+
+    try:
+        screener_rows = await VnstockScreenerFetcher.fetch(
+            StockScreenerParams(symbol=symbol, limit=1, source=settings.vnstock_source)
+        )
+        if screener_rows:
+            screener_market_cap = _coerce_optional_float(
+                getattr(screener_rows[0], "market_cap", None)
+            )
+            if screener_market_cap not in (None, 0):
+                return screener_market_cap
+    except BaseException as exc:
+        if _is_control_flow_exception(exc):
+            raise
+        logger.warning(
+            "Screener fallback failed while resolving market cap for %s: %s", symbol, exc
+        )
 
     return None
 
@@ -1573,7 +1611,9 @@ async def get_financials(
             return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
 
         return StandardResponse(data=[], meta=MetaData(count=0))
-    except Exception as e:
+    except BaseException as e:
+        if _is_control_flow_exception(e):
+            raise
         logger.warning(f"Live API failed for financials {symbol}, trying database fallback: {e}")
         try:
             fallback_data = await _load_financial_statement_fallback(
@@ -2173,7 +2213,9 @@ async def get_income_statement(
             db=db,
         )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
-    except Exception as e:
+    except BaseException as e:
+        if _is_control_flow_exception(e):
+            raise
         try:
             fallback_data = await _load_financial_statement_fallback(
                 db=db,
@@ -2221,7 +2263,9 @@ async def get_balance_sheet(
                 limit=limit,
             )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
-    except Exception as e:
+    except BaseException as e:
+        if _is_control_flow_exception(e):
+            raise
         try:
             fallback_data = await _load_financial_statement_fallback(
                 db=db,
@@ -2261,7 +2305,9 @@ async def get_cash_flow(
                 limit=limit,
             )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
-    except Exception as e:
+    except BaseException as e:
+        if _is_control_flow_exception(e):
+            raise
         try:
             fallback_data = await _load_financial_statement_fallback(
                 db=db,
