@@ -67,7 +67,7 @@ export const DropdownMenuContent = ({ children, className = '', align = 'center'
         <div
             ref={ref}
             className={cn(
-                "absolute z-50 mt-2 min-w-[8rem] overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/98 p-1 text-[var(--text-primary)] shadow-xl backdrop-blur-md animate-in fade-in-80 zoom-in-95",
+                "absolute z-50 mt-2 min-w-[8rem] overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-1 text-[var(--text-primary)] shadow-xl ring-1 ring-black/10 animate-in fade-in-80 zoom-in-95",
                 alignClasses[align as keyof typeof alignClasses] || alignClasses.center,
                 className
             )}
@@ -178,7 +178,7 @@ export const DropdownMenuSubContent = ({ children, className, isOpen }: any) => 
     if (!isOpen) return null;
     return (
         <div className={cn(
-            "absolute left-full top-0 z-50 ml-1 min-w-[8rem] overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/98 p-1 text-[var(--text-primary)] shadow-xl backdrop-blur-md animate-in fade-in-80 zoom-in-95",
+            "absolute left-full top-0 z-50 ml-1 min-w-[8rem] overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-1 text-[var(--text-primary)] shadow-xl ring-1 ring-black/10 animate-in fade-in-80 zoom-in-95",
             className
         )}>
             {children}

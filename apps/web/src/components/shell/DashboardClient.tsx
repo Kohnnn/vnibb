@@ -195,8 +195,17 @@ function DashboardContent() {
     }, [activeDashboard, updateSyncGroupSymbol, setGlobalSymbol, setContextGlobalSymbol]);
 
     const handleEditToggle = useCallback(() => {
+        if (activeDashboard?.isEditable === false) {
+            return;
+        }
         setIsEditing((prev) => !prev);
-    }, []);
+    }, [activeDashboard?.isEditable]);
+
+    useEffect(() => {
+        if (activeDashboard?.isEditable === false && isEditing) {
+            setIsEditing(false);
+        }
+    }, [activeDashboard?.id, activeDashboard?.isEditable, isEditing]);
 
     const handleResetLayout = useCallback(() => {
         if (activeDashboard && activeTab) {
@@ -300,7 +309,7 @@ function DashboardContent() {
     }, [activeTab]);
 
     const handleApplyTemplate = useCallback((template: DashboardTemplate) => {
-        if (!activeDashboard || !activeTab) return;
+        if (!activeDashboard || !activeTab || activeDashboard.isEditable === false) return;
         
         // Clear existing widgets and add template ones
         // In a real app we might want to ask confirmation
@@ -424,16 +433,16 @@ function DashboardContent() {
                     currentSymbol={globalSymbol}
                     onSymbolChange={handleSymbolChange}
                     isEditing={isEditing}
-                    onEditToggle={handleEditToggle}
+                    onEditToggle={activeDashboard?.isEditable === false ? undefined : handleEditToggle}
                     onAIClick={() => {
                         setCopilotWidgetContext(undefined);
                         setCopilotWidgetData(undefined);
                         setShowAICopilot(!showAICopilot);
                     }}
-                    onResetLayout={handleResetLayout}
-                    onAutoFitLayout={handleAutoFitLayout}
-                    onCollapseAll={handleCollapseAll}
-                    onExpandAll={handleExpandAll}
+                    onResetLayout={activeDashboard?.isEditable === false ? undefined : handleResetLayout}
+                    onAutoFitLayout={activeDashboard?.isEditable === false ? undefined : handleAutoFitLayout}
+                    onCollapseAll={activeDashboard?.isEditable === false ? undefined : handleCollapseAll}
+                    onExpandAll={activeDashboard?.isEditable === false ? undefined : handleExpandAll}
                     unitDisplay={unitConfig.display}
                     onUnitDisplayChange={setUnit}
                 />
@@ -474,7 +483,9 @@ function DashboardContent() {
                                                     widgetGroup={widget.widgetGroup}
                                                     isEditing={isEditing}
                                                     isCollapsed={Boolean(widget.config?.collapsed)}
-                                                    onRemove={() => deleteWidget(activeDashboard.id, activeTab.id, widget.id)}
+                                                    onRemove={activeDashboard.isEditable === false
+                                                        ? undefined
+                                                        : () => deleteWidget(activeDashboard.id, activeTab.id, widget.id)}
                                                     onSymbolChange={handleSymbolChange}
                                                     onCopilotClick={(context) => {
                                                         const contextName = typeof context?.widgetType === 'string'

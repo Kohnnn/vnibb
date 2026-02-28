@@ -27,6 +27,9 @@ Modern, responsive web application for Vietnamese stock market analysis. Built w
 - **Real-time Data** - WebSocket connections for live updates
 - **Responsive** - Mobile, tablet, desktop optimized
 - **Fast** - Server-side rendering + edge caching
+- **Main System Dashboard** - Permanent read-only fallback dashboard that prevents empty-state crashes
+- **External Intelligence Hub** - Research widget uses categorized outbound links (no brittle iframes)
+- **Quant Library Grouping** - Volume Profile, Gap Fill, Volume Delta, and Amihud are grouped under Quant
 
 ---
 

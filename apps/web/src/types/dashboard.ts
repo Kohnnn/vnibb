@@ -177,6 +177,8 @@ export interface Dashboard {
     folderId?: string;      // Optional folder membership
     order: number;
     isDefault: boolean;
+    isEditable?: boolean;
+    isDeletable?: boolean;
     showGroupLabels: boolean; // Controls visibility of sync badges on widgets
     tabs: DashboardTab[];
     syncGroups: WidgetSyncGroup[];
@@ -252,7 +254,8 @@ export type WidgetCategory =
     | 'ownership'
     | 'estimates'
     | 'screener'
-    | 'analysis';
+    | 'analysis'
+    | 'quant';
 
 
 export interface WidgetCategoryInfo {

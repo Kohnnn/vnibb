@@ -33,7 +33,7 @@ interface ResearchBrowserWidgetProps {
   onRemove?: () => void
 }
 
-type SourceMode = 'embed' | 'external' | 'rss'
+type SourceMode = 'external' | 'rss'
 type SourceCategory = 'research' | 'broker' | 'chart' | 'global'
 
 interface QuickSource {
@@ -58,9 +58,9 @@ const QUICK_SOURCES: QuickSource[] = [
   {
     id: 'stockbiz',
     label: 'StockBiz',
-    mode: 'embed',
+    mode: 'external',
     category: 'research',
-    urlTemplate: 'https://stockbiz.vn/symbol/{SYMBOL}',
+    urlTemplate: 'https://www.stockbiz.vn/Stocks/{SYMBOL}/Overview.aspx',
     description: 'Company profile, trading overview, and quick fundamentals.',
     favicon: 'https://stockbiz.vn/favicon.ico',
   },
@@ -131,14 +131,6 @@ const QUICK_SOURCES: QuickSource[] = [
   },
 ]
 
-const EMBED_BLOCKLIST: Record<string, string> = {
-  'cafef.vn': 'CafeF blocks iframe embedding with X-Frame-Options.',
-  'fireant.vn': 'FireAnt blocks embedding for authenticated and public pages.',
-  'vietstock.vn': 'Vietstock blocks most iframe embeds.',
-  'vndirect.com.vn': 'VNDirect pages are protected against iframe embedding.',
-  'google.com': 'Google search pages cannot be embedded in iframes.',
-}
-
 const CATEGORY_LABELS: Record<SourceCategory, string> = {
   research: 'Research',
   broker: 'Broker',
@@ -157,18 +149,6 @@ function substituteSymbol(urlTemplate: string, symbol?: string): string {
   if (!symbol) return urlTemplate.replaceAll('{SYMBOL}', '').replaceAll('{symbol}', '')
   const normalized = encodeURIComponent(symbol.trim().toUpperCase())
   return urlTemplate.replaceAll('{SYMBOL}', normalized).replaceAll('{symbol}', normalized)
-}
-
-function getEmbedBlockReason(url: string): string | null {
-  try {
-    const host = new URL(url).hostname.toLowerCase()
-    const blocked = Object.entries(EMBED_BLOCKLIST).find(
-      ([domain]) => host === domain || host.endsWith(`.${domain}`)
-    )
-    return blocked ? blocked[1] : null
-  } catch {
-    return 'Invalid URL.'
-  }
 }
 
 function inferRssSource(source?: QuickSource | null): ResearchRssSource | null {
@@ -194,7 +174,6 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
 
   const [customTitle, setCustomTitle] = useState('')
   const [customUrl, setCustomUrl] = useState('')
-  const [embedState, setEmbedState] = useState<'idle' | 'loading' | 'ready' | 'blocked'>('idle')
   const [inlineNotice, setInlineNotice] = useState<string | null>(null)
 
   const normalizedSymbol = (symbol || '').trim().toUpperCase()
@@ -213,9 +192,7 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
   }, [activeSavedSite, activeQuickSource.urlTemplate, normalizedSymbol])
 
   const activeTitle = activeSavedSite?.title || activeQuickSource.label
-  const activeMode: SourceMode = activeSavedSite ? 'embed' : activeQuickSource.mode
-  const embedBlockReason = useMemo(() => getEmbedBlockReason(activeUrl), [activeUrl])
-  const canAttemptEmbed = activeMode === 'embed' && Boolean(activeUrl) && !embedBlockReason
+  const activeMode: SourceMode = activeSavedSite ? 'external' : activeQuickSource.mode
   const rssSource = activeSavedSite ? null : inferRssSource(activeQuickSource)
 
   const groupedSources = useMemo(() => {
@@ -343,25 +320,6 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
   }, [inlineNotice])
 
   useEffect(() => {
-    if (!activeUrl) {
-      setEmbedState('idle')
-      return
-    }
-
-    if (!canAttemptEmbed) {
-      setEmbedState('blocked')
-      return
-    }
-
-    setEmbedState('loading')
-    const timeoutId = window.setTimeout(() => {
-      setEmbedState((current) => (current === 'ready' ? current : 'blocked'))
-    }, 7000)
-
-    return () => window.clearTimeout(timeoutId)
-  }, [activeUrl, canAttemptEmbed])
-
-  useEffect(() => {
     const handleKeyboard = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
         return
@@ -395,7 +353,7 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
   })
 
   return (
-    <WidgetContainer title="Research Browser" onClose={onRemove} noPadding widgetId={id}>
+    <WidgetContainer title="External Intelligence Hub" onClose={onRemove} noPadding widgetId={id}>
       <div className="flex h-full flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]" {...swipeHandlers}>
         <div className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/80 px-3 py-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -445,9 +403,6 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
             <button
               type="button"
               onClick={() => {
-                if (canAttemptEmbed) {
-                  setEmbedState('loading')
-                }
                 rssQuery.refetch()
               }}
               className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
@@ -556,25 +511,6 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
           <section className="min-h-[320px] bg-[var(--bg-primary)] p-3">
             {!activeUrl ? (
               <WidgetEmpty message="Pick a source to begin research." icon={<Link2 size={18} />} />
-            ) : canAttemptEmbed && embedState !== 'blocked' ? (
-              <div className="relative h-full min-h-[320px] overflow-hidden rounded-xl border border-[var(--border-color)]">
-                <iframe
-                  title={activeTitle}
-                  src={activeUrl}
-                  className="h-full w-full border-0 bg-[var(--bg-secondary)]"
-                  loading="lazy"
-                  onLoad={() => {
-                    setEmbedState('ready')
-                    markVisited(activeUrl)
-                  }}
-                />
-
-                {embedState === 'loading' && (
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[var(--bg-primary)]/65 text-xs text-[var(--text-secondary)]">
-                    Attempting embed...
-                  </div>
-                )}
-              </div>
             ) : (
               <div className="space-y-3">
                 <ResearchSourceCard
@@ -584,7 +520,7 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
                     url: activeUrl,
                     favicon: activeSavedSite ? undefined : activeQuickSource.favicon,
                     description: activeSavedSite
-                      ? 'Custom source. Open externally when embedding fails.'
+                      ? 'Custom source saved in your external intelligence hub.'
                       : activeQuickSource.description,
                     category: activeMode,
                   }}
@@ -594,11 +530,40 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
                   lastVisitedAt={lastVisitedByUrl[activeUrl]}
                 />
 
-                {embedBlockReason && (
-                  <div className="rounded border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                    {embedBlockReason}
+                <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3">
+                  <div className="mb-2 text-xs font-semibold text-[var(--text-primary)]">
+                    External intelligence links by category
                   </div>
-                )}
+                  <div className="space-y-3">
+                    {(Object.keys(groupedSources) as SourceCategory[]).map((category) => (
+                      <div key={`category-${category}`}>
+                        <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                          {CATEGORY_LABELS[category]}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {groupedSources[category].map((source) => {
+                            const sourceUrl = substituteSymbol(source.urlTemplate, normalizedSymbol)
+                            return (
+                              <button
+                                key={`quick-link-${source.id}`}
+                                type="button"
+                                onClick={() => {
+                                  setActiveSourceId(source.id)
+                                  setActiveSavedSiteId(null)
+                                  openExternal(sourceUrl)
+                                }}
+                                className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:border-blue-500/40 hover:text-[var(--text-primary)]"
+                              >
+                                <ExternalLink size={12} />
+                                {source.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
                 {rssSource && (
                   <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3">
