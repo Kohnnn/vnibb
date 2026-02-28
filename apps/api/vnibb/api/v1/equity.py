@@ -120,7 +120,9 @@ async def _refresh_profile_cache(symbol: str) -> None:
             return
         await cache_manager.store_profile_data(symbol, profile_data.model_dump(mode="json"))
         logger.info(f"Background profile refresh complete (symbol={symbol})")
-    except Exception as e:
+    except BaseException as e:
+        if _is_control_flow_exception(e):
+            raise
         logger.warning(f"Background profile refresh failed (symbol={symbol}): {e}")
 
 
@@ -1578,7 +1580,10 @@ async def get_profile(
 
         # Return None data instead of 404
         return StandardResponse(data=None, error="Profile not found")
-    except Exception as e:
+    except BaseException as e:
+        if _is_control_flow_exception(e):
+            raise
+        logger.warning("Profile endpoint failed open for %s: %s", symbol_upper, e)
         return StandardResponse(data=None, error=str(e))
 
 

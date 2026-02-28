@@ -70,6 +70,8 @@ export type WidgetType =
     | 'gap_fill_stats'
     | 'volume_delta'
     | 'amihud_illiquidity'
+    | 'drawdown_deep_dive'
+    | 'hurst_market_structure'
     | 'seasonality_heatmap'
     | 'technical_summary'
     | 'technical_snapshot'

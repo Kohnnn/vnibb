@@ -446,6 +446,22 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
     },
     {
+        type: 'drawdown_deep_dive',
+        name: 'Drawdown Deep Dive',
+        description: 'Underwater curve, max drawdown depth, and recovery duration profile',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'hurst_market_structure',
+        name: 'Hurst Market Structure',
+        description: 'Hurst exponent and autocorrelation lens for trend vs mean-reversion regimes',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
         type: 'seasonality_heatmap',
         name: 'Seasonality Heatmap',
         description: 'Year x month return matrix for recurring seasonal patterns',

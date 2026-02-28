@@ -240,55 +240,103 @@ const CALENDAR_TEMPLATE: TemplateWidget[] = [
     }
 ];
 
-// Immutable Main Dashboard: showcase layout used as permanent fallback/introduction
-const MAIN_SYSTEM_TEMPLATE: TemplateWidget[] = [
+// Immutable Main Dashboard templates: dense multi-tab system workspace
+const MAIN_MACRO_TEMPLATE: TemplateWidget[] = [
     {
         type: 'market_overview',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 6, h: 4, minW: 4, minH: 3 }
+        layout: { x: 0, y: 0, w: 8, h: 4, minW: 6, minH: 3 }
     },
     {
         type: 'top_movers',
         syncGroupId: 1,
         config: {},
-        layout: { x: 6, y: 0, w: 6, h: 4, minW: 4, minH: 3 }
+        layout: { x: 8, y: 0, w: 8, h: 4, minW: 6, minH: 3 }
     },
     {
         type: 'market_heatmap',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 0, w: 12, h: 8, minW: 8, minH: 5 }
+        layout: { x: 16, y: 0, w: 8, h: 8, minW: 6, minH: 5 }
     },
     {
         type: 'screener',
         syncGroupId: 1,
         config: { preset: 'value_momentum' },
-        layout: { x: 0, y: 8, w: 24, h: 8, minW: 12, minH: 6 }
+        layout: { x: 0, y: 4, w: 16, h: 8, minW: 12, minH: 6 }
     },
+];
+
+const MAIN_DEEP_DIVE_TEMPLATE: TemplateWidget[] = [
     {
         type: 'price_chart',
         syncGroupId: 1,
         config: { timeframe: '1Y', chartType: 'candle' },
-        layout: { x: 0, y: 16, w: 12, h: 8, minW: 8, minH: 6 }
+        layout: { x: 0, y: 0, w: 14, h: 8, minW: 10, minH: 6 }
     },
     {
         type: 'ticker_info',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 24, w: 6, h: 4, minW: 4, minH: 3 }
+        layout: { x: 14, y: 0, w: 10, h: 3, minW: 8, minH: 3 }
     },
     {
-        type: 'news_feed',
+        type: 'ticker_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 16, w: 8, h: 8, minW: 6, minH: 5 }
+        layout: { x: 14, y: 3, w: 10, h: 5, minW: 8, minH: 4 }
     },
     {
-        type: 'events_calendar',
+        type: 'institutional_ownership',
         syncGroupId: 1,
         config: {},
-        layout: { x: 20, y: 16, w: 4, h: 8, minW: 4, minH: 5 }
+        layout: { x: 0, y: 8, w: 12, h: 7, minW: 8, minH: 5 }
+    },
+    {
+        type: 'financial_ratios',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 8, w: 12, h: 7, minW: 8, minH: 5 }
+    },
+];
+
+const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'volume_profile',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'seasonality_heatmap',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 0, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'obv_divergence',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 0, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'amihud_illiquidity',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 7, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'drawdown_deep_dive',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 7, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'hurst_market_structure',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 7, w: 8, h: 7, minW: 6, minH: 5 }
     }
 ];
 
@@ -597,15 +645,31 @@ const createDefaultTab = (name: string, order: number): DashboardTab => ({
     widgets: [],
 });
 
-const createMainDashboardTab = (): DashboardTab => {
-    const tabId = 'tab-main-overview';
-    const widgets = createWidgetsFromTemplate(MAIN_SYSTEM_TEMPLATE, tabId);
-    return {
-        id: tabId,
-        name: 'Main Dashboard',
-        order: 0,
-        widgets,
-    };
+const createMainDashboardTabs = (): DashboardTab[] => {
+    const macroId = 'tab-main-macro-discovery';
+    const deepDiveId = 'tab-main-deep-dive';
+    const quantId = 'tab-main-quantitative-edge';
+
+    return [
+        {
+            id: macroId,
+            name: 'Macro & Discovery',
+            order: 0,
+            widgets: createWidgetsFromTemplate(MAIN_MACRO_TEMPLATE, macroId),
+        },
+        {
+            id: deepDiveId,
+            name: 'Deep Dive (Symbol)',
+            order: 1,
+            widgets: createWidgetsFromTemplate(MAIN_DEEP_DIVE_TEMPLATE, deepDiveId),
+        },
+        {
+            id: quantId,
+            name: 'Quantitative Edge',
+            order: 2,
+            widgets: createWidgetsFromTemplate(MAIN_QUANT_TEMPLATE, quantId),
+        },
+    ];
 };
 
 const createMainSystemDashboard = (): Dashboard => {
@@ -619,7 +683,7 @@ const createMainSystemDashboard = (): Dashboard => {
         isEditable: false,
         isDeletable: false,
         showGroupLabels: true,
-        tabs: [createMainDashboardTab()],
+        tabs: createMainDashboardTabs(),
         syncGroups: [
             { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: 'VNM' },
         ],
@@ -656,9 +720,7 @@ const ensureMainDashboardPresent = (dashboards: Dashboard[]): Dashboard[] => {
             isDefault: true,
             isEditable: false,
             isDeletable: false,
-            tabs: Array.isArray(existingMain.tabs) && existingMain.tabs.length > 0
-                ? existingMain.tabs
-                : fallbackMain.tabs,
+            tabs: fallbackMain.tabs,
             syncGroups: Array.isArray(existingMain.syncGroups) && existingMain.syncGroups.length > 0
                 ? existingMain.syncGroups
                 : fallbackMain.syncGroups,

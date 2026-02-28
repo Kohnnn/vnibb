@@ -66,6 +66,8 @@ export { MarketMoversSectorsWidget } from './MarketMoversSectorsWidget';
 export { SectorRotationRadarWidget } from './SectorRotationRadarWidget';
 export { MarketBreadthWidget } from './MarketBreadthWidget';
 export { IndexComparisonWidget } from './IndexComparisonWidget';
+export { DrawdownDeepDiveWidget } from './DrawdownDeepDiveWidget';
+export { HurstMarketStructureWidget } from './HurstMarketStructureWidget';
 export { EconomicCalendarWidget } from './EconomicCalendarWidget';
 export { EventsCalendarWidget } from './EventsCalendarWidget';
 export { NewsCorporateActionsWidget } from './NewsCorporateActionsWidget';
