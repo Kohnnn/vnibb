@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
     Search,
     User,
@@ -14,12 +14,14 @@ import {
     Link as LinkIcon,
     LayoutGrid,
     MoreHorizontal,
+    ChevronRight,
     Moon,
     Sun,
 } from 'lucide-react';
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel';
 import { ConnectionStatus } from '../ui/ConnectionStatus';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useHistoricalPrices, useStockQuote } from '@/lib/queries';
 import type { UnitDisplay } from '@/lib/units';
 import { cn } from '@/lib/utils';
 import {
@@ -37,6 +39,61 @@ const UNIT_OPTIONS: Array<{ value: UnitDisplay; label: string }> = [
     { value: 'B', label: 'B' },
     { value: 'raw', label: 'Raw' },
 ];
+
+const MARKET_TIMEZONE = 'Asia/Ho_Chi_Minh';
+
+function formatHeaderPrice(value: number | null | undefined): string {
+    if (value === null || value === undefined) return '--';
+    return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatHeaderPercent(value: number | null | undefined): string {
+    if (value === null || value === undefined) return '--';
+    const normalized = Math.abs(value) > 1 ? value : value * 100;
+    const sign = normalized > 0 ? '+' : '';
+    return `${sign}${normalized.toFixed(2)}%`;
+}
+
+function getSparklinePoints(values: number[]): string {
+    if (values.length < 2) return '';
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    const range = max - min || 1;
+
+    return values
+        .map((value, index) => {
+            const x = (index / (values.length - 1)) * 100;
+            const y = 100 - ((value - min) / range) * 100;
+            return `${x.toFixed(2)},${y.toFixed(2)}`;
+        })
+        .join(' ');
+}
+
+function getVietnamMarketStatus(reference = new Date()): { label: string; isOpen: boolean } {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: MARKET_TIMEZONE,
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    });
+
+    const parts = formatter.formatToParts(reference);
+    const weekday = parts.find((part) => part.type === 'weekday')?.value ?? 'Mon';
+    const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? '0');
+    const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? '0');
+
+    const isBusinessDay = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(weekday);
+    const totalMinutes = hour * 60 + minute;
+    const morningSession = totalMinutes >= 9 * 60 && totalMinutes <= 11 * 60 + 30;
+    const afternoonSession = totalMinutes >= 13 * 60 && totalMinutes <= 15 * 60;
+    const isOpen = isBusinessDay && (morningSession || afternoonSession);
+
+    return {
+        isOpen,
+        label: isOpen ? 'Market Open (HOSE)' : 'Market Closed (HOSE)',
+    };
+}
 
 
 interface HeaderProps {
@@ -71,6 +128,31 @@ export function Header({
     const inputRef = useRef<HTMLInputElement>(null);
     const hasActionMenu = Boolean(onAutoFitLayout || onResetLayout || onCollapseAll || onExpandAll || onEditToggle);
     const { resolvedTheme, setTheme } = useTheme();
+    const [marketClock, setMarketClock] = useState(() => Date.now());
+
+    const quoteQuery = useStockQuote(currentSymbol, Boolean(currentSymbol));
+    const historyQuery = useHistoricalPrices(currentSymbol, {
+        interval: '1D',
+        enabled: Boolean(currentSymbol),
+    });
+
+    const quote = quoteQuery.data;
+    const sparklineValues = useMemo(() => {
+        const points = historyQuery.data?.data || [];
+        return points
+            .slice(-20)
+            .map((point) => point.close)
+            .filter((value): value is number => Number.isFinite(value));
+    }, [historyQuery.data]);
+
+    const sparklinePoints = useMemo(() => getSparklinePoints(sparklineValues), [sparklineValues]);
+    const quoteIsPositive = (quote?.changePct ?? 0) >= 0;
+    const quoteChangeClass = quote?.changePct == null
+        ? 'text-[var(--text-muted)]'
+        : quoteIsPositive
+            ? 'text-emerald-400'
+            : 'text-rose-400';
+    const marketStatus = useMemo(() => getVietnamMarketStatus(new Date(marketClock)), [marketClock]);
 
     // Sync searchValue when currentSymbol changes externally (e.g., widget ticker click)
     useEffect(() => {
@@ -78,6 +160,14 @@ export function Header({
             setSearchValue(currentSymbol);
         }
     }, [currentSymbol, isSearching]);
+
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            setMarketClock(Date.now());
+        }, 60 * 1000);
+
+        return () => window.clearInterval(timer);
+    }, []);
 
     const handleSearch = useCallback(() => {
         const normalized = searchValue.trim().toUpperCase();
@@ -105,11 +195,18 @@ export function Header({
     }, [resolvedTheme, setTheme]);
 
     return (
-        <header className="h-12 bg-[var(--bg-secondary)]/95 backdrop-blur-sm border-b border-[var(--border-color)] sticky top-0 z-40">
-            <div className="h-full flex items-center justify-between px-4">
-                {/* Search Bar */}
-                <div className="flex-1 max-w-sm">
-                    <div className="relative">
+        <header className="h-14 bg-[var(--bg-secondary)]/95 backdrop-blur-sm border-b border-[var(--border-color)] sticky top-0 z-40">
+            <div className="h-full flex items-center justify-between gap-3 px-4">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <div className="hidden xl:flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                        <span>VNIBB</span>
+                        <ChevronRight size={11} className="text-[var(--text-muted)]" />
+                        <span>Equities</span>
+                        <ChevronRight size={11} className="text-[var(--text-muted)]" />
+                        <span className="text-[var(--text-primary)]">{currentSymbol}</span>
+                    </div>
+
+                    <div className="relative w-full max-w-sm">
                         <Search
                             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
                             size={14}
@@ -135,21 +232,13 @@ export function Header({
                             }}
                             onKeyDown={handleKeyDown}
                             onBlur={() => {
-                                // Small delay to allow clear button click to register
                                 setTimeout(() => {
                                     if (isSearching) handleSearch();
                                 }, 150);
                             }}
                             placeholder="Search symbol (e.g., VNM, FPT)"
-                            className={`
-                w-full pl-8 pr-8 py-1.5 rounded-md text-xs
-                bg-[var(--bg-tertiary)] border border-[var(--border-color)]
-                text-[var(--text-primary)] placeholder-[var(--text-muted)]
-                focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20
-                transition-all
-              `}
+                            className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] py-1.5 pl-8 pr-16 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/20"
                         />
-                        {/* Clear button */}
                         {searchValue && searchValue !== currentSymbol && (
                             <button
                                 type="button"
@@ -158,28 +247,62 @@ export function Header({
                                     setIsSearching(false);
                                     inputRef.current?.focus();
                                 }}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+                                className="absolute right-10 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
                                 title="Clear search"
                                 aria-label="Clear search"
                             >
                                 <X size={12} />
                             </button>
                         )}
+                        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+                            Cmd+K
+                        </span>
                     </div>
                 </div>
 
-                {/* Current Symbol Display - Hidden on mobile */}
-                <div className="hidden md:flex items-center gap-4 mx-6">
-                    <div className="flex items-center gap-2">
-                        <div className="flex items-center">
-                            <span className="text-xs text-[var(--text-muted)]">Viewing:</span>
-                            <span className="ml-1.5 text-sm font-semibold text-[var(--text-primary)]">
-                                {currentSymbol}
-                            </span>
-                        </div>
-                        <LinkIcon size={12} className="text-blue-500 opacity-50" />
+                <div className="hidden lg:flex items-center gap-2">
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1">
+                        <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)]">Viewing</span>
+                        <span className="text-xs font-semibold text-[var(--text-primary)]">{currentSymbol}</span>
+                        <LinkIcon size={11} className="text-blue-500/70" />
                     </div>
-                    <div className="h-4 w-[1px] bg-[var(--border-color)]" />
+
+                    <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1">
+                        <span className="text-xs font-semibold text-[var(--text-primary)]">
+                            {formatHeaderPrice(quote?.price)}
+                        </span>
+                        <span className={cn('text-xs font-semibold', quoteChangeClass)}>
+                            {formatHeaderPercent(quote?.changePct)}
+                        </span>
+                        {sparklinePoints && (
+                            <svg viewBox="0 0 100 28" className="h-6 w-20" aria-hidden="true">
+                                <polyline
+                                    fill="none"
+                                    stroke={quoteIsPositive ? '#34d399' : '#f87171'}
+                                    strokeWidth="2"
+                                    points={sparklinePoints}
+                                />
+                            </svg>
+                        )}
+                    </div>
+
+                    <div
+                        className={cn(
+                            'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-wide',
+                            marketStatus.isOpen
+                                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                                : 'border-slate-500/40 bg-slate-500/10 text-slate-300'
+                        )}
+                    >
+                        <span
+                            className={cn(
+                                'h-1.5 w-1.5 rounded-full',
+                                marketStatus.isOpen ? 'animate-pulse bg-emerald-400' : 'bg-slate-400'
+                            )}
+                        />
+                        {marketStatus.label}
+                    </div>
+
                     <ConnectionStatus />
                 </div>
 
@@ -316,29 +439,31 @@ export function Header({
                     )}
 
                     {/* Edit Mode Toggle */}
-                    <button
-                        onClick={onEditToggle}
-                        className={`
-              flex items-center gap-1.5 px-2 md:px-3 py-1.5 rounded-md
-              transition-colors font-medium text-xs
-              ${isEditing
-                                ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25 border border-green-500/20'
-                                : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)]'
-                            }
-            `}
-                    >
-                        {isEditing ? (
-                            <>
-                                <Check size={14} />
-                                <span className="hidden md:inline">Save Layout</span>
-                            </>
-                        ) : (
-                            <>
-                                <Edit size={14} />
-                                <span className="hidden md:inline">Edit</span>
-                            </>
-                        )}
-                    </button>
+                    {onEditToggle && (
+                        <button
+                            onClick={onEditToggle}
+                            className={`
+                  flex items-center gap-1.5 px-2 md:px-3 py-1.5 rounded-md
+                  transition-colors font-medium text-xs
+                  ${isEditing
+                                    ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25 border border-green-500/20'
+                                    : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)]'
+                                }
+                `}
+                        >
+                            {isEditing ? (
+                                <>
+                                    <Check size={14} />
+                                    <span className="hidden md:inline">Save Layout</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Edit size={14} />
+                                    <span className="hidden md:inline">Edit</span>
+                                </>
+                            )}
+                        </button>
+                    )}
 
                     {/* AI Copilot */}
                     <button

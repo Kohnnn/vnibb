@@ -28,6 +28,7 @@ import {
     AppWindow,
     MessageSquareText,
     Search,
+    Lock,
 } from 'lucide-react';
 import { useDashboard } from '@/contexts/DashboardContext';
 import type { Dashboard, DashboardFolder } from '@/types/dashboard';
@@ -195,6 +196,14 @@ export function Sidebar({
         return candidate;
     };
 
+    const isDashboardEditable = (dashboard: Dashboard | undefined) => {
+        return (dashboard?.isEditable ?? true) !== false;
+    };
+
+    const isDashboardDeletable = (dashboard: Dashboard | undefined) => {
+        return (dashboard?.isDeletable ?? true) !== false;
+    };
+
     const handleCreateDashboard = (folderId?: string) => {
         const dashboard = createDashboard({
             name: withUniqueDashboardName(nextDashboardName()),
@@ -224,7 +233,7 @@ export function Sidebar({
         if (!contextMenu) return;
         if (contextMenu.type === 'dashboard') {
             const dashboard = state.dashboards.find(d => d.id === contextMenu.id);
-            if (dashboard) {
+            if (dashboard && isDashboardEditable(dashboard)) {
                 setEditingId(dashboard.id);
                 setEditingName(dashboard.name);
             }
@@ -242,6 +251,12 @@ export function Sidebar({
     const handleDelete = () => {
         if (!contextMenu) return;
         if (contextMenu.type === 'dashboard') {
+            const dashboard = state.dashboards.find(d => d.id === contextMenu.id);
+            if (!isDashboardDeletable(dashboard)) {
+                setContextMenu(null);
+                setShowMoveSubmenu(false);
+                return;
+            }
             deleteDashboard(contextMenu.id);
         } else {
             deleteFolder(contextMenu.id);
@@ -253,7 +268,7 @@ export function Sidebar({
     const handleDuplicate = () => {
         if (!contextMenu || contextMenu.type !== 'dashboard') return;
         const dashboard = state.dashboards.find(d => d.id === contextMenu.id);
-        if (dashboard) {
+        if (dashboard && isDashboardEditable(dashboard)) {
             createDashboard({
                 name: withUniqueDashboardName(`${dashboard.name} (Copy)`),
                 folderId: dashboard.folderId,
@@ -289,6 +304,12 @@ export function Sidebar({
 
     const handleMoveToFolder = (targetFolderId: string | undefined) => {
         if (!contextMenu || contextMenu.type !== 'dashboard') return;
+        const dashboard = state.dashboards.find(d => d.id === contextMenu.id);
+        if (!isDashboardEditable(dashboard)) {
+            setContextMenu(null);
+            setShowMoveSubmenu(false);
+            return;
+        }
         moveDashboard(contextMenu.id, targetFolderId);
         setContextMenu(null);
         setShowMoveSubmenu(false);
@@ -362,11 +383,13 @@ export function Sidebar({
         const isEditing = editingId === dashboard.id;
         const isDragging = draggedId === dashboard.id;
         const isDragOver = dragOverId === dashboard.id;
+        const isEditableDashboard = isDashboardEditable(dashboard);
+        const isDeletableDashboard = isDashboardDeletable(dashboard);
 
         return (
             <div
                 key={dashboard.id}
-                draggable={!isEditing}
+                draggable={!isEditing && isEditableDashboard}
                 onDragStart={(e) => handleDragStart(e, dashboard.id)}
                 onDragEnd={handleDragEnd}
                 onDragOver={(e) => handleDragOver(e, dashboard.id, false)}
@@ -393,6 +416,7 @@ export function Sidebar({
                 }}
                 onClick={() => !isEditing && setActiveDashboard(dashboard.id)}
                 onDoubleClick={() => {
+                    if (!isEditableDashboard) return;
                     setEditingId(dashboard.id);
                     setEditingName(dashboard.name);
                 }}
@@ -417,8 +441,15 @@ export function Sidebar({
                 ) : (
                     <>
                         <span className="flex-1 truncate">{dashboard.name}</span>
+                        {!isEditableDashboard && (
+                            <span className="inline-flex items-center rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">
+                                <Lock size={9} className="mr-1" />
+                                Main
+                            </span>
+                        )}
                         <button
                             className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
+                            disabled={!isEditableDashboard && !isDeletableDashboard}
                             onClick={(e) => {
                                 e.stopPropagation();
                                 handleContextMenu(e, dashboard.id, 'dashboard');
@@ -495,6 +526,13 @@ export function Sidebar({
             </div>
         );
     };
+
+    const contextDashboard =
+        contextMenu?.type === 'dashboard'
+            ? state.dashboards.find((dashboard) => dashboard.id === contextMenu.id)
+            : undefined;
+    const contextDashboardEditable = isDashboardEditable(contextDashboard);
+    const contextDashboardDeletable = isDashboardDeletable(contextDashboard);
 
     return (
         <>
@@ -698,7 +736,8 @@ export function Sidebar({
                     >
                         <button
                             onClick={handleRename}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                            disabled={contextMenu.type === 'dashboard' && !contextDashboardEditable}
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             <Edit2 size={12} />
                             <span>Rename</span>
@@ -707,7 +746,8 @@ export function Sidebar({
                             <>
                                 <button
                                     onClick={handleDuplicate}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                    disabled={!contextDashboardEditable}
+                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                     <Copy size={12} />
                                     <span>Duplicate</span>
@@ -720,7 +760,8 @@ export function Sidebar({
                                         }
                                         setContextMenu(null);
                                     }}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                    disabled={!contextDashboardEditable}
+                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                     {state.dashboards.find(d => d.id === contextMenu.id)?.showGroupLabels !== false ? (
                                         <>
@@ -737,7 +778,8 @@ export function Sidebar({
                                 <div className="relative">
                                     <button
                                         onClick={() => setShowMoveSubmenu(!showMoveSubmenu)}
-                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                        disabled={!contextDashboardEditable}
+                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                                     >
                                         <FolderInput size={12} />
                                         <span>Move to Folder</span>
@@ -770,7 +812,8 @@ export function Sidebar({
                         <div className="border-t border-[var(--border-color)] my-0.5" />
                         <button
                             onClick={handleDelete}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-red-400 hover:bg-[var(--bg-tertiary)] hover:text-red-300"
+                            disabled={contextMenu.type === 'dashboard' && !contextDashboardDeletable}
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-red-400 hover:bg-[var(--bg-tertiary)] hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             <Trash2 size={12} />
                             <span>Delete</span>

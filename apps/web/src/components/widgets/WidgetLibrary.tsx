@@ -7,7 +7,7 @@ import {
     Search, X, Grid3X3, ChevronRight, Check,
     Box, Star, BarChart3, DollarSign, TrendingUp,
     Newspaper, PieChart, Info, LayoutGrid, Layers,
-    Plus, Clock, Maximize2
+    Plus, Clock, Maximize2, Sigma
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -22,6 +22,7 @@ const CATEGORY_ICONS: Record<string, any> = {
     'core_data': BarChart3,
     'financials': DollarSign,
     'charting': TrendingUp,
+    'quant': Sigma,
     'calendar': Newspaper,
     'screener': Search,
     'analysis': PieChart,
@@ -31,6 +32,7 @@ const CATEGORY_ICONS: Record<string, any> = {
 
 function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
     const { activeDashboard, activeTab, addWidget } = useDashboard();
+    const dashboardEditable = (activeDashboard?.isEditable ?? true) !== false;
     const [searchQuery, setSearchQuery] = useState('');
     const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
@@ -55,7 +57,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
     }, [searchQuery]);
 
     const handleAddWidget = (widgetDef: any) => {
-        if (!activeDashboard || !activeTab) return;
+        if (!activeDashboard || !activeTab || !dashboardEditable) return;
 
         let yOffset = activeTab.widgets.reduce((max, w) => Math.max(max, w.layout.y + w.layout.h), 0);
 
@@ -194,7 +196,9 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                             </div>
                                                             <button
                                                                 onClick={() => handleAddWidget(widget)}
-                                                                className="p-1 rounded bg-blue-600 text-white opacity-0 group-hover:opacity-100 transition-all hover:scale-110 active:scale-95 shadow-lg shadow-blue-600/20"
+                                                                disabled={!dashboardEditable}
+                                                                title={dashboardEditable ? `Add ${widget.name}` : 'Main dashboard is read-only'}
+                                                                className="p-1 rounded bg-blue-600 text-white opacity-0 group-hover:opacity-100 transition-all hover:scale-110 active:scale-95 shadow-lg shadow-blue-600/20 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
                                                             >
                                                                 <Plus size={14} strokeWidth={3} />
                                                             </button>

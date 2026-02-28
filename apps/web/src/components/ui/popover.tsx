@@ -1,5 +1,6 @@
 // Refined Popover components for VNIBB Design System
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
+import { cn } from '@/lib/utils';
 
 const PopoverContext = createContext<{
     isOpen: boolean;
@@ -65,7 +66,11 @@ export const PopoverContent = ({ children, className = '', align = 'center' }: a
     return (
         <div
             ref={ref}
-            className={`absolute z-[100] mt-2 shadow-2xl animate-in fade-in zoom-in-95 duration-200 ${alignClasses[align as keyof typeof alignClasses]} ${className}`}
+            className={cn(
+                'absolute z-[100] mt-2 min-w-[8rem] rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-1 text-[var(--text-primary)] shadow-xl ring-1 ring-black/10 animate-in fade-in zoom-in-95 duration-200',
+                alignClasses[align as keyof typeof alignClasses],
+                className
+            )}
         >
             {children}
         </div>

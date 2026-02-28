@@ -37,11 +37,13 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 8;
+const CURRENT_MIGRATION_VERSION = 9;
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
 const LEGACY_STALE_TAB_RE = /^new\s+tab(?:\s+\d+)?$/i;
+const MAIN_DASHBOARD_ID = 'main-default';
+const MAIN_DASHBOARD_NAME = 'Main System Dashboard';
 
 // ============================================================================
 // Default Data & Templates
@@ -235,6 +237,58 @@ const CALENDAR_TEMPLATE: TemplateWidget[] = [
         syncGroupId: 1,
         config: {},
         layout: { x: 12, y: 5, w: 12, h: 7, minW: 6, minH: 4 }
+    }
+];
+
+// Immutable Main Dashboard: showcase layout used as permanent fallback/introduction
+const MAIN_SYSTEM_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'market_overview',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 6, h: 4, minW: 4, minH: 3 }
+    },
+    {
+        type: 'top_movers',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 6, y: 0, w: 6, h: 4, minW: 4, minH: 3 }
+    },
+    {
+        type: 'market_heatmap',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 0, w: 12, h: 8, minW: 8, minH: 5 }
+    },
+    {
+        type: 'screener',
+        syncGroupId: 1,
+        config: { preset: 'value_momentum' },
+        layout: { x: 0, y: 8, w: 24, h: 8, minW: 12, minH: 6 }
+    },
+    {
+        type: 'price_chart',
+        syncGroupId: 1,
+        config: { timeframe: '1Y', chartType: 'candle' },
+        layout: { x: 0, y: 16, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'ticker_info',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 24, w: 6, h: 4, minW: 4, minH: 3 }
+    },
+    {
+        type: 'news_feed',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 16, w: 8, h: 8, minW: 6, minH: 5 }
+    },
+    {
+        type: 'events_calendar',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 20, y: 16, w: 4, h: 8, minW: 4, minH: 5 }
     }
 ];
 
@@ -543,23 +597,95 @@ const createDefaultTab = (name: string, order: number): DashboardTab => ({
     widgets: [],
 });
 
-const createDefaultDashboard = (): Dashboard => {
-    const tabs: DashboardTab[] = [createTabWithTemplate('Overview 1', 0, 'overview')];
-
+const createMainDashboardTab = (): DashboardTab => {
+    const tabId = 'tab-main-overview';
+    const widgets = createWidgetsFromTemplate(MAIN_SYSTEM_TEMPLATE, tabId);
     return {
-        id: `dash-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        name: 'Default Overview',
-        description: 'Default workspace with pre-configured overview widgets',
+        id: tabId,
+        name: 'Main Dashboard',
+        order: 0,
+        widgets,
+    };
+};
+
+const createMainSystemDashboard = (): Dashboard => {
+    const timestamp = new Date().toISOString();
+    return {
+        id: MAIN_DASHBOARD_ID,
+        name: MAIN_DASHBOARD_NAME,
+        description: 'Read-only system dashboard showcasing VNIBB core capabilities.',
         order: 0,
         isDefault: true,
+        isEditable: false,
+        isDeletable: false,
         showGroupLabels: true,
-        tabs,
+        tabs: [createMainDashboardTab()],
         syncGroups: [
             { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: 'VNM' },
         ],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: timestamp,
+        updatedAt: timestamp,
     };
+};
+
+const migrateDashboardPermissions = (dashboards: Dashboard[]): Dashboard[] => {
+    return dashboards.map((dashboard) => {
+        const isMain = dashboard.id === MAIN_DASHBOARD_ID;
+        return {
+            ...dashboard,
+            isEditable: isMain ? false : dashboard.isEditable ?? true,
+            isDeletable: isMain ? false : dashboard.isDeletable ?? true,
+        };
+    });
+};
+
+const ensureMainDashboardPresent = (dashboards: Dashboard[]): Dashboard[] => {
+    const validDashboards = Array.isArray(dashboards) ? dashboards.filter(Boolean) : [];
+    const permissionsMigrated = migrateDashboardPermissions(validDashboards);
+
+    const existingMain = permissionsMigrated.find((dashboard) => dashboard.id === MAIN_DASHBOARD_ID);
+    const fallbackMain = createMainSystemDashboard();
+
+    const mainDashboard: Dashboard = existingMain
+        ? {
+            ...existingMain,
+            id: MAIN_DASHBOARD_ID,
+            name: MAIN_DASHBOARD_NAME,
+            folderId: undefined,
+            order: 0,
+            isDefault: true,
+            isEditable: false,
+            isDeletable: false,
+            tabs: Array.isArray(existingMain.tabs) && existingMain.tabs.length > 0
+                ? existingMain.tabs
+                : fallbackMain.tabs,
+            syncGroups: Array.isArray(existingMain.syncGroups) && existingMain.syncGroups.length > 0
+                ? existingMain.syncGroups
+                : fallbackMain.syncGroups,
+            createdAt: existingMain.createdAt || fallbackMain.createdAt,
+            updatedAt: new Date().toISOString(),
+        }
+        : fallbackMain;
+
+    const nonMainDashboards = permissionsMigrated
+        .filter((dashboard) => dashboard.id !== MAIN_DASHBOARD_ID)
+        .sort((a, b) => a.order - b.order)
+        .map((dashboard, index) => ({
+            ...dashboard,
+            order: index + 1,
+            isEditable: dashboard.isEditable ?? true,
+            isDeletable: dashboard.isDeletable ?? true,
+        }));
+
+    return [{ ...mainDashboard, order: 0 }, ...nonMainDashboards];
+};
+
+const canEditDashboard = (dashboard?: Dashboard | null): boolean => {
+    return (dashboard?.isEditable ?? true) !== false;
+};
+
+const canDeleteDashboard = (dashboard?: Dashboard | null): boolean => {
+    return (dashboard?.isDeletable ?? true) !== false;
 };
 
 // ============================================================================
@@ -595,9 +721,36 @@ type DashboardAction =
 // ============================================================================
 
 function dashboardReducer(state: DashboardState, action: DashboardAction): DashboardState {
+    const getDashboard = (dashboardId: string) => {
+        return state.dashboards.find((dashboard) => dashboard.id === dashboardId) || null;
+    };
+
+    const isEditableDashboardId = (dashboardId: string) => {
+        return canEditDashboard(getDashboard(dashboardId));
+    };
+
+    const isDeletableDashboardId = (dashboardId: string) => {
+        return canDeleteDashboard(getDashboard(dashboardId));
+    };
+
     switch (action.type) {
-        case 'SET_STATE':
-            return action.payload;
+        case 'SET_STATE': {
+            const dashboards = ensureMainDashboardPresent(action.payload.dashboards);
+            const activeDashboardId = dashboards.some((dashboard) => dashboard.id === action.payload.activeDashboardId)
+                ? action.payload.activeDashboardId
+                : dashboards[0]?.id || null;
+            const activeDashboard = dashboards.find((dashboard) => dashboard.id === activeDashboardId) || dashboards[0];
+            const activeTabId = activeDashboard?.tabs.some((tab) => tab.id === action.payload.activeTabId)
+                ? action.payload.activeTabId
+                : activeDashboard?.tabs[0]?.id || null;
+
+            return {
+                ...action.payload,
+                dashboards,
+                activeDashboardId,
+                activeTabId,
+            };
+        }
 
         case 'SET_ACTIVE_DASHBOARD':
             return { ...state, activeDashboardId: action.payload };
@@ -608,25 +761,44 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         case 'ADD_DASHBOARD':
             return {
                 ...state,
-                dashboards: [...state.dashboards, action.payload],
+                dashboards: [
+                    ...state.dashboards,
+                    {
+                        ...action.payload,
+                        isEditable: action.payload.isEditable ?? true,
+                        isDeletable: action.payload.isDeletable ?? true,
+                    },
+                ],
             };
 
-        case 'UPDATE_DASHBOARD':
+        case 'UPDATE_DASHBOARD': {
+            if (!isEditableDashboardId(action.payload.id)) {
+                return state;
+            }
+
+            const { isEditable: _ignoreEditable, isDeletable: _ignoreDeletable, ...safeUpdates } = action.payload.updates;
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
                     d.id === action.payload.id
-                        ? { ...d, ...action.payload.updates, updatedAt: new Date().toISOString() }
+                        ? { ...d, ...safeUpdates, updatedAt: new Date().toISOString() }
                         : d
                 ),
             };
+        }
 
         case 'DELETE_DASHBOARD':
             {
-                const remainingDashboards = state.dashboards.filter((d) => d.id !== action.payload);
+                if (!isDeletableDashboardId(action.payload)) {
+                    return state;
+                }
+
+                const remainingDashboards = ensureMainDashboardPresent(
+                    state.dashboards.filter((d) => d.id !== action.payload)
+                );
 
                 if (remainingDashboards.length === 0) {
-                    const defaultDashboard = createDefaultDashboard();
+                    const defaultDashboard = createMainSystemDashboard();
                     return {
                         ...state,
                         dashboards: [defaultDashboard],
@@ -686,6 +858,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
             };
 
         case 'ADD_TAB': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -697,6 +873,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'UPDATE_TAB': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -714,6 +894,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'DELETE_TAB': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             const targetDashboard = state.dashboards.find((d) => d.id === action.payload.dashboardId);
             const remainingTabs = targetDashboard?.tabs.filter((t) => t.id !== action.payload.tabId) || [];
             // Sort by order to get the first tab correctly
@@ -738,6 +922,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'REORDER_TABS': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -749,6 +937,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'ADD_WIDGET': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -768,6 +960,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'UPDATE_WIDGET': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -794,6 +990,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'DELETE_WIDGET': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -813,6 +1013,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'UPDATE_TAB_LAYOUT': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -832,6 +1036,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'RESET_TAB_LAYOUT': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -882,6 +1090,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'UPDATE_SYNC_GROUP': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -901,6 +1113,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'ADD_SYNC_GROUP': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -916,6 +1132,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'MOVE_DASHBOARD': {
+            if (!isEditableDashboardId(action.payload.dashboardId)) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -928,12 +1148,17 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
 
         case 'REORDER_DASHBOARDS': {
             const { dashboardIds, folderId } = action.payload;
+            const orderedEditableIds = dashboardIds.filter((dashboardId) => dashboardId !== MAIN_DASHBOARD_ID);
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) => {
-                    const newIndex = dashboardIds.indexOf(d.id);
+                    if (!canEditDashboard(d)) {
+                        return { ...d, folderId: undefined, order: 0 };
+                    }
+
+                    const newIndex = orderedEditableIds.indexOf(d.id);
                     if (newIndex !== -1) {
-                        return { ...d, order: newIndex, folderId, updatedAt: new Date().toISOString() };
+                        return { ...d, order: newIndex + 1, folderId, updatedAt: new Date().toISOString() };
                     }
                     return d;
                 }),
@@ -1039,9 +1264,9 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 }
             }
 
-            // Create default dashboard if none exist
+            // Ensure permanent immutable main dashboard exists
             if (dashboards.length === 0) {
-                dashboards = [createDefaultDashboard()];
+                dashboards = [createMainSystemDashboard()];
             } else if (migrationVersion < CURRENT_MIGRATION_VERSION) {
                 if (migrationVersion < 2) {
                     dashboards = migrateEmptyTabs(dashboards);
@@ -1073,6 +1298,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     dashboards = migrateLegacyChartWidgets(dashboards);
                 }
 
+                if (migrationVersion < 9) {
+                    dashboards = migrateDashboardPermissions(dashboards);
+                }
+
                 // Final safety validation for all widgets
                 dashboards = dashboards.map(d => ({
                     ...d,
@@ -1097,9 +1326,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             const cleanedSidebar = migrateSidebarClutter(dashboards, folders);
             dashboards = cleanedSidebar.dashboards;
             folders = cleanedSidebar.folders;
+            dashboards = ensureMainDashboardPresent(dashboards);
 
             if (dashboards.length === 0) {
-                dashboards = [createDefaultDashboard()];
+                dashboards = [createMainSystemDashboard()];
                 folders = [];
             }
 
@@ -1112,7 +1342,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             });
         } catch (error) {
             console.error('Failed to load dashboards from storage:', error);
-            const defaultDashboard = createDefaultDashboard();
+            const defaultDashboard = createMainSystemDashboard();
             dispatch({
                 type: 'SET_STATE',
                 payload: {
@@ -1169,6 +1399,8 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             folderId: data.folderId,
             order: state.dashboards.length,
             isDefault: data.isDefault || false,
+            isEditable: true,
+            isDeletable: true,
             showGroupLabels: true,
             tabs: [createDefaultTab('Overview 1', 0)],
             syncGroups: [

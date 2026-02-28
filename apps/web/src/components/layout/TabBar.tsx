@@ -119,6 +119,7 @@ export function TabBar({ symbol }: TabBarProps) {
     }
 
     const sortedTabs = [...activeDashboard.tabs].sort((a, b) => a.order - b.order);
+    const dashboardEditable = (activeDashboard.isEditable ?? true) !== false;
     const reachedTabLimit = sortedTabs.length >= MAX_TABS;
 
     // Swipe gesture handlers for mobile tab navigation
@@ -150,7 +151,7 @@ export function TabBar({ symbol }: TabBarProps) {
     };
 
     const handleAddTab = () => {
-        if (isCreatingTab || createTabLockRef.current || reachedTabLimit) {
+        if (!dashboardEditable || isCreatingTab || createTabLockRef.current || reachedTabLimit) {
             return;
         }
 
@@ -179,6 +180,7 @@ export function TabBar({ symbol }: TabBarProps) {
 
     // Double-click to start inline rename
     const handleDoubleClick = (tab: DashboardTab) => {
+        if (!dashboardEditable) return;
         setEditingTabId(tab.id);
         setEditingName(tab.name);
     };
@@ -386,13 +388,13 @@ export function TabBar({ symbol }: TabBarProps) {
                     {/* Add tab button */}
                     <button
                         onClick={handleAddTab}
-                        disabled={reachedTabLimit || isCreatingTab}
+                        disabled={!dashboardEditable || reachedTabLimit || isCreatingTab}
                         className={`p-1.5 rounded transition-colors ml-1 ${
-                            reachedTabLimit || isCreatingTab
+                            !dashboardEditable || reachedTabLimit || isCreatingTab
                                 ? 'text-[var(--text-muted)]/50 cursor-not-allowed'
                                 : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60'
                         }`}
-                        title={reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : 'Add new tab (Ctrl+T)'}
+                        title={dashboardEditable ? (reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : 'Add new tab (Ctrl+T)') : 'Main dashboard is read-only'}
                     >
                         <Plus size={14} />
                     </button>
@@ -400,8 +402,12 @@ export function TabBar({ symbol }: TabBarProps) {
                     {/* Edit tabs button */}
                     <button
                         onClick={() => setIsManageModalOpen(true)}
-                        className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 rounded transition-colors"
-                        title="Manage tabs"
+                        disabled={!dashboardEditable}
+                        className={`p-1.5 rounded transition-colors ${dashboardEditable
+                            ? 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60'
+                            : 'text-[var(--text-muted)]/50 cursor-not-allowed'
+                        }`}
+                        title={dashboardEditable ? 'Manage tabs' : 'Main dashboard is read-only'}
                     >
                         <Settings2 size={14} />
                     </button>

@@ -19,6 +19,12 @@ export const widgetCategories: WidgetCategoryInfo[] = [
         icon: 'TrendingUp'
     },
     {
+        id: 'quant',
+        name: 'Quant',
+        description: 'Institutional-style quantitative and market microstructure tools',
+        icon: 'Sigma'
+    },
+    {
         id: 'calendar',
         name: 'Calendar',
         description: 'Events, earnings, and corporate actions',
@@ -395,7 +401,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         type: 'volume_profile',
         name: 'Volume Profile',
         description: 'POC/VAH/VAL volume distribution by price bins',
-        category: 'charting',
+        category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
     },
@@ -403,7 +409,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         type: 'obv_divergence',
         name: 'OBV Divergence',
         description: 'Price vs OBV divergence signal with confidence score',
-        category: 'charting',
+        category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
     },
@@ -411,7 +417,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         type: 'atr_regime',
         name: 'ATR Regime',
         description: 'ATR volatility regime with model position sizing',
-        category: 'charting',
+        category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
     },
@@ -419,7 +425,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         type: 'gap_fill_stats',
         name: 'Gap Fill Stats',
         description: 'Gap-up/down fill probability and average days to fill',
-        category: 'charting',
+        category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
     },
@@ -427,7 +433,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         type: 'volume_delta',
         name: 'Volume Delta',
         description: 'Order-flow proxy from buy/sell pressure and cumulative delta',
-        category: 'charting',
+        category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
     },
@@ -435,7 +441,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         type: 'amihud_illiquidity',
         name: 'Amihud Illiquidity',
         description: 'Rolling 20-day illiquidity ratio to track market depth changes',
-        category: 'charting',
+        category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
     },
@@ -443,7 +449,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         type: 'seasonality_heatmap',
         name: 'Seasonality Heatmap',
         description: 'Year x month return matrix for recurring seasonal patterns',
-        category: 'charting',
+        category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
     },
@@ -507,8 +513,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
     },
     {
         type: 'research_browser',
-        name: 'Research Browser',
-        description: 'Embed and save external research sites',
+        name: 'External Intelligence Hub',
+        description: 'Curated external research links and ticker-aware intelligence sources',
         category: 'analysis',
         defaultConfig: {},
         defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 }

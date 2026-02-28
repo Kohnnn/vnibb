@@ -103,7 +103,10 @@ function getCellClass(value: number | null): string {
   return 'bg-red-500/20 text-red-200'
 }
 
-function getBestAndWorstMonth(monthlyAverages: Array<number | null>) {
+function getBestAndWorstMonth(monthlyAverages: Array<number | null>): {
+  best: { month: number; value: number } | null
+  worst: { month: number; value: number } | null
+} {
   let best: { month: number; value: number } | null = null
   let worst: { month: number; value: number } | null = null
 
