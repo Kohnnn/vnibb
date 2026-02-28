@@ -24,6 +24,8 @@ import {
   type ResearchRssFeedResponse,
 } from '@/lib/api'
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage'
+import { useProfile } from '@/lib/queries'
+import { toTradingViewSymbol } from '@/lib/tradingView'
 import { cn } from '@/lib/utils'
 import { ResearchSourceCard } from '@/components/widgets/research/ResearchSourceCard'
 
@@ -116,7 +118,7 @@ const QUICK_SOURCES: QuickSource[] = [
     label: 'TradingView',
     mode: 'external',
     category: 'chart',
-    urlTemplate: 'https://www.tradingview.com/chart/?symbol=HOSE:{SYMBOL}',
+    urlTemplate: 'https://www.tradingview.com/chart/?symbol={TV_SYMBOL}',
     description: 'Advanced charting and technical overlays.',
     favicon: 'https://www.tradingview.com/favicon.ico',
   },
@@ -145,10 +147,20 @@ function normalizeUrl(input: string): string {
   return `https://${value}`
 }
 
-function substituteSymbol(urlTemplate: string, symbol?: string): string {
-  if (!symbol) return urlTemplate.replaceAll('{SYMBOL}', '').replaceAll('{symbol}', '')
+function substituteSymbol(urlTemplate: string, symbol?: string, tvSymbol?: string): string {
+  if (!symbol) {
+    return urlTemplate
+      .replaceAll('{SYMBOL}', '')
+      .replaceAll('{symbol}', '')
+      .replaceAll('{TV_SYMBOL}', '')
+  }
+
   const normalized = encodeURIComponent(symbol.trim().toUpperCase())
-  return urlTemplate.replaceAll('{SYMBOL}', normalized).replaceAll('{symbol}', normalized)
+  const normalizedTv = encodeURIComponent((tvSymbol || symbol).trim().toUpperCase())
+  return urlTemplate
+    .replaceAll('{SYMBOL}', normalized)
+    .replaceAll('{symbol}', normalized)
+    .replaceAll('{TV_SYMBOL}', normalizedTv)
 }
 
 function inferRssSource(source?: QuickSource | null): ResearchRssSource | null {
@@ -177,6 +189,12 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
   const [inlineNotice, setInlineNotice] = useState<string | null>(null)
 
   const normalizedSymbol = (symbol || '').trim().toUpperCase()
+  const { data: profileData } = useProfile(normalizedSymbol, Boolean(normalizedSymbol))
+  const exchange = profileData?.data?.exchange?.toString()
+  const resolvedTradingViewSymbol = useMemo(
+    () => (normalizedSymbol ? toTradingViewSymbol(normalizedSymbol, exchange) : ''),
+    [normalizedSymbol, exchange]
+  )
   const activeQuickSource = useMemo(
     () => QUICK_SOURCES.find((source) => source.id === activeSourceId) || QUICK_SOURCES[0],
     [activeSourceId]
@@ -188,8 +206,8 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
 
   const activeUrl = useMemo(() => {
     if (activeSavedSite) return activeSavedSite.url
-    return substituteSymbol(activeQuickSource.urlTemplate, normalizedSymbol)
-  }, [activeSavedSite, activeQuickSource.urlTemplate, normalizedSymbol])
+    return substituteSymbol(activeQuickSource.urlTemplate, normalizedSymbol, resolvedTradingViewSymbol)
+  }, [activeSavedSite, activeQuickSource.urlTemplate, normalizedSymbol, resolvedTradingViewSymbol])
 
   const activeTitle = activeSavedSite?.title || activeQuickSource.label
   const activeMode: SourceMode = activeSavedSite ? 'external' : activeQuickSource.mode
@@ -542,7 +560,11 @@ export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserW
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {groupedSources[category].map((source) => {
-                            const sourceUrl = substituteSymbol(source.urlTemplate, normalizedSymbol)
+                            const sourceUrl = substituteSymbol(
+                              source.urlTemplate,
+                              normalizedSymbol,
+                              resolvedTradingViewSymbol
+                            )
                             return (
                               <button
                                 key={`quick-link-${source.id}`}

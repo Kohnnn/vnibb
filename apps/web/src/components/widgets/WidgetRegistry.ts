@@ -43,6 +43,8 @@ import { ATRRegimeWidget } from './ATRRegimeWidget';
 import { GapFillStatsWidget } from './GapFillStatsWidget';
 import { VolumeDeltaWidget } from './VolumeDeltaWidget';
 import { AmihudIlliquidityWidget } from './AmihudIlliquidityWidget';
+import { DrawdownDeepDiveWidget } from './DrawdownDeepDiveWidget';
+import { HurstMarketStructureWidget } from './HurstMarketStructureWidget';
 import { SeasonalityHeatmapWidget } from './SeasonalityHeatmapWidget';
 import { TechnicalSummaryWidget } from './TechnicalSummaryWidget';
 import { ForexRatesWidget } from './ForexRatesWidget';
@@ -186,6 +188,8 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     gap_fill_stats: GapFillStatsWidget as ComponentType<WidgetProps>,
     volume_delta: VolumeDeltaWidget as ComponentType<WidgetProps>,
     amihud_illiquidity: AmihudIlliquidityWidget as ComponentType<WidgetProps>,
+    drawdown_deep_dive: DrawdownDeepDiveWidget as ComponentType<WidgetProps>,
+    hurst_market_structure: HurstMarketStructureWidget as ComponentType<WidgetProps>,
     seasonality_heatmap: SeasonalityHeatmapWidget as ComponentType<WidgetProps>,
     technical_summary: TechnicalSummaryWidget as ComponentType<WidgetProps>,
     technical_snapshot: TechnicalSnapshotWidget as ComponentType<WidgetProps>,
@@ -261,6 +265,8 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     gap_fill_stats: { w: 6, h: 7, minW: 4, minH: 5 },
     volume_delta: { w: 6, h: 7, minW: 4, minH: 5 },
     amihud_illiquidity: { w: 6, h: 7, minW: 4, minH: 5 },
+    drawdown_deep_dive: { w: 8, h: 7, minW: 6, minH: 5 },
+    hurst_market_structure: { w: 6, h: 7, minW: 4, minH: 5 },
     seasonality_heatmap: { w: 8, h: 7, minW: 6, minH: 5 },
     technical_summary: { w: 5, h: 7, minW: 4, minH: 5 },
     technical_snapshot: { w: 5, h: 6, minW: 4, minH: 5 },
@@ -343,6 +349,8 @@ export const widgetNames: Record<WidgetType, string> = {
     gap_fill_stats: 'Gap Fill Stats',
     volume_delta: 'Volume Delta',
     amihud_illiquidity: 'Amihud Illiquidity',
+    drawdown_deep_dive: 'Drawdown Deep Dive',
+    hurst_market_structure: 'Hurst Market Structure',
     seasonality_heatmap: 'Seasonality Heatmap',
     technical_summary: 'Technical Summary',
     technical_snapshot: 'Technical Snapshot',
@@ -422,6 +430,8 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     gap_fill_stats: 'Gap fill probability and fill timing',
     volume_delta: 'Buy/sell pressure proxy with cumulative delta divergence',
     amihud_illiquidity: 'Price impact per traded value with rolling liquidity trend',
+    drawdown_deep_dive: 'Underwater drawdown curve with depth and recovery statistics',
+    hurst_market_structure: 'Hurst exponent with persistence and mean-reversion structure clues',
     seasonality_heatmap: 'Year by month return heatmap for seasonal structure',
     technical_summary: 'Indicator-based signals',
     technical_snapshot: 'Daily technical indicator snapshot',

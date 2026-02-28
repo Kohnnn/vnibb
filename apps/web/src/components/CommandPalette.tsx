@@ -6,6 +6,7 @@ import {
   Search, Plus, LayoutGrid, Settings, Moon, Sun, 
   RefreshCw, Download, Maximize2, Home, BarChart2,
   TrendingUp, PieChart, Newspaper, Bell, Database,
+  ShieldAlert, Sigma,
   Globe, User, Box, FileText, ChevronRight, X
 } from 'lucide-react';
 import { useDashboard } from '@/contexts/DashboardContext';
@@ -317,6 +318,8 @@ function getWidgetIcon(type: WidgetType): React.ReactNode {
     price_alerts: <Bell className="w-4 h-4" />,
     ticker_info: <User className="w-4 h-4" />,
     financials: <FileText className="w-4 h-4" />,
+    drawdown_deep_dive: <ShieldAlert className="w-4 h-4" />,
+    hurst_market_structure: <Sigma className="w-4 h-4" />,
   };
   return iconMap[type] || <Plus className="w-4 h-4" />;
 }

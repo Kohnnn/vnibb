@@ -67,7 +67,7 @@ export const DropdownMenuContent = ({ children, className = '', align = 'center'
         <div
             ref={ref}
             className={cn(
-                "absolute z-50 mt-2 min-w-[8rem] overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-1 text-[var(--text-primary)] shadow-xl ring-1 ring-black/10 animate-in fade-in-80 zoom-in-95",
+                'absolute z-50 mt-2 min-w-[8rem] overflow-hidden rounded-md border border-slate-700 bg-slate-900 p-1 text-slate-100 shadow-xl ring-1 ring-black/40 animate-in fade-in-80 zoom-in-95',
                 alignClasses[align as keyof typeof alignClasses] || alignClasses.center,
                 className
             )}
@@ -82,7 +82,7 @@ export const DropdownMenuItem = ({ children, onClick, className }: any) => {
     return (
         <div
             className={cn(
-                "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+                'relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm text-slate-300 outline-none transition-colors hover:bg-slate-800 hover:text-slate-100 data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
                 className
             )}
             role="menuitem"
@@ -110,7 +110,7 @@ export const DropdownMenuCheckboxItem = ({ children, checked, onCheckedChange, c
     return (
         <div
             className={cn(
-                "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                'relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm text-slate-300 outline-none transition-colors hover:bg-slate-800 hover:text-slate-100',
                 className
             )}
             role="menuitemcheckbox"
@@ -136,13 +136,13 @@ export const DropdownMenuCheckboxItem = ({ children, checked, onCheckedChange, c
 };
 
 export const DropdownMenuLabel = ({ children, className }: any) => (
-    <div className={cn("px-2 py-1.5 text-sm font-semibold text-[var(--text-primary)]", className)}>
+    <div className={cn('px-2 py-1.5 text-sm font-semibold text-slate-100', className)}>
         {children}
     </div>
 );
 
 export const DropdownMenuSeparator = ({ className }: any) => (
-    <div className={cn("-mx-1 my-1 h-px bg-[var(--border-subtle)]", className)} />
+    <div className={cn('-mx-1 my-1 h-px bg-slate-700', className)} />
 );
 
 export const DropdownMenuSub = ({ children }: { children: React.ReactNode }) => {
@@ -165,8 +165,8 @@ export const DropdownMenuSub = ({ children }: { children: React.ReactNode }) => 
 
 export const DropdownMenuSubTrigger = ({ children, className, isOpen }: any) => (
     <div className={cn(
-        "flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm text-[var(--text-secondary)] outline-none hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
-        isOpen && "bg-[var(--bg-hover)] text-[var(--text-primary)]",
+        'flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm text-slate-300 outline-none hover:bg-slate-800 hover:text-slate-100',
+        isOpen && 'bg-slate-800 text-slate-100',
         className
     )}>
         {children}
@@ -178,7 +178,7 @@ export const DropdownMenuSubContent = ({ children, className, isOpen }: any) => 
     if (!isOpen) return null;
     return (
         <div className={cn(
-            "absolute left-full top-0 z-50 ml-1 min-w-[8rem] overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-1 text-[var(--text-primary)] shadow-xl ring-1 ring-black/10 animate-in fade-in-80 zoom-in-95",
+            'absolute left-full top-0 z-50 ml-1 min-w-[8rem] overflow-hidden rounded-md border border-slate-700 bg-slate-900 p-1 text-slate-100 shadow-xl ring-1 ring-black/40 animate-in fade-in-80 zoom-in-95',
             className
         )}>
             {children}

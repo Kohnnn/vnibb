@@ -7,12 +7,12 @@
  * - Dark/light mode toggle
  * - localStorage persistence
  * - No flash on page load
- * - System preference detection
+ * - Dark-first theme initialization
  */
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 
-type Theme = 'dark' | 'light' | 'system';
+type Theme = 'dark' | 'light';
 
 interface ThemeContextType {
   theme: Theme;
@@ -28,13 +28,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>('dark');
   const [mounted, setMounted] = useState(false);
 
-  // Get resolved theme (handles 'system' preference)
+  // Get resolved theme
   const getResolvedTheme = (theme: Theme): 'dark' | 'light' => {
-    if (theme === 'system') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light';
-    }
     return theme;
   };
 
@@ -44,7 +39,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
-      const initialTheme = stored || 'dark';
+      const initialTheme: Theme = stored === 'light' ? 'light' : 'dark';
       setThemeState(initialTheme);
       setResolvedTheme(getResolvedTheme(initialTheme));
       setMounted(true);
@@ -90,20 +85,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     };
   }, [theme, mounted]);
 
-  // Listen for system theme changes
-  useEffect(() => {
-    if (theme !== 'system') return;
-
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    
-    const handleChange = () => {
-      setResolvedTheme(mediaQuery.matches ? 'dark' : 'light');
-    };
-
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [theme]);
-
   const setTheme = (newTheme: Theme) => {
     try {
       localStorage.setItem(THEME_STORAGE_KEY, newTheme);
@@ -143,13 +124,7 @@ export const ThemeScript = () => {
     (function() {
       try {
         var theme = localStorage.getItem('${THEME_STORAGE_KEY}') || 'dark';
-        var resolved = theme;
-        
-        if (theme === 'system') {
-          resolved = window.matchMedia('(prefers-color-scheme: dark)').matches
-            ? 'dark'
-            : 'light';
-        }
+        var resolved = theme === 'light' ? 'light' : 'dark';
         
         document.documentElement.classList.remove('light', 'dark');
         document.documentElement.classList.add(resolved);

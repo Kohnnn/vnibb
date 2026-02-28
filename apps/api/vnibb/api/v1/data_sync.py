@@ -11,7 +11,6 @@ from datetime import date, timedelta
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, WebSocket, WebSocketDisconnect
-from typing import Optional, List
 from pydantic import BaseModel
 
 from vnibb.services.websocket_service import manager
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 async def sync_status_websocket(websocket: WebSocket):
     """WebSocket endpoint for real-time sync status updates."""
     await manager.connect(websocket)
-    
+
     try:
         while True:
             # Keep connection alive and listen for optional client messages
@@ -43,8 +42,8 @@ async def broadcast_sync_status(status: dict):
 
 
 class SyncResponse(BaseModel):
-
     """Response for sync operations."""
+
     status: str
     message: str
     count: Optional[int] = None
@@ -52,6 +51,7 @@ class SyncResponse(BaseModel):
 
 class CleanupResponse(BaseModel):
     """Response for retention cleanup operations."""
+
     status: str
     message: str
     removed: dict
@@ -60,6 +60,7 @@ class CleanupResponse(BaseModel):
 
 class SyncJobRequest(BaseModel):
     """Request for running sync jobs."""
+
     job_type: str  # stock_list, prices, news, dividends, foreign_trading
     symbols: Optional[list[str]] = None
     start_date: Optional[date] = None
@@ -70,8 +71,10 @@ class SyncJobRequest(BaseModel):
 # HEALTH CHECK ENDPOINTS
 # =============================================================================
 
+
 class DatabaseHealthResponse(BaseModel):
     """Response for database health check."""
+
     status: str  # healthy, degraded, needs_seed
     timestamp: str
     database: dict
@@ -82,6 +85,7 @@ class DatabaseHealthResponse(BaseModel):
 
 class SyncHistoryItem(BaseModel):
     """Single sync history entry."""
+
     id: int
     sync_type: str
     status: str
@@ -101,7 +105,7 @@ class SyncHistoryItem(BaseModel):
 async def database_health() -> DatabaseHealthResponse:
     """
     Check database health and data status.
-    
+
     Returns:
     - status: 'healthy', 'degraded', or 'needs_seed'
     - database: Stock counts, price records, screener records
@@ -110,7 +114,7 @@ async def database_health() -> DatabaseHealthResponse:
     - recommendations: Suggested actions
     """
     from vnibb.services.health_service import get_health_service
-    
+
     try:
         health = await get_health_service().get_database_health()
         return DatabaseHealthResponse(**health)
@@ -131,7 +135,7 @@ async def get_sync_history(
 ) -> List[SyncHistoryItem]:
     """Get recent sync history."""
     from vnibb.services.health_service import get_health_service
-    
+
     try:
         history = await get_health_service().get_sync_history(limit=limit, sync_type=sync_type)
         return [SyncHistoryItem(**h) for h in history]
@@ -140,13 +144,14 @@ async def get_sync_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
 # =============================================================================
 # SEED ENDPOINTS
 # =============================================================================
 
+
 class SeedResponse(BaseModel):
     """Response for seed operations."""
+
     status: str
     message: str
     stocks_synced: int
@@ -166,12 +171,12 @@ async def seed_stocks(
 ) -> SeedResponse:
     """
     Seed all stock symbols from vnstock.
-    
+
     This is the primary way to initialize an empty database.
     Fetches all symbols from HOSE, HNX, and UPCOM exchanges.
     """
     from vnibb.cli.seed import seed_stock_symbols
-    
+
     if async_mode:
         background_tasks.add_task(seed_stock_symbols)
         return SeedResponse(
@@ -181,7 +186,7 @@ async def seed_stocks(
             errors=0,
             exchanges={},
         )
-    
+
     try:
         results = await seed_stock_symbols()
         return SeedResponse(
@@ -214,19 +219,19 @@ async def seed_full(
 ) -> SyncResponse:
     """
     Run complete database seeding.
-    
+
     Includes:
     - All stock symbols
     - ICB industry mappings
     - Optionally: Historical price data
     """
     from vnibb.services.data_pipeline import data_pipeline
-    
+
     async def _run_seed():
         await data_pipeline.run_full_seeding(days=price_days, include_prices=include_prices)
-    
+
     background_tasks.add_task(_run_seed)
-    
+
     return SyncResponse(
         status="started",
         message=f"Full seed started in background (prices: {include_prices})",
@@ -243,6 +248,7 @@ async def sync_stocks() -> SyncResponse:
     """Sync stock list from vnstock."""
 
     from vnibb.services.data_pipeline import data_pipeline
+
     try:
         count = await data_pipeline.sync_stock_list()
         return SyncResponse(
@@ -268,6 +274,7 @@ async def sync_profiles(
 ) -> SyncResponse:
     """Sync company profiles to database."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(
             data_pipeline.sync_company_profiles,
@@ -277,7 +284,7 @@ async def sync_profiles(
             status="started",
             message="Profile sync started in background",
         )
-    
+
     try:
         count = await data_pipeline.sync_company_profiles(symbols=symbols)
         return SyncResponse(
@@ -302,16 +309,14 @@ async def sync_screener(
 ) -> SyncResponse:
     """Sync screener data."""
     from vnibb.services.data_pipeline import data_pipeline
-    
+
     if async_mode:
-        background_tasks.add_task(
-            data_pipeline.sync_screener_data
-        )
+        background_tasks.add_task(data_pipeline.sync_screener_data)
         return SyncResponse(
             status="started",
             message="Screener sync started in background",
         )
-    
+
     try:
         count = await data_pipeline.sync_screener_data()
         return SyncResponse(
@@ -339,6 +344,7 @@ async def sync_prices(
 ) -> SyncResponse:
     """Sync daily prices for stocks."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(
             data_pipeline.sync_daily_prices,
@@ -350,7 +356,7 @@ async def sync_prices(
             status="started",
             message="Price sync started in background",
         )
-    
+
     try:
         count = await data_pipeline.sync_daily_prices(
             symbols=symbols,
@@ -381,6 +387,7 @@ async def sync_news(
 ) -> SyncResponse:
     """Sync company news."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(
             data_pipeline.sync_company_news,
@@ -391,7 +398,7 @@ async def sync_news(
             status="started",
             message="News sync started in background",
         )
-    
+
     try:
         count = await data_pipeline.sync_company_news(symbols=symbols, limit=limit)
         return SyncResponse(
@@ -438,6 +445,7 @@ async def sync_dividends(
 ) -> SyncResponse:
     """Sync dividend data."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(
             data_pipeline.sync_dividends,
@@ -447,7 +455,7 @@ async def sync_dividends(
             status="started",
             message="Dividend sync started in background",
         )
-    
+
     try:
         count = await data_pipeline.sync_dividends(symbols=symbols)
         return SyncResponse(
@@ -474,6 +482,7 @@ async def sync_company_events(
 ) -> SyncResponse:
     """Sync company events."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(
             data_pipeline.sync_company_events,
@@ -511,6 +520,7 @@ async def sync_insider_deals(
 ) -> SyncResponse:
     """Sync insider deals."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(
             data_pipeline.sync_insider_deals,
@@ -547,6 +557,7 @@ async def sync_shareholders(
 ) -> SyncResponse:
     """Sync shareholders."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(
             data_pipeline.sync_shareholders,
@@ -582,6 +593,7 @@ async def sync_officers(
 ) -> SyncResponse:
     """Sync officers."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(
             data_pipeline.sync_officers,
@@ -617,6 +629,7 @@ async def sync_subsidiaries(
 ) -> SyncResponse:
     """Sync subsidiaries."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(
             data_pipeline.sync_subsidiaries,
@@ -651,6 +664,7 @@ async def sync_market_sectors(
 ) -> SyncResponse:
     """Sync market sector master data."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(data_pipeline.sync_market_sectors)
         return SyncResponse(
@@ -681,6 +695,7 @@ async def sync_foreign_trading(
 ) -> SyncResponse:
     """Sync foreign trading data."""
     from vnibb.services.data_pipeline import data_pipeline
+
     try:
         count = await data_pipeline.sync_foreign_trading(trade_date=trade_date)
         return SyncResponse(
@@ -790,6 +805,7 @@ async def sync_financials(
 ) -> SyncResponse:
     """Sync financial statements to database."""
     from vnibb.services.data_pipeline import data_pipeline
+
     if async_mode:
         background_tasks.add_task(
             data_pipeline.sync_financials,
@@ -800,7 +816,7 @@ async def sync_financials(
             status="started",
             message="Financial statements sync started in background",
         )
-    
+
     try:
         total = await data_pipeline.sync_financials(symbols=symbols, period=period)
         return SyncResponse(
@@ -827,21 +843,22 @@ async def sync_metrics(
 ) -> SyncResponse:
     """Sync financial ratios to database."""
     from vnibb.services.data_pipeline import data_pipeline
-    
+
     async def _run_sync():
         await data_pipeline.sync_financial_ratios(symbols=symbols, period=period)
-        
+
     if async_mode:
         background_tasks.add_task(_run_sync)
         return SyncResponse(status="started", message="Metrics sync started in background")
-    
+
     try:
         total = await data_pipeline.sync_financial_ratios(symbols=symbols, period=period)
-        return SyncResponse(status="success", message=f"Synced ratios for {total} symbols", count=total)
+        return SyncResponse(
+            status="success", message=f"Synced ratios for {total} symbols", count=total
+        )
     except Exception as e:
         logger.error(f"Metrics sync failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @router.post(
@@ -855,7 +872,7 @@ async def sync_all(
 ) -> SyncResponse:
     """Run full data sync in background."""
     from vnibb.services.data_pipeline import run_daily_sync
-    
+
     background_tasks.add_task(run_daily_sync)
     return SyncResponse(
         status="started",
@@ -867,8 +884,10 @@ async def sync_all(
 # FULL MARKET SYNC (NEW)
 # =============================================================================
 
+
 class FullSyncResultsResponse(BaseModel):
     """Response for full market sync."""
+
     success: bool
     results: dict
     total_synced: int
@@ -885,21 +904,22 @@ class FullSyncResultsResponse(BaseModel):
 async def sync_full_market(
     background_tasks: BackgroundTasks,
     max_symbols: Optional[int] = Query(
-        default=None,
-        description="Optional limit on symbols to sync (for testing)"
+        default=None, description="Optional limit on symbols to sync (for testing)"
     ),
     include_historical: bool = Query(
-        default=False,
-        description="Whether to sync historical price data"
+        default=True, description="Whether to sync historical price data"
     ),
-    async_mode: bool = Query(
-        default=True,
-        description="Run sync in background"
+    history_days: Optional[int] = Query(
+        default=None,
+        ge=1,
+        le=3650,
+        description="Override historical days window (defaults to config)",
     ),
+    async_mode: bool = Query(default=True, description="Run sync in background"),
 ) -> FullSyncResultsResponse:
     """
     Run comprehensive market data sync.
-    
+
     Syncs:
     - All stock symbols
     - Current prices from screener
@@ -907,52 +927,55 @@ async def sync_full_market(
     - Optional: Historical data
     """
     from vnibb.services.sync_all_data import FullMarketSync
-    
+
     if async_mode:
+
         async def _run_sync():
             sync = FullMarketSync()
             await sync.run_full_sync(
                 include_historical=include_historical,
-                max_symbols=max_symbols
+                max_symbols=max_symbols,
+                history_days=history_days,
             )
-        
+
         background_tasks.add_task(_run_sync)
         return FullSyncResultsResponse(
             success=True,
             results={"status": "started"},
             total_synced=0,
             total_errors=0,
-            total_duration=0
+            total_duration=0,
         )
-    
+
     try:
         sync = FullMarketSync()
         results = await sync.run_full_sync(
             include_historical=include_historical,
-            max_symbols=max_symbols
+            max_symbols=max_symbols,
+            history_days=history_days,
         )
-        
+
         # Convert SyncResult objects to dict
         results_dict = {
             k: {
                 "synced_count": v.synced_count,
                 "error_count": v.error_count,
                 "duration_seconds": v.duration_seconds,
-                "success": v.success
+                "success": v.success,
             }
             for k, v in results.items()
         }
-        
+
         total_synced = sum(v.synced_count for v in results.values())
         total_errors = sum(v.error_count for v in results.values())
         total_duration = sum(v.duration_seconds for v in results.values())
-        
+
         return FullSyncResultsResponse(
             success=all(v.success for v in results.values()),
             results=results_dict,
             total_synced=total_synced,
             total_errors=total_errors,
-            total_duration=total_duration
+            total_duration=total_duration,
         )
     except Exception as e:
         logger.error(f"Full market sync failed: {e}")
@@ -967,4 +990,5 @@ async def sync_full_market(
 async def get_sync_status():
     """Get scheduler job status."""
     from vnibb.core.scheduler import get_job_status
+
     return get_job_status()
