@@ -191,8 +191,22 @@ function DashboardContent() {
             setGlobalSymbol(symbol);
             setContextGlobalSymbol(symbol);
             updateSyncGroupSymbol(activeDashboard.id, 1, symbol);
+
+            const deepDiveTab = activeDashboard.tabs.find(
+                (tab) => tab.id === 'tab-main-deep-dive' || tab.name.toLowerCase().includes('deep dive')
+            );
+            if (deepDiveTab && activeTab?.id !== deepDiveTab.id) {
+                setActiveTab(deepDiveTab.id);
+            }
         }
-    }, [activeDashboard, updateSyncGroupSymbol, setGlobalSymbol, setContextGlobalSymbol]);
+    }, [
+        activeDashboard,
+        activeTab?.id,
+        setActiveTab,
+        updateSyncGroupSymbol,
+        setGlobalSymbol,
+        setContextGlobalSymbol,
+    ]);
 
     const handleEditToggle = useCallback(() => {
         if (activeDashboard?.isEditable === false) {

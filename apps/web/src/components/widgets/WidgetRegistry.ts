@@ -140,6 +140,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     // Company info widgets
     company_filings: CompanyFilingsWidget as ComponentType<WidgetProps>,
     major_shareholders: MajorShareholdersWidget as ComponentType<WidgetProps>,
+    institutional_ownership: MajorShareholdersWidget as ComponentType<WidgetProps>,
     officers_management: OfficersManagementWidget as ComponentType<WidgetProps>,
     subsidiaries: SubsidiariesWidget as ComponentType<WidgetProps>,
 

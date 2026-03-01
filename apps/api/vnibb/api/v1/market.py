@@ -1031,6 +1031,23 @@ async def get_market_top_movers(
             for item in movers
         ]
 
+        if payload:
+            symbols = [
+                str(item.get("symbol", "")).upper() for item in payload if item.get("symbol")
+            ]
+            change_map = await _load_change_pct_map(symbols)
+            for item in payload:
+                symbol = str(item.get("symbol", "")).upper()
+                fallback_change_pct = change_map.get(symbol)
+                if fallback_change_pct is None:
+                    continue
+                current_change_pct = _to_float(item.get("price_change_pct"))
+                if current_change_pct is None or abs(current_change_pct) < 1e-9:
+                    item["price_change_pct"] = fallback_change_pct
+                    price_value = _to_float(item.get("last_price"))
+                    if price_value not in (None, 0):
+                        item["price_change"] = price_value * (fallback_change_pct / 100.0)
+
         if not payload and type in {"gainer", "loser"}:
             # Graceful fallback: volume movers are generally the most stable upstream feed.
             fallback = await asyncio.wait_for(

@@ -35,6 +35,7 @@ interface PriceChartLocalWidgetProps {
 // Session cache for chart data
 const chartCache = new Map<string, { data: ChartDataPoint[]; timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const REQUEST_TIMEOUT_MS = 15000;
 
 function getCacheKey(symbol: string, period: string): string {
   return `${symbol}:${period}`;
@@ -68,6 +69,7 @@ export function PriceChartLocalWidget({
   const chartRef = useRef<IChartApi | null>(null);
   const mainSeriesRef = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Line'> | ISeriesApi<'Area'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const requestTimeoutRef = useRef<number | null>(null);
 
   const [period, setPeriod] = useState<Period>('10Y');
   const [chartType, setChartType] = useState<ChartType>('Candlestick');
@@ -90,6 +92,15 @@ export function PriceChartLocalWidget({
 
     setIsLoading(true);
     setError(null);
+    if (requestTimeoutRef.current) {
+      window.clearTimeout(requestTimeoutRef.current);
+    }
+
+    requestTimeoutRef.current = window.setTimeout(() => {
+      setError('Chart request timed out. Showing empty state.');
+      setData([]);
+      setIsLoading(false);
+    }, REQUEST_TIMEOUT_MS);
 
     try {
       const response = await getChartData(sym, per);
@@ -102,8 +113,20 @@ export function PriceChartLocalWidget({
       setError(err.message || 'Failed to load chart data');
       setData([]);
     } finally {
+      if (requestTimeoutRef.current) {
+        window.clearTimeout(requestTimeoutRef.current);
+        requestTimeoutRef.current = null;
+      }
       setIsLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (requestTimeoutRef.current) {
+        window.clearTimeout(requestTimeoutRef.current);
+      }
+    };
   }, []);
 
   // Fetch data when symbol or period changes
@@ -376,6 +399,12 @@ export function PriceChartLocalWidget({
                   Retry
                 </button>
               </div>
+            </div>
+          )}
+
+          {!isLoading && !error && data.length === 0 && (
+            <div className="absolute inset-0 z-10 bg-[var(--bg-primary)]">
+              <WidgetEmpty message="No chart data available for this period" />
             </div>
           )}
 

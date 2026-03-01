@@ -153,6 +153,12 @@ class ScreenerData(BaseModel):
     # ==========================================================================
     price: Optional[float] = Field(None, description="Current price")
     volume: Optional[float] = Field(None, description="Trading volume")
+    change_1d: Optional[float] = Field(
+        None, alias="change1D", description="Daily price change percentage"
+    )
+    perf_1w: Optional[float] = Field(None, alias="perf1W", description="1-week performance (%)")
+    perf_1m: Optional[float] = Field(None, alias="perf1M", description="1-month performance (%)")
+    perf_ytd: Optional[float] = Field(None, alias="perfYTD", description="YTD performance (%)")
     market_cap: Optional[float] = Field(
         None, alias="marketCap", description="Market capitalization"
     )
@@ -760,6 +766,20 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
             "price": "price",
             "close": "price",
             "volume": "volume",
+            "change_1d": "change_1d",
+            "change1d": "change_1d",
+            "price_change_1d_pct": "change_1d",
+            "pct_change": "change_1d",
+            "percent_change": "change_1d",
+            "perf_1w": "perf_1w",
+            "price_change_1w_pct": "perf_1w",
+            "weekly_pct": "perf_1w",
+            "perf_1m": "perf_1m",
+            "price_change_1m_pct": "perf_1m",
+            "monthly_pct": "perf_1m",
+            "perf_ytd": "perf_ytd",
+            "price_change_ytd_pct": "perf_ytd",
+            "ytd_pct": "perf_ytd",
             # Market Cap & Shares
             "marketCap": "market_cap",
             "market_cap": "market_cap",

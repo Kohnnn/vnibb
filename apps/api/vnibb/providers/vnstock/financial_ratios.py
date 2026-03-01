@@ -17,6 +17,28 @@ from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 logger = logging.getLogger(__name__)
 
 
+def _as_float(value: Any) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_dividend_yield(value: Any) -> Optional[float]:
+    numeric = _as_float(value)
+    if numeric is None:
+        return None
+
+    normalized = numeric
+    if abs(normalized) > 1000:
+        while abs(normalized) > 100:
+            normalized /= 100
+
+    return normalized
+
+
 class FinancialRatiosQueryParams(BaseModel):
     """Query parameters for financial ratios."""
 
@@ -345,7 +367,9 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         revenue_growth=row.get("revenueGrowth") or row.get("revenue_growth"),
                         earnings_growth=row.get("earningsGrowth") or row.get("earnings_growth"),
                         dps=row.get("dividendPerShare") or row.get("dps"),
-                        dividend_yield=row.get("dividendYield") or row.get("dividend_yield"),
+                        dividend_yield=_normalize_dividend_yield(
+                            row.get("dividendYield") or row.get("dividend_yield")
+                        ),
                         payout_ratio=row.get("payoutRatio") or row.get("payout_ratio"),
                         peg_ratio=row.get("pegRatio") or row.get("peg_ratio"),
                     )

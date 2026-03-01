@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import pandas as pd
 
 from vnibb.core.database import get_db
-from vnibb.models.stock import Stock
+from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.company import Company
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 from vnibb.models.trading import FinancialRatio
@@ -77,6 +77,30 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         industry_name=getattr(row, "industry", None),
         price=getattr(row, "price", None),
         volume=getattr(row, "volume", None),
+        change_1d=_pick(
+            getattr(row, "change_1d", None),
+            getattr(row, "price_change_1d_pct", None),
+            extended_metrics.get("change_1d"),
+            extended_metrics.get("price_change_1d_pct"),
+        ),
+        perf_1w=_pick(
+            getattr(row, "perf_1w", None),
+            getattr(row, "price_change_1w_pct", None),
+            extended_metrics.get("perf_1w"),
+            extended_metrics.get("price_change_1w_pct"),
+        ),
+        perf_1m=_pick(
+            getattr(row, "perf_1m", None),
+            getattr(row, "price_change_1m_pct", None),
+            extended_metrics.get("perf_1m"),
+            extended_metrics.get("price_change_1m_pct"),
+        ),
+        perf_ytd=_pick(
+            getattr(row, "perf_ytd", None),
+            getattr(row, "price_change_ytd_pct", None),
+            extended_metrics.get("perf_ytd"),
+            extended_metrics.get("price_change_ytd_pct"),
+        ),
         market_cap=getattr(row, "market_cap", None),
         pe=getattr(row, "pe", None),
         pb=getattr(row, "pb", None),
@@ -296,6 +320,21 @@ def _compute_growth(current: Optional[float], previous: Optional[float]) -> Opti
     return ((current - previous) / previous) * 100
 
 
+def _normalize_dividend_yield(value: Any) -> Optional[float]:
+    numeric = _coerce_float(value)
+    if numeric is None:
+        return None
+
+    normalized = numeric
+    abs_value = abs(normalized)
+
+    if abs_value > 1000:
+        while abs(normalized) > 100:
+            normalized /= 100
+
+    return normalized
+
+
 async def _enrich_screener_metrics(
     rows: List[ScreenerData], db: AsyncSession
 ) -> List[ScreenerData]:
@@ -313,6 +352,10 @@ async def _enrich_screener_metrics(
                 or row.operating_margin is None
                 or row.ev_ebitda is None
                 or row.dividend_yield is None
+                or row.change_1d is None
+                or row.perf_1w is None
+                or row.perf_1m is None
+                or row.perf_ytd is None
                 or row.debt_to_asset is None
                 or row.equity_on_total_asset is None
                 or row.market_cap is None
@@ -430,6 +473,44 @@ async def _enrich_screener_metrics(
             payload.get("financial_ratio_issue_share"),
         )
 
+    price_rows = (
+        await db.execute(
+            select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+            .where(StockPrice.symbol.in_(target_symbols), StockPrice.interval == "1D")
+            .order_by(StockPrice.symbol.asc(), StockPrice.time.desc())
+        )
+    ).all()
+
+    price_series_by_symbol: dict[str, list[tuple[Any, float]]] = {
+        symbol: [] for symbol in target_symbols
+    }
+    for symbol, price_time, close in price_rows:
+        close_value = _coerce_float(close)
+        if close_value in (None, 0):
+            continue
+        bucket = price_series_by_symbol.setdefault(symbol, [])
+        if len(bucket) >= 260:
+            continue
+        bucket.append((price_time, close_value))
+
+    def _build_performance_map(days: int) -> dict[str, float]:
+        perf_map: dict[str, float] = {}
+        for symbol, series in price_series_by_symbol.items():
+            if len(series) < 2:
+                continue
+            latest_price = series[0][1]
+            lookback_index = min(days, len(series) - 1)
+            base_price = series[lookback_index][1]
+            if base_price in (None, 0):
+                continue
+            perf_map[symbol] = ((latest_price - base_price) / base_price) * 100
+        return perf_map
+
+    perf_1d_map = _build_performance_map(1)
+    perf_1w_map = _build_performance_map(5)
+    perf_1m_map = _build_performance_map(21)
+    perf_ytd_map = _build_performance_map(252)
+
     enriched_rows: List[ScreenerData] = []
     for row in rows:
         updates: dict[str, Any] = {}
@@ -523,9 +604,11 @@ async def _enrich_screener_metrics(
                 updates["equity_on_total_asset"] = equity_on_total_asset
 
         if row.dividend_yield is None:
-            dividend_yield = _pick_float(
-                ratio_raw.get("dividend_yield"),
-                ratio_raw.get("dividendYield"),
+            dividend_yield = _normalize_dividend_yield(
+                _pick_float(
+                    ratio_raw.get("dividend_yield"),
+                    ratio_raw.get("dividendYield"),
+                )
             )
             if dividend_yield is None:
                 dps = _pick_float(
@@ -540,9 +623,21 @@ async def _enrich_screener_metrics(
                         dps = abs(dividends_paid) / (shares * _shares_multiplier(shares))
                 price = _coerce_float(row.price)
                 if dps is not None and price not in (None, 0):
-                    dividend_yield = (dps / price) * 100
+                    dividend_yield = _normalize_dividend_yield((dps / price) * 100)
             if dividend_yield is not None:
                 updates["dividend_yield"] = dividend_yield
+
+        if row.change_1d is None and symbol in perf_1d_map:
+            updates["change_1d"] = perf_1d_map[symbol]
+
+        if row.perf_1w is None and symbol in perf_1w_map:
+            updates["perf_1w"] = perf_1w_map[symbol]
+
+        if row.perf_1m is None and symbol in perf_1m_map:
+            updates["perf_1m"] = perf_1m_map[symbol]
+
+        if row.perf_ytd is None and symbol in perf_ytd_map:
+            updates["perf_ytd"] = perf_ytd_map[symbol]
 
         if row.market_cap is None:
             shares = _coerce_float(row.shares_outstanding) or _coerce_float(
