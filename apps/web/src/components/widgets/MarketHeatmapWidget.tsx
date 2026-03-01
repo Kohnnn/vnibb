@@ -102,6 +102,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
             <select
                 value={groupBy}
                 onChange={(e) => setGroupBy(e.target.value as any)}
+                aria-label="Heatmap grouping"
                 className="bg-[var(--bg-secondary)] text-[9px] font-black uppercase text-[var(--text-secondary)] border border-[var(--border-default)] rounded px-1.5 py-0.5 outline-none hover:text-[var(--text-primary)] transition-colors"
             >
                 <option value="sector">By Sector</option>
