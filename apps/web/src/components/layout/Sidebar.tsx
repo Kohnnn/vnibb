@@ -635,7 +635,7 @@ export function Sidebar({
                                         <Plus size={14} />
                                     </button>
                                     {showCreateMenu && (
-                                        <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] py-1 shadow-xl backdrop-blur-sm">
+                                        <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] py-1 shadow-xl">
                                             <button
                                                 onClick={() => handleCreateDashboard()}
                                                 className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
@@ -731,7 +731,7 @@ export function Sidebar({
                     />
                     <div
                         ref={contextMenuRef}
-                        className="fixed z-[70] min-w-[140px] rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl backdrop-blur-sm"
+                        className="fixed z-[70] min-w-[140px] rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
                         <button
@@ -786,7 +786,7 @@ export function Sidebar({
                                         <ChevronRight size={12} className="ml-auto" />
                                     </button>
                                     {showMoveSubmenu && (
-                                        <div className="absolute left-full top-0 z-[80] ml-1 w-40 rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl backdrop-blur-sm">
+                                        <div className="absolute left-full top-0 z-[80] ml-1 w-40 rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl">
                                             <button
                                                 onClick={() => handleMoveToFolder(undefined)}
                                                 className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"

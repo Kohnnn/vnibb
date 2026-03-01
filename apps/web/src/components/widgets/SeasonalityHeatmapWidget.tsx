@@ -94,7 +94,7 @@ function computeMonthlyAverages(rows: MonthlyReturn[]): Array<number | null> {
 }
 
 function getCellClass(value: number | null): string {
-  if (value === null) return 'bg-gray-800/20 text-gray-500'
+  if (value === null) return 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
   if (value >= 8) return 'bg-emerald-500/60 text-emerald-100'
   if (value >= 4) return 'bg-emerald-500/40 text-emerald-100'
   if (value > 0) return 'bg-emerald-500/20 text-emerald-200'
@@ -159,7 +159,7 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <CalendarDays size={12} className="text-cyan-400" />
           <span>Monthly Seasonality</span>
         </div>
@@ -173,20 +173,20 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">Best Avg</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Best Avg</div>
           <div className="text-emerald-300 font-mono">
             {best ? `${MONTH_LABELS[best.month]} ${formatPct(best.value)}` : '-'}
           </div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">Worst Avg</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Worst Avg</div>
           <div className="text-red-300 font-mono">
             {worst ? `${MONTH_LABELS[worst.month]} ${formatPct(worst.value)}` : '-'}
           </div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">Hit Rate</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Hit Rate</div>
           <div className="text-cyan-300 font-mono">{hitRate.toFixed(0)}%</div>
         </div>
       </div>
@@ -200,7 +200,7 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
           <WidgetEmpty message="Not enough historical months for heatmap" icon={<CalendarDays size={18} />} />
         ) : (
           <div className="min-w-[520px] space-y-2">
-            <div className="grid grid-cols-[56px_repeat(12,minmax(0,1fr))] gap-1 text-[10px] text-gray-500">
+            <div className="grid grid-cols-[56px_repeat(12,minmax(0,1fr))] gap-1 text-[10px] text-[var(--text-muted)]">
               <div />
               {MONTH_LABELS.map((month) => (
                 <div key={month} className="text-center uppercase tracking-widest">
@@ -211,11 +211,11 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
 
             {years.map((year) => (
               <div key={year} className="grid grid-cols-[56px_repeat(12,minmax(0,1fr))] gap-1 text-[10px]">
-                <div className="text-gray-400 font-medium flex items-center">{year}</div>
+                <div className="text-[var(--text-secondary)] font-medium flex items-center">{year}</div>
                 {(matrix.get(year) ?? []).map((value, monthIdx) => (
                   <div
                     key={`${year}-${monthIdx}`}
-                    className={`h-7 rounded border border-gray-800/30 flex items-center justify-center font-mono ${getCellClass(
+                    className={`h-7 rounded border border-[var(--border-subtle)] flex items-center justify-center font-mono ${getCellClass(
                       value
                     )}`}
                     title={`${year} ${MONTH_LABELS[monthIdx]}: ${formatPct(value)}`}
@@ -233,7 +233,7 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
                   key={`avg-${monthIdx}`}
                   className={`h-7 rounded border border-cyan-500/20 flex items-center justify-center font-mono ${
                     value === null
-                      ? 'bg-gray-800/20 text-gray-500'
+                      ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
                       : value >= 0
                         ? 'bg-emerald-500/20 text-emerald-200'
                         : 'bg-red-500/20 text-red-200'

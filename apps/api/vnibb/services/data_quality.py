@@ -155,7 +155,7 @@ async def run_data_quality_check(
 
     latest_ratio_dt = latest_ratio_value
     if isinstance(latest_ratio_dt, datetime) and latest_ratio_dt < stale_cutoff:
-        warnings.append("financial_ratios freshness exceeded 7 days")
+        warnings.append(f"financial_ratios freshness exceeded {max_stale_days} days")
 
     report = {
         "generated_at": datetime.utcnow().isoformat(),

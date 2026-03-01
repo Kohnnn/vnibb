@@ -222,6 +222,128 @@ async def _select_priority_symbols(db: AsyncSession, limit: int) -> list[str]:
     return symbols[:limit]
 
 
+def _append_unique_symbols(
+    target: list[str],
+    seen: set[str],
+    raw_symbols: list[Any],
+    limit: int,
+) -> None:
+    for value in raw_symbols:
+        if value is None:
+            continue
+        symbol = str(value).upper().strip()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        target.append(symbol)
+        if len(target) >= limit:
+            return
+
+
+async def _collect_reinforcement_candidates(db: AsyncSession, limit: int) -> list[str]:
+    """Collect symbols with stale or incomplete key metrics for reinforcement jobs."""
+    symbols: list[str] = []
+    seen: set[str] = set()
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+
+    try:
+        if await _table_exists(db, "screener_snapshots"):
+            screener_result = await db.execute(
+                text(
+                    """
+                    SELECT symbol
+                    FROM screener_snapshots
+                    WHERE symbol IS NOT NULL
+                      AND (
+                        market_cap IS NULL
+                        OR perf_1w <= -90 OR perf_1m <= -90 OR perf_ytd <= -90
+                        OR ABS(COALESCE(change_1d, 0)) >= 40
+                      )
+                    ORDER BY snapshot_date DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": max(limit * 2, limit)},
+            )
+            _append_unique_symbols(
+                symbols, seen, [row[0] for row in screener_result.fetchall()], limit
+            )
+
+        if len(symbols) < limit and await _table_exists(db, "stock_prices"):
+            stale_prices_result = await db.execute(
+                text(
+                    """
+                    SELECT symbol
+                    FROM (
+                        SELECT symbol, MAX(time) AS latest_time
+                        FROM stock_prices
+                        GROUP BY symbol
+                    ) latest_prices
+                    WHERE symbol IS NOT NULL
+                      AND (latest_time IS NULL OR latest_time < :cutoff)
+                    LIMIT :limit
+                    """
+                ),
+                {
+                    "cutoff": cutoff,
+                    "limit": max(limit * 2, limit),
+                },
+            )
+            _append_unique_symbols(
+                symbols, seen, [row[0] for row in stale_prices_result.fetchall()], limit
+            )
+
+        if len(symbols) < limit and await _table_exists(db, "financial_ratios"):
+            ratio_result = await db.execute(
+                text(
+                    """
+                    SELECT symbol
+                    FROM financial_ratios
+                    WHERE symbol IS NOT NULL
+                      AND (
+                        dps IS NULL
+                        OR dividend_yield IS NULL
+                        OR payout_ratio IS NULL
+                        OR ABS(COALESCE(dividend_yield, 0)) > 100
+                        OR updated_at < :cutoff
+                      )
+                    ORDER BY updated_at ASC
+                    LIMIT :limit
+                    """
+                ),
+                {"cutoff": cutoff, "limit": max(limit * 2, limit)},
+            )
+            _append_unique_symbols(
+                symbols, seen, [row[0] for row in ratio_result.fetchall()], limit
+            )
+
+        if len(symbols) < limit and await _table_exists(db, "shareholders"):
+            shareholder_result = await db.execute(
+                text(
+                    """
+                    SELECT symbol
+                    FROM shareholders
+                    WHERE symbol IS NOT NULL
+                      AND (shares_held IS NULL OR ownership_pct IS NULL)
+                    ORDER BY updated_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": max(limit * 2, limit)},
+            )
+            _append_unique_symbols(
+                symbols, seen, [row[0] for row in shareholder_result.fetchall()], limit
+            )
+    except Exception:
+        await db.rollback()
+
+    if len(symbols) < limit:
+        fallback = await _select_priority_symbols(db, limit)
+        _append_unique_symbols(symbols, seen, fallback, limit)
+
+    return symbols[:limit]
+
+
 @router.get("/database/tables")
 async def list_all_tables(db: AsyncSession = Depends(get_db)):
     """List all database tables with row counts and freshness metadata."""
@@ -528,6 +650,102 @@ async def trigger_data_health_auto_backfill(
         "selected_symbol_count": len(symbols),
         "selected_symbols_preview": symbols[:10],
         "jobs": jobs,
+        "jobs_scheduled": scheduled_count,
+    }
+
+
+@router.post("/reinforce")
+@router.post("/data-health/reinforce")
+async def trigger_data_reinforcement(
+    background_tasks: BackgroundTasks,
+    symbols: Optional[List[str]] = Body(default=None, embed=True),
+    domains: Optional[List[str]] = Body(default=None, embed=True),
+    dry_run: bool = Body(default=True, embed=True),
+    max_symbols: int = Body(default=50, embed=True),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Schedule targeted reinforcement jobs for selected symbols/domains.
+
+    Supported domains: prices, financials, ratios, shareholders, officers
+    """
+    from vnibb.services.data_pipeline import data_pipeline
+
+    max_symbols = max(5, min(max_symbols, 200))
+    input_symbols = [
+        str(symbol).upper().strip() for symbol in (symbols or []) if symbol and str(symbol).strip()
+    ]
+
+    stale_requested = not input_symbols or "STALE" in input_symbols
+    explicit_symbols = sorted({symbol for symbol in input_symbols if symbol != "STALE"})
+
+    if explicit_symbols:
+        normalized_symbols = explicit_symbols[:max_symbols]
+    else:
+        normalized_symbols = await _collect_reinforcement_candidates(db, limit=max_symbols)
+
+    requested_domains = {
+        str(domain).strip().lower()
+        for domain in (domains or ["prices", "financials", "ratios", "shareholders"])
+        if domain and str(domain).strip()
+    }
+    allowed_domains = {"prices", "financials", "ratios", "shareholders", "officers"}
+    invalid_domains = sorted(requested_domains - allowed_domains)
+    if invalid_domains:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Unsupported domains requested",
+                "invalid_domains": invalid_domains,
+                "allowed_domains": sorted(allowed_domains),
+            },
+        )
+
+    request_cost_weights = {
+        "prices": 2,
+        "financials": 4,
+        "ratios": 4,
+        "shareholders": 2,
+        "officers": 2,
+    }
+    estimated_requests = len(normalized_symbols) * sum(
+        request_cost_weights.get(domain, 1) for domain in requested_domains
+    )
+    estimated_seconds = max(1, estimated_requests)
+    estimated_minutes = round(estimated_seconds / 60, 1)
+
+    jobs = [
+        {
+            "job": "run_reinforcement",
+            "args": {
+                "symbols": normalized_symbols,
+                "domains": sorted(requested_domains),
+            },
+            "estimated_requests": estimated_requests,
+            "estimated_minutes": estimated_minutes,
+            "rate_budget": "1 req/sec reinforcement limiter",
+        }
+    ]
+
+    scheduled_count = 0
+    if not dry_run:
+        background_tasks.add_task(
+            data_pipeline.run_reinforcement,
+            symbols=normalized_symbols,
+            domains=sorted(requested_domains),
+        )
+        scheduled_count = 1
+
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "dry_run": dry_run,
+        "selection_mode": "stale" if stale_requested and not explicit_symbols else "explicit",
+        "domains": sorted(requested_domains),
+        "symbols_count": len(normalized_symbols),
+        "symbols_preview": normalized_symbols[:15],
+        "jobs": jobs,
+        "estimated_requests": estimated_requests,
+        "estimated_completion_minutes": estimated_minutes,
         "jobs_scheduled": scheduled_count,
     }
 

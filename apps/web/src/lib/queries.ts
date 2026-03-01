@@ -24,7 +24,15 @@ export function useVnstockSource(): VnstockSource {
 // ============ Query Keys ============
 
 export const queryKeys = {
-    historical: (symbol: string) => ['historical', symbol] as const,
+    historical: (
+        symbol: string,
+        params?: {
+            startDate?: string;
+            endDate?: string;
+            interval?: string;
+            source?: string;
+        }
+    ) => ['historical', symbol, params] as const,
     profile: (symbol: string) => ['profile', symbol] as const,
     companyNews: (symbol: string) => ['companyNews', symbol] as const,
     companyEvents: (symbol: string) => ['companyEvents', symbol] as const,
@@ -113,9 +121,15 @@ export function useHistoricalPrices(
     }
 
     const source = options?.source ?? preferredSource;
+    const historyParams = {
+        startDate: options?.startDate,
+        endDate: options?.endDate,
+        interval: options?.interval,
+        source,
+    }
 
     return useQuery({
-        queryKey: [...queryKeys.historical(symbol), source],
+        queryKey: queryKeys.historical(symbol, historyParams),
         queryFn: () => api.getHistoricalPrices(symbol, { ...options, source }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // Increase to 5 minutes

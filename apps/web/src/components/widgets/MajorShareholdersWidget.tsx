@@ -15,7 +15,7 @@ interface MajorShareholdersWidgetProps {
 }
 
 function formatShares(shares: number | null | undefined): string {
-    if (!shares) return '-';
+    if (shares === null || shares === undefined || Number.isNaN(shares)) return '-';
     if (shares >= 1e9) return `${(shares / 1e9).toFixed(2)}B`;
     if (shares >= 1e6) return `${(shares / 1e6).toFixed(2)}M`;
     if (shares >= 1e3) return `${(shares / 1e3).toFixed(1)}K`;
@@ -23,8 +23,9 @@ function formatShares(shares: number | null | undefined): string {
 }
 
 function formatPct(pct: number | null | undefined): string {
-    if (pct === null || pct === undefined) return '-';
-    return `${pct.toFixed(2)}%`;
+    if (pct === null || pct === undefined || Number.isNaN(pct)) return '-';
+    const normalized = Math.abs(pct) <= 1 ? pct * 100 : pct;
+    return `${normalized.toFixed(2)}%`;
 }
 
 function getTypeIcon(type: string | null | undefined) {
@@ -48,8 +49,8 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
 
     return (
         <div className="h-full flex flex-col">
-            <div className="flex items-center justify-between pb-2 border-b border-gray-800/50">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
+            <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-2">
+                <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                     <Users size={12} />
                     <span>{shareholders.length} shareholders</span>
                 </div>
@@ -70,8 +71,8 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
                     <WidgetEmpty message="No shareholders data" icon={<Users size={18} />} />
                 ) : (
                     <table className="data-table w-full text-xs">
-                        <thead className="text-gray-500">
-                            <tr className="border-b border-gray-800">
+                        <thead className="text-[var(--text-muted)]">
+                            <tr className="border-b border-[var(--border-color)]">
                                 <th className="text-left py-1.5 px-1 font-medium">Shareholder</th>
                                 <th className="text-right py-1.5 px-1 font-medium">Shares</th>
                                 <th className="text-right py-1.5 px-1 font-medium">%</th>
@@ -81,16 +82,16 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
                             {shareholders.map((sh, index) => {
                                 const Icon = getTypeIcon(sh.shareholder_type);
                                 return (
-                                    <tr key={index} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                                    <tr key={index} className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
                                         <td className="py-1.5 px-1">
                                             <div className="flex items-center gap-1.5">
                                                 <Icon size={12} className="text-blue-400 shrink-0" />
-                                                <span className="text-gray-200 truncate max-w-[150px]" title={sh.shareholder_name || ''}>
+                                                <span className="max-w-[150px] truncate text-[var(--text-primary)]" title={sh.shareholder_name || ''}>
                                                     {sh.shareholder_name || 'Unknown'}
                                                 </span>
                                             </div>
                                         </td>
-                                        <td className="text-right py-1.5 px-1 text-gray-400">
+                                        <td className="text-right py-1.5 px-1 text-[var(--text-secondary)]">
                                             {formatShares(sh.shares_owned)}
                                         </td>
                                         <td className="text-right py-1.5 px-1 text-green-400 font-medium">

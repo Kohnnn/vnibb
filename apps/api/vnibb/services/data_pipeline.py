@@ -10,6 +10,7 @@ import asyncio
 import os
 import logging
 import re
+from contextvars import ContextVar
 from uuid import uuid4
 from datetime import date, datetime, timedelta, time
 from typing import Optional, List, Dict, Any, Union, Tuple
@@ -87,6 +88,10 @@ DAILY_TRADING_STAGES = [
     "warrants",
 ]
 
+RATE_MODE_NORMAL = "normal"
+RATE_MODE_REINFORCEMENT = "reinforcement"
+RATE_MODE_CONTEXT: ContextVar[str] = ContextVar("vnibb_rate_mode", default=RATE_MODE_NORMAL)
+
 
 def get_upsert_stmt(model, index_elements, values):
     """
@@ -138,6 +143,15 @@ class DataPipeline:
         self._vnstock = None
         self.cache_writes_enabled = True
         self._redis_disabled_until = 0.0
+        rps_budget = max(float(getattr(settings, "vnstock_rate_limit_rps", 0) or 0), 0.0)
+        self.global_vnstock_limiter = RateLimiter(calls_per_minute=rps_budget * 60)
+        self.reinforcement_vnstock_limiter = RateLimiter(calls_per_minute=60)
+        self._normal_budget_per_minute = 500
+        self._reinforcement_budget_per_minute = 50
+        self._rate_log_window_start = 0.0
+        self._rate_log_normal_calls = 0
+        self._rate_log_reinforcement_calls = 0
+        self._rate_log_lock = asyncio.Lock()
         base_limits = {
             "listing": 10,
             "screener": 20,
@@ -157,6 +171,42 @@ class DataPipeline:
         if settings.vnstock_api_key:
             os.environ["VNSTOCK_API_KEY"] = settings.vnstock_api_key
             logger.info("VNStock API key configured (registration handled at startup)")
+
+    async def _record_rate_usage(self, mode: str) -> None:
+        now = asyncio.get_event_loop().time()
+        async with self._rate_log_lock:
+            if self._rate_log_window_start <= 0:
+                self._rate_log_window_start = now
+
+            if mode == RATE_MODE_REINFORCEMENT:
+                self._rate_log_reinforcement_calls += 1
+            else:
+                self._rate_log_normal_calls += 1
+
+            elapsed = now - self._rate_log_window_start
+            if elapsed < 60:
+                return
+
+            logger.info(
+                "[RateLimit] %d/%d requests consumed in last 60s window (reinforcement %d/%d)",
+                self._rate_log_normal_calls,
+                self._normal_budget_per_minute,
+                self._rate_log_reinforcement_calls,
+                self._reinforcement_budget_per_minute,
+            )
+            self._rate_log_window_start = now
+            self._rate_log_normal_calls = 0
+            self._rate_log_reinforcement_calls = 0
+
+    async def _wait_for_rate_limit(self, bucket: str) -> None:
+        mode = RATE_MODE_CONTEXT.get()
+        await self.global_vnstock_limiter.wait()
+        if mode == RATE_MODE_REINFORCEMENT:
+            await self.reinforcement_vnstock_limiter.wait()
+        limiter = self.rate_limiters.get(bucket)
+        if limiter:
+            await limiter.wait()
+        await self._record_rate_usage(mode)
 
     @property
     def vnstock(self):
@@ -1000,7 +1050,7 @@ class DataPipeline:
             count = 0
             for idx in range(start_index, len(deduped_symbols)):
                 symbol = deduped_symbols[idx]
-                await self.rate_limiters["screener"].wait()
+                await self._wait_for_rate_limit("screener")
                 try:
                     ratio_df = None
                     for ratio_source in ratio_sources:
@@ -1527,7 +1577,7 @@ class DataPipeline:
         total_synced = 0
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
-            await self.rate_limiters["prices"].wait()
+            await self._wait_for_rate_limit("prices")
             try:
                 from vnstock import Vnstock
 
@@ -1807,7 +1857,7 @@ class DataPipeline:
         total = 0
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
-            await self.rate_limiters["profiles"].wait()
+            await self._wait_for_rate_limit("profiles")
             try:
                 from vnstock import Vnstock
 
@@ -2106,7 +2156,7 @@ class DataPipeline:
 
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
-            await self.rate_limiters["financials"].wait()
+            await self._wait_for_rate_limit("financials")
             try:
                 default_statement_specs = [
                     (StatementType.INCOME, IncomeStatement, "income"),
@@ -2935,7 +2985,7 @@ class DataPipeline:
 
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
-            await self.rate_limiters["financials"].wait()
+            await self._wait_for_rate_limit("financials")
             try:
                 params = FinancialRatiosQueryParams(symbol=symbol, period=normalized_period)
                 ratio_items = await VnstockFinancialRatiosFetcher.fetch(params)
@@ -3129,7 +3179,7 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self.rate_limiters["profiles"].wait()
+            await self._wait_for_rate_limit("profiles")
             try:
                 params = CompanyNewsQueryParams(symbol=symbol, limit=limit)
                 items = await VnstockCompanyNewsFetcher.fetch(params)
@@ -3219,7 +3269,7 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self.rate_limiters["profiles"].wait()
+            await self._wait_for_rate_limit("profiles")
             try:
                 params = CompanyEventsQueryParams(symbol=symbol, limit=limit)
                 items = await VnstockCompanyEventsFetcher.fetch(params)
@@ -3347,7 +3397,7 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self.rate_limiters["profiles"].wait()
+            await self._wait_for_rate_limit("profiles")
             try:
                 items = await VnstockDividendsFetcher.fetch(symbol)
                 if not items:
@@ -3423,7 +3473,7 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self.rate_limiters["profiles"].wait()
+            await self._wait_for_rate_limit("profiles")
             try:
                 items = await VnstockInsiderDealsFetcher.fetch(symbol, limit=limit)
                 if not items:
@@ -3514,7 +3564,7 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self.rate_limiters["profiles"].wait()
+            await self._wait_for_rate_limit("profiles")
             try:
                 params = ShareholdersQueryParams(symbol=symbol)
                 items = await VnstockShareholdersFetcher.fetch(params)
@@ -3588,7 +3638,7 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self.rate_limiters["profiles"].wait()
+            await self._wait_for_rate_limit("profiles")
             try:
                 params = OfficersQueryParams(symbol=symbol)
                 items = await VnstockOfficersFetcher.fetch(params)
@@ -3662,7 +3712,7 @@ class DataPipeline:
             )
 
         for idx, symbol in enumerate(symbols):
-            await self.rate_limiters["profiles"].wait()
+            await self._wait_for_rate_limit("profiles")
             try:
                 params = SubsidiariesQueryParams(symbol=symbol)
                 items = await VnstockSubsidiariesFetcher.fetch(params)
@@ -3790,7 +3840,7 @@ class DataPipeline:
         source = settings.vnstock_source or "KBS"
         for idx in range(start_index, len(symbols), batch_size):
             batch = symbols[idx : idx + batch_size]
-            await self.rate_limiters["price_board"].wait()
+            await self._wait_for_rate_limit("price_board")
 
             records = []
             try:
@@ -4023,7 +4073,7 @@ class DataPipeline:
         error_samples: List[str] = []
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
-            await self.rate_limiters["intraday"].wait()
+            await self._wait_for_rate_limit("intraday")
             try:
                 source = settings.vnstock_source if settings.vnstock_source != "TCBS" else "VCI"
 
@@ -4346,7 +4396,7 @@ class DataPipeline:
 
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
-            await self.rate_limiters["orderbook"].wait()
+            await self._wait_for_rate_limit("orderbook")
             try:
                 depth = await VnstockPriceDepthFetcher.fetch(
                     symbol=symbol,
@@ -4697,7 +4747,7 @@ class DataPipeline:
         total = 0
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
-            await self.rate_limiters["derivatives"].wait()
+            await self._wait_for_rate_limit("derivatives")
             try:
                 data = await VnstockDerivativesFetcher.fetch(
                     symbol=symbol,
@@ -4957,6 +5007,94 @@ class DataPipeline:
             await self._update_sync_record(sync_id, status="failed", additional_data=progress)
             logger.error(f"Daily trading updates failed: {exc}")
             raise
+
+    async def run_reinforcement(
+        self,
+        symbols: List[str],
+        domains: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Run targeted symbol reinforcement using reserved low-throughput budget."""
+        normalized_symbols = sorted(
+            {
+                str(symbol).upper().strip()
+                for symbol in (symbols or [])
+                if symbol and str(symbol).strip()
+            }
+        )
+        if not normalized_symbols:
+            return {
+                "status": "skipped",
+                "reason": "no_symbols",
+                "symbols_count": 0,
+                "domains": [],
+                "domain_results": [],
+            }
+
+        allowed_domains = {"prices", "financials", "ratios", "shareholders", "officers"}
+        requested_domains = [
+            domain
+            for domain in (domains or ["prices", "financials", "ratios", "shareholders"])
+            if domain in allowed_domains
+        ]
+
+        token = RATE_MODE_CONTEXT.set(RATE_MODE_REINFORCEMENT)
+        started_at = datetime.utcnow()
+        domain_results: List[Dict[str, Any]] = []
+        try:
+            for domain in requested_domains:
+                domain_started = datetime.utcnow()
+                try:
+                    if domain == "prices":
+                        await self.sync_daily_prices(symbols=normalized_symbols, days=40)
+                    elif domain == "financials":
+                        await self.sync_financials(symbols=normalized_symbols, period="quarter")
+                        await self.sync_financials(symbols=normalized_symbols, period="year")
+                    elif domain == "ratios":
+                        await self.sync_financial_ratios(
+                            symbols=normalized_symbols, period="quarter"
+                        )
+                        await self.sync_financial_ratios(symbols=normalized_symbols, period="year")
+                    elif domain == "shareholders":
+                        await self.sync_shareholders(symbols=normalized_symbols)
+                    elif domain == "officers":
+                        await self.sync_officers(symbols=normalized_symbols)
+
+                    domain_results.append(
+                        {
+                            "domain": domain,
+                            "status": "completed",
+                            "elapsed_seconds": round(
+                                (datetime.utcnow() - domain_started).total_seconds(), 2
+                            ),
+                        }
+                    )
+                except Exception as exc:
+                    logger.warning("Reinforcement domain failed (%s): %s", domain, exc)
+                    domain_results.append(
+                        {
+                            "domain": domain,
+                            "status": "failed",
+                            "error": str(exc),
+                            "elapsed_seconds": round(
+                                (datetime.utcnow() - domain_started).total_seconds(), 2
+                            ),
+                        }
+                    )
+
+            failed_domains = [
+                result for result in domain_results if result.get("status") == "failed"
+            ]
+            return {
+                "status": "partial" if failed_domains else "completed",
+                "started_at": started_at.isoformat(),
+                "finished_at": datetime.utcnow().isoformat(),
+                "symbols_count": len(normalized_symbols),
+                "domains": requested_domains,
+                "domain_results": domain_results,
+                "failed_domains": len(failed_domains),
+            }
+        finally:
+            RATE_MODE_CONTEXT.reset(token)
 
     async def run_full_seeding(
         self,

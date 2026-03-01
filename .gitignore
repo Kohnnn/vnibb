@@ -92,3 +92,5 @@ DEPLOYMENT_GUIDE_V2.md
 .env*.local
 apps/api/scripts/v34_widget_health_after.json
 apps/api/scripts/v34_widget_health_strict.json
+apps/api/scripts/v120_cross_symbol_gate.json
+apps/api/scripts/v120_data_quality_report.json
