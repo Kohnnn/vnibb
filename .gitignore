@@ -90,3 +90,5 @@ DEPLOYMENT.md
 DEPLOYMENT_GUIDE_V2.md
 .vercel
 .env*.local
+apps/api/scripts/v34_widget_health_after.json
+apps/api/scripts/v34_widget_health_strict.json

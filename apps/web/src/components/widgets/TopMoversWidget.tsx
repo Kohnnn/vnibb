@@ -140,11 +140,16 @@ export function TopMoversWidget({
                   }
                 }
 
-                if (changePct === null) {
-                  changePct = 0;
-                }
-
-                const isUp = changePct >= 0;
+                const hasChangePct = changePct !== null;
+                const isUp = (changePct ?? 0) >= 0;
+                const changeLabel = hasChangePct
+                  ? `${isUp ? '+' : ''}${(changePct ?? 0).toFixed(2)}%`
+                  : '--';
+                const rowHoverClass = hasChangePct
+                  ? isUp
+                    ? 'hover:bg-green-500/10 hover:border-green-500/20'
+                    : 'hover:bg-red-500/10 hover:border-red-500/20'
+                  : 'hover:bg-[var(--bg-secondary)]/70 hover:border-[var(--border-subtle)]';
                 return (
                   <button
                     key={`${stock.symbol}-${index}`}
@@ -156,11 +161,7 @@ export function TopMoversWidget({
                         handleSymbolSelect(stock.symbol);
                       }
                     }}
-                    className={`w-full flex items-center justify-between py-2 px-2.5 rounded-lg group transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 ${
-                      isUp
-                        ? 'hover:bg-green-500/10 hover:border-green-500/20'
-                        : 'hover:bg-red-500/10 hover:border-red-500/20'
-                    } border border-transparent`}
+                    className={`w-full flex items-center justify-between py-2 px-2.5 rounded-lg group transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 ${rowHoverClass} border border-transparent`}
                   >
                     <div className="flex items-center gap-2.5">
                       <span
@@ -185,12 +186,14 @@ export function TopMoversWidget({
                       </span>
                       <span
                         className={`text-[11px] font-bold min-w-[55px] text-right px-1.5 py-0.5 rounded ${
-                          isUp
-                            ? 'text-green-600 bg-green-500/10'
-                            : 'text-red-600 bg-red-500/10'
+                          hasChangePct
+                            ? isUp
+                              ? 'text-green-600 bg-green-500/10'
+                              : 'text-red-600 bg-red-500/10'
+                            : 'text-[var(--text-muted)] bg-[var(--bg-secondary)]'
                         }`}
                       >
-                        {isUp ? '+' : ''}{changePct.toFixed(2)}%
+                        {changeLabel}
                       </span>
                     </div>
                   </button>

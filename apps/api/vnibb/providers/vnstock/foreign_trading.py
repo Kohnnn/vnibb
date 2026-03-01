@@ -6,6 +6,7 @@ Fetches foreign investor buying/selling data for Vietnam-listed stocks.
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -15,6 +16,53 @@ from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_trade_date(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    iso_candidate = text.replace("/", "-")
+    if " " in iso_candidate and "T" not in iso_candidate:
+        iso_candidate = iso_candidate.replace(" ", "T", 1)
+
+    iso_prefix = iso_candidate[:10]
+    for fmt in ("%Y-%m-%d", "%Y%m%d", "%d-%m-%Y", "%d/%m/%Y"):
+        try:
+            parsed = datetime.strptime(iso_prefix if fmt == "%Y-%m-%d" else text, fmt)
+            return parsed.date().isoformat()
+        except ValueError:
+            continue
+
+    if len(text) == 8 and text.isdigit():
+        try:
+            parsed = datetime.strptime(text, "%Y%m%d")
+            return parsed.date().isoformat()
+        except ValueError:
+            return None
+
+    if text.isdigit():
+        # Numeric blobs like "074500016" are not valid trading dates.
+        return None
+
+    try:
+        parsed_iso = datetime.fromisoformat(iso_candidate)
+        return parsed_iso.date().isoformat()
+    except ValueError:
+        return None
 
 
 class ForeignTradingQueryParams(BaseModel):
@@ -132,23 +180,38 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
                 if not has_foreign_fields:
                     continue
 
+                buy_vol_num = _safe_float(buy_vol)
+                sell_vol_num = _safe_float(sell_vol)
+                buy_value_num = _safe_float(buy_value)
+                sell_value_num = _safe_float(sell_value)
+                net_value_num = _safe_float(net_value)
+                if (
+                    net_value_num is None
+                    and buy_value_num is not None
+                    and sell_value_num is not None
+                ):
+                    net_value_num = buy_value_num - sell_value_num
+
+                normalized_date = _normalize_trade_date(
+                    row.get("time")
+                    or row.get("date")
+                    or row.get(("listing", "trading_date"))
+                    or row.get(("bid_ask", "trading_date"))
+                    or row.get(("bid_ask", "transaction_time"))
+                )
+
                 results.append(
                     ForeignTradingData(
                         symbol=params.symbol.upper(),
-                        date=str(
-                            row.get("time")
-                            or row.get("date")
-                            or row.get(("bid_ask", "transaction_time"))
-                            or ""
-                        ),
-                        buy_volume=float(buy_vol) if buy_vol is not None else None,
-                        sell_volume=float(sell_vol) if sell_vol is not None else None,
-                        buy_value=float(buy_value) if buy_value is not None else None,
-                        sell_value=float(sell_value) if sell_value is not None else None,
-                        net_volume=(buy_vol - sell_vol)
-                        if buy_vol is not None and sell_vol is not None
+                        date=normalized_date,
+                        buy_volume=buy_vol_num,
+                        sell_volume=sell_vol_num,
+                        buy_value=buy_value_num,
+                        sell_value=sell_value_num,
+                        net_volume=(buy_vol_num - sell_vol_num)
+                        if buy_vol_num is not None and sell_vol_num is not None
                         else None,
-                        net_value=net_value,
+                        net_value=net_value_num,
                     )
                 )
             except Exception as e:

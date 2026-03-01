@@ -159,6 +159,15 @@ RSS_FEED_URLS: dict[str, list[str]] = {
 WORLD_INDEX_POINT_TIMEOUT_SECONDS = 5
 WORLD_INDEX_FALLBACK_TIMEOUT_SECONDS = 5
 HEATMAP_FETCH_TIMEOUT_SECONDS = 20
+TOP_MOVER_TYPES = {"gainer", "loser", "volume", "value"}
+TOP_MOVER_TYPE_ALIASES = {
+    "gainers": "gainer",
+    "losers": "loser",
+}
+TOP_MOVER_INDEX_EXCHANGE = {
+    "VNINDEX": {"HOSE", "HSX"},
+    "HNX": {"HNX"},
+}
 SECTOR_CLASSIFICATION_IDS = [
     sector_id for sector_id in VN_SECTORS.keys() if sector_id not in {"vn30"}
 ]
@@ -303,6 +312,40 @@ def _normalize_text(value: Any) -> Optional[str]:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _normalize_mover_type(value: Optional[str]) -> str:
+    if value is None:
+        return "gainer"
+
+    normalized = str(value).strip().lower()
+    if normalized in TOP_MOVER_TYPE_ALIASES:
+        return TOP_MOVER_TYPE_ALIASES[normalized]
+    if normalized in TOP_MOVER_TYPES:
+        return normalized
+    return "gainer"
+
+
+def _extract_snapshot_change_pct(extended_metrics: dict[str, Any]) -> Optional[float]:
+    return _to_float(
+        _first_non_none(
+            extended_metrics.get("change_1d"),
+            extended_metrics.get("price_change_1d_pct"),
+            extended_metrics.get("change_pct"),
+            extended_metrics.get("price_change_pct"),
+        )
+    )
+
+
+def _extract_snapshot_value_traded(extended_metrics: dict[str, Any]) -> Optional[float]:
+    return _to_float(
+        _first_non_none(
+            extended_metrics.get("value_traded"),
+            extended_metrics.get("valueTraded"),
+            extended_metrics.get("trading_value"),
+            extended_metrics.get("value"),
+        )
+    )
 
 
 def _normalize_screener_row(item: Any) -> dict[str, Any]:
@@ -512,82 +555,347 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
 
     change_map: Dict[str, float] = {}
 
-    async with async_session_maker() as session:
-        ranked_prices = (
-            select(
-                StockPrice.symbol.label("symbol"),
-                StockPrice.close.label("close"),
-                func.row_number()
-                .over(partition_by=StockPrice.symbol, order_by=StockPrice.time.desc())
-                .label("rn"),
-            )
-            .where(StockPrice.interval == "1D", StockPrice.symbol.in_(unique_symbols))
-            .subquery()
-        )
-        price_rows = (
-            await session.execute(
-                select(ranked_prices.c.symbol, ranked_prices.c.close, ranked_prices.c.rn).where(
-                    ranked_prices.c.rn <= 2
-                )
-            )
-        ).all()
-
-        price_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
-        for symbol, close, rn in price_rows:
-            close_value = _to_float(close)
-            if close_value is None:
-                continue
-            price_lookup[_normalize_symbol(symbol)][int(rn)] = close_value
-
-        for symbol, data in price_lookup.items():
-            latest = data.get(1)
-            previous = data.get(2)
-            if latest is not None and previous not in (None, 0):
-                change_map[symbol] = ((latest - previous) / previous) * 100.0
-
-        missing_symbols = [symbol for symbol in unique_symbols if symbol not in change_map]
-        if missing_symbols:
-            ranked_snapshots = (
+    try:
+        async with async_session_maker() as session:
+            ranked_prices = (
                 select(
-                    ScreenerSnapshot.symbol.label("symbol"),
-                    ScreenerSnapshot.price.label("price"),
+                    StockPrice.symbol.label("symbol"),
+                    StockPrice.close.label("close"),
                     func.row_number()
-                    .over(
-                        partition_by=ScreenerSnapshot.symbol,
-                        order_by=ScreenerSnapshot.snapshot_date.desc(),
-                    )
+                    .over(partition_by=StockPrice.symbol, order_by=StockPrice.time.desc())
                     .label("rn"),
                 )
-                .where(
-                    ScreenerSnapshot.symbol.in_(missing_symbols),
-                    ScreenerSnapshot.price.is_not(None),
-                )
+                .where(StockPrice.interval == "1D", StockPrice.symbol.in_(unique_symbols))
                 .subquery()
             )
-            snapshot_rows = (
+            price_rows = (
                 await session.execute(
-                    select(
-                        ranked_snapshots.c.symbol,
-                        ranked_snapshots.c.price,
-                        ranked_snapshots.c.rn,
-                    ).where(ranked_snapshots.c.rn <= 2)
+                    select(ranked_prices.c.symbol, ranked_prices.c.close, ranked_prices.c.rn).where(
+                        ranked_prices.c.rn <= 2
+                    )
                 )
             ).all()
 
-            snapshot_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
-            for symbol, price, rn in snapshot_rows:
-                price_value = _to_float(price)
-                if price_value is None:
+            price_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
+            for symbol, close, rn in price_rows:
+                close_value = _to_float(close)
+                if close_value is None:
                     continue
-                snapshot_lookup[_normalize_symbol(symbol)][int(rn)] = price_value
+                price_lookup[_normalize_symbol(symbol)][int(rn)] = close_value
 
-            for symbol, data in snapshot_lookup.items():
+            for symbol, data in price_lookup.items():
                 latest = data.get(1)
                 previous = data.get(2)
                 if latest is not None and previous not in (None, 0):
                     change_map[symbol] = ((latest - previous) / previous) * 100.0
 
+            missing_symbols = [symbol for symbol in unique_symbols if symbol not in change_map]
+            if missing_symbols:
+                ranked_snapshots = (
+                    select(
+                        ScreenerSnapshot.symbol.label("symbol"),
+                        ScreenerSnapshot.price.label("price"),
+                        func.row_number()
+                        .over(
+                            partition_by=ScreenerSnapshot.symbol,
+                            order_by=ScreenerSnapshot.snapshot_date.desc(),
+                        )
+                        .label("rn"),
+                    )
+                    .where(
+                        ScreenerSnapshot.symbol.in_(missing_symbols),
+                        ScreenerSnapshot.price.is_not(None),
+                    )
+                    .subquery()
+                )
+                snapshot_rows = (
+                    await session.execute(
+                        select(
+                            ranked_snapshots.c.symbol,
+                            ranked_snapshots.c.price,
+                            ranked_snapshots.c.rn,
+                        ).where(ranked_snapshots.c.rn <= 2)
+                    )
+                ).all()
+
+                snapshot_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
+                for symbol, price, rn in snapshot_rows:
+                    price_value = _to_float(price)
+                    if price_value is None:
+                        continue
+                    snapshot_lookup[_normalize_symbol(symbol)][int(rn)] = price_value
+
+                for symbol, data in snapshot_lookup.items():
+                    latest = data.get(1)
+                    previous = data.get(2)
+                    if latest is not None and previous not in (None, 0):
+                        change_map[symbol] = ((latest - previous) / previous) * 100.0
+    except Exception as exc:
+        logger.warning("Failed to build change map from DB fallback: %s", exc)
+        return {}
+
     return change_map
+
+
+async def _load_latest_snapshot_metrics(
+    symbols: List[str],
+) -> Dict[str, dict[str, Optional[float]]]:
+    unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
+    if not unique_symbols:
+        return {}
+
+    metrics_map: Dict[str, dict[str, Optional[float]]] = {}
+
+    try:
+        async with async_session_maker() as session:
+            ranked_snapshots = (
+                select(
+                    ScreenerSnapshot.symbol.label("symbol"),
+                    ScreenerSnapshot.price.label("price"),
+                    ScreenerSnapshot.volume.label("volume"),
+                    ScreenerSnapshot.extended_metrics.label("extended_metrics"),
+                    func.row_number()
+                    .over(
+                        partition_by=ScreenerSnapshot.symbol,
+                        order_by=(
+                            ScreenerSnapshot.snapshot_date.desc(),
+                            ScreenerSnapshot.created_at.desc(),
+                        ),
+                    )
+                    .label("rn"),
+                )
+                .where(ScreenerSnapshot.symbol.in_(unique_symbols))
+                .subquery()
+            )
+
+            rows = (
+                await session.execute(
+                    select(
+                        ranked_snapshots.c.symbol,
+                        ranked_snapshots.c.price,
+                        ranked_snapshots.c.volume,
+                        ranked_snapshots.c.extended_metrics,
+                    ).where(ranked_snapshots.c.rn == 1)
+                )
+            ).all()
+
+            for symbol, price, volume, extended_metrics in rows:
+                symbol_key = _normalize_symbol(symbol)
+                payload = extended_metrics if isinstance(extended_metrics, dict) else {}
+                metrics_map[symbol_key] = {
+                    "price": _to_float(price),
+                    "volume": _to_float(volume),
+                    "change_pct": _extract_snapshot_change_pct(payload),
+                    "value": _extract_snapshot_value_traded(payload),
+                }
+    except Exception as exc:
+        logger.warning("Failed to load latest snapshot metrics: %s", exc)
+        return {}
+
+    return metrics_map
+
+
+def _apply_snapshot_metrics_to_movers(
+    payload: List[dict[str, Any]],
+    metrics_map: Dict[str, dict[str, Optional[float]]],
+) -> List[dict[str, Any]]:
+    if not payload or not metrics_map:
+        return payload
+
+    for item in payload:
+        symbol = _normalize_symbol(item.get("symbol"))
+        metrics = metrics_map.get(symbol)
+        if not metrics:
+            continue
+
+        current_pct = _to_float(item.get("price_change_pct"))
+        snapshot_pct = metrics.get("change_pct")
+        if (current_pct is None or abs(current_pct) < 1e-9) and snapshot_pct is not None:
+            item["price_change_pct"] = snapshot_pct
+            current_pct = snapshot_pct
+
+        price_value = _to_float(item.get("last_price"))
+        snapshot_price = metrics.get("price")
+        if price_value in (None, 0) and snapshot_price not in (None, 0):
+            item["last_price"] = snapshot_price
+            price_value = snapshot_price
+
+        volume_value = _to_float(item.get("volume"))
+        snapshot_volume = metrics.get("volume")
+        if volume_value in (None, 0) and snapshot_volume not in (None, 0):
+            item["volume"] = int(snapshot_volume)
+            volume_value = snapshot_volume
+
+        value_value = _to_float(item.get("value"))
+        snapshot_value = metrics.get("value")
+        if value_value in (None, 0) and snapshot_value not in (None, 0):
+            item["value"] = snapshot_value
+            value_value = snapshot_value
+
+        if (
+            value_value in (None, 0)
+            and price_value not in (None, 0)
+            and volume_value not in (None, 0)
+        ):
+            item["value"] = price_value * volume_value
+
+        current_change = _to_float(item.get("price_change"))
+        if (
+            (current_change is None or abs(current_change) < 1e-9)
+            and current_pct is not None
+            and price_value not in (None, 0)
+            and abs(current_pct + 100.0) > 1e-6
+        ):
+            previous_price = price_value / (1.0 + (current_pct / 100.0))
+            item["price_change"] = price_value - previous_price
+
+    return payload
+
+
+def _sort_top_movers(
+    payload: List[dict[str, Any]], mover_type: str, limit: int
+) -> List[dict[str, Any]]:
+    if mover_type == "gainer":
+        rows = [item for item in payload if (_to_float(item.get("price_change_pct")) or 0.0) > 0]
+        rows.sort(key=lambda item: _to_float(item.get("price_change_pct")) or 0.0, reverse=True)
+        return rows[:limit]
+
+    if mover_type == "loser":
+        rows = [item for item in payload if (_to_float(item.get("price_change_pct")) or 0.0) < 0]
+        rows.sort(key=lambda item: _to_float(item.get("price_change_pct")) or 0.0)
+        return rows[:limit]
+
+    if mover_type == "volume":
+        rows = sorted(payload, key=lambda item: _to_float(item.get("volume")) or 0.0, reverse=True)
+        return rows[:limit]
+
+    if mover_type == "value":
+        rows = sorted(payload, key=lambda item: _to_float(item.get("value")) or 0.0, reverse=True)
+        return rows[:limit]
+
+    return payload[:limit]
+
+
+def _has_non_zero_top_mover_signal(payload: List[dict[str, Any]]) -> bool:
+    for item in payload:
+        change_pct = _to_float(item.get("price_change_pct"))
+        if change_pct is not None and abs(change_pct) > 1e-9:
+            return True
+    return False
+
+
+async def _build_snapshot_top_movers(
+    index: str, mover_type: str, limit: int
+) -> List[dict[str, Any]]:
+    cache_manager = CacheManager()
+    cache_result = await cache_manager.get_screener_data(
+        symbol=None,
+        source=settings.vnstock_source,
+        allow_stale=True,
+    )
+    if not cache_result.data:
+        return []
+
+    vn30_symbols = {
+        symbol.upper()
+        for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
+    }
+
+    rows: List[dict[str, Any]] = []
+    for item in cache_result.data:
+        symbol = _normalize_symbol(getattr(item, "symbol", None))
+        if not symbol:
+            continue
+
+        if index == "VN30" and symbol not in vn30_symbols:
+            continue
+
+        exchange = _normalize_symbol(getattr(item, "exchange", None))
+        if index in TOP_MOVER_INDEX_EXCHANGE and exchange:
+            allowed_exchanges = TOP_MOVER_INDEX_EXCHANGE[index]
+            if exchange not in allowed_exchanges:
+                continue
+
+        extended_metrics = (
+            getattr(item, "extended_metrics", None)
+            if isinstance(getattr(item, "extended_metrics", None), dict)
+            else {}
+        )
+
+        price = _to_float(
+            _first_non_none(getattr(item, "price", None), extended_metrics.get("price"))
+        )
+        volume = _to_float(
+            _first_non_none(getattr(item, "volume", None), extended_metrics.get("volume"))
+        )
+        change_pct = _extract_snapshot_change_pct(extended_metrics)
+        value = _extract_snapshot_value_traded(extended_metrics)
+        if value in (None, 0) and price not in (None, 0) and volume not in (None, 0):
+            value = price * volume
+
+        rows.append(
+            {
+                "symbol": symbol,
+                "price": price,
+                "volume": volume,
+                "change_pct": change_pct,
+                "value": value,
+            }
+        )
+
+    if not rows:
+        return []
+
+    missing_change_symbols = [row["symbol"] for row in rows if row.get("change_pct") is None]
+    if missing_change_symbols:
+        change_map = await _load_change_pct_map(missing_change_symbols)
+        for row in rows:
+            if row.get("change_pct") is None and row["symbol"] in change_map:
+                row["change_pct"] = change_map[row["symbol"]]
+
+    sorted_rows = _sort_top_movers(
+        [
+            {
+                "symbol": row["symbol"],
+                "price_change_pct": row.get("change_pct"),
+                "last_price": row.get("price"),
+                "volume": row.get("volume"),
+                "value": row.get("value"),
+            }
+            for row in rows
+        ],
+        mover_type=mover_type,
+        limit=limit,
+    )
+
+    payload: List[dict[str, Any]] = []
+    for row in sorted_rows:
+        last_price = _to_float(row.get("last_price"))
+        change_pct = _to_float(row.get("price_change_pct"))
+        price_change = None
+        if (
+            last_price not in (None, 0)
+            and change_pct is not None
+            and abs(change_pct + 100.0) > 1e-6
+        ):
+            previous_price = last_price / (1.0 + (change_pct / 100.0))
+            price_change = last_price - previous_price
+
+        payload.append(
+            {
+                "symbol": row.get("symbol"),
+                "index": index,
+                "last_price": last_price,
+                "price_change": price_change,
+                "price_change_pct": change_pct,
+                "volume": row.get("volume"),
+                "value": row.get("value"),
+                "avg_volume_20d": None,
+                "volume_spike_pct": None,
+            }
+        )
+
+    return payload[:limit]
 
 
 def _resolve_hnx30_symbols(rows: List[dict[str, Any]]) -> set[str]:
@@ -1017,13 +1325,19 @@ async def get_market_indices(
 
 @router.get("/top-movers", response_model=MarketTopMoversResponse)
 async def get_market_top_movers(
-    type: str = Query(default="gainer", pattern=r"^(gainer|loser|volume|value)$"),
+    type: str = Query(default="gainer", pattern=r"^(gainer|loser|volume|value|gainers|losers)$"),
+    mode: Optional[str] = Query(
+        default=None,
+        pattern=r"^(gainer|loser|volume|value|gainers|losers)$",
+    ),
     index: str = Query(default="VNINDEX", pattern=r"^(VNINDEX|HNX|VN30)$"),
     limit: int = Query(default=10, ge=1, le=50),
 ) -> MarketTopMoversResponse:
+    mover_type = _normalize_mover_type(mode or type)
+
     try:
         movers = await asyncio.wait_for(
-            VnstockTopMoversFetcher.fetch(type=type, index=index, limit=limit),
+            VnstockTopMoversFetcher.fetch(type=mover_type, index=index, limit=limit),
             timeout=30,
         )
         payload = [
@@ -1039,16 +1353,27 @@ async def get_market_top_movers(
             for item in payload:
                 symbol = str(item.get("symbol", "")).upper()
                 fallback_change_pct = change_map.get(symbol)
-                if fallback_change_pct is None:
-                    continue
                 current_change_pct = _to_float(item.get("price_change_pct"))
-                if current_change_pct is None or abs(current_change_pct) < 1e-9:
-                    item["price_change_pct"] = fallback_change_pct
-                    price_value = _to_float(item.get("last_price"))
-                    if price_value not in (None, 0):
-                        item["price_change"] = price_value * (fallback_change_pct / 100.0)
 
-        if not payload and type in {"gainer", "loser"}:
+                if (current_change_pct is None or abs(current_change_pct) < 1e-9) and (
+                    fallback_change_pct is not None
+                ):
+                    item["price_change_pct"] = fallback_change_pct
+                    current_change_pct = fallback_change_pct
+
+                if current_change_pct is None or abs(current_change_pct) < 1e-9:
+                    price_change = _to_float(item.get("price_change"))
+                    last_price = _to_float(item.get("last_price"))
+                    if price_change not in (None, 0) and last_price not in (None, 0):
+                        previous_price = last_price - price_change
+                        if previous_price not in (None, 0):
+                            item["price_change_pct"] = (price_change / previous_price) * 100.0
+
+            snapshot_metrics = await _load_latest_snapshot_metrics(symbols)
+            payload = _apply_snapshot_metrics_to_movers(payload, snapshot_metrics)
+            payload = _sort_top_movers(payload, mover_type=mover_type, limit=limit)
+
+        if not payload and mover_type in {"gainer", "loser"}:
             # Graceful fallback: volume movers are generally the most stable upstream feed.
             fallback = await asyncio.wait_for(
                 VnstockTopMoversFetcher.fetch(type="volume", index=index, limit=limit),
@@ -1061,38 +1386,138 @@ async def get_market_top_movers(
                 for item in fallback
             ]
 
+            fallback_symbols = [
+                str(item.get("symbol", "")).upper() for item in payload if item.get("symbol")
+            ]
+            fallback_metrics = await _load_latest_snapshot_metrics(fallback_symbols)
+            payload = _apply_snapshot_metrics_to_movers(payload, fallback_metrics)
+            payload = _sort_top_movers(payload, mover_type=mover_type, limit=limit)
+
+            if not payload or not _has_non_zero_top_mover_signal(payload):
+                payload = await _build_snapshot_top_movers(
+                    index=index, mover_type=mover_type, limit=limit
+                )
+
             if payload:
                 return MarketTopMoversResponse(
-                    type=type,
+                    type=mover_type,
                     index=index,
                     count=len(payload),
                     data=payload,
-                    error=f"Requested '{type}' movers unavailable, returned volume movers fallback",
+                    error=(
+                        f"Requested '{mover_type}' movers unavailable, returned snapshot-derived "
+                        "fallback"
+                    ),
                 )
 
-        return MarketTopMoversResponse(type=type, index=index, count=len(payload), data=payload)
+        return MarketTopMoversResponse(
+            type=mover_type, index=index, count=len(payload), data=payload
+        )
     except Exception as e:
         logger.warning(f"Market top movers fetch failed: {e}")
-        return MarketTopMoversResponse(type=type, index=index, count=0, data=[], error=str(e))
+        return MarketTopMoversResponse(type=mover_type, index=index, count=0, data=[], error=str(e))
 
 
 @router.get("/sector-performance", response_model=MarketSectorPerformanceResponse)
 async def get_market_sector_performance() -> MarketSectorPerformanceResponse:
+    cache_manager = CacheManager()
+
+    async def _build_sector_payload(rows: List[dict[str, Any]]) -> MarketSectorPerformanceResponse:
+        sectors = await SectorService.calculate_sector_performance(rows)
+        payload = [item.model_dump(mode="json", by_alias=True) for item in sectors]
+        return MarketSectorPerformanceResponse(count=len(payload), data=payload)
+
+    async def _load_cached_sector_rows() -> List[dict[str, Any]]:
+        cache_result = await cache_manager.get_screener_data(
+            symbol=None,
+            source=settings.vnstock_source,
+            allow_stale=True,
+        )
+        if not cache_result.data:
+            return []
+
+        rows: List[dict[str, Any]] = []
+        for item in cache_result.data:
+            symbol = _normalize_symbol(getattr(item, "symbol", None))
+            if not symbol:
+                continue
+
+            extended_metrics = (
+                getattr(item, "extended_metrics", None)
+                if isinstance(getattr(item, "extended_metrics", None), dict)
+                else {}
+            )
+
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "price": _to_float(getattr(item, "price", None)),
+                    "change_pct": _extract_snapshot_change_pct(extended_metrics),
+                    "industry_name": _normalize_text(
+                        _first_non_none(
+                            getattr(item, "industry", None),
+                            getattr(item, "industry_name", None),
+                            extended_metrics.get("industry_name"),
+                            extended_metrics.get("industryName"),
+                        )
+                    ),
+                    "sector": _normalize_text(
+                        _first_non_none(
+                            extended_metrics.get("sector"),
+                            extended_metrics.get("sector_name"),
+                            extended_metrics.get("sectorName"),
+                        )
+                    ),
+                }
+            )
+
+        if not rows:
+            return []
+
+        symbols = [row["symbol"] for row in rows]
+        metadata_map = await _load_stock_metadata(symbols)
+        for row in rows:
+            metadata = metadata_map.get(row["symbol"]) or {}
+            if not row.get("industry_name") and metadata.get("industry"):
+                row["industry_name"] = metadata.get("industry")
+            if not row.get("sector") and metadata.get("sector"):
+                row["sector"] = metadata.get("sector")
+
+        missing_change_symbols = [row["symbol"] for row in rows if row.get("change_pct") is None]
+        if missing_change_symbols:
+            symbol_change_map = await _load_change_pct_map(missing_change_symbols)
+            for row in rows:
+                if row.get("change_pct") is None:
+                    row["change_pct"] = symbol_change_map.get(row["symbol"])
+
+        return rows
+
     try:
+        cached_rows = await _load_cached_sector_rows()
+        if cached_rows:
+            return await _build_sector_payload(cached_rows)
+
         params = StockScreenerParams(
             symbol=None,
             exchange="ALL",
-            limit=1500,
+            limit=1200,
             source=settings.vnstock_source,
         )
-        screener_data = await asyncio.wait_for(VnstockScreenerFetcher.fetch(params), timeout=30)
+        screener_data = await asyncio.wait_for(VnstockScreenerFetcher.fetch(params), timeout=20)
         rows = [
             item.model_dump(mode="json", by_alias=True) if hasattr(item, "model_dump") else item
             for item in screener_data
         ]
-        sectors = await SectorService.calculate_sector_performance(rows)
-        payload = [item.model_dump(mode="json", by_alias=True) for item in sectors]
-        return MarketSectorPerformanceResponse(count=len(payload), data=payload)
+        return await _build_sector_payload(rows)
+    except asyncio.TimeoutError:
+        logger.warning("Market sector performance live fetch timed out")
+        try:
+            cached_rows = await _load_cached_sector_rows()
+            if cached_rows:
+                return await _build_sector_payload(cached_rows)
+        except Exception as cache_error:
+            logger.warning("Sector performance cache fallback failed: %s", cache_error)
+        return MarketSectorPerformanceResponse(count=0, data=[], error="Live fetch timeout")
     except Exception as e:
         logger.warning(f"Market sector performance fetch failed: {e}")
         return MarketSectorPerformanceResponse(count=0, data=[], error=str(e))
