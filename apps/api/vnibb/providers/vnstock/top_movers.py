@@ -153,24 +153,52 @@ def _parse_price_board_record(row: dict) -> Optional[dict]:
     # Extract prices
     match_price = _safe_float(
         _extract_from_flattened(
-            row, ["match_match_price", "match_price", "price", "last_price", "close"]
+            row,
+            [
+                "match_match_price",
+                "match_price",
+                "matchPrice",
+                "price",
+                "last_price",
+                "lastPrice",
+                "close",
+                "listing_match_price",
+            ],
         )
     )
 
     ref_price = _safe_float(
         _extract_from_flattened(
             row,
-            ["listing_ref_price", "match_reference_price", "ref_price", "reference", "prev_close"],
+            [
+                "listing_ref_price",
+                "listing_reference_price",
+                "match_reference_price",
+                "ref_price",
+                "reference",
+                "prev_close",
+                "prevClose",
+                "close_prev",
+            ],
         )
     )
 
     # Calculate price change
-    price_change = 0.0
-    price_change_pct = 0.0
+    price_change = _safe_float(
+        _extract_from_flattened(row, ["change", "price_change", "priceChange"])
+    )
+    price_change_pct = _safe_float(
+        _extract_from_flattened(
+            row,
+            ["change_pct", "percent_change", "percentChange", "pct_change", "pctChange"],
+        )
+    )
 
     if match_price > 0 and ref_price > 0:
         price_change = match_price - ref_price
         price_change_pct = (price_change / ref_price) * 100
+    elif match_price > 0 and price_change_pct and not price_change:
+        price_change = (price_change_pct / 100) * match_price
 
     # Extract volume and value
     volume = _safe_int(

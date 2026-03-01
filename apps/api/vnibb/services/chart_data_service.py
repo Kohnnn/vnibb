@@ -8,10 +8,13 @@ Uses vnstock to fetch historical price data with in-memory LRU cache.
 import asyncio
 import logging
 from datetime import date, timedelta
-from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import select
+
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker
+from vnibb.models.stock import StockPrice
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,43 @@ def _evict_oldest():
     if len(_cache) >= _CACHE_MAX_SIZE:
         oldest_key = next(iter(_cache))
         del _cache[oldest_key]
+
+
+async def _fetch_chart_data_from_db(symbol: str, start_date: date) -> List[Dict[str, Any]]:
+    async with async_session_maker() as session:
+        rows = (
+            await session.execute(
+                select(
+                    StockPrice.time,
+                    StockPrice.open,
+                    StockPrice.high,
+                    StockPrice.low,
+                    StockPrice.close,
+                    StockPrice.volume,
+                )
+                .where(
+                    StockPrice.symbol == symbol,
+                    StockPrice.interval == "1D",
+                    StockPrice.time >= start_date,
+                )
+                .order_by(StockPrice.time.asc())
+            )
+        ).all()
+
+    records: List[Dict[str, Any]] = []
+    for time_value, open_v, high_v, low_v, close_v, volume_v in rows:
+        records.append(
+            {
+                "time": time_value.isoformat(),
+                "open": float(open_v),
+                "high": float(high_v),
+                "low": float(low_v),
+                "close": float(close_v),
+                "volume": int(volume_v or 0),
+            }
+        )
+
+    return records
 
 
 async def fetch_chart_data(
@@ -129,6 +169,16 @@ async def fetch_chart_data(
             loop.run_in_executor(None, _fetch_sync),
             timeout=getattr(settings, "vnstock_timeout", 30),
         )
+
+        if not data:
+            data = await _fetch_chart_data_from_db(symbol=symbol, start_date=start_date)
+            if data:
+                logger.info(
+                    "Chart data fallback hit DB cache: %s (%d points, period=%s)",
+                    symbol,
+                    len(data),
+                    period,
+                )
 
         # Cache result
         if data:

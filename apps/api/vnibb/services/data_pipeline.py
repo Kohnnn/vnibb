@@ -733,6 +733,18 @@ class DataPipeline:
                     return parsed
             return None
 
+        def _normalize_dividend_yield(value: Any) -> Optional[float]:
+            parsed = _parse_float(value)
+            if parsed is None:
+                return None
+
+            normalized = parsed
+            if abs(normalized) > 1000:
+                while abs(normalized) > 100:
+                    normalized /= 100
+
+            return normalized
+
         def _extract_listing_metadata(src: str) -> Dict[str, Dict[str, Any]]:
             metadata: Dict[str, Dict[str, Any]] = {}
             try:
@@ -1209,7 +1221,7 @@ class DataPipeline:
                             or row.get("net_profit_growth")
                             or row.get("netProfitGrowth")
                         ),
-                        "dividend_yield": _parse_float(
+                        "dividend_yield": _normalize_dividend_yield(
                             row.get("dividend_yield")
                             or row.get("dividendYield")
                             or row.get("dividend")
@@ -1358,9 +1370,11 @@ class DataPipeline:
                         changed = True
 
                 if screener_row.dividend_yield is None:
-                    dividend_yield_value = _pick_float(
-                        ratio_payload.get("dividend_yield"),
-                        ratio_payload.get("dividendYield"),
+                    dividend_yield_value = _normalize_dividend_yield(
+                        _pick_float(
+                            ratio_payload.get("dividend_yield"),
+                            ratio_payload.get("dividendYield"),
+                        )
                     )
                     if dividend_yield_value is None:
                         dps_value = _pick_float(
@@ -1370,7 +1384,9 @@ class DataPipeline:
                         )
                         price_value = _pick_float(screener_row.price)
                         if dps_value is not None and price_value not in (None, 0):
-                            dividend_yield_value = (dps_value / price_value) * 100
+                            dividend_yield_value = _normalize_dividend_yield(
+                                (dps_value / price_value) * 100
+                            )
 
                     if dividend_yield_value is not None:
                         screener_row.dividend_yield = dividend_yield_value
@@ -2835,7 +2851,12 @@ class DataPipeline:
 
                 if ratio_row.dps is None:
                     if dividends_paid is not None and outstanding_shares not in (None, 0):
-                        ratio_row.dps = round(abs(dividends_paid) / outstanding_shares, 4)
+                        shares_denominator = (
+                            outstanding_shares
+                            if outstanding_shares >= 1_000_000
+                            else outstanding_shares * 1_000_000
+                        )
+                        ratio_row.dps = round(abs(dividends_paid) / shares_denominator, 4)
                         raw_payload["dps"] = ratio_row.dps
                         changed = True
 
@@ -2843,6 +2864,13 @@ class DataPipeline:
                 if _pick_float(raw_payload.get("dividend_yield")) is None:
                     if dps_value is not None and latest_price not in (None, 0):
                         raw_payload["dividend_yield"] = round((dps_value / latest_price) * 100, 4)
+                        changed = True
+                else:
+                    existing_yield = _pick_float(raw_payload.get("dividend_yield"))
+                    if existing_yield is not None and abs(existing_yield) > 1000:
+                        while abs(existing_yield) > 100:
+                            existing_yield /= 100
+                        raw_payload["dividend_yield"] = round(existing_yield, 4)
                         changed = True
 
                 if _pick_float(raw_payload.get("payout_ratio")) is None:

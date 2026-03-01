@@ -635,17 +635,17 @@ export function Sidebar({
                                         <Plus size={14} />
                                     </button>
                                     {showCreateMenu && (
-                                        <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-slate-700 bg-slate-900 py-1 shadow-xl">
+                                        <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] py-1 shadow-xl backdrop-blur-sm">
                                             <button
                                                 onClick={() => handleCreateDashboard()}
-                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                             >
                                                 <LayoutDashboard size={14} />
                                                 <span>Create Dashboard</span>
                                             </button>
                                             <button
                                                 onClick={handleCreateFolder}
-                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                             >
                                                 <Folder size={14} />
                                                 <span>New Folder</span>
@@ -731,13 +731,13 @@ export function Sidebar({
                     />
                     <div
                         ref={contextMenuRef}
-                        className="fixed z-[70] min-w-[140px] rounded border border-slate-700 bg-slate-900 py-0.5 shadow-xl"
+                        className="fixed z-[70] min-w-[140px] rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl backdrop-blur-sm"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
                         <button
                             onClick={handleRename}
                             disabled={contextMenu.type === 'dashboard' && !contextDashboardEditable}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             <Edit2 size={12} />
                             <span>Rename</span>
@@ -747,7 +747,7 @@ export function Sidebar({
                                 <button
                                     onClick={handleDuplicate}
                                     disabled={!contextDashboardEditable}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                     <Copy size={12} />
                                     <span>Duplicate</span>
@@ -761,7 +761,7 @@ export function Sidebar({
                                         setContextMenu(null);
                                     }}
                                     disabled={!contextDashboardEditable}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                     {state.dashboards.find(d => d.id === contextMenu.id)?.showGroupLabels !== false ? (
                                         <>
@@ -779,17 +779,17 @@ export function Sidebar({
                                     <button
                                         onClick={() => setShowMoveSubmenu(!showMoveSubmenu)}
                                         disabled={!contextDashboardEditable}
-                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                                     >
                                         <FolderInput size={12} />
                                         <span>Move to Folder</span>
                                         <ChevronRight size={12} className="ml-auto" />
                                     </button>
                                     {showMoveSubmenu && (
-                                        <div className="absolute left-full top-0 z-[80] ml-1 w-40 rounded border border-slate-700 bg-slate-900 py-0.5 shadow-xl">
+                                        <div className="absolute left-full top-0 z-[80] ml-1 w-40 rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl backdrop-blur-sm">
                                             <button
                                                 onClick={() => handleMoveToFolder(undefined)}
-                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                             >
                                                 <FolderX size={12} />
                                                 <span>No Folder (Root)</span>
@@ -798,7 +798,7 @@ export function Sidebar({
                                                 <button
                                                     key={folder.id}
                                                     onClick={() => handleMoveToFolder(folder.id)}
-                                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+                                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                                 >
                                                     <Folder size={12} className="text-yellow-500/80" />
                                                     <span className="truncate">{folder.name}</span>
@@ -809,11 +809,11 @@ export function Sidebar({
                                 </div>
                             </>
                         )}
-                        <div className="my-0.5 border-t border-slate-700" />
+                        <div className="my-0.5 border-t border-[var(--border-color)]" />
                         <button
                             onClick={handleDelete}
                             disabled={contextMenu.type === 'dashboard' && !contextDashboardDeletable}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-red-400 hover:bg-slate-800 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-red-500 hover:bg-[var(--bg-tertiary)] hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             <Trash2 size={12} />
                             <span>Delete</span>
