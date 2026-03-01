@@ -23,6 +23,17 @@ function formatPct(value: number | null | undefined): string {
   return `${prefix}${value.toFixed(2)}%`;
 }
 
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const normalized = value.replace(/,/g, '').trim();
+    if (!normalized) return null;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMarketOverview();
   const indices = data?.data || [];
@@ -59,21 +70,24 @@ export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
             <div className="index-cards-grid">
               {indices.map((idx, i) => {
                 const indexPayload = idx as unknown as Record<string, unknown>;
-                const changePct = Number(idx.change_pct ?? indexPayload.changePct ?? 0);
-                const changeValue = Number(idx.change ?? indexPayload.changeValue ?? 0);
-                const currentValue = Number(idx.current_value ?? indexPayload.currentValue ?? 0);
+                const changePct = toFiniteNumber(idx.change_pct ?? indexPayload.changePct);
+                const changeValue = toFiniteNumber(idx.change ?? indexPayload.changeValue);
+                const currentValue = toFiniteNumber(idx.current_value ?? indexPayload.currentValue);
                 const indexName =
                   (idx.index_name as string | undefined) ||
                   (indexPayload.indexName as string | undefined) ||
                   (indexPayload.index_code as string | undefined) ||
                   `Index ${i + 1}`;
-                const isUp = changePct >= 0;
+                const isUp = (changePct ?? changeValue ?? 0) >= 0;
+                const hasTrend = changePct !== null || changeValue !== null;
 
                 return (
                   <div key={i} className={`index-card ${isUp ? 'up' : 'down'}`}>
                     <div className="flex items-center justify-between mb-2">
                       <span className="index-card__name">{indexName}</span>
-                      {isUp ? (
+                      {!hasTrend ? (
+                        <Activity size={14} className="text-[var(--text-muted)]" />
+                      ) : isUp ? (
                         <TrendingUp size={14} className="text-green-600" />
                       ) : (
                         <TrendingDown size={14} className="text-red-600" />

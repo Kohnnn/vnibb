@@ -132,6 +132,24 @@ def _extract_from_flattened(row: dict, keys: List[str], default=None):
     return default
 
 
+def _extract_by_key_fragments(
+    row: dict,
+    required_fragments: List[str],
+    forbidden_fragments: Optional[List[str]] = None,
+):
+    forbidden_fragments = forbidden_fragments or []
+    for key, value in row.items():
+        if value is None:
+            continue
+        key_lc = str(key).lower()
+        if any(fragment not in key_lc for fragment in required_fragments):
+            continue
+        if any(fragment in key_lc for fragment in forbidden_fragments):
+            continue
+        return value
+    return None
+
+
 def _parse_price_board_record(row: dict) -> Optional[dict]:
     """
     Parse a flattened price_board record into normalized format.
@@ -193,6 +211,24 @@ def _parse_price_board_record(row: dict) -> Optional[dict]:
             ["change_pct", "percent_change", "percentChange", "pct_change", "pctChange"],
         )
     )
+
+    if not price_change_pct:
+        price_change_pct = _safe_float(
+            _extract_by_key_fragments(
+                row,
+                required_fragments=["change", "pct"],
+                forbidden_fragments=["volume", "value"],
+            )
+        )
+
+    if not price_change:
+        price_change = _safe_float(
+            _extract_by_key_fragments(
+                row,
+                required_fragments=["change"],
+                forbidden_fragments=["pct", "percent", "volume", "value"],
+            )
+        )
 
     if match_price > 0 and ref_price > 0:
         price_change = match_price - ref_price
