@@ -18,9 +18,9 @@ interface QuickFiltersProps {
 
 const PRESET_FILTERS: ScreenerFilter[] = [
   { id: 'large_cap', label: 'Large Cap', field: 'market_cap', operator: 'gt', value: 10000000000000 },
-  { id: 'high_dividend', label: 'High Yield', field: 'dividend_yield', operator: 'gt', value: 0.05 },
+  { id: 'high_dividend', label: 'High Yield', field: 'dividend_yield', operator: 'gt', value: 5 },
   { id: 'low_pe', label: 'Low P/E', field: 'pe', operator: 'lt', value: 10 },
-  { id: 'growth', label: 'Growth', field: 'roe', operator: 'gt', value: 0.15 },
+  { id: 'growth', label: 'Growth', field: 'roe', operator: 'gt', value: 15 },
   { id: 'gainer', label: 'Gainers', field: 'change_1d', operator: 'gt', value: 0 },
   { id: 'loser', label: 'Losers', field: 'change_1d', operator: 'lt', value: 0 },
 ];

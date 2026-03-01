@@ -138,12 +138,26 @@ export function PriceChartLocalWidget({
   useEffect(() => {
     if (!chartContainerRef.current || data.length === 0) return;
 
+    let isDisposed = false;
+    let resizeObserver: ResizeObserver | null = null;
+
+    const safelyRemoveChart = (chart: IChartApi | null) => {
+      if (!chart) return;
+      try {
+        chart.remove();
+      } catch {
+        // Ignore disposal races during rapid tab/widget switches.
+      }
+    };
+
     const loadChart = async () => {
       const { createChart, ColorType: CT, CrosshairMode } = await import('lightweight-charts');
 
+      if (isDisposed) return;
+
       // Dispose previous chart
       if (chartRef.current) {
-        chartRef.current.remove();
+        safelyRemoveChart(chartRef.current);
         chartRef.current = null;
         mainSeriesRef.current = null;
         volumeSeriesRef.current = null;
@@ -187,6 +201,11 @@ export function PriceChartLocalWidget({
         },
         handleScroll: { vertTouchDrag: false },
       });
+
+      if (isDisposed) {
+        safelyRemoveChart(chart);
+        return;
+      }
 
       chartRef.current = chart;
 
@@ -267,29 +286,37 @@ export function PriceChartLocalWidget({
       chart.timeScale().fitContent();
 
       // Resize observer
-      const resizeObserver = new ResizeObserver((entries) => {
+      resizeObserver = new ResizeObserver((entries) => {
         const entry = entries[0];
-        if (entry && chart) {
-          const { width, height } = entry.contentRect;
+        if (!entry || isDisposed || chartRef.current !== chart) return;
+
+        const { width, height } = entry.contentRect;
+        if (width <= 0 || height <= 0) return;
+
+        try {
           chart.applyOptions({ width, height });
+        } catch {
+          // Lightweight chart can throw when tab unmount races observer callbacks.
         }
       });
 
       resizeObserver.observe(container);
-
-      return () => {
-        resizeObserver.disconnect();
-        chart.remove();
-      };
     };
 
     loadChart();
 
     return () => {
+      isDisposed = true;
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+        resizeObserver = null;
+      }
       if (chartRef.current) {
-        chartRef.current.remove();
+        safelyRemoveChart(chartRef.current);
         chartRef.current = null;
       }
+      mainSeriesRef.current = null;
+      volumeSeriesRef.current = null;
     };
   }, [data, chartType]);
 

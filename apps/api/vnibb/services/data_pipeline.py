@@ -739,9 +739,8 @@ class DataPipeline:
                 return None
 
             normalized = parsed
-            if abs(normalized) > 1000:
-                while abs(normalized) > 100:
-                    normalized /= 100
+            while abs(normalized) > 100:
+                normalized /= 100
 
             return normalized
 
@@ -2863,15 +2862,45 @@ class DataPipeline:
                 dps_value = _pick_float(ratio_row.dps, raw_payload.get("dps"))
                 if _pick_float(raw_payload.get("dividend_yield")) is None:
                     if dps_value is not None and latest_price not in (None, 0):
-                        raw_payload["dividend_yield"] = round((dps_value / latest_price) * 100, 4)
+                        raw_payload["dividend_yield"] = round(
+                            _normalize_dividend_yield((dps_value / latest_price) * 100),
+                            4,
+                        )
                         changed = True
                 else:
                     existing_yield = _pick_float(raw_payload.get("dividend_yield"))
-                    if existing_yield is not None and abs(existing_yield) > 1000:
+                    if existing_yield is not None and abs(existing_yield) > 100:
                         while abs(existing_yield) > 100:
                             existing_yield /= 100
                         raw_payload["dividend_yield"] = round(existing_yield, 4)
                         changed = True
+
+                payout_ratio_value = _pick_float(raw_payload.get("payout_ratio"))
+                eps_value = _pick_float(ratio_row.eps, raw_payload.get("eps"))
+
+                if (
+                    payout_ratio_value is None
+                    and dps_value not in (None, 0)
+                    and eps_value not in (None, 0)
+                ):
+                    payout_ratio_value = (dps_value / eps_value) * 100
+                    raw_payload["payout_ratio"] = round(payout_ratio_value, 4)
+                    changed = True
+
+                if (
+                    ratio_row.dps is None
+                    and payout_ratio_value not in (None, 0)
+                    and eps_value not in (None, 0)
+                ):
+                    payout_ratio_base = payout_ratio_value
+                    while abs(payout_ratio_base) > 100:
+                        payout_ratio_base /= 100
+
+                    derived_dps = eps_value * (payout_ratio_base / 100)
+                    ratio_row.dps = round(derived_dps, 4)
+                    raw_payload["dps"] = ratio_row.dps
+                    dps_value = ratio_row.dps
+                    changed = True
 
                 if _pick_float(raw_payload.get("payout_ratio")) is None:
                     if dividends_paid is not None and net_income not in (None, 0):

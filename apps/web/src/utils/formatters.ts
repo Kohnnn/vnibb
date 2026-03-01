@@ -1,16 +1,33 @@
+import { formatPercent } from '@/lib/units'
+
+function normalizeLikelyPercent(value: number): number {
+  let normalized = value
+  while (Math.abs(normalized) > 100) {
+    normalized /= 100
+  }
+  return normalized
+}
+
 export function formatScreenerValue(value: any, format?: string): string {
   if (value === null || value === undefined) return '—';
+
+  const numericValue = Number(value)
+  const isNumeric = Number.isFinite(numericValue)
   
   switch (format) {
     case 'currency':
-      return formatCurrency(value);
+      return isNumeric ? formatCurrency(numericValue) : String(value);
     case 'percent':
-      return `${(value * 100).toFixed(2)}%`;
+      return isNumeric
+        ? formatPercent(normalizeLikelyPercent(numericValue), { input: 'auto', decimals: 2 })
+        : String(value);
     case 'change':
-      const prefix = value >= 0 ? '+' : '';
-      return `${prefix}${(value * 100).toFixed(2)}%`;
+      if (!isNumeric) return String(value)
+      const normalized = normalizeLikelyPercent(numericValue)
+      const formatted = formatPercent(normalized, { input: 'auto', decimals: 2 })
+      return normalized > 0 ? `+${formatted}` : formatted
     case 'number':
-      return formatNumber(value);
+      return isNumeric ? formatNumber(numericValue) : String(value);
     default:
       return String(value);
   }

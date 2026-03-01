@@ -34,6 +34,7 @@ export function TradingViewAdvancedChart({
   allowSymbolChange = false,
 }: TradingViewAdvancedChartProps) {
   const widgetMountRef = useRef<HTMLDivElement>(null);
+  const mountVersionRef = useRef(0);
   const [candidateIndex, setCandidateIndex] = useState(0);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
 
@@ -55,6 +56,7 @@ export function TradingViewAdvancedChart({
     if (!widgetMountRef.current || !tvSymbol) return;
 
     const mountNode = widgetMountRef.current;
+    const version = ++mountVersionRef.current;
     mountNode.innerHTML = '';
     setStatus('loading');
 
@@ -90,7 +92,7 @@ export function TradingViewAdvancedChart({
     let resolved = false;
 
     const markReady = () => {
-      if (disposed) return;
+      if (disposed || mountVersionRef.current !== version) return;
       resolved = true;
       setStatus('ready');
       persistResolvedTradingViewSymbol(symbol, tvSymbol);
@@ -115,7 +117,7 @@ export function TradingViewAdvancedChart({
     }, 250);
 
     const timeoutId = window.setTimeout(() => {
-      if (disposed || resolved) return;
+      if (disposed || resolved || mountVersionRef.current !== version) return;
       observer.disconnect();
       window.clearInterval(pollId);
 
@@ -131,9 +133,14 @@ export function TradingViewAdvancedChart({
       observer.disconnect();
       window.clearInterval(pollId);
       window.clearTimeout(timeoutId);
-      if (mountNode.isConnected) {
-        mountNode.replaceChildren();
-      }
+
+      // Do not force immediate DOM disposal while TradingView internals are mid-tick.
+      // Let React unmount naturally and only clear when this mount is still current.
+      window.setTimeout(() => {
+        if (mountVersionRef.current === version && mountNode.isConnected) {
+          mountNode.replaceChildren();
+        }
+      }, 0);
     };
   }, [tvSymbol, interval, timezone, theme, allowSymbolChange, candidates.length, candidateIndex, symbol]);
 

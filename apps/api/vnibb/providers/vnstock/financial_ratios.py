@@ -32,9 +32,8 @@ def _normalize_dividend_yield(value: Any) -> Optional[float]:
         return None
 
     normalized = numeric
-    if abs(normalized) > 1000:
-        while abs(normalized) > 100:
-            normalized /= 100
+    while abs(normalized) > 100:
+        normalized /= 100
 
     return normalized
 
