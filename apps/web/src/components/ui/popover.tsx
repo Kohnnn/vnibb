@@ -67,7 +67,7 @@ export const PopoverContent = ({ children, className = '', align = 'center' }: a
         <div
             ref={ref}
             className={cn(
-                'absolute z-[100] mt-2 min-w-[8rem] rounded-md border border-slate-700 bg-slate-900 p-1 text-slate-100 shadow-xl ring-1 ring-black/40 animate-in fade-in zoom-in-95 duration-200',
+                'absolute z-[100] mt-2 min-w-[8rem] rounded-md border border-[var(--border-color)] bg-[var(--bg-elevated)] p-1 text-[var(--text-primary)] shadow-xl ring-1 ring-black/15 animate-in fade-in zoom-in-95 duration-200',
                 alignClasses[align as keyof typeof alignClasses],
                 className
             )}

@@ -14,11 +14,6 @@ import {
   LayoutGrid,
   MoreHorizontal,
   ChevronRight,
-  Moon,
-  Sun,
-  Activity,
-  AlertTriangle,
-  WifiOff,
   Settings2,
 } from 'lucide-react'
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel'
@@ -168,7 +163,6 @@ export function Header({
         label: 'Healthy',
         className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
         dotClassName: 'bg-emerald-400',
-        icon: <Activity size={11} />,
       }
     }
     if (connectionStatus === 'degraded' || connectionStatus === 'checking') {
@@ -176,14 +170,12 @@ export function Header({
         label: connectionStatus === 'checking' ? 'Checking' : 'Degraded',
         className: 'border-amber-500/35 bg-amber-500/10 text-amber-200',
         dotClassName: 'bg-amber-400',
-        icon: <AlertTriangle size={11} />,
       }
     }
     return {
       label: 'Offline',
       className: 'border-rose-500/35 bg-rose-500/10 text-rose-300',
       dotClassName: 'bg-rose-400',
-      icon: <WifiOff size={11} />,
     }
   }, [connectionStatus])
 
@@ -347,7 +339,7 @@ export function Header({
 
           <div
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-wide',
+              'inline-flex items-center rounded-full border px-2 py-1',
               healthBadge.className
             )}
             title={healthTitle}
@@ -355,59 +347,62 @@ export function Header({
           >
             <span
               className={cn(
-                'h-1.5 w-1.5 rounded-full',
+                'h-2 w-2 rounded-full',
                 healthBadge.dotClassName,
                 marketStatus.isOpen && connectionStatus === 'online' ? 'animate-pulse' : ''
               )}
             />
-            {healthBadge.icon}
-            <span>Health</span>
+            <span className="sr-only">{healthBadge.label}</span>
           </div>
         </div>
 
         <div className="flex items-center gap-1 md:gap-2">
-          {onUnitDisplayChange && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 md:px-2.5 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
-                  title="Display settings"
-                >
-                  <Settings2 size={14} />
-                  <span className="hidden text-xs font-medium md:inline">Display</span>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[180px]">
-                <DropdownMenuItem className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] focus:bg-transparent focus:text-[var(--text-muted)]">
-                  Unit display ({unitDisplay})
-                </DropdownMenuItem>
-                {UNIT_OPTIONS.map((option) => (
-                  <DropdownMenuItem
-                    key={option.value}
-                    onClick={() => onUnitDisplayChange(option.value)}
-                    className={cn(
-                      'text-xs',
-                      unitDisplay === option.value
-                        ? 'text-blue-300'
-                        : 'text-[var(--text-secondary)]'
-                    )}
-                  >
-                    {option.label}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="flex items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                title="Display settings"
+              >
+                <Settings2 size={14} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[180px]">
+              <DropdownMenuItem onClick={toggleTheme} className="text-xs">
+                Theme: {resolvedTheme === 'dark' ? 'Light mode' : 'Dark mode'}
+              </DropdownMenuItem>
+              {onUnitDisplayChange && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] focus:bg-transparent focus:text-[var(--text-muted)]">
+                    Unit display ({unitDisplay})
                   </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+                  {UNIT_OPTIONS.map((option) => (
+                    <DropdownMenuItem
+                      key={option.value}
+                      onClick={() => onUnitDisplayChange(option.value)}
+                      className={cn(
+                        'text-xs',
+                        unitDisplay === option.value
+                          ? 'text-blue-300'
+                          : 'text-[var(--text-secondary)]'
+                      )}
+                    >
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           {hasActionMenu && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 md:px-2.5 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                  className="flex items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
                   title="Dashboard actions"
                 >
                   <MoreHorizontal size={14} />
-                  <span className="hidden text-xs font-medium md:inline">Actions</span>
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[180px]">
@@ -443,17 +438,6 @@ export function Header({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          <button
-            onClick={toggleTheme}
-            className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 md:px-2.5 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)]"
-            title={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            aria-label={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {resolvedTheme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-            <span className="hidden text-xs font-medium md:inline">
-              {resolvedTheme === 'dark' ? 'Light' : 'Dark'}
-            </span>
-          </button>
           {isEditing && onResetLayout && (
             <button
               onClick={onResetLayout}
@@ -505,7 +489,7 @@ export function Header({
             className="flex items-center gap-1.5 rounded-md border border-blue-500/20 bg-blue-600/15 px-2 md:px-2.5 py-1.5 text-blue-400 transition-colors hover:bg-blue-600/25"
           >
             <Bot size={14} />
-            <span className="hidden text-xs font-medium md:inline">AI Copilot</span>
+            <span className="hidden text-xs font-medium xl:inline">AI</span>
           </button>
 
           <div className="hidden sm:block">

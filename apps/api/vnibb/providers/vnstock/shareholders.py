@@ -18,11 +18,38 @@ from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 logger = logging.getLogger(__name__)
 
 
+def _parse_number(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", "")
+        if not cleaned:
+            return None
+        if cleaned.endswith("%"):
+            cleaned = cleaned[:-1]
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
+def _normalize_ownership_pct(value: Any) -> Optional[float]:
+    parsed = _parse_number(value)
+    if parsed is None:
+        return None
+    if parsed <= 1:
+        return parsed * 100
+    return parsed
+
+
 class ShareholdersQueryParams(BaseModel):
     """Query parameters for shareholders data."""
-    
+
     symbol: str = Field(..., min_length=1, max_length=10)
-    
+
     @field_validator("symbol")
     @classmethod
     def uppercase_symbol(cls, v: str) -> str:
@@ -31,13 +58,13 @@ class ShareholdersQueryParams(BaseModel):
 
 class ShareholderData(BaseModel):
     """Standardized shareholder data."""
-    
+
     symbol: str
     shareholder_name: Optional[str] = None
     shares_owned: Optional[float] = None
     ownership_pct: Optional[float] = None
     shareholder_type: Optional[str] = None  # Major, Insider, Foreign, etc.
-    
+
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -53,35 +80,38 @@ class ShareholderData(BaseModel):
 
 class VnstockShareholdersFetcher(BaseFetcher[ShareholdersQueryParams, ShareholderData]):
     """Fetcher for major shareholders via vnstock."""
-    
+
     provider_name = "vnstock"
     requires_credentials = False
-    
+
     @staticmethod
     def transform_query(params: ShareholdersQueryParams) -> dict[str, Any]:
         return {"symbol": params.symbol.upper()}
-    
+
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
         loop = asyncio.get_event_loop()
-        
+
         def _fetch_sync() -> List[dict]:
             try:
                 from vnstock import Vnstock
+
                 stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
                 df = stock.company.shareholders()
-                
+
                 if df is None or df.empty:
                     return []
-                
+
                 return df.to_dict("records")
             except Exception as e:
                 logger.error(f"vnstock shareholders fetch error: {e}")
-                raise ProviderError(message=str(e), provider="vnstock", details={"symbol": query["symbol"]})
-        
+                raise ProviderError(
+                    message=str(e), provider="vnstock", details={"symbol": query["symbol"]}
+                )
+
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(None, _fetch_sync),
@@ -89,7 +119,7 @@ class VnstockShareholdersFetcher(BaseFetcher[ShareholdersQueryParams, Shareholde
             )
         except asyncio.TimeoutError:
             raise ProviderTimeoutError(provider="vnstock", timeout=settings.vnstock_timeout)
-    
+
     @staticmethod
     def transform_data(
         params: ShareholdersQueryParams,
@@ -98,13 +128,33 @@ class VnstockShareholdersFetcher(BaseFetcher[ShareholdersQueryParams, Shareholde
         results = []
         for row in data:
             try:
-                results.append(ShareholderData(
-                    symbol=params.symbol.upper(),
-                    shareholder_name=row.get("name") or row.get("shareholderName") or row.get("tenCoDonh"),
-                    shares_owned=row.get("shares") or row.get("quantity") or row.get("soLuong"),
-                    ownership_pct=row.get("ratio") or row.get("ownership") or row.get("tyLe"),
-                    shareholder_type=row.get("type") or row.get("shareholderType"),
-                ))
+                shares_owned = _parse_number(
+                    row.get("shares")
+                    or row.get("quantity")
+                    or row.get("soLuong")
+                    or row.get("share_own")
+                    or row.get("shareOwn")
+                    or row.get("owned_shares")
+                )
+                ownership_pct = _normalize_ownership_pct(
+                    row.get("ratio")
+                    or row.get("ownership")
+                    or row.get("tyLe")
+                    or row.get("ownership_pct")
+                    or row.get("share_own_percent")
+                    or row.get("percent")
+                )
+                results.append(
+                    ShareholderData(
+                        symbol=params.symbol.upper(),
+                        shareholder_name=row.get("name")
+                        or row.get("shareholderName")
+                        or row.get("tenCoDonh"),
+                        shares_owned=shares_owned,
+                        ownership_pct=ownership_pct,
+                        shareholder_type=row.get("type") or row.get("shareholderType"),
+                    )
+                )
             except Exception as e:
                 logger.warning(f"Skipping invalid shareholder row: {e}")
         return results

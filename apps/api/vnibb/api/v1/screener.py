@@ -320,6 +320,21 @@ def _compute_growth(current: Optional[float], previous: Optional[float]) -> Opti
     return ((current - previous) / previous) * 100
 
 
+def _normalize_pct_metric(value: Any) -> Optional[float]:
+    numeric = _coerce_float(value)
+    if numeric is None:
+        return None
+
+    normalized = numeric
+    if abs(normalized) <= 1:
+        normalized *= 100
+
+    while abs(normalized) > 200:
+        normalized /= 10
+
+    return normalized
+
+
 def _normalize_dividend_yield(value: Any) -> Optional[float]:
     numeric = _coerce_float(value)
     if numeric is None:
@@ -508,6 +523,21 @@ async def _enrich_screener_metrics(
     perf_1m_map = _build_performance_map(21)
     perf_ytd_map = _build_performance_map(252)
 
+    def _should_use_computed_pct(
+        existing: Optional[float],
+        computed: Optional[float],
+        *,
+        extreme_threshold: float,
+        diff_threshold: float,
+    ) -> bool:
+        if computed is None:
+            return False
+        if existing is None:
+            return True
+        if abs(existing) >= extreme_threshold:
+            return True
+        return abs(existing - computed) >= diff_threshold
+
     enriched_rows: List[ScreenerData] = []
     for row in rows:
         updates: dict[str, Any] = {}
@@ -624,17 +654,53 @@ async def _enrich_screener_metrics(
             if dividend_yield is not None:
                 updates["dividend_yield"] = dividend_yield
 
-        if row.change_1d is None and symbol in perf_1d_map:
-            updates["change_1d"] = perf_1d_map[symbol]
+        normalized_change_1d = _normalize_pct_metric(row.change_1d)
+        computed_change_1d = perf_1d_map.get(symbol)
+        if _should_use_computed_pct(
+            normalized_change_1d,
+            computed_change_1d,
+            extreme_threshold=35,
+            diff_threshold=6,
+        ):
+            updates["change_1d"] = computed_change_1d
+        elif normalized_change_1d is not None and abs(normalized_change_1d) <= 60:
+            updates["change_1d"] = normalized_change_1d
 
-        if row.perf_1w is None and symbol in perf_1w_map:
-            updates["perf_1w"] = perf_1w_map[symbol]
+        normalized_perf_1w = _normalize_pct_metric(row.perf_1w)
+        computed_perf_1w = perf_1w_map.get(symbol)
+        if _should_use_computed_pct(
+            normalized_perf_1w,
+            computed_perf_1w,
+            extreme_threshold=70,
+            diff_threshold=12,
+        ):
+            updates["perf_1w"] = computed_perf_1w
+        elif normalized_perf_1w is not None and abs(normalized_perf_1w) <= 80:
+            updates["perf_1w"] = normalized_perf_1w
 
-        if row.perf_1m is None and symbol in perf_1m_map:
-            updates["perf_1m"] = perf_1m_map[symbol]
+        normalized_perf_1m = _normalize_pct_metric(row.perf_1m)
+        computed_perf_1m = perf_1m_map.get(symbol)
+        if _should_use_computed_pct(
+            normalized_perf_1m,
+            computed_perf_1m,
+            extreme_threshold=90,
+            diff_threshold=18,
+        ):
+            updates["perf_1m"] = computed_perf_1m
+        elif normalized_perf_1m is not None and abs(normalized_perf_1m) <= 100:
+            updates["perf_1m"] = normalized_perf_1m
 
-        if row.perf_ytd is None and symbol in perf_ytd_map:
-            updates["perf_ytd"] = perf_ytd_map[symbol]
+        normalized_perf_ytd = _normalize_pct_metric(row.perf_ytd)
+        computed_perf_ytd = perf_ytd_map.get(symbol)
+        if _should_use_computed_pct(
+            normalized_perf_ytd,
+            computed_perf_ytd,
+            extreme_threshold=120,
+            diff_threshold=30,
+        ):
+            updates["perf_ytd"] = computed_perf_ytd
+        elif normalized_perf_ytd is not None and abs(normalized_perf_ytd) <= 140:
+            updates["perf_ytd"] = normalized_perf_ytd
 
         if row.market_cap is None:
             shares = _coerce_float(row.shares_outstanding) or _coerce_float(

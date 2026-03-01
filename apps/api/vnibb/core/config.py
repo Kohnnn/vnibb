@@ -108,6 +108,7 @@ class Settings(BaseSettings):
     vnstock_api_key: Optional[str] = None  # Golden Sponsor API key
     vnstock_source: str = "KBS"  # KBS (default in vnstock 3.4.0), VCI, DNSE
     vnstock_timeout: int = 30  # Request timeout in seconds
+    vnstock_rate_limit_rps: float = 7.0  # Global vnstock request budget
     vnstock_calls_per_minute: Optional[int] = None  # Override per-operation limits
     big_order_threshold_vnd: float = 10_000_000_000
     intraday_limit: int = 500

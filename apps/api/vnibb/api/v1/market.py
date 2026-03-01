@@ -1419,11 +1419,15 @@ async def get_market_top_movers(
 
 
 @router.get("/sector-performance", response_model=MarketSectorPerformanceResponse)
-async def get_market_sector_performance() -> MarketSectorPerformanceResponse:
+async def get_market_sector_performance(
+    include_empty: bool = Query(default=False),
+) -> MarketSectorPerformanceResponse:
     cache_manager = CacheManager()
 
     async def _build_sector_payload(rows: List[dict[str, Any]]) -> MarketSectorPerformanceResponse:
         sectors = await SectorService.calculate_sector_performance(rows)
+        if not include_empty:
+            sectors = [sector for sector in sectors if sector.total_stocks > 0]
         payload = [item.model_dump(mode="json", by_alias=True) for item in sectors]
         return MarketSectorPerformanceResponse(count=len(payload), data=payload)
 

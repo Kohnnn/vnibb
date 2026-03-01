@@ -6,6 +6,7 @@ Fetches historical financial ratios for Vietnam-listed companies.
 
 import asyncio
 import logging
+import re
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -63,6 +64,7 @@ class FinancialRatioData(BaseModel):
     ebitda: Optional[float] = None
     roe: Optional[float] = None
     roa: Optional[float] = None
+    roic: Optional[float] = None
     eps: Optional[float] = None
     bvps: Optional[float] = None
     debt_equity: Optional[float] = None
@@ -177,6 +179,162 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                     return numeric
             return None
 
+        def _normalize_key(key: Any) -> str:
+            if isinstance(key, tuple):
+                text = " ".join(str(part).strip() for part in key if part is not None)
+            else:
+                text = str(key or "").strip()
+            return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+        def _build_lookup(row: dict[str, Any]) -> dict[str, Any]:
+            lookup: dict[str, Any] = {}
+            for key, value in row.items():
+                normalized = _normalize_key(key)
+                if normalized and normalized not in lookup:
+                    lookup[normalized] = value
+
+                if isinstance(key, tuple):
+                    for part in key:
+                        part_normalized = _normalize_key(part)
+                        if part_normalized and part_normalized not in lookup:
+                            lookup[part_normalized] = value
+
+            return lookup
+
+        def _lookup(lookup: dict[str, Any], *aliases: str) -> Any:
+            for alias in aliases:
+                if alias in lookup:
+                    return lookup[alias]
+            return None
+
+        has_tuple_keys = any(
+            isinstance(key, tuple)
+            for row in data
+            for key in (row.keys() if isinstance(row, dict) else [])
+        )
+        if has_tuple_keys:
+            results: list[FinancialRatioData] = []
+            for row in data:
+                if not isinstance(row, dict):
+                    continue
+
+                lookup = _build_lookup(row)
+                period_value = _lookup(
+                    lookup,
+                    "year_report",
+                    "yearreport",
+                    "period",
+                    "quarter",
+                    "fiscal_year",
+                    "fiscalyear",
+                )
+                period_text = str(period_value or "").strip()
+                if not period_text:
+                    continue
+
+                try:
+                    dso = _pick_float(
+                        _lookup(lookup, "days_sales_outstanding"),
+                        _lookup(lookup, "day_sales_outstanding"),
+                    )
+                    receivables_turnover = _pick_float(
+                        _lookup(lookup, "receivables_turnover"),
+                        _lookup(lookup, "account_receivables_turnover"),
+                    )
+                    if receivables_turnover is None and dso not in (None, 0):
+                        receivables_turnover = 365.0 / dso
+
+                    results.append(
+                        FinancialRatioData(
+                            symbol=params.symbol.upper(),
+                            period=period_text,
+                            pe=_pick_float(_lookup(lookup, "p_e"), _lookup(lookup, "pe")),
+                            pb=_pick_float(_lookup(lookup, "p_b"), _lookup(lookup, "pb")),
+                            ps=_pick_float(_lookup(lookup, "p_s"), _lookup(lookup, "ps")),
+                            ev_ebitda=_pick_float(
+                                _lookup(lookup, "ev_ebitda"),
+                                _lookup(lookup, "ev_to_ebitda"),
+                            ),
+                            ev_sales=_pick_float(
+                                _lookup(lookup, "ev_sales"),
+                                _lookup(lookup, "ev_to_sales"),
+                                _lookup(lookup, "enterprise_value_to_sales"),
+                            ),
+                            ebitda=_pick_float(
+                                _lookup(lookup, "ebitda"),
+                                _lookup(lookup, "ebitda_bn_vnd"),
+                            ),
+                            roe=_pick_float(_lookup(lookup, "roe"), _lookup(lookup, "roe_percent")),
+                            roa=_pick_float(_lookup(lookup, "roa"), _lookup(lookup, "roa_percent")),
+                            roic=_pick_float(
+                                _lookup(lookup, "roic"),
+                                _lookup(lookup, "roic_percent"),
+                            ),
+                            eps=_pick_float(_lookup(lookup, "eps"), _lookup(lookup, "eps_vnd")),
+                            bvps=_pick_float(_lookup(lookup, "bvps"), _lookup(lookup, "bvps_vnd")),
+                            debt_equity=_pick_float(
+                                _lookup(lookup, "debt_equity"),
+                                _lookup(lookup, "debt_on_equity"),
+                            ),
+                            debt_assets=_pick_float(
+                                _lookup(lookup, "debt_assets"),
+                                _lookup(lookup, "debt_on_assets"),
+                            ),
+                            equity_multiplier=_pick_float(
+                                _lookup(lookup, "equity_multiplier"),
+                                _lookup(lookup, "financial_leverage"),
+                            ),
+                            current_ratio=_pick_float(_lookup(lookup, "current_ratio")),
+                            quick_ratio=_pick_float(_lookup(lookup, "quick_ratio")),
+                            cash_ratio=_pick_float(_lookup(lookup, "cash_ratio")),
+                            asset_turnover=_pick_float(_lookup(lookup, "asset_turnover")),
+                            inventory_turnover=_pick_float(_lookup(lookup, "inventory_turnover")),
+                            receivables_turnover=receivables_turnover,
+                            gross_margin=_pick_float(
+                                _lookup(lookup, "gross_profit_margin"),
+                                _lookup(lookup, "gross_profit_margin_percent"),
+                            ),
+                            net_margin=_pick_float(
+                                _lookup(lookup, "net_profit_margin"),
+                                _lookup(lookup, "net_profit_margin_percent"),
+                            ),
+                            operating_margin=_pick_float(
+                                _lookup(lookup, "operating_margin"),
+                                _lookup(lookup, "ebit_margin"),
+                                _lookup(lookup, "ebit_margin_percent"),
+                            ),
+                            interest_coverage=_pick_float(_lookup(lookup, "interest_coverage")),
+                            debt_service_coverage=_pick_float(
+                                _lookup(lookup, "debt_service_coverage")
+                            ),
+                            ocf_debt=_pick_float(
+                                _lookup(lookup, "ocf_to_debt"),
+                                _lookup(lookup, "ocf_debt"),
+                            ),
+                            fcf_yield=_pick_float(_lookup(lookup, "fcf_yield")),
+                            ocf_sales=_pick_float(_lookup(lookup, "ocf_sales")),
+                            revenue_growth=_pick_float(_lookup(lookup, "revenue_growth")),
+                            earnings_growth=_pick_float(_lookup(lookup, "earnings_growth")),
+                            dps=_pick_float(
+                                _lookup(lookup, "dividends_per_share"),
+                                _lookup(lookup, "dps"),
+                            ),
+                            dividend_yield=_normalize_dividend_yield(
+                                _pick_float(
+                                    _lookup(lookup, "dividend_yield"),
+                                    _lookup(lookup, "dividend_yield_percent"),
+                                )
+                            ),
+                            payout_ratio=_pick_float(_lookup(lookup, "payout_ratio")),
+                            peg_ratio=_pick_float(_lookup(lookup, "peg_ratio")),
+                        )
+                    )
+                except Exception as e:
+                    logger.warning(f"Skipping tuple-key ratio row: {e}")
+
+            if results:
+                return results
+
         has_row_items = any("item_id" in row for row in data)
         if has_row_items:
             metric_map = {
@@ -190,6 +348,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 "ebitda": "ebitda",
                 "roe": "roe",
                 "roa": "roa",
+                "roic": "roic",
                 "trailing_eps": "eps",
                 "book_value_per_share_bvps": "bvps",
                 "dividends_per_share": "dps",
@@ -223,7 +382,11 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 {
                     str(key)
                     for key in raw_fields
-                    if str(key).isdigit() or ("Q" in str(key).upper() and "/" in str(key))
+                    if str(key).isdigit()
+                    or re.search(
+                        r"(20\d{2}).*Q[1-4]|Q[1-4].*(20\d{2})",
+                        str(key).upper(),
+                    )
                 },
                 reverse=True,
             )
@@ -342,6 +505,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         ),
                         roe=row.get("roe"),
                         roa=row.get("roa"),
+                        roic=row.get("roic") or row.get("roicPercent"),
                         eps=row.get("earningPerShare")
                         or row.get("earningsPerShare")
                         or row.get("eps"),

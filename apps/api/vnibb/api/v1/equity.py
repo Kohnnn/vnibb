@@ -280,6 +280,69 @@ def _pick_optional_float(*values: Any) -> Optional[float]:
     return None
 
 
+def _price_to_vnd_units(price: Any, dps_hint: Any = None) -> Optional[float]:
+    """
+    Normalize quote/snapshot price to VND units.
+
+    Local datasets can store price in thousands of VND (e.g. 68.2 for 68,200 VND).
+    Dividend and DPS metrics are in VND, so price must be scaled before yield math.
+    """
+    numeric = _coerce_optional_float(price)
+    if numeric in (None, 0):
+        return None
+
+    if abs(numeric) >= 1000:
+        return numeric
+
+    dps_value = _coerce_optional_float(dps_hint)
+    if dps_value is None or abs(dps_value) >= 1:
+        return numeric * 1000.0
+
+    return numeric
+
+
+def _normalize_dividend_yield_percent(value: Any) -> Optional[float]:
+    numeric = _coerce_optional_float(value)
+    if numeric is None:
+        return None
+
+    normalized = numeric
+    while abs(normalized) > 100:
+        normalized /= 100
+
+    return normalized
+
+
+def _derive_dividend_yield_from_dps(dps: Any, latest_price: Any) -> Optional[float]:
+    dps_value = _coerce_optional_float(dps)
+    price_vnd = _price_to_vnd_units(latest_price, dps_hint=dps_value)
+    if dps_value is None or price_vnd in (None, 0):
+        return None
+    return (dps_value / price_vnd) * 100
+
+
+def _resolve_dividend_yield_percent(
+    raw_yield: Any,
+    dps: Any,
+    latest_price: Any,
+) -> Optional[float]:
+    normalized_raw = _normalize_dividend_yield_percent(raw_yield)
+    derived = _derive_dividend_yield_from_dps(dps=dps, latest_price=latest_price)
+
+    if derived is None:
+        return normalized_raw
+    if normalized_raw is None:
+        return derived
+
+    if abs(normalized_raw) > 30 >= abs(derived):
+        return derived
+
+    if abs(normalized_raw - derived) >= 10:
+        return derived
+
+    return normalized_raw
+
+
 def _coerce_iso_date(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -588,10 +651,12 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
             "equity_multiplier",
             _coerce_optional_float(raw_data.get("equity_multiplier")),
         ),
-        dividend_yield=getattr(
-            row,
-            "dividend_yield",
-            _coerce_optional_float(raw_data.get("dividend_yield")),
+        dividend_yield=_normalize_dividend_yield_percent(
+            getattr(
+                row,
+                "dividend_yield",
+                _coerce_optional_float(raw_data.get("dividend_yield")),
+            )
         ),
         payout_ratio=getattr(
             row,
@@ -1198,13 +1263,23 @@ async def _enrich_missing_ratio_metrics(
         if item.dps is None and dividends_paid is not None and outstanding_shares not in (None, 0):
             item.dps = abs(dividends_paid) / outstanding_shares
 
-        if item.dps is None and item.dividend_yield is not None and latest_price not in (None, 0):
-            item.dps = (item.dividend_yield / 100) * latest_price
+        item.dividend_yield = _resolve_dividend_yield_percent(
+            raw_yield=item.dividend_yield,
+            dps=item.dps,
+            latest_price=latest_price,
+        )
 
-        if item.dividend_yield is None and latest_price not in (None, 0):
-            dps = _coerce_optional_float(getattr(item, "dps", None))
-            if dps is not None:
-                item.dividend_yield = (dps / latest_price) * 100
+        if item.dps is None and item.dividend_yield is not None:
+            price_vnd = _price_to_vnd_units(latest_price, dps_hint=1.0)
+            if price_vnd not in (None, 0):
+                item.dps = (item.dividend_yield / 100) * price_vnd
+
+        if item.dividend_yield is None:
+            item.dividend_yield = _resolve_dividend_yield_percent(
+                raw_yield=None,
+                dps=item.dps,
+                latest_price=latest_price,
+            )
 
         if item.payout_ratio is None:
             if dividends_paid is not None and net_income not in (None, 0) and net_income > 0:
@@ -2431,7 +2506,14 @@ async def get_dividends(
                 if annual_dps is None:
                     continue
                 row["annual_dps"] = round(annual_dps, 4)
-                row["dividend_yield"] = round((annual_dps / float(latest_price)) * 100, 4)
+                normalized_yield = _resolve_dividend_yield_percent(
+                    raw_yield=None,
+                    dps=annual_dps,
+                    latest_price=latest_price,
+                )
+                row["dividend_yield"] = (
+                    round(float(normalized_yield), 4) if normalized_yield is not None else None
+                )
 
         data = rows[:limit]
         return StandardResponse(data=data, meta=MetaData(count=len(data)))

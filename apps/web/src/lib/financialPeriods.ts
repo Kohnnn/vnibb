@@ -44,13 +44,14 @@ export function formatFinancialPeriodLabel(
   const yearMatch = upper.match(YEAR_REGEX)
   const quarterMatch = upper.match(QUARTER_REGEX)
   const numeric = Number(upper)
+  const hasYtd = upper.includes('YTD')
 
   if (mode === 'ttm') {
     return yearMatch ? `TTM ${yearMatch[1]}` : 'TTM'
   }
 
   if (mode === 'year') {
-    if (yearMatch) return yearMatch[1]
+    if (yearMatch) return hasYtd ? `${yearMatch[1]} (YTD)` : yearMatch[1]
 
     if (Number.isFinite(numeric) && numeric >= 1900 && numeric <= 2100) {
       return String(Math.trunc(numeric))

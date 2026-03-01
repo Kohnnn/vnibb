@@ -298,12 +298,12 @@ export function WidgetWrapper({
                                     />
                                 </button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent className="bg-secondary border-default min-w-[120px]">
+                            <DropdownMenuContent className="min-w-[120px]">
                                 {Object.entries(groups).map(([id, config]) => (
                                     <DropdownMenuItem
                                         key={id}
                                         onClick={() => handleGroupChange(id as WidgetGroupId)}
-                                        className="flex items-center gap-2 text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary"
+                                        className="flex cursor-pointer items-center gap-2 text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]"
                                     >
                                         <div
                                             className="w-2 h-2 rounded-full"
@@ -369,29 +369,29 @@ export function WidgetWrapper({
                                     <MoreHorizontal size={11} />
                                 </button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent className="bg-secondary border-default min-w-[150px]">
+                            <DropdownMenuContent className="min-w-[150px]">
                                 <DropdownMenuSub>
-                                    <DropdownMenuSubTrigger className="text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary">
+                                    <DropdownMenuSubTrigger className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]">
                                         <Download size={14} className="mr-2" />
                                         <span>Export</span>
                                     </DropdownMenuSubTrigger>
-                                    <DropdownMenuSubContent className="bg-secondary border-default">
-                                        <DropdownMenuItem onClick={() => handleExport('csv')} className="text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary">
+                                    <DropdownMenuSubContent>
+                                        <DropdownMenuItem onClick={() => handleExport('csv')} className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]">
                                             <FileSpreadsheet size={14} className="mr-2" />
                                             <span>Export as CSV</span>
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleExport('json')} className="text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary">
+                                        <DropdownMenuItem onClick={() => handleExport('json')} className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]">
                                             <FileJson size={14} className="mr-2" />
                                             <span>Export as JSON</span>
                                         </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleExport('png')} className="text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary">
+                                        <DropdownMenuItem onClick={() => handleExport('png')} className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]">
                                             <Image size={14} className="mr-2" />
                                             <span>Export as PNG</span>
                                         </DropdownMenuItem>
                                     </DropdownMenuSubContent>
                                 </DropdownMenuSub>
                                 {onSettingsClick && (
-                                    <DropdownMenuItem onClick={onSettingsClick} className="text-xs focus:bg-[var(--bg-hover)] cursor-pointer text-primary">
+                                    <DropdownMenuItem onClick={onSettingsClick} className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]">
                                         <Settings size={14} className="mr-2" />
                                         <span>Widget Settings</span>
                                     </DropdownMenuItem>
@@ -403,13 +403,13 @@ export function WidgetWrapper({
 
 
                 {/* Content */}
-                <div id={id} ref={contentHostRef} className="flex-1 overflow-auto relative bg-secondary p-3 sm:p-4">
+                <div id={id} ref={contentHostRef} className="relative flex-1 overflow-auto bg-[var(--bg-secondary)] p-3 sm:p-4">
                     {isCollapsed ? (
-                        <div className="h-full flex items-center justify-center text-[10px] text-muted-foreground uppercase tracking-[0.2em]">
+                        <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
                             Collapsed
                         </div>
                     ) : !isContentVisible ? (
-                        <div className="h-full flex items-center justify-center text-[10px] text-muted-foreground uppercase tracking-[0.2em]">
+                        <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
                             Loading Widget
                         </div>
                     ) : (
