@@ -278,6 +278,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                     <select
                         value={chartType}
                         onChange={(e) => setChartType(e.target.value as any)}
+                        aria-label="Income statement chart mode"
                         className="bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
                     >
                         <option value="overview">Revenue & Profit</option>

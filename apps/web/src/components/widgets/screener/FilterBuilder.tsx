@@ -56,6 +56,7 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
           <select
             value={filter.field}
             onChange={(e) => updateFilter(filter.id, { field: e.target.value })}
+            aria-label="Filter field"
             className="flex-1 bg-gray-800 text-white text-[11px] rounded px-2 py-1.5 border border-gray-700 outline-none focus:border-blue-500"
           >
             {availableFields.map(f => (
@@ -66,6 +67,7 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
           <select
             value={filter.operator}
             onChange={(e) => updateFilter(filter.id, { operator: e.target.value as Filter['operator'] })}
+            aria-label="Filter operator"
             className="bg-gray-800 text-white text-[11px] rounded px-2 py-1.5 border border-gray-700 outline-none focus:border-blue-500"
           >
             <option value="gt">&gt;</option>
@@ -78,6 +80,7 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
             type="number"
             value={filter.value as number}
             onChange={(e) => updateFilter(filter.id, { value: parseFloat(e.target.value) })}
+            aria-label="Filter value"
             className="w-20 bg-gray-800 text-white text-[11px] rounded px-2 py-1.5 border border-gray-700 outline-none focus:border-blue-500 font-mono"
           />
 
