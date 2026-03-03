@@ -24,8 +24,7 @@ function formatShares(shares: number | null | undefined): string {
 
 function formatPct(pct: number | null | undefined): string {
     if (pct === null || pct === undefined || Number.isNaN(pct)) return '-';
-    const normalized = Math.abs(pct) <= 1 ? pct * 100 : pct;
-    return `${normalized.toFixed(2)}%`;
+    return `${pct.toFixed(2)}%`;
 }
 
 function getTypeIcon(type: string | null | undefined) {
@@ -40,6 +39,17 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useShareholders(symbol, !!symbol);
 
     const shareholders = data?.data || [];
+    const ownershipValues = shareholders
+        .map((holder) => {
+            const value =
+                holder.ownership_pct ??
+                (holder as unknown as Record<string, number | null | undefined>).ownership ??
+                (holder as unknown as Record<string, number | null | undefined>).share_own_percent;
+            return typeof value === 'number' && Number.isFinite(value) ? value : null;
+        })
+        .filter((value): value is number => value !== null);
+    const treatOwnershipAsRatio =
+        ownershipValues.length > 0 && ownershipValues.every((value) => Math.abs(value) <= 1);
     const hasData = shareholders.length > 0;
     const isFallback = Boolean(error && hasData);
 
@@ -80,22 +90,39 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
                         </thead>
                         <tbody>
                             {shareholders.map((sh, index) => {
+                                const row = sh as unknown as Record<string, string | number | null | undefined>;
                                 const Icon = getTypeIcon(sh.shareholder_type);
+                                const sharesOwned =
+                                    sh.shares_owned ??
+                                    (typeof row.shares === 'number' ? row.shares : null) ??
+                                    (typeof row.quantity === 'number' ? row.quantity : null);
+                                const ownershipPctRaw =
+                                    sh.ownership_pct ??
+                                    (typeof row.ownership === 'number' ? row.ownership : null) ??
+                                    (typeof row.share_own_percent === 'number'
+                                        ? row.share_own_percent
+                                        : null);
+                                const ownershipPct =
+                                    ownershipPctRaw !== null &&
+                                    ownershipPctRaw !== undefined &&
+                                    treatOwnershipAsRatio
+                                        ? ownershipPctRaw * 100
+                                        : ownershipPctRaw;
                                 return (
                                     <tr key={index} className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
                                         <td className="py-1.5 px-1">
                                             <div className="flex items-center gap-1.5">
                                                 <Icon size={12} className="text-blue-400 shrink-0" />
-                                                <span className="max-w-[150px] truncate text-[var(--text-primary)]" title={sh.shareholder_name || ''}>
-                                                    {sh.shareholder_name || 'Unknown'}
+                                                <span className="max-w-[150px] truncate text-[var(--text-primary)]" title={(sh.shareholder_name || row.name || row.share_holder || '') as string}>
+                                                    {(sh.shareholder_name || row.name || row.share_holder || 'Unknown') as string}
                                                 </span>
                                             </div>
                                         </td>
                                         <td className="text-right py-1.5 px-1 text-[var(--text-secondary)]">
-                                            {formatShares(sh.shares_owned)}
+                                            {formatShares(sharesOwned as number | null | undefined)}
                                         </td>
                                         <td className="text-right py-1.5 px-1 text-green-400 font-medium">
-                                            {formatPct(sh.ownership_pct)}
+                                            {formatPct(ownershipPct as number | null | undefined)}
                                         </td>
                                     </tr>
                                 );

@@ -29,14 +29,17 @@ router = APIRouter()
 # RESPONSE MODELS
 # =============================================================================
 
+
 class PriceBoardResponse(BaseModel):
     """Response for price board."""
+
     count: int
     data: List[PriceBoardData]
 
 
 class TopMoversResponse(BaseModel):
     """Response for top movers."""
+
     type: str
     index: str
     count: int
@@ -45,6 +48,7 @@ class TopMoversResponse(BaseModel):
 
 class SectorTopMoversResponse(BaseModel):
     """Response for sector top movers endpoint."""
+
     count: int
     type: str
     data: List[SectorTopMoversData]
@@ -53,6 +57,7 @@ class SectorTopMoversResponse(BaseModel):
 # =============================================================================
 # ENDPOINTS
 # =============================================================================
+
 
 @router.get(
     "/price-board",
@@ -66,13 +71,11 @@ async def get_price_board(
         description="Comma-separated list of symbols (e.g., VNM,FPT,VIC)",
         examples=["VNM,FPT,VIC"],
     ),
-
     source: str = Query(
         default="KBS",
         pattern=r"^(KBS|VCI|DNSE)$",
         description="Data source: KBS (default), VCI, or DNSE",
     ),
-
 ) -> PriceBoardResponse:
     """Fetch real-time price board for multiple symbols. Cached for 1 minute."""
     symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
@@ -80,11 +83,11 @@ async def get_price_board(
         raise HTTPException(status_code=400, detail="At least one symbol is required")
     if len(symbol_list) > 50:
         raise HTTPException(status_code=400, detail="Maximum 50 symbols allowed")
-    
+
     # Create consistent cache key (sort symbols for cache hit on same set)
     sorted_symbols = ",".join(sorted(symbol_list))
     cache_key = build_cache_key("vnibb", "priceboard", sorted_symbols, source)
-    
+
     # Check cache first (1 minute TTL)
     try:
         cached = await redis_client.get_json(cache_key)
@@ -93,21 +96,19 @@ async def get_price_board(
             return PriceBoardResponse(count=len(data), data=data)
     except Exception:
         pass  # Cache miss or error, continue to fetch
-    
+
     try:
         data = await VnstockPriceBoardFetcher.fetch(symbols=symbol_list, source=source)
-        
+
         # Store in cache with 1 minute TTL (60 seconds)
         if data:
             try:
                 await redis_client.set_json(
-                    cache_key,
-                    [d.model_dump(mode="json") for d in data],
-                    ttl=60
+                    cache_key, [d.model_dump(mode="json") for d in data], ttl=60
                 )
             except Exception:
                 pass  # Cache write failure is non-fatal
-        
+
         return PriceBoardResponse(count=len(data), data=data)
     except ProviderError as e:
         raise HTTPException(status_code=502, detail=f"Provider error: {e.message}")
@@ -138,10 +139,11 @@ async def get_top_movers(
 ) -> TopMoversResponse:
     """Fetch top movers by type and index. Cached for 1 minute."""
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     cache_key = build_cache_key("vnibb", "topmovers", type, index, str(limit))
-    
+
     # Check cache first (1 minute TTL)
     try:
         cached = await redis_client.get_json(cache_key)
@@ -151,7 +153,7 @@ async def get_top_movers(
             return TopMoversResponse(count=len(data), type=type, index=index, data=data)
     except Exception as e:
         logger.debug(f"Cache miss or error for top movers: {e}")
-    
+
     try:
         logger.info(f"Fetching top movers: type={type}, index={index}, limit={limit}")
         data = await VnstockTopMoversFetcher.fetch(
@@ -159,20 +161,18 @@ async def get_top_movers(
             index=index,  # type: ignore
             limit=limit,
         )
-        
+
         logger.info(f"Top movers fetch returned {len(data)} items")
-        
+
         # Store in cache with 1 minute TTL
         if data:
             try:
                 await redis_client.set_json(
-                    cache_key,
-                    [d.model_dump(mode="json") for d in data],
-                    ttl=60
+                    cache_key, [d.model_dump(mode="json") for d in data], ttl=60
                 )
             except Exception as e:
                 logger.debug(f"Cache write failed: {e}")
-        
+
         return TopMoversResponse(count=len(data), type=type, index=index, data=data)
     except ProviderError as e:
         logger.error(f"Provider error fetching top movers: {e}")
@@ -205,11 +205,10 @@ async def get_sector_top_movers(
         pattern=r"^(KBS|VCI|DNSE)$",
         description="Data source: KBS (default), VCI, or DNSE",
     ),
-
 ) -> SectorTopMoversResponse:
     """Fetch top movers grouped by sector. Cached for 1 minute."""
     cache_key = build_cache_key("vnibb", "sectortopmovers", type, str(limit), source)
-    
+
     # Check cache first
     try:
         cached = await redis_client.get_json(cache_key)
@@ -218,25 +217,23 @@ async def get_sector_top_movers(
             return SectorTopMoversResponse(count=len(data), type=type, data=data)
     except Exception:
         pass
-    
+
     try:
         data = await VnstockTopMoversFetcher.fetch_sector_top_movers(
             type=type,  # type: ignore
             limit_per_sector=limit,
             source=source,
         )
-        
+
         # Store in cache
         if data:
             try:
                 await redis_client.set_json(
-                    cache_key,
-                    [d.model_dump(mode="json") for d in data],
-                    ttl=60
+                    cache_key, [d.model_dump(mode="json") for d in data], ttl=60
                 )
             except Exception:
                 pass
-        
+
         return SectorTopMoversResponse(count=len(data), type=type, data=data)
     except ProviderError:
         return SectorTopMoversResponse(count=0, type=type, data=[])
@@ -326,6 +323,7 @@ from vnibb.providers.vnstock.equity_screener import VnstockScreenerFetcher
 
 class SectorPerformanceResponse(BaseModel):
     """Response for sector performance endpoint."""
+
     count: int
     data: List[SectorPerformance]
 
@@ -342,44 +340,51 @@ async def get_all_sector_performance(
         pattern=r"^(KBS|VCI|DNSE)$",
         description="Data source: KBS (default), VCI, or DNSE",
     ),
-
+    include_empty: bool = Query(
+        default=False,
+        description="Include sectors with totalStocks == 0",
+    ),
 ) -> SectorPerformanceResponse:
     """
     Get performance data for all VN market sectors.
-    
-    Returns sector change percentages, top gainers/losers, 
+
+    Returns sector change percentages, top gainers/losers,
     and total stock counts for each sector.
     """
     cache_key = build_cache_key("vnibb", "sectorperformance", source)
-    
+
     # Check cache first (1 minute TTL)
     try:
         cached = await redis_client.get_json(cache_key)
         if cached:
             data = [SectorPerformance(**item) for item in cached]
+            if not include_empty:
+                data = [item for item in data if item.total_stocks > 0]
             return SectorPerformanceResponse(count=len(data), data=data)
     except Exception:
         pass
-    
+
     try:
         # Fetch all screener data
         screener_result = await VnstockScreenerFetcher.fetch(limit=2000, source=source)
         screener_data = [s.model_dump() for s in screener_result] if screener_result else []
-        
+
         # Calculate sector performance
         sector_data = await SectorService.calculate_sector_performance(screener_data)
-        
+        if not include_empty:
+            sector_data = [item for item in sector_data if item.total_stocks > 0]
+
         # Cache result
         if sector_data:
             try:
                 await redis_client.set_json(
                     cache_key,
                     [d.model_dump(mode="json", by_alias=True) for d in sector_data],
-                    ttl=60
+                    ttl=60,
                 )
             except Exception:
                 pass
-        
+
         return SectorPerformanceResponse(count=len(sector_data), data=sector_data)
     except Exception as e:
         # Return empty on error

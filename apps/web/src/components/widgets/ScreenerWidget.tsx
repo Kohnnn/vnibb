@@ -11,6 +11,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/VirtualizedTable';
 import { useColumnPresets } from '@/hooks/useColumnPresets';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
 import { ALL_COLUMNS, type ScreenerColumn } from '@/types/screener';
@@ -121,6 +122,7 @@ export function ScreenerWidget({
 
     const hasData = filteredData.length > 0;
     const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
     // Handlers
     const handleSort = useCallback((field: string) => {
@@ -287,7 +289,16 @@ export function ScreenerWidget({
 
                 {/* Main Content Area */}
                 <div className="flex-1 overflow-hidden relative">
-                    {isLoading && !hasData ? (
+                    {timedOut && isLoading && !hasData ? (
+                        <WidgetError
+                            title="Loading timed out"
+                            error={new Error('Request timed out after 15 seconds.')}
+                            onRetry={() => {
+                                resetTimeout();
+                                refetch();
+                            }}
+                        />
+                    ) : isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={8} />
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />

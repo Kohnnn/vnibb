@@ -226,6 +226,55 @@ class CacheManager:
                 if not symbol:
                     continue
 
+                def _pick(*values: Any) -> Any:
+                    for value in values:
+                        if value is not None:
+                            return value
+                    return None
+
+                updated_at_value = _pick(record.get("updated_at"), record.get("updatedAt"))
+                if isinstance(updated_at_value, (datetime, date)):
+                    updated_at_serialized: Any = updated_at_value.isoformat()
+                elif updated_at_value is not None:
+                    updated_at_serialized = str(updated_at_value)
+                else:
+                    updated_at_serialized = None
+
+                extended_metrics = {
+                    "change_1d": _pick(record.get("change_1d"), record.get("change1D")),
+                    "perf_1w": _pick(record.get("perf_1w"), record.get("perf1W")),
+                    "perf_1m": _pick(record.get("perf_1m"), record.get("perf1M")),
+                    "perf_ytd": _pick(record.get("perf_ytd"), record.get("perfYTD")),
+                    "debt_to_asset": _pick(record.get("debt_to_asset"), record.get("debtToAsset")),
+                    "days_receivable": _pick(
+                        record.get("days_receivable"),
+                        record.get("daysReceivable"),
+                    ),
+                    "days_payable": _pick(record.get("days_payable"), record.get("daysPayable")),
+                    "equity_on_total_asset": _pick(
+                        record.get("equity_on_total_asset"),
+                        record.get("equityOnTotalAsset"),
+                    ),
+                    "revenue_on_asset": _pick(
+                        record.get("revenue_on_asset"),
+                        record.get("revenueOnAsset"),
+                    ),
+                    "state_ownership": _pick(
+                        record.get("state_ownership"),
+                        record.get("stateOwnership"),
+                    ),
+                    "foreign_ownership": _pick(
+                        record.get("foreign_ownership"),
+                        record.get("foreignOwnership"),
+                    ),
+                    "year": record.get("year"),
+                    "quarter": record.get("quarter"),
+                    "updated_at": updated_at_serialized,
+                }
+                compact_extended_metrics = {
+                    key: value for key, value in extended_metrics.items() if value is not None
+                }
+
                 values = {
                     "symbol": symbol.upper(),
                     "snapshot_date": today,
@@ -257,6 +306,7 @@ class CacheManager:
                     "bvps": record.get("bvps"),
                     "foreign_ownership": record.get("foreign_ownership")
                     or record.get("foreignOwnership"),
+                    "extended_metrics": compact_extended_metrics or None,
                     "source": source,
                     "created_at": now,
                 }

@@ -20,9 +20,16 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { CompanyLogo } from '@/components/ui/CompanyLogo'
 import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
-import { compareStocks, getComparisonPerformance, getPeerCompanies } from '@/lib/api'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import {
+  compareStocks,
+  getComparisonPerformance,
+  getFinancialRatios,
+  getPeerCompanies,
+} from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units'
+import type { FinancialRatioData } from '@/types/equity'
 
 const CATEGORY_DEFINITIONS = [
   {
@@ -58,15 +65,72 @@ const CATEGORY_DEFINITIONS = [
 ] as const
 
 const COLOR_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#14b8a6', '#06b6d4']
-const PERFORMANCE_PERIODS = ['1M', '3M', '6M', '1Y', '3Y', '5Y'] as const
+const PERFORMANCE_PERIODS = ['1M', '3M', '6M', '1Y', '3Y', '5Y', 'YTD', 'ALL'] as const
 
 type PerformancePeriod = (typeof PERFORMANCE_PERIODS)[number]
+
+type RatioTableView = 'valuation' | 'financial'
+
+interface RatioColumn {
+  key: keyof FinancialRatioData
+  label: string
+  format: 'ratio' | 'percent-auto' | 'percent'
+}
+
+const VALUATION_RATIO_COLUMNS: RatioColumn[] = [
+  { key: 'pe', label: 'P/E', format: 'ratio' },
+  { key: 'ps', label: 'P/S', format: 'ratio' },
+  { key: 'pb', label: 'P/B', format: 'ratio' },
+  { key: 'ev_sales', label: 'EV/Sales', format: 'ratio' },
+  { key: 'ev_ebitda', label: 'EV/EBITDA', format: 'ratio' },
+  { key: 'dividend_yield', label: 'Div Yield', format: 'percent' },
+]
+
+const FINANCIAL_RATIO_COLUMNS: RatioColumn[] = [
+  { key: 'roe', label: 'ROE', format: 'percent-auto' },
+  { key: 'roa', label: 'ROA', format: 'percent-auto' },
+  { key: 'net_margin', label: 'Net Margin', format: 'percent-auto' },
+  { key: 'current_ratio', label: 'Current Ratio', format: 'ratio' },
+  { key: 'debt_equity', label: 'D/E', format: 'ratio' },
+]
 
 interface ComparisonAnalysisWidgetProps {
   id: string
   symbol?: string
   initialSymbols?: string[]
   onRemove?: () => void
+}
+
+function normalizePerformanceData(payload: unknown): Array<Record<string, string | number>> {
+  const rawRows = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === 'object' && Array.isArray((payload as any).data)
+      ? (payload as any).data
+      : []
+
+  return rawRows
+    .map((row: any) => {
+      if (!row || typeof row !== 'object') return null
+      if (row.values && typeof row.values === 'object') {
+        return {
+          date: row.date || row.time || row.period || '',
+          ...row.values,
+        }
+      }
+      return row
+    })
+    .filter(
+      (
+        row: Record<string, string | number> | null
+      ): row is Record<string, string | number> => {
+      if (!row) return false
+      const dateValue = row.date
+      if (typeof dateValue !== 'string' || dateValue.length === 0) return false
+      return Object.entries(row).some(
+        ([key, value]) => key !== 'date' && typeof value === 'number' && Number.isFinite(value)
+      )
+      }
+    )
 }
 
 function ComparisonAnalysisWidgetComponent({
@@ -84,6 +148,7 @@ function ComparisonAnalysisWidgetComponent({
   const [period, setPeriod] = useState<Period>('FY')
   const [performancePeriod, setPerformancePeriod] = useState<PerformancePeriod>('1M')
   const [activeCategory, setActiveCategory] = useState('valuation')
+  const [ratioTableView, setRatioTableView] = useState<RatioTableView>('valuation')
   const [newSymbol, setNewSymbol] = useState('')
 
   const comparisonQuery = useQuery({
@@ -106,8 +171,33 @@ function ComparisonAnalysisWidgetComponent({
     staleTime: 30 * 60 * 1000,
   })
 
+  const ratioGridQuery = useQuery({
+    queryKey: ['comparison-ratio-grid', symbols.join(','), period],
+    queryFn: async () => {
+      const entries = await Promise.all(
+        symbols.map(async (ticker) => {
+          try {
+            const response = await getFinancialRatios(ticker, { period })
+            const latest = Array.isArray(response?.data) ? response.data[0] ?? null : null
+            return { symbol: ticker, ratios: latest as FinancialRatioData | null }
+          } catch {
+            return { symbol: ticker, ratios: null }
+          }
+        })
+      )
+
+      return entries
+    },
+    enabled: symbols.length >= 2,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const ratioGridRows = ratioGridQuery.data ?? []
   const hasData = Boolean(comparisonQuery.data?.stocks?.length)
+  const hasRatioGridData =
+    ratioGridRows.length > 0 && ratioGridRows.some((entry) => Boolean(entry.ratios))
   const isFallback = Boolean(comparisonQuery.error && hasData)
+  const primarySymbol = (symbol?.trim().toUpperCase() || symbols[0] || '').toUpperCase()
 
   const symbolColors = useMemo(() => {
     return symbols.reduce<Record<string, string>>((acc, ticker, index) => {
@@ -115,6 +205,19 @@ function ComparisonAnalysisWidgetComponent({
       return acc
     }, {})
   }, [symbols])
+
+  const performanceSeries = useMemo(
+    () => normalizePerformanceData(performanceQuery.data),
+    [performanceQuery.data]
+  )
+  const hasPerformanceData = performanceSeries.length > 0
+  const { timedOut: comparisonTimedOut, resetTimeout: resetComparisonTimeout } =
+    useLoadingTimeout(comparisonQuery.isLoading && !hasData)
+  const { timedOut: performanceTimedOut, resetTimeout: resetPerformanceTimeout } =
+    useLoadingTimeout(performanceQuery.isLoading && !hasPerformanceData)
+  const { timedOut: ratioGridTimedOut, resetTimeout: resetRatioGridTimeout } = useLoadingTimeout(
+    ratioGridQuery.isLoading && !hasRatioGridData
+  )
 
   const filteredMetrics = useMemo(() => {
     const selected = CATEGORY_DEFINITIONS.find((category) => category.id === activeCategory)
@@ -172,6 +275,7 @@ function ComparisonAnalysisWidgetComponent({
         comparisonQuery.refetch()
         performanceQuery.refetch()
         peersQuery.refetch()
+        ratioGridQuery.refetch()
       }}
       onClose={onRemove}
       isLoading={comparisonQuery.isLoading && !hasData}
@@ -291,16 +395,25 @@ function ComparisonAnalysisWidgetComponent({
         </div>
 
         <div className="h-[180px] border-b border-[var(--border-color)] px-2 py-1">
-          {performanceQuery.isLoading ? (
+          {performanceTimedOut && performanceQuery.isLoading ? (
+            <WidgetError
+              title="Loading timed out"
+              error={new Error('Request timed out after 15 seconds.')}
+              onRetry={() => {
+                resetPerformanceTimeout()
+                performanceQuery.refetch()
+              }}
+            />
+          ) : performanceQuery.isLoading ? (
             <WidgetSkeleton variant="chart" />
           ) : performanceQuery.error ? (
             <WidgetError error={performanceQuery.error as Error} onRetry={() => performanceQuery.refetch()} />
-          ) : !performanceQuery.data || performanceQuery.data.length === 0 ? (
+          ) : performanceSeries.length === 0 ? (
             <WidgetEmpty message="No performance series available for selected symbols." />
           ) : (
             <ChartMountGuard className="h-full" minHeight={120}>
               <ResponsiveContainer width="99%" height="100%" minWidth={260} minHeight={120}>
-                <LineChart data={performanceQuery.data}>
+                <LineChart data={performanceSeries}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.25)" vertical={false} />
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} />
                   <YAxis
@@ -361,6 +474,15 @@ function ComparisonAnalysisWidgetComponent({
             <WidgetEmpty
               message="Comparison requires at least two tickers."
               action={{ label: 'Add FPT', onClick: () => setSymbols((prev) => [...prev, 'FPT']) }}
+            />
+          ) : comparisonTimedOut && comparisonQuery.isLoading && !hasData ? (
+            <WidgetError
+              title="Loading timed out"
+              error={new Error('Request timed out after 15 seconds.')}
+              onRetry={() => {
+                resetComparisonTimeout()
+                comparisonQuery.refetch()
+              }}
             />
           ) : comparisonQuery.isLoading && !hasData ? (
             <WidgetSkeleton variant="table" lines={8} />
@@ -434,9 +556,146 @@ function ComparisonAnalysisWidgetComponent({
             </table>
           )}
         </div>
+
+        <div className="border-t border-[var(--border-color)]">
+          <div className="flex items-center justify-between gap-2 px-3 py-2">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setRatioTableView('valuation')}
+                className={cn(
+                  'rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors',
+                  ratioTableView === 'valuation'
+                    ? 'bg-blue-600/15 text-blue-300 border border-blue-500/35'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
+                )}
+              >
+                Valuation Multiples
+              </button>
+              <button
+                type="button"
+                onClick={() => setRatioTableView('financial')}
+                className={cn(
+                  'rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors',
+                  ratioTableView === 'financial'
+                    ? 'bg-blue-600/15 text-blue-300 border border-blue-500/35'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
+                )}
+              >
+                Financial Ratios
+              </button>
+            </div>
+            <span className="text-[10px] text-[var(--text-muted)]">
+              Period: {period}
+            </span>
+          </div>
+
+          <div className="max-h-[220px] overflow-auto border-t border-[var(--border-color)]">
+            {ratioGridTimedOut && ratioGridQuery.isLoading && !hasRatioGridData ? (
+              <WidgetError
+                title="Loading timed out"
+                error={new Error('Request timed out after 15 seconds.')}
+                onRetry={() => {
+                  resetRatioGridTimeout()
+                  ratioGridQuery.refetch()
+                }}
+              />
+            ) : ratioGridQuery.isLoading && !hasRatioGridData ? (
+              <WidgetSkeleton variant="table" lines={5} />
+            ) : ratioGridQuery.error && !hasRatioGridData ? (
+              <WidgetError
+                error={ratioGridQuery.error as Error}
+                onRetry={() => ratioGridQuery.refetch()}
+              />
+            ) : !hasRatioGridData ? (
+              <WidgetEmpty message="No ratio snapshot data available for selected symbols." />
+            ) : (
+              <table className="data-table financial-dense freeze-first-col w-full text-[11px]">
+                <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]/95 backdrop-blur">
+                  <tr className="border-b border-[var(--border-color)]">
+                    <th className="w-[172px] bg-[var(--bg-secondary)] text-left">Name</th>
+                    {(ratioTableView === 'valuation'
+                      ? VALUATION_RATIO_COLUMNS
+                      : FINANCIAL_RATIO_COLUMNS
+                    ).map((column) => (
+                      <th key={column.key} className="text-right">
+                        {column.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ratioGridRows.map((entry) => {
+                    const row = entry.ratios
+                    const isPrimary = entry.symbol === primarySymbol
+
+                    return (
+                      <tr
+                        key={`ratio-grid-${entry.symbol}`}
+                        className={cn(
+                          'border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-tertiary)]/40',
+                          isPrimary && 'bg-blue-600/5'
+                        )}
+                      >
+                        <td className="bg-[var(--bg-secondary)]">
+                          <div className="flex items-center gap-2">
+                            <CompanyLogo symbol={entry.symbol} name={entry.symbol} size={16} />
+                            <span className="font-semibold text-[var(--text-primary)]">
+                              {entry.symbol}
+                            </span>
+                          </div>
+                        </td>
+
+                        {(ratioTableView === 'valuation'
+                          ? VALUATION_RATIO_COLUMNS
+                          : FINANCIAL_RATIO_COLUMNS
+                        ).map((column) => {
+                          const rawValue = row?.[column.key]
+                          const numericValue =
+                            typeof rawValue === 'number' && Number.isFinite(rawValue)
+                              ? rawValue
+                              : null
+
+                          return (
+                            <td
+                              key={`${entry.symbol}-${column.key}`}
+                              data-type="number"
+                              className="font-mono text-[var(--text-primary)]"
+                            >
+                              {formatRatioGridValue(numericValue, column.format)}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
       </div>
     </WidgetContainer>
   )
+}
+
+function formatRatioGridValue(
+  value: number | null | undefined,
+  format: RatioColumn['format']
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return EMPTY_VALUE
+  }
+
+  if (format === 'percent-auto') {
+    return formatPercent(value, { decimals: 2, input: 'auto' })
+  }
+
+  if (format === 'percent') {
+    return formatPercent(value, { decimals: 2, input: 'percent' })
+  }
+
+  return formatNumber(value, { decimals: 2 })
 }
 
 function formatMetric(value: number | null | undefined, format: string): string {

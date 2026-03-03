@@ -96,6 +96,8 @@ export const queryKeys = {
     rsLeaders: (limit: number, sector?: string) => ['rsLeaders', limit, sector] as const,
     rsLaggards: (limit: number, sector?: string) => ['rsLaggards', limit, sector] as const,
     rsGainers: (limit: number, lookbackDays: number) => ['rsGainers', limit, lookbackDays] as const,
+    quant: (symbol: string, period: string, metrics: string[], source: string) =>
+        ['quant', symbol, period, metrics.join(','), source] as const,
 };
 
 // ============ Equity Queries ============
@@ -1011,6 +1013,31 @@ export function useTechnicalHistory(
         queryFn: () => api.getTechnicalHistory(symbol, { days }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // 5 minutes
+    });
+}
+
+// ============ Quant Queries ============
+
+export function useQuantMetrics(
+    symbol: string,
+    options?: {
+        period?: api.QuantPeriod;
+        metrics?: api.QuantMetric[];
+        source?: 'KBS' | 'VCI' | 'DNSE' | 'TCBS';
+        enabled?: boolean;
+    }
+) {
+    const preferredSource = useVnstockSource();
+    const period = options?.period || '5Y';
+    const metrics = options?.metrics || ['volume_delta'];
+    const source = options?.source || preferredSource;
+    const quantSource: 'KBS' | 'VCI' | 'DNSE' = source === 'TCBS' ? 'VCI' : source;
+    return useQuery({
+        queryKey: queryKeys.quant(symbol, period, metrics, quantSource),
+        queryFn: () => api.getQuantMetrics(symbol, { period, metrics, source: quantSource }),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 5 * 60 * 1000,
+        retry: 2,
     });
 }
 

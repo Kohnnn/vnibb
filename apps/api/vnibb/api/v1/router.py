@@ -22,6 +22,7 @@ from vnibb.api.v1.user import router as user_router
 from vnibb.api.v1.health import router as health_router
 from vnibb.api.v1.rs_rating import router as rs_rating_router
 from vnibb.api.v1.market import router as market_router
+from vnibb.api.v1.quant import router as quant_router
 
 from vnibb.api.v1.comparison import router as comparison_router
 from vnibb.api.v1.sectors import router as sectors_router
@@ -208,4 +209,11 @@ api_router.include_router(
     chart_router,
     prefix="/chart-data",
     tags=["Chart Data"],
+)
+
+# Quant analytics
+api_router.include_router(
+    quant_router,
+    prefix="/quant",
+    tags=["Quant"],
 )

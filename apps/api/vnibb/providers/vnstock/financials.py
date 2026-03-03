@@ -6,6 +6,7 @@ for Vietnam-listed companies via vnstock library.
 """
 
 import asyncio
+import inspect
 import logging
 import math
 import re
@@ -180,23 +181,34 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 statement_type = query["statement_type"]
                 period = query["period"]
                 candidate_sources: list[str] = []
-                for source in ["VCI", settings.vnstock_source, "KBS"]:
+                for source in [settings.vnstock_source, "KBS", "VCI"]:
                     if source and source not in candidate_sources:
                         candidate_sources.append(source)
 
-                def _fetch_df(finance: Any, lang: str | None):
-                    kwargs = {"period": period}
-                    if lang is not None:
-                        kwargs["lang"] = lang
-
+                def _get_statement_method(finance: Any):
                     if statement_type == "income":
-                        return finance.income_statement(**kwargs)
+                        return finance.income_statement
                     if statement_type == "balance":
-                        return finance.balance_sheet(**kwargs)
+                        return finance.balance_sheet
                     if statement_type == "cashflow":
-                        return finance.cash_flow(**kwargs)
+                        return finance.cash_flow
 
                     raise ValueError(f"Unknown statement type: {statement_type}")
+
+                def _fetch_df(finance: Any, lang: str | None):
+                    kwargs = {"period": period}
+                    method = _get_statement_method(finance)
+
+                    supports_lang = False
+                    try:
+                        supports_lang = "lang" in inspect.signature(method).parameters
+                    except (TypeError, ValueError):
+                        supports_lang = False
+
+                    if lang is not None and supports_lang:
+                        kwargs["lang"] = lang
+
+                    return method(**kwargs)
 
                 for source in candidate_sources:
                     try:
@@ -211,14 +223,20 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         )
                         continue
 
-                    for lang in ["en", None, "vi"]:
+                    try:
+                        supports_lang = (
+                            "lang" in inspect.signature(_get_statement_method(finance)).parameters
+                        )
+                    except (TypeError, ValueError):
+                        supports_lang = False
+
+                    lang_candidates: list[str | None] = (
+                        [None, "en", "vi"] if supports_lang else [None]
+                    )
+
+                    for lang in lang_candidates:
                         try:
                             df = _fetch_df(finance, lang)
-                        except TypeError:
-                            # Some vnstock source/method combos do not support lang.
-                            if lang is not None:
-                                continue
-                            df = _fetch_df(finance, None)
                         except Exception as source_error:
                             logger.debug(
                                 "vnstock %s fetch failed for %s source=%s lang=%s: %s",
@@ -794,7 +812,13 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 period: Any = year_hint or raw_period or "Unknown"
 
                 if params.period == "quarter" and year_hint is not None:
-                    quarter_hint = row.get("quarter") or row.get("period")
+                    quarter_hint = (
+                        row.get("quarter")
+                        or row.get("fiscalQuarter")
+                        or row.get("lengthReport")
+                        or row.get("length_report")
+                        or row.get("period")
+                    )
                     try:
                         quarter_value = int(float(quarter_hint))
                     except (TypeError, ValueError):
@@ -1044,5 +1068,28 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             except Exception as e:
                 logger.warning(f"Skipping invalid financial row: {e}")
                 continue
+
+        if params.period == "quarter":
+            quarter_rows = [
+                row
+                for row in results
+                if re.search(r"Q[1-4]", str(row.period or "").upper()) is not None
+            ]
+
+            deduped_rows: list[FinancialStatementData] = []
+            seen_periods: set[str] = set()
+            for row in quarter_rows:
+                normalized_period = str(row.period or "").upper()
+                if normalized_period in seen_periods:
+                    continue
+                seen_periods.add(normalized_period)
+                deduped_rows.append(row)
+
+            deduped_rows.sort(key=lambda row: _period_sort_key(str(row.period or "")), reverse=True)
+            return deduped_rows[: params.limit]
+
+        results.sort(key=lambda row: _period_sort_key(str(row.period or "")), reverse=True)
+        if params.limit:
+            return results[: params.limit]
 
         return results

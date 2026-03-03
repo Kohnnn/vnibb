@@ -30,17 +30,44 @@ function toMonthKey(date: Date): string {
   return `${year}-${String(month).padStart(2, '0')}`
 }
 
+function parseCandleTime(rawTime: number | string): Date | null {
+  if (typeof rawTime === 'number' && Number.isFinite(rawTime)) {
+    const millis = rawTime > 1e12 ? rawTime : rawTime * 1000
+    const parsed = new Date(millis)
+    return Number.isFinite(parsed.getTime()) ? parsed : null
+  }
+
+  const text = String(rawTime ?? '').trim()
+  if (!text) return null
+
+  const numeric = Number(text)
+  if (Number.isFinite(numeric)) {
+    const millis = numeric > 1e12 ? numeric : numeric * 1000
+    const parsedFromNumber = new Date(millis)
+    if (Number.isFinite(parsedFromNumber.getTime())) {
+      return parsedFromNumber
+    }
+  }
+
+  const parsed = new Date(text)
+  return Number.isFinite(parsed.getTime()) ? parsed : null
+}
+
 function computeMonthlyReturns(candles: OHLCData[]): MonthlyReturn[] {
   const grouped = new Map<string, { year: number; month: number; first: number; last: number }>()
 
   const sorted = candles
     .filter((candle) => Number.isFinite(candle.close))
     .slice()
-    .sort((a, b) => new Date(String(a.time)).getTime() - new Date(String(b.time)).getTime())
+    .sort((a, b) => {
+      const aTime = parseCandleTime(a.time)?.getTime() ?? 0
+      const bTime = parseCandleTime(b.time)?.getTime() ?? 0
+      return aTime - bTime
+    })
 
   for (const candle of sorted) {
-    const parsed = new Date(String(candle.time))
-    if (!Number.isFinite(parsed.getTime())) continue
+    const parsed = parseCandleTime(candle.time)
+    if (!parsed) continue
 
     const key = toMonthKey(parsed)
     const close = Number(candle.close)
@@ -139,7 +166,7 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
 
   const candles = (data?.data || []) as OHLCData[]
   const monthlyReturns = computeMonthlyReturns(candles)
-  const hasData = monthlyReturns.length > 12
+  const hasData = monthlyReturns.length >= 12
   const isFallback = Boolean(error && hasData)
 
   const { years, matrix } = buildHeatmap(monthlyReturns)

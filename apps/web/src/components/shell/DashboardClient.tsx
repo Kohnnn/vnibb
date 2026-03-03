@@ -129,18 +129,18 @@ function DashboardContent() {
                 return;
             }
 
-            if (!event.metaKey && !event.ctrlKey && !event.altKey) {
-                const numeric = Number(event.key);
-                if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 9 && activeDashboard?.tabs?.length) {
-                    const orderedTabs = [...activeDashboard.tabs].sort((a, b) => a.order - b.order);
-                    const nextTab = orderedTabs[numeric - 1];
-                    if (nextTab) {
-                        event.preventDefault();
-                        setActiveTab(nextTab.id);
-                    }
+            const numeric = Number(event.key);
+            if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 9 && activeDashboard?.tabs?.length) {
+                const orderedTabs = [...activeDashboard.tabs].sort((a, b) => a.order - b.order);
+                const nextTab = orderedTabs[numeric - 1];
+                if (nextTab && (event.metaKey || event.ctrlKey || (!event.altKey && !event.shiftKey))) {
+                    event.preventDefault();
+                    setActiveTab(nextTab.id);
                     return;
                 }
+            }
 
+            if (!event.metaKey && !event.ctrlKey && !event.altKey) {
                 if (event.key === 'Tab' && activeTab?.widgets?.length) {
                     const focusableWidgets = Array.from(
                         document.querySelectorAll<HTMLElement>('[data-widget-focus="true"]')

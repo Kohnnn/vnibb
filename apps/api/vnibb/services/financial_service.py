@@ -242,7 +242,13 @@ async def get_financials_with_ttm(
                 return True
             return upper.startswith(f"{q_num}/") or upper.startswith(f"{q_num}-")
 
-        data = [d for d in data if is_matching_quarter(d.period)][-limit:]
+        filtered = [d for d in data if is_matching_quarter(d.period)]
+        filtered.sort(
+            key=lambda row: (_extract_period_year(row.period) or 0) * 10
+            + (_extract_period_quarter(row.period) or 0),
+            reverse=True,
+        )
+        data = filtered[:limit]
 
     if actual_period == "year" and not is_specific_quarter:
         data = await _inject_latest_ytd_row(

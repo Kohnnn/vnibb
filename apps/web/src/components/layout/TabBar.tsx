@@ -356,7 +356,7 @@ export function TabBar({ symbol }: TabBarProps) {
                                         <span className="flex items-center gap-1 px-1">
                                             <span>{tab.name}</span>
                                             {index < 9 && (
-                                                <span className="text-[10px] text-[var(--text-muted)]">{index + 1}</span>
+                                                <span className="text-[10px] text-[var(--text-muted)]">⌘{index + 1}</span>
                                             )}
                                         </span>
                                     )}
@@ -417,7 +417,7 @@ export function TabBar({ symbol }: TabBarProps) {
 
                     {/* Keyboard shortcuts hint */}
                     <div className="hidden md:flex items-center gap-2 text-[10px] text-[var(--text-muted)] mr-2">
-                        <span className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded">1-9</span>
+                        <span className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded">⌘1-9</span>
                         <span>quick switch</span>
                         {reachedTabLimit && <span className="text-amber-400">max {MAX_TABS} tabs</span>}
                     </div>

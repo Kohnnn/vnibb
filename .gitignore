@@ -94,3 +94,5 @@ apps/api/scripts/v34_widget_health_after.json
 apps/api/scripts/v34_widget_health_strict.json
 apps/api/scripts/v120_cross_symbol_gate.json
 apps/api/scripts/v120_data_quality_report.json
+apps/api/migrations/versions/20260303_2230_cleanup_invalid_financial_ratio_periods.py
+apps/api/tests/test_api/quant_endpoint_test.py

@@ -4,6 +4,7 @@ import { useProfile, useDividends, useInsiderDeals, useScreenerData } from '@/li
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { Building2, Globe, Users, Calendar, MapPin, AlertTriangle } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/format';
@@ -68,9 +69,23 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     const insiderDeals = insiderDealsData ?? [];
     const hasData = Boolean(profile);
     const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
     const updatedAt = [dataUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
         .filter(Boolean)
         .sort((a, b) => Number(b) - Number(a))[0];
+
+    if (timedOut && isLoading && !hasData) {
+        return (
+            <WidgetError
+                title="Loading timed out"
+                error={new Error('Request timed out after 15 seconds.')}
+                onRetry={() => {
+                    resetTimeout();
+                    refetch();
+                }}
+            />
+        );
+    }
 
     if (isLoading && !hasData) {
         return <WidgetSkeleton lines={4} />;

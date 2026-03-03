@@ -1264,6 +1264,51 @@ export async function getPeerCompanies(symbol: string, limit = 5): Promise<Peers
     });
 }
 
+// ============ Quant API ============
+
+export type QuantPeriod = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'YTD' | 'ALL'
+
+export type QuantMetric =
+    | 'volume_delta'
+    | 'rsi_seasonal'
+    | 'gap_stats'
+    | 'bollinger'
+    | 'atr'
+    | 'sortino'
+    | 'calmar'
+    | 'macd_crossovers'
+
+export interface QuantResponse {
+    data: {
+        symbol: string
+        period: QuantPeriod
+        computed_at: string
+        metrics: Record<string, any>
+    }
+    meta?: {
+        count?: number
+    }
+    error?: string | null
+}
+
+export async function getQuantMetrics(
+    symbol: string,
+    options?: {
+        period?: QuantPeriod
+        metrics?: QuantMetric[]
+        source?: 'KBS' | 'VCI' | 'DNSE'
+    }
+): Promise<QuantResponse> {
+    return fetchAPI<QuantResponse>(`/quant/${symbol}`, {
+        params: {
+            period: options?.period ?? '5Y',
+            metrics: options?.metrics?.join(','),
+            source: options?.source,
+        },
+        timeout: 30000,
+    })
+}
+
 // ============ AI Copilot API ============
 
 export interface WidgetContext {

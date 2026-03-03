@@ -6,12 +6,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   Search,
   User,
-  Edit,
-  Check,
-  Bot,
-  RotateCcw,
   X,
-  LayoutGrid,
   MoreHorizontal,
   ChevronRight,
   Settings2,
@@ -312,7 +307,7 @@ export function Header({
               </button>
             )}
             <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-              Cmd+K
+              ⌘K
             </span>
           </div>
         </div>
@@ -416,6 +411,16 @@ export function Header({
                     Reset layout
                   </DropdownMenuItem>
                 )}
+                {onAIClick && (
+                  <>
+                    {(onAutoFitLayout || onResetLayout || onCollapseAll || onExpandAll || onEditToggle) && (
+                      <DropdownMenuSeparator />
+                    )}
+                    <DropdownMenuItem onClick={onAIClick} className="text-xs">
+                      Open AI assistant
+                    </DropdownMenuItem>
+                  </>
+                )}
                 {(onCollapseAll || onExpandAll) && <DropdownMenuSeparator />}
                 {onCollapseAll && (
                   <DropdownMenuItem onClick={onCollapseAll} className="text-xs">
@@ -438,59 +443,6 @@ export function Header({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          {isEditing && onResetLayout && (
-            <button
-              onClick={onResetLayout}
-              className="flex items-center gap-1.5 rounded-md border border-amber-500/20 bg-amber-500/15 px-2 md:px-2.5 py-1.5 text-amber-400 transition-colors hover:bg-amber-500/25"
-              title="Reset widget positions to default"
-            >
-              <RotateCcw size={14} />
-              <span className="hidden text-xs font-medium md:inline">Reset</span>
-            </button>
-          )}
-
-          {onAutoFitLayout && (
-            <button
-              onClick={onAutoFitLayout}
-              className="flex items-center gap-1.5 rounded-md border border-sky-500/20 bg-sky-500/15 px-2 md:px-2.5 py-1.5 text-sky-300 transition-colors hover:bg-sky-500/25"
-              title="Auto-arrange widgets into a neat grid"
-            >
-              <LayoutGrid size={14} />
-              <span className="hidden text-xs font-medium md:inline">Auto-fit</span>
-            </button>
-          )}
-
-          {onEditToggle && (
-            <button
-              onClick={onEditToggle}
-              className={cn(
-                'flex items-center gap-1.5 rounded-md px-2 md:px-3 py-1.5 text-xs font-medium transition-colors',
-                isEditing
-                  ? 'border border-green-500/20 bg-green-500/15 text-green-400 hover:bg-green-500/25'
-                  : 'border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-              )}
-            >
-              {isEditing ? (
-                <>
-                  <Check size={14} />
-                  <span className="hidden md:inline">Save Layout</span>
-                </>
-              ) : (
-                <>
-                  <Edit size={14} />
-                  <span className="hidden md:inline">Edit</span>
-                </>
-              )}
-            </button>
-          )}
-
-          <button
-            onClick={onAIClick}
-            className="flex items-center gap-1.5 rounded-md border border-blue-500/20 bg-blue-600/15 px-2 md:px-2.5 py-1.5 text-blue-400 transition-colors hover:bg-blue-600/25"
-          >
-            <Bot size={14} />
-            <span className="hidden text-xs font-medium xl:inline">AI</span>
-          </button>
 
           <div className="hidden sm:block">
             <AlertNotificationPanel />

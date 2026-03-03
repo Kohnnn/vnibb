@@ -144,10 +144,17 @@ class DataPipeline:
         self.cache_writes_enabled = True
         self._redis_disabled_until = 0.0
         rps_budget = max(float(getattr(settings, "vnstock_rate_limit_rps", 0) or 0), 0.0)
+        reinforcement_rps = max(
+            float(getattr(settings, "vnstock_reinforcement_rps", 0) or 0),
+            0.0,
+        )
         self.global_vnstock_limiter = RateLimiter(calls_per_minute=rps_budget * 60)
-        self.reinforcement_vnstock_limiter = RateLimiter(calls_per_minute=60)
+        self.reinforcement_vnstock_limiter = RateLimiter(calls_per_minute=reinforcement_rps * 60)
         self._normal_budget_per_minute = 500
-        self._reinforcement_budget_per_minute = 50
+        reinforcement_budget = int(reinforcement_rps * 60)
+        self._reinforcement_budget_per_minute = (
+            min(50, reinforcement_budget) if reinforcement_budget > 0 else 0
+        )
         self._rate_log_window_start = 0.0
         self._rate_log_normal_calls = 0
         self._rate_log_reinforcement_calls = 0
@@ -1066,12 +1073,16 @@ class DataPipeline:
                                 if "item_id" in df.columns:
                                     records = df.to_dict("records")
                                     year_cols = sorted(
-                                        [c for c in df.columns if str(c).isdigit()],
+                                        [
+                                            str(column)
+                                            for column in df.columns
+                                            if re.fullmatch(r"20\d{2}", str(column))
+                                        ],
                                         reverse=True,
                                     )
                                     if not year_cols:
                                         return None
-                                    latest_year = str(year_cols[0])
+                                    latest_year = year_cols[0]
                                     ratio_row: Dict[str, Any] = {"year_report": int(latest_year)}
                                     metric_map = {
                                         "p_e": "pe",
