@@ -130,8 +130,8 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend} except per-share values`,
-        [unitLegend]
+        () => `Note: ${unitLegend} except per-share values. Data for ${symbol}.`,
+        [unitLegend, symbol]
     );
 
     const tableColumns = useMemo(

@@ -621,7 +621,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
 
             {/* Row Detail View (Overlay) */}
             {selectedRow && (
-                <div className="absolute inset-0 bg-background/95 backdrop-blur-sm z-[150] flex flex-col p-6 animate-in fade-in duration-200">
+                <div className="absolute inset-0 bg-background z-[150] flex flex-col p-6 animate-in fade-in duration-200">
                     <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-2">
                             <FileJson className="h-5 w-5 text-blue-500" />

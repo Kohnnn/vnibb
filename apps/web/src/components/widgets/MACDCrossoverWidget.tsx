@@ -2,7 +2,18 @@
 
 import { useState } from 'react'
 import { ActivitySquare } from 'lucide-react'
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { useQuantMetrics } from '@/lib/queries'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
@@ -25,6 +36,13 @@ type CrossoverRow = {
   return_3m_pct: number | null
 }
 
+type MACDSeriesRow = {
+  date: string
+  macd: number | null
+  signal: number | null
+  histogram: number | null
+}
+
 function stateClass(state: string): string {
   if (state === 'bullish') return 'text-emerald-300'
   if (state === 'bearish') return 'text-red-300'
@@ -43,24 +61,41 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
   const metric = data?.data?.metrics?.macd_crossovers as
     | {
         current_state?: string
+        current_macd?: number | null
+        current_signal?: number | null
+        current_histogram?: number | null
         avg_return_after_bullish_1m_pct?: number | null
         avg_return_after_bullish_3m_pct?: number | null
+        macd_series?: MACDSeriesRow[]
         crossovers?: CrossoverRow[]
       }
     | undefined
 
+  const macdSeries = metric?.macd_series || []
   const crossovers = metric?.crossovers || []
+  const macdPanelSeries = macdSeries.slice(-120).map((row) => ({
+    date: row.date,
+    macd: Number(row.macd ?? 0),
+    signal: Number(row.signal ?? 0),
+    histogram: Number(row.histogram ?? 0),
+  }))
   const crossoverBars = crossovers.slice(-24).map((row) => ({
     date: row.date,
     type: row.type,
     return1m: Number(row.return_1m_pct ?? 0),
     return3m: Number(row.return_3m_pct ?? 0),
   }))
-  const maxAbs = Math.max(
+  const maxMacdAbs = Math.max(
+    ...macdPanelSeries.map((row) =>
+      Math.max(Math.abs(row.macd), Math.abs(row.signal), Math.abs(row.histogram))
+    ),
+    0.5
+  )
+  const maxReturnAbs = Math.max(
     ...crossoverBars.map((row) => Math.max(Math.abs(row.return1m), Math.abs(row.return3m))),
     1
   )
-  const hasData = crossovers.length > 0
+  const hasData = macdSeries.length > 0 || crossovers.length > 0
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view MACD crossovers" icon={<ActivitySquare size={18} />} />
@@ -98,18 +133,82 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
         <WidgetEmpty message="No crossover history" icon={<ActivitySquare size={18} />} />
       ) : (
         <>
-          <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
+          <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
               <div className="text-gray-500 uppercase tracking-widest">State</div>
-              <div className={`font-semibold uppercase ${stateClass(metric?.current_state || 'neutral')}`}>{metric?.current_state || 'neutral'}</div>
+              <div className={`font-semibold uppercase ${stateClass(metric?.current_state || 'neutral')}`}>
+                {metric?.current_state || 'neutral'}
+              </div>
             </div>
             <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
+              <div className="text-gray-500 uppercase tracking-widest">MACD</div>
+              <div className="text-cyan-300 font-mono">{Number(metric?.current_macd ?? 0).toFixed(4)}</div>
+            </div>
+            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
+              <div className="text-gray-500 uppercase tracking-widest">Signal</div>
+              <div className="text-amber-300 font-mono">{Number(metric?.current_signal ?? 0).toFixed(4)}</div>
+            </div>
+            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
+              <div className="text-gray-500 uppercase tracking-widest">Histogram</div>
+              <div
+                className={`font-mono ${Number(metric?.current_histogram ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}
+              >
+                {Number(metric?.current_histogram ?? 0).toFixed(4)}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-gray-800/60 bg-black/20 p-2 mb-2">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-widest text-gray-500">MACD Panel</div>
+              <div className="text-[10px] text-gray-400">MACD, Signal, Histogram</div>
+            </div>
+            {macdPanelSeries.length === 0 ? (
+              <div className="py-6 text-center text-[11px] text-gray-500">No MACD series available</div>
+            ) : (
+              <ChartMountGuard className="h-[140px]" minHeight={120}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={macdPanelSeries}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
+                      axisLine={false}
+                      tickLine={false}
+                      domain={[-maxMacdAbs, maxMacdAbs]}
+                    />
+                    <ReferenceLine y={0} stroke="rgba(148,163,184,0.32)" />
+                    <Tooltip
+                      contentStyle={{
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        fontSize: '11px',
+                      }}
+                      formatter={(value: unknown, name?: string) => [Number(value).toFixed(4), name || '']}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '10px' }} />
+                    <Bar dataKey="histogram" name="Histogram" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
+                    <Line type="monotone" dataKey="macd" name="MACD" stroke="#22d3ee" dot={false} strokeWidth={2} />
+                    <Line type="monotone" dataKey="signal" name="Signal" stroke="#f59e0b" dot={false} strokeWidth={2} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </ChartMountGuard>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
+            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
               <div className="text-gray-500 uppercase tracking-widest">Bull 1M Avg</div>
-              <div className="text-emerald-300 font-mono">{Number(metric?.avg_return_after_bullish_1m_pct ?? 0).toFixed(2)}%</div>
+              <div className="text-emerald-300 font-mono">
+                {Number(metric?.avg_return_after_bullish_1m_pct ?? 0).toFixed(2)}%
+              </div>
             </div>
             <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
               <div className="text-gray-500 uppercase tracking-widest">Bull 3M Avg</div>
-              <div className="text-cyan-300 font-mono">{Number(metric?.avg_return_after_bullish_3m_pct ?? 0).toFixed(2)}%</div>
+              <div className="text-cyan-300 font-mono">
+                {Number(metric?.avg_return_after_bullish_3m_pct ?? 0).toFixed(2)}%
+              </div>
             </div>
           </div>
 
@@ -123,15 +222,16 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
             ) : (
               <ChartMountGuard className="h-[140px]" minHeight={120}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={crossoverBars}>
+                  <ComposedChart data={crossoverBars}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />
                     <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                     <YAxis
                       tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                       axisLine={false}
                       tickLine={false}
-                      domain={[-maxAbs, maxAbs]}
+                      domain={[-maxReturnAbs, maxReturnAbs]}
                     />
+                    <ReferenceLine y={0} stroke="rgba(148,163,184,0.32)" />
                     <Tooltip
                       contentStyle={{
                         background: 'var(--bg-secondary)',
@@ -143,7 +243,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
                     />
                     <Bar dataKey="return1m" name="1M Return" fill="#22c55e" radius={[2, 2, 0, 0]} />
                     <Bar dataKey="return3m" name="3M Return" fill="#06b6d4" radius={[2, 2, 0, 0]} />
-                  </BarChart>
+                  </ComposedChart>
                 </ResponsiveContainer>
               </ChartMountGuard>
             )}
@@ -163,7 +263,9 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
                 {crossovers.slice(-12).reverse().map((row) => (
                   <tr key={`${row.date}-${row.type}-${row.price}`} className="border-b border-gray-900/80 text-gray-300">
                     <td className="py-1">{row.date}</td>
-                    <td className={`py-1 uppercase ${row.type === 'bullish' ? 'text-emerald-300' : 'text-red-300'}`}>{row.type}</td>
+                    <td className={`py-1 uppercase ${row.type === 'bullish' ? 'text-emerald-300' : 'text-red-300'}`}>
+                      {row.type}
+                    </td>
                     <td className="py-1 text-right font-mono">{Number(row.return_1m_pct ?? 0).toFixed(2)}%</td>
                     <td className="py-1 text-right font-mono">{Number(row.return_3m_pct ?? 0).toFixed(2)}%</td>
                   </tr>

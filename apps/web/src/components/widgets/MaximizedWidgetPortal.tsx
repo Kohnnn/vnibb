@@ -73,7 +73,7 @@ export function MaximizedWidgetPortal({
             className={`
                 fixed inset-0 z-50 flex items-center justify-center p-6
                 transition-all duration-200 ease-out
-                ${isAnimating ? 'bg-black/80 backdrop-blur-sm' : 'bg-black/0'}
+                ${isAnimating ? 'bg-black/80' : 'bg-black/0'}
             `}
             onClick={handleBackdropClick}
         >

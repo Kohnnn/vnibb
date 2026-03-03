@@ -129,7 +129,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
     }, [items, unitConfig]);
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
-    const unitNote = useMemo(() => `Note: ${unitLegend}`, [unitLegend]);
+    const unitNote = useMemo(() => `Note: ${unitLegend}. Data for ${symbol}.`, [unitLegend, symbol]);
 
     const tableColumns = useMemo(
         () =>

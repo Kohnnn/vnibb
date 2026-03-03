@@ -69,7 +69,7 @@ export class WidgetErrorBoundary extends Component<Props, State> {
             <AlertTriangle size={32} />
           </div>
           <div className="widget-error__content">
-            <h4 className="widget-error__title">Something went wrong</h4>
+            <h4 className="widget-error__title">Widget crashed</h4>
             <p className="widget-error__message">
               {this.props.widgetName
                 ? `The ${this.props.widgetName} widget encountered an error.`
@@ -86,7 +86,7 @@ export class WidgetErrorBoundary extends Component<Props, State> {
             onClick={this.handleRetry}
           >
             <RefreshCw size={16} />
-            <span>Try Again</span>
+            <span>Retry</span>
           </button>
         </div>
       );
@@ -115,7 +115,7 @@ export const WidgetErrorFallback: React.FC<ErrorFallbackProps> = ({
       <AlertTriangle size={32} />
     </div>
     <div className="widget-error__content">
-      <h4 className="widget-error__title">Something went wrong</h4>
+      <h4 className="widget-error__title">Widget crashed</h4>
       <p className="widget-error__message">
         {widgetName
           ? `The ${widgetName} widget encountered an error.`
@@ -125,7 +125,7 @@ export const WidgetErrorFallback: React.FC<ErrorFallbackProps> = ({
     </div>
     <button className="widget-error__retry" onClick={resetError}>
       <RefreshCw size={16} />
-      <span>Try Again</span>
+      <span>Retry</span>
     </button>
   </div>
 );

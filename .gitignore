@@ -75,9 +75,8 @@ server.log
 apps/api/nul
 image/
 
-# Test files (not for production)
+# Local test artifacts (not for production)
 test.db
-test_*.py
 test_*.sh
 api_test_results.json
 *.test.ts
@@ -95,4 +94,15 @@ apps/api/scripts/v34_widget_health_strict.json
 apps/api/scripts/v120_cross_symbol_gate.json
 apps/api/scripts/v120_data_quality_report.json
 apps/api/migrations/versions/20260303_2230_cleanup_invalid_financial_ratio_periods.py
+apps/api/scripts/test_simple.py
 apps/api/tests/test_api/quant_endpoint_test.py
+apps/api/tests/test_api/test_admin_reinforcement.py
+apps/api/tests/test_api/test_chart_endpoint.py
+apps/api/tests/test_api/test_equity_ratio_helpers.py
+apps/api/tests/test_api/test_financial_ratio_transform.py
+apps/api/tests/test_api/test_financials_transform.py
+apps/api/tests/test_api/test_foreign_trading_transform.py
+apps/api/tests/test_api/test_news_service.py
+apps/api/tests/test_api/test_sectors_endpoint.py
+apps/api/tests/test_api/test_smoke_endpoints.py
+apps/api/tests/test_integration/test_api_integration.py

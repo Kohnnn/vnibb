@@ -15,7 +15,7 @@ interface MajorShareholdersWidgetProps {
 }
 
 function formatShares(shares: number | null | undefined): string {
-    if (shares === null || shares === undefined || Number.isNaN(shares)) return '-';
+    if (shares === null || shares === undefined || Number.isNaN(shares)) return 'Data unavailable';
     if (shares >= 1e9) return `${(shares / 1e9).toFixed(2)}B`;
     if (shares >= 1e6) return `${(shares / 1e6).toFixed(2)}M`;
     if (shares >= 1e3) return `${(shares / 1e3).toFixed(1)}K`;
@@ -23,7 +23,7 @@ function formatShares(shares: number | null | undefined): string {
 }
 
 function formatPct(pct: number | null | undefined): string {
-    if (pct === null || pct === undefined || Number.isNaN(pct)) return '-';
+    if (pct === null || pct === undefined || Number.isNaN(pct)) return 'Data unavailable';
     return `${pct.toFixed(2)}%`;
 }
 
@@ -108,6 +108,14 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
                                     treatOwnershipAsRatio
                                         ? ownershipPctRaw * 100
                                         : ownershipPctRaw;
+                                const missingShares =
+                                    sharesOwned === null ||
+                                    sharesOwned === undefined ||
+                                    Number.isNaN(Number(sharesOwned));
+                                const missingOwnership =
+                                    ownershipPct === null ||
+                                    ownershipPct === undefined ||
+                                    Number.isNaN(Number(ownershipPct));
                                 return (
                                     <tr key={index} className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
                                         <td className="py-1.5 px-1">
@@ -118,10 +126,10 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
                                                 </span>
                                             </div>
                                         </td>
-                                        <td className="text-right py-1.5 px-1 text-[var(--text-secondary)]">
+                                        <td className={`text-right py-1.5 px-1 ${missingShares ? 'text-[var(--text-muted)] text-[10px]' : 'text-[var(--text-secondary)]'}`}>
                                             {formatShares(sharesOwned as number | null | undefined)}
                                         </td>
-                                        <td className="text-right py-1.5 px-1 text-green-400 font-medium">
+                                        <td className={`text-right py-1.5 px-1 font-medium ${missingOwnership ? 'text-[var(--text-muted)] text-[10px]' : 'text-green-400'}`}>
                                             {formatPct(ownershipPct as number | null | undefined)}
                                         </td>
                                     </tr>

@@ -113,7 +113,7 @@ export function formatRelativeTime(date: Date | string): string {
   const mins = String(then.getMinutes()).padStart(2, '0');
 
   if (isSameDay) {
-    return `today at ${hours}:${mins}`;
+    return `Today ${hours}:${mins}`;
   }
 
   const year = then.getFullYear();

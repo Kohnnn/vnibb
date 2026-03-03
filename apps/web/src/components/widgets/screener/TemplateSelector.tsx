@@ -245,7 +245,7 @@ export function TemplateSelector({ currentFilters, currentColumns, onLoadTemplat
             </div>
 
             {isSaving && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] backdrop-blur-sm animate-in fade-in duration-200">
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] animate-in fade-in duration-200">
                     <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-xl p-6 shadow-2xl w-96 max-w-full">
                         <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4 flex items-center gap-2">
                             <Save size={20} className="text-blue-500" />

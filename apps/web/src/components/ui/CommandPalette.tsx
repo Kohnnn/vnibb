@@ -154,7 +154,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
+                className="fixed inset-0 bg-black/60 z-50"
                 role="button"
                 tabIndex={0}
                 aria-label="Close command palette"

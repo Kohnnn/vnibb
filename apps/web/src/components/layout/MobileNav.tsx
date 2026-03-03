@@ -33,7 +33,7 @@ export function MobileNav({
             {/* Mobile Drawer Overlay */}
             {isOpen && (
                 <div
-                    className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 transition-opacity"
+                    className="lg:hidden fixed inset-0 bg-black/60 z-50 transition-opacity"
                     role="button"
                     tabIndex={0}
                     aria-label="Close menu"

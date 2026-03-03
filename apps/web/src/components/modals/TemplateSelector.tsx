@@ -47,14 +47,14 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
       <button
         type="button"
         onClick={onClose}
-        className="absolute inset-0 bg-slate-950/55 backdrop-blur-md"
+        className="absolute inset-0 bg-slate-950/60"
         aria-label="Close template selector"
       />
       <motion.div 
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         onClick={(event) => event.stopPropagation()}
-        className="w-full max-w-4xl max-h-[85vh] bg-[var(--bg-surface)]/95 backdrop-blur-xl border border-[var(--border-subtle)] rounded-2xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col"
+        className="w-full max-w-4xl max-h-[85vh] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-[var(--border-default)] bg-[var(--bg-surface)]">

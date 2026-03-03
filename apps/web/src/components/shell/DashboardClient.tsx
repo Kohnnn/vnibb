@@ -130,10 +130,18 @@ function DashboardContent() {
             }
 
             const numeric = Number(event.key);
-            if (Number.isInteger(numeric) && numeric >= 1 && numeric <= 9 && activeDashboard?.tabs?.length) {
+            if (
+                Number.isInteger(numeric) &&
+                numeric >= 1 &&
+                numeric <= 9 &&
+                activeDashboard?.tabs?.length &&
+                (event.metaKey || event.ctrlKey) &&
+                !event.altKey &&
+                !event.shiftKey
+            ) {
                 const orderedTabs = [...activeDashboard.tabs].sort((a, b) => a.order - b.order);
                 const nextTab = orderedTabs[numeric - 1];
-                if (nextTab && (event.metaKey || event.ctrlKey || (!event.altKey && !event.shiftKey))) {
+                if (nextTab) {
                     event.preventDefault();
                     setActiveTab(nextTab.id);
                     return;
