@@ -178,8 +178,9 @@ class PerformanceLoggingMiddleware(BaseHTTPMiddleware):
         # Add server-timing header
         response.headers["X-Process-Time"] = f"{process_time:.4f}s"
 
-        # Log slow requests
-        if process_time > 0.5:  # Over 500ms
+        # Log only materially slow requests here.
+        # Fine-grained latency warnings are already handled by MetricsMiddleware.
+        if process_time > 3.0:
             logger.warning(
                 f"Slow Request: {request.method} {request.url.path} "
                 f"status={response.status_code} took {process_time:.4f}s"

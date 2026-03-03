@@ -13,6 +13,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface FinancialRatiosWidgetProps {
     id: string;
@@ -63,6 +64,23 @@ const ratioLabels: Record<string, string> = {
 
 const TABLE_YEAR_LIMIT = 10;
 
+const VALID_RATIO_PERIOD_RE = /^20\d{2}(?:-Q[1-4])?$/
+
+function normalizeRatioPeriod(period: string | null | undefined): string | null {
+    const cleaned = String(period ?? '').trim().toUpperCase()
+    if (!cleaned) return null
+
+    if (VALID_RATIO_PERIOD_RE.test(cleaned)) return cleaned
+
+    const compactQuarter = cleaned.match(/^(20\d{2})Q([1-4])$/)
+    if (compactQuarter) return `${compactQuarter[1]}-Q${compactQuarter[2]}`
+
+    const slashQuarter = cleaned.match(/^Q([1-4])[-/](20\d{2})$/)
+    if (slashQuarter) return `${slashQuarter[2]}-Q${slashQuarter[1]}`
+
+    return null
+}
+
 function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: FinancialRatiosWidgetProps) {
     const { period, setPeriod } = usePeriodState({
         widgetId: id || 'financial_ratios',
@@ -81,9 +99,29 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
         dataUpdatedAt,
     } = useFinancialRatios(symbol, { period: apiPeriod });
 
-    const ratios = data?.data || [];
+    const rawRatios = data?.data || [];
+    const ratios = useMemo(() => {
+        const seen = new Set<string>()
+
+        return rawRatios
+            .map((entry) => {
+                const normalizedPeriod = normalizeRatioPeriod(entry?.period)
+                if (!normalizedPeriod) return null
+                return {
+                    ...entry,
+                    period: normalizedPeriod,
+                }
+            })
+            .filter((entry): entry is NonNullable<typeof entry> => {
+                if (!entry) return false
+                if (seen.has(entry.period)) return false
+                seen.add(entry.period)
+                return true
+            })
+    }, [rawRatios]);
     const hasData = ratios.length > 0;
     const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
     const categoryMetrics = {
         valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda', 'peg_ratio'],
         liquidity: ['current_ratio', 'quick_ratio', 'cash_ratio'],
@@ -199,7 +237,16 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                     />
                 </div>
                 <div className="flex-1 overflow-auto px-2 pt-1 scrollbar-hide">
-                    {isLoading && !hasData ? (
+                    {timedOut && isLoading && !hasData ? (
+                        <WidgetError
+                            title="Loading timed out"
+                            error={new Error('Request timed out after 15 seconds.')}
+                            onRetry={() => {
+                                resetTimeout()
+                                refetch()
+                            }}
+                        />
+                    ) : isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />

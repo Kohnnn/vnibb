@@ -87,7 +87,25 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
     enabled: Boolean(upperSymbol),
   });
 
-  const candles = (data?.data || []) as OHLCData[];
+  const candles = ((data?.data || []) as OHLCData[])
+    .map((row) => {
+      const close = Number(row.close);
+      if (!Number.isFinite(close)) return null;
+
+      const highRaw = Number(row.high);
+      const lowRaw = Number(row.low);
+      const high = Number.isFinite(highRaw) ? highRaw : close;
+      const low = Number.isFinite(lowRaw) ? lowRaw : close;
+
+      return {
+        ...row,
+        high: Math.max(high, low, close),
+        low: Math.min(high, low, close),
+        volume: Number.isFinite(Number(row.volume)) ? Number(row.volume) : 0,
+      } as OHLCData;
+    })
+    .filter((row): row is OHLCData => row !== null);
+
   const profile = calculateVolumeProfile(candles, 24) as VolumeBin[];
   const hasData = profile.length > 0;
   const isFallback = Boolean(error && hasData);
@@ -97,6 +115,28 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume profile" icon={<BarChart2 size={18} />} />;
+  }
+
+  if (isLoading && !hasData) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex items-center justify-between px-1 py-1 mb-2">
+          <div className="flex items-center gap-2 text-xs text-gray-400">
+            <BarChart2 size={12} className="text-cyan-400" />
+            <span>6M Volume Profile</span>
+          </div>
+        </div>
+        <WidgetSkeleton lines={10} />
+      </div>
+    );
+  }
+
+  if (error && !hasData) {
+    return <WidgetError error={error as Error} onRetry={() => refetch()} />;
+  }
+
+  if (!hasData) {
+    return <WidgetEmpty message="No volume profile data" icon={<BarChart2 size={18} />} />;
   }
 
   return (
@@ -131,42 +171,34 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
       </div>
 
       <div className="flex-1 overflow-auto space-y-1 pr-1">
-        {isLoading && !hasData ? (
-          <WidgetSkeleton lines={8} />
-        ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => refetch()} />
-        ) : !hasData ? (
-          <WidgetEmpty message="No volume profile data" icon={<BarChart2 size={18} />} />
-        ) : (
-          profile
-            .slice()
-            .reverse()
-            .map((bin, index) => {
-              const widthPct = maxVolume > 0 ? (bin.volume / maxVolume) * 100 : 0;
-              const isPOC = pocPrice !== null && Math.abs(bin.price - pocPrice) < Number.EPSILON;
-              const isInValueArea =
-                vahPrice !== null && valPrice !== null && bin.price >= valPrice && bin.price <= vahPrice;
+        {profile
+          .slice()
+          .reverse()
+          .map((bin, index) => {
+            const widthPct = maxVolume > 0 ? (bin.volume / maxVolume) * 100 : 0;
+            const isPOC = pocPrice !== null && Math.abs(bin.price - pocPrice) < Number.EPSILON;
+            const isInValueArea =
+              vahPrice !== null && valPrice !== null && bin.price >= valPrice && bin.price <= vahPrice;
 
-              return (
-                <div key={`${bin.price}-${index}`} className="flex items-center gap-2">
-                  <div className="w-14 text-[10px] text-gray-500 shrink-0 font-mono">{bin.price.toFixed(2)}</div>
-                  <div className="flex-1 h-4 bg-gray-800/30 rounded overflow-hidden relative">
-                    <div
-                      className={`h-full ${
-                        isPOC
-                          ? 'bg-cyan-500'
-                          : isInValueArea
-                            ? 'bg-emerald-500/70'
-                            : 'bg-gray-500/45'
-                      }`}
-                      style={{ width: `${Math.max(2, widthPct)}%` }}
-                    />
-                  </div>
-                  <div className="w-12 text-[10px] text-gray-400 text-right shrink-0">{formatVolume(bin.volume)}</div>
+            return (
+              <div key={`${bin.price}-${index}`} className="flex items-center gap-2">
+                <div className="w-14 text-[10px] text-gray-500 shrink-0 font-mono">{bin.price.toFixed(2)}</div>
+                <div className="flex-1 h-4 bg-gray-800/30 rounded overflow-hidden relative">
+                  <div
+                    className={`h-full ${
+                      isPOC
+                        ? 'bg-cyan-500'
+                        : isInValueArea
+                          ? 'bg-emerald-500/70'
+                          : 'bg-gray-500/45'
+                    }`}
+                    style={{ width: `${Math.max(2, widthPct)}%` }}
+                  />
                 </div>
-              );
-            })
-        )}
+                <div className="w-12 text-[10px] text-gray-400 text-right shrink-0">{formatVolume(bin.volume)}</div>
+              </div>
+            );
+          })}
       </div>
     </div>
   );

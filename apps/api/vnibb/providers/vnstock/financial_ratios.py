@@ -17,6 +17,8 @@ from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 
 logger = logging.getLogger(__name__)
 
+VALID_PERIOD_RE = re.compile(r"^\d{4}(?:-Q[1-4])?$")
+
 
 def _as_float(value: Any) -> Optional[float]:
     try:
@@ -33,10 +35,79 @@ def _normalize_dividend_yield(value: Any) -> Optional[float]:
         return None
 
     normalized = numeric
+    if 0 < abs(normalized) < 1:
+        normalized *= 100
+
     while abs(normalized) > 100:
         normalized /= 100
 
+    if abs(normalized) > 50:
+        normalized = 50.0 if normalized > 0 else -50.0
+
     return normalized
+
+
+def _period_sort_key(period: str) -> int:
+    upper = str(period or "").upper()
+    year_match = re.search(r"(20\d{2})", upper)
+    year = int(year_match.group(1)) if year_match else 0
+    quarter_match = re.search(r"Q([1-4])", upper)
+    quarter = int(quarter_match.group(1)) if quarter_match else 0
+    return year * 10 + quarter
+
+
+def _normalize_period_value(
+    period_value: Any,
+    *,
+    fiscal_year: Any = None,
+    fiscal_quarter: Any = None,
+    default_period: str = "year",
+) -> Optional[str]:
+    text = str(period_value or "").strip().upper()
+
+    year_hint = _as_float(fiscal_year)
+    quarter_hint = _as_float(fiscal_quarter)
+    year = int(year_hint) if year_hint is not None else None
+    quarter = int(quarter_hint) if quarter_hint is not None else None
+    if year is not None and not (1900 <= year <= 2100):
+        year = None
+    if quarter is not None and not (1 <= quarter <= 4):
+        quarter = None
+
+    if text:
+        if VALID_PERIOD_RE.match(text):
+            return text
+
+        year_match = re.search(r"(20\d{2})", text)
+        quarter_match = re.search(r"Q([1-4])", text)
+
+        if year_match and quarter_match:
+            return f"{year_match.group(1)}-Q{quarter_match.group(1)}"
+
+        alt_quarter = re.match(r"^([1-4])[\/_-](20\d{2})$", text)
+        if alt_quarter:
+            return f"{alt_quarter.group(2)}-Q{alt_quarter.group(1)}"
+
+        compact_quarter = re.match(r"^(20\d{2})[\/_-]?([1-4])$", text)
+        if compact_quarter and ("Q" in text or default_period == "quarter"):
+            return f"{compact_quarter.group(1)}-Q{compact_quarter.group(2)}"
+
+        if text.isdigit():
+            numeric = int(text)
+            if 1900 <= numeric <= 2100:
+                return str(numeric)
+            if 1 <= numeric <= 4 and year is not None:
+                return f"{year}-Q{numeric}"
+
+    if year is None:
+        return None
+
+    if quarter is not None or default_period == "quarter":
+        resolved_quarter = quarter if quarter is not None else 4
+        if 1 <= resolved_quarter <= 4:
+            return f"{year}-Q{resolved_quarter}"
+
+    return str(year)
 
 
 class FinancialRatiosQueryParams(BaseModel):
@@ -219,6 +290,25 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                     continue
 
                 lookup = _build_lookup(row)
+                period_hint_year = _pick_float(
+                    _lookup(
+                        lookup,
+                        "year_report",
+                        "yearreport",
+                        "fiscal_year",
+                        "fiscalyear",
+                        "year",
+                    )
+                )
+                period_hint_quarter = _pick_float(
+                    _lookup(
+                        lookup,
+                        "quarter",
+                        "fiscal_quarter",
+                        "fiscalquarter",
+                        "length_report",
+                    )
+                )
                 period_value = _lookup(
                     lookup,
                     "year_report",
@@ -228,7 +318,12 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                     "fiscal_year",
                     "fiscalyear",
                 )
-                period_text = str(period_value or "").strip()
+                period_text = _normalize_period_value(
+                    period_value,
+                    fiscal_year=period_hint_year,
+                    fiscal_quarter=period_hint_quarter,
+                    default_period=params.period,
+                )
                 if not period_text:
                     continue
 
@@ -333,6 +428,12 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                     logger.warning(f"Skipping tuple-key ratio row: {e}")
 
             if results:
+                results = [
+                    item for item in results if VALID_PERIOD_RE.match(str(item.period or ""))
+                ]
+                results.sort(
+                    key=lambda item: _period_sort_key(str(item.period or "")), reverse=True
+                )
                 return results
 
         has_row_items = any("item_id" in row for row in data)
@@ -378,54 +479,53 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
             raw_fields = {
                 key for row in data for key in row.keys() if key not in {"item", "item_id"}
             }
-            year_fields = sorted(
-                {
-                    str(key)
-                    for key in raw_fields
-                    if str(key).isdigit()
-                    or re.search(
-                        r"(20\d{2}).*Q[1-4]|Q[1-4].*(20\d{2})",
-                        str(key).upper(),
-                    )
-                },
-                reverse=True,
-            )
+            period_columns: list[tuple[Any, str]] = []
+            period_values: set[str] = set()
 
-            if not year_fields:
+            for raw_key in raw_fields:
+                normalized_period = _normalize_period_value(raw_key, default_period=params.period)
+                if not normalized_period:
+                    continue
+                period_columns.append((raw_key, normalized_period))
+                period_values.add(normalized_period)
+
+            periods = sorted(period_values, key=_period_sort_key, reverse=True)
+
+            if not periods:
                 logger.warning("No valid ratio periods found in vnstock response")
                 return []
 
-            by_year: dict[str, dict[str, Any]] = {
-                year: {"symbol": params.symbol.upper(), "period": str(year)} for year in year_fields
+            by_period: dict[str, dict[str, Any]] = {
+                period: {"symbol": params.symbol.upper(), "period": period} for period in periods
             }
-            liabilities_by_year: dict[str, float] = {}
-            equity_by_year: dict[str, float] = {}
-            enterprise_value_by_year: dict[str, float] = {}
-            revenue_by_year: dict[str, float] = {}
+            liabilities_by_period: dict[str, float] = {}
+            equity_by_period: dict[str, float] = {}
+            enterprise_value_by_period: dict[str, float] = {}
+            revenue_by_period: dict[str, float] = {}
 
             for row in data:
                 item_id = row.get("item_id")
                 if not item_id:
                     continue
                 item_id_lower = str(item_id).strip().lower()
-                for year in year_fields:
-                    if year not in row:
+                for raw_key, period in period_columns:
+                    if raw_key not in row:
                         continue
-                    value = _to_float(row.get(year))
+                    value = _to_float(row.get(raw_key))
                     if value is None:
                         continue
                     if item_id_lower in metric_map:
                         field = metric_map[item_id_lower]
-                        by_year[year][field] = value
+                        by_period[period][field] = value
                         continue
                     if item_id_lower == "liabilities":
-                        liabilities_by_year[year] = value
+                        liabilities_by_period[period] = value
                         continue
                     if item_id_lower == "owners_equity":
-                        equity_by_year[year] = value
+                        equity_by_period[period] = value
                         continue
                     if item_id_lower in {"enterprise_value", "ev"}:
-                        enterprise_value_by_year[year] = value
+                        enterprise_value_by_period[period] = value
                         continue
                     if item_id_lower in {
                         "revenue",
@@ -433,25 +533,25 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                         "total_revenue",
                         "sales_revenue",
                     }:
-                        revenue_by_year[year] = value
+                        revenue_by_period[period] = value
 
-            for year in year_fields:
-                if by_year[year].get("debt_equity") is None:
-                    liabilities = liabilities_by_year.get(year)
-                    equity = equity_by_year.get(year)
+            for period in periods:
+                if by_period[period].get("debt_equity") is None:
+                    liabilities = liabilities_by_period.get(period)
+                    equity = equity_by_period.get(period)
                     if liabilities is not None and equity not in (None, 0):
-                        by_year[year]["debt_equity"] = liabilities / equity
+                        by_period[period]["debt_equity"] = liabilities / equity
 
-                if by_year[year].get("ev_sales") is None:
-                    enterprise_value = enterprise_value_by_year.get(year)
-                    revenue = revenue_by_year.get(year)
+                if by_period[period].get("ev_sales") is None:
+                    enterprise_value = enterprise_value_by_period.get(period)
+                    revenue = revenue_by_period.get(period)
                     if enterprise_value is not None and revenue not in (None, 0):
-                        by_year[year]["ev_sales"] = enterprise_value / revenue
+                        by_period[period]["ev_sales"] = enterprise_value / revenue
 
             results = []
-            for year in year_fields:
+            for period in periods:
                 try:
-                    results.append(FinancialRatioData(**by_year[year]))
+                    results.append(FinancialRatioData(**by_period[period]))
                 except Exception as e:
                     logger.warning(f"Skipping invalid ratio row: {e}")
             return results
@@ -474,16 +574,23 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 if enterprise_value is not None and revenue not in (None, 0):
                     computed_ev_sales = enterprise_value / revenue
 
+                period_value = _normalize_period_value(
+                    row.get("yearReport")
+                    or row.get("period")
+                    or row.get("quarter")
+                    or row.get("fiscalYear")
+                    or row.get("year"),
+                    fiscal_year=row.get("fiscalYear") or row.get("year"),
+                    fiscal_quarter=row.get("quarter") or row.get("fiscalQuarter"),
+                    default_period=params.period,
+                )
+                if not period_value:
+                    continue
+
                 results.append(
                     FinancialRatioData(
                         symbol=params.symbol.upper(),
-                        period=str(
-                            row.get("yearReport")
-                            or row.get("period")
-                            or row.get("quarter")
-                            or row.get("fiscalYear")
-                            or ""
-                        ),
+                        period=period_value,
                         pe=row.get("priceToEarning") or row.get("pe"),
                         pb=row.get("priceToBook") or row.get("pb"),
                         ps=row.get("priceToSales") or row.get("ps"),
@@ -539,4 +646,6 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 )
             except Exception as e:
                 logger.warning(f"Skipping invalid ratio row: {e}")
+        results = [item for item in results if VALID_PERIOD_RE.match(str(item.period or ""))]
+        results.sort(key=lambda item: _period_sort_key(str(item.period or "")), reverse=True)
         return results

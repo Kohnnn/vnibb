@@ -321,22 +321,40 @@ const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
         layout: { x: 16, y: 0, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'amihud_illiquidity',
+        type: 'volume_flow',
         syncGroupId: 1,
         config: {},
         layout: { x: 0, y: 7, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'drawdown_deep_dive',
+        type: 'rsi_seasonal',
         syncGroupId: 1,
         config: {},
         layout: { x: 8, y: 7, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'hurst_market_structure',
+        type: 'bollinger_squeeze',
         syncGroupId: 1,
         config: {},
         layout: { x: 16, y: 7, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'sortino_monthly',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 14, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'gap_analysis',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 14, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'macd_crossovers',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 14, w: 8, h: 7, minW: 6, minH: 5 }
     }
 ];
 
@@ -653,19 +671,19 @@ const createMainDashboardTabs = (): DashboardTab[] => {
     return [
         {
             id: macroId,
-            name: 'Macro & Discovery',
+            name: 'Overview',
             order: 0,
             widgets: createWidgetsFromTemplate(MAIN_MACRO_TEMPLATE, macroId),
         },
         {
             id: deepDiveId,
-            name: 'Deep Dive (Symbol)',
+            name: 'Equity Analysis',
             order: 1,
             widgets: createWidgetsFromTemplate(MAIN_DEEP_DIVE_TEMPLATE, deepDiveId),
         },
         {
             id: quantId,
-            name: 'Quantitative Edge',
+            name: 'Quant & Technical',
             order: 2,
             widgets: createWidgetsFromTemplate(MAIN_QUANT_TEMPLATE, quantId),
         },

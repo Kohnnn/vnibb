@@ -10,7 +10,7 @@ Provides endpoints for:
 import logging
 import asyncio
 import math
-from datetime import datetime, date
+from datetime import datetime
 from typing import Any, List, Optional, Callable, Awaitable
 
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import pandas as pd
 
+from vnibb.core.config import settings
 from vnibb.core.database import get_db
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.company import Company
@@ -144,7 +145,32 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         ),
         eps=getattr(row, "eps", None),
         bvps=getattr(row, "bvps", None),
-        foreign_ownership=getattr(row, "foreign_ownership", None),
+        foreign_ownership=_pick(
+            getattr(row, "foreign_ownership", None),
+            extended_metrics.get("foreign_ownership"),
+            extended_metrics.get("foreignOwnership"),
+        ),
+        state_ownership=_pick(
+            getattr(row, "state_ownership", None),
+            extended_metrics.get("state_ownership"),
+            extended_metrics.get("stateOwnership"),
+        ),
+        year=_pick(
+            getattr(row, "year", None),
+            extended_metrics.get("year"),
+            extended_metrics.get("fiscal_year"),
+        ),
+        quarter=_pick(
+            getattr(row, "quarter", None),
+            extended_metrics.get("quarter"),
+            extended_metrics.get("fiscal_quarter"),
+        ),
+        updated_at=_pick(
+            getattr(row, "updated_at", None),
+            extended_metrics.get("updated_at"),
+            getattr(row, "created_at", None),
+            getattr(row, "snapshot_date", None),
+        ),
     )
 
 
@@ -341,8 +367,57 @@ def _normalize_dividend_yield(value: Any) -> Optional[float]:
         return None
 
     normalized = numeric
+    if 0 < abs(normalized) < 1:
+        normalized *= 100
+
     while abs(normalized) > 100:
         normalized /= 100
+
+    if abs(normalized) > 50:
+        normalized = 50.0 if normalized > 0 else -50.0
+
+    return normalized
+
+
+def _price_to_vnd_units(price: Any, dps_hint: Any = None) -> Optional[float]:
+    numeric = _coerce_float(price)
+    if numeric in (None, 0):
+        return None
+
+    if abs(numeric) >= 1000:
+        return numeric
+
+    dps_numeric = _coerce_float(dps_hint)
+    if dps_numeric is None or abs(dps_numeric) >= 1:
+        return numeric * 1000.0
+
+    return numeric
+
+
+def _normalize_price_series(series: list[tuple[Any, float]]) -> list[tuple[Any, float]]:
+    normalized: list[tuple[Any, float]] = []
+    anchor: Optional[float] = None
+
+    for point_time, raw_price in series:
+        price = _coerce_float(raw_price)
+        if price in (None, 0):
+            continue
+
+        adjusted = price
+        if anchor is not None and anchor > 0:
+            if anchor >= 1000 and adjusted < 100:
+                adjusted *= 1000.0
+            elif anchor < 1000 and adjusted >= 1000:
+                adjusted /= 1000.0
+
+            ratio = adjusted / anchor
+            if ratio > 50:
+                adjusted /= 1000.0
+            elif ratio < 0.02:
+                adjusted *= 1000.0
+
+        normalized.append((point_time, adjusted))
+        anchor = adjusted
 
     return normalized
 
@@ -363,6 +438,7 @@ async def _enrich_screener_metrics(
                 or row.earnings_growth is None
                 or row.operating_margin is None
                 or row.ev_ebitda is None
+                or row.roic is None
                 or row.dividend_yield is None
                 or row.change_1d is None
                 or row.perf_1w is None
@@ -377,137 +453,188 @@ async def _enrich_screener_metrics(
     if not target_symbols:
         return rows
 
-    ratio_rows = (
-        (
-            await db.execute(
-                select(FinancialRatio)
-                .where(
-                    FinancialRatio.symbol.in_(target_symbols), FinancialRatio.period_type == "year"
-                )
-                .order_by(
-                    FinancialRatio.symbol.asc(),
-                    FinancialRatio.fiscal_year.desc(),
-                    FinancialRatio.fiscal_quarter.desc(),
-                )
+    target_symbol_set = set(target_symbols)
+    fundamental_symbols = sorted(
+        {
+            row.symbol
+            for row in rows
+            if row.symbol
+            and row.symbol in target_symbol_set
+            and (
+                row.revenue_growth is None
+                or row.earnings_growth is None
+                or row.operating_margin is None
+                or row.ev_ebitda is None
+                or row.roic is None
+                or row.dividend_yield is None
+                or row.debt_to_asset is None
+                or row.equity_on_total_asset is None
+                or row.market_cap is None
+                or row.foreign_ownership is None
+                or row.state_ownership is None
+                or row.year is None
+                or row.quarter is None
             )
-        )
-        .scalars()
-        .all()
-    )
-    ratio_by_symbol: dict[str, FinancialRatio] = {}
-    for ratio in ratio_rows:
-        ratio_by_symbol.setdefault(ratio.symbol, ratio)
-
-    income_rows = (
-        await db.execute(
-            select(
-                IncomeStatement.symbol,
-                IncomeStatement.fiscal_year,
-                IncomeStatement.revenue,
-                IncomeStatement.operating_income,
-                IncomeStatement.net_income,
-            )
-            .where(
-                IncomeStatement.symbol.in_(target_symbols),
-                IncomeStatement.period_type == "year",
-            )
-            .order_by(IncomeStatement.symbol.asc(), IncomeStatement.fiscal_year.desc())
-        )
-    ).all()
-    income_by_symbol: dict[str, list[dict[str, Optional[float]]]] = {
-        symbol: [] for symbol in target_symbols
-    }
-    for symbol, _year, revenue, operating_income, net_income in income_rows:
-        bucket = income_by_symbol.setdefault(symbol, [])
-        if len(bucket) >= 2:
-            continue
-        bucket.append(
-            {
-                "revenue": _coerce_float(revenue),
-                "operating_income": _coerce_float(operating_income),
-                "net_income": _coerce_float(net_income),
-            }
-        )
-
-    balance_rows = (
-        await db.execute(
-            select(
-                BalanceSheet.symbol,
-                BalanceSheet.total_assets,
-                BalanceSheet.total_liabilities,
-                BalanceSheet.total_equity,
-            )
-            .where(BalanceSheet.symbol.in_(target_symbols), BalanceSheet.period_type == "year")
-            .order_by(BalanceSheet.symbol.asc(), BalanceSheet.fiscal_year.desc())
-        )
-    ).all()
-    balance_by_symbol: dict[str, dict[str, Optional[float]]] = {}
-    for symbol, total_assets, total_liabilities, total_equity in balance_rows:
-        if symbol in balance_by_symbol:
-            continue
-        balance_by_symbol[symbol] = {
-            "total_assets": _coerce_float(total_assets),
-            "total_liabilities": _coerce_float(total_liabilities),
-            "total_equity": _coerce_float(total_equity),
         }
+    )
+    price_symbols = sorted(
+        {
+            row.symbol
+            for row in rows
+            if row.symbol
+            and row.symbol in target_symbol_set
+            and (
+                row.change_1d is None
+                or row.perf_1w is None
+                or row.perf_1m is None
+                or row.perf_ytd is None
+            )
+        }
+    )
 
-    cashflow_rows = (
-        await db.execute(
-            select(CashFlow.symbol, CashFlow.dividends_paid)
-            .where(CashFlow.symbol.in_(target_symbols), CashFlow.period_type == "year")
-            .order_by(CashFlow.symbol.asc(), CashFlow.fiscal_year.desc())
-        )
-    ).all()
+    ratio_by_symbol: dict[str, FinancialRatio] = {}
+    income_by_symbol: dict[str, list[dict[str, Optional[float]]]] = {}
+    balance_by_symbol: dict[str, dict[str, Optional[float]]] = {}
     dividends_by_symbol: dict[str, Optional[float]] = {}
-    for symbol, dividends_paid in cashflow_rows:
-        if symbol not in dividends_by_symbol:
-            dividends_by_symbol[symbol] = _coerce_float(dividends_paid)
-
-    company_rows = (
-        await db.execute(
-            select(
-                Company.symbol,
-                Company.outstanding_shares,
-                Company.listed_shares,
-                Company.raw_data,
-            ).where(Company.symbol.in_(target_symbols))
-        )
-    ).all()
     shares_by_symbol: dict[str, Optional[float]] = {}
-    for symbol, outstanding_shares, listed_shares, raw_data in company_rows:
-        payload = raw_data if isinstance(raw_data, dict) else {}
-        shares_by_symbol[symbol] = _pick_float(
-            outstanding_shares,
-            listed_shares,
-            payload.get("outstanding_shares"),
-            payload.get("listed_shares"),
-            payload.get("issue_share"),
-            payload.get("financial_ratio_issue_share"),
-        )
 
-    price_rows = (
-        await db.execute(
-            select(StockPrice.symbol, StockPrice.time, StockPrice.close)
-            .where(StockPrice.symbol.in_(target_symbols), StockPrice.interval == "1D")
-            .order_by(StockPrice.symbol.asc(), StockPrice.time.desc())
+    if fundamental_symbols:
+        ratio_rows = (
+            (
+                await db.execute(
+                    select(FinancialRatio)
+                    .where(
+                        FinancialRatio.symbol.in_(fundamental_symbols),
+                        FinancialRatio.period_type == "year",
+                    )
+                    .order_by(
+                        FinancialRatio.symbol.asc(),
+                        FinancialRatio.fiscal_year.desc(),
+                        FinancialRatio.fiscal_quarter.desc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
         )
-    ).all()
+        for ratio in ratio_rows:
+            ratio_by_symbol.setdefault(ratio.symbol, ratio)
 
-    price_series_by_symbol: dict[str, list[tuple[Any, float]]] = {
-        symbol: [] for symbol in target_symbols
-    }
-    for symbol, price_time, close in price_rows:
-        close_value = _coerce_float(close)
-        if close_value in (None, 0):
-            continue
-        bucket = price_series_by_symbol.setdefault(symbol, [])
-        if len(bucket) >= 260:
-            continue
-        bucket.append((price_time, close_value))
+        income_rows = (
+            await db.execute(
+                select(
+                    IncomeStatement.symbol,
+                    IncomeStatement.fiscal_year,
+                    IncomeStatement.revenue,
+                    IncomeStatement.operating_income,
+                    IncomeStatement.net_income,
+                )
+                .where(
+                    IncomeStatement.symbol.in_(fundamental_symbols),
+                    IncomeStatement.period_type == "year",
+                )
+                .order_by(IncomeStatement.symbol.asc(), IncomeStatement.fiscal_year.desc())
+            )
+        ).all()
+        income_by_symbol = {symbol: [] for symbol in fundamental_symbols}
+        for symbol, _year, revenue, operating_income, net_income in income_rows:
+            bucket = income_by_symbol.setdefault(symbol, [])
+            if len(bucket) >= 2:
+                continue
+            bucket.append(
+                {
+                    "revenue": _coerce_float(revenue),
+                    "operating_income": _coerce_float(operating_income),
+                    "net_income": _coerce_float(net_income),
+                }
+            )
+
+        balance_rows = (
+            await db.execute(
+                select(
+                    BalanceSheet.symbol,
+                    BalanceSheet.total_assets,
+                    BalanceSheet.total_liabilities,
+                    BalanceSheet.total_equity,
+                )
+                .where(
+                    BalanceSheet.symbol.in_(fundamental_symbols),
+                    BalanceSheet.period_type == "year",
+                )
+                .order_by(BalanceSheet.symbol.asc(), BalanceSheet.fiscal_year.desc())
+            )
+        ).all()
+        for symbol, total_assets, total_liabilities, total_equity in balance_rows:
+            if symbol in balance_by_symbol:
+                continue
+            balance_by_symbol[symbol] = {
+                "total_assets": _coerce_float(total_assets),
+                "total_liabilities": _coerce_float(total_liabilities),
+                "total_equity": _coerce_float(total_equity),
+            }
+
+        cashflow_rows = (
+            await db.execute(
+                select(CashFlow.symbol, CashFlow.dividends_paid)
+                .where(CashFlow.symbol.in_(fundamental_symbols), CashFlow.period_type == "year")
+                .order_by(CashFlow.symbol.asc(), CashFlow.fiscal_year.desc())
+            )
+        ).all()
+        for symbol, dividends_paid in cashflow_rows:
+            if symbol not in dividends_by_symbol:
+                dividends_by_symbol[symbol] = _coerce_float(dividends_paid)
+
+        company_rows = (
+            await db.execute(
+                select(
+                    Company.symbol,
+                    Company.outstanding_shares,
+                    Company.listed_shares,
+                    Company.raw_data,
+                ).where(Company.symbol.in_(fundamental_symbols))
+            )
+        ).all()
+        for symbol, outstanding_shares, listed_shares, raw_data in company_rows:
+            payload = raw_data if isinstance(raw_data, dict) else {}
+            shares_by_symbol[symbol] = _pick_float(
+                outstanding_shares,
+                listed_shares,
+                payload.get("outstanding_shares"),
+                payload.get("listed_shares"),
+                payload.get("issue_share"),
+                payload.get("financial_ratio_issue_share"),
+            )
+
+    normalized_price_series_by_symbol: dict[str, list[tuple[Any, float]]] = {}
+    if price_symbols:
+        price_rows = (
+            await db.execute(
+                select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+                .where(StockPrice.symbol.in_(price_symbols), StockPrice.interval == "1D")
+                .order_by(StockPrice.symbol.asc(), StockPrice.time.desc())
+            )
+        ).all()
+
+        price_series_by_symbol: dict[str, list[tuple[Any, float]]] = {
+            symbol: [] for symbol in price_symbols
+        }
+        for symbol, price_time, close in price_rows:
+            close_value = _coerce_float(close)
+            if close_value in (None, 0):
+                continue
+            bucket = price_series_by_symbol.setdefault(symbol, [])
+            if len(bucket) >= 260:
+                continue
+            bucket.append((price_time, close_value))
+
+        normalized_price_series_by_symbol = {
+            symbol: _normalize_price_series(series)
+            for symbol, series in price_series_by_symbol.items()
+        }
 
     def _build_performance_map(days: int) -> dict[str, float]:
         perf_map: dict[str, float] = {}
-        for symbol, series in price_series_by_symbol.items():
+        for symbol, series in normalized_price_series_by_symbol.items():
             if len(series) < 2:
                 continue
             latest_price = series[0][1]
@@ -548,6 +675,52 @@ async def _enrich_screener_metrics(
         latest_income = income[0] if income else {}
         prev_income = income[1] if len(income) > 1 else {}
         balance = balance_by_symbol.get(symbol, {})
+
+        normalized_existing_dividend = _normalize_dividend_yield(row.dividend_yield)
+        if (
+            normalized_existing_dividend is not None
+            and row.dividend_yield is not None
+            and normalized_existing_dividend != row.dividend_yield
+        ):
+            updates["dividend_yield"] = normalized_existing_dividend
+
+        if row.roic is None:
+            roic = _pick_float(
+                ratio_row.roic if ratio_row else None,
+                ratio_raw.get("roic"),
+                ratio_raw.get("roic_percent"),
+            )
+            if roic is not None:
+                updates["roic"] = roic
+
+        if row.foreign_ownership is None:
+            foreign_ownership = _pick_float(
+                ratio_raw.get("foreign_ownership"),
+                ratio_raw.get("foreignOwnership"),
+            )
+            if foreign_ownership is not None:
+                updates["foreign_ownership"] = foreign_ownership
+
+        if row.state_ownership is None:
+            state_ownership = _pick_float(
+                ratio_raw.get("state_ownership"),
+                ratio_raw.get("stateOwnership"),
+            )
+            if state_ownership is not None:
+                updates["state_ownership"] = state_ownership
+
+        if row.year is None and ratio_row and ratio_row.fiscal_year:
+            updates["year"] = ratio_row.fiscal_year
+
+        if row.quarter is None and ratio_row and ratio_row.fiscal_quarter in {1, 2, 3, 4}:
+            updates["quarter"] = ratio_row.fiscal_quarter
+
+        if row.updated_at is None:
+            latest_price_point = normalized_price_series_by_symbol.get(symbol, [])
+            latest_price_time = latest_price_point[0][0] if latest_price_point else None
+            fallback_updated_at = latest_price_time or (ratio_row.updated_at if ratio_row else None)
+            if fallback_updated_at is not None:
+                updates["updated_at"] = fallback_updated_at
 
         if row.ev_ebitda is None:
             ev_ebitda = _pick_float(
@@ -648,9 +821,9 @@ async def _enrich_screener_metrics(
                     shares = _coerce_float(shares_by_symbol.get(symbol))
                     if dividends_paid is not None and shares not in (None, 0):
                         dps = abs(dividends_paid) / (shares * _shares_multiplier(shares))
-                price = _coerce_float(row.price)
-                if dps is not None and price not in (None, 0):
-                    dividend_yield = _normalize_dividend_yield((dps / price) * 100)
+                price_vnd = _price_to_vnd_units(row.price, dps_hint=dps)
+                if dps is not None and price_vnd not in (None, 0):
+                    dividend_yield = _normalize_dividend_yield((dps / price_vnd) * 100)
             if dividend_yield is not None:
                 updates["dividend_yield"] = dividend_yield
 
@@ -767,7 +940,8 @@ async def _refresh_screener_cache(params: StockScreenerParams) -> None:
             logger.info("Skipping screener background refresh while circuit breaker is open")
             return
 
-        data = await asyncio.wait_for(VnstockScreenerFetcher.fetch(params), timeout=20.0)
+        refresh_timeout = max(20.0, float(settings.vnstock_timeout) + 5.0)
+        data = await asyncio.wait_for(VnstockScreenerFetcher.fetch(params), timeout=refresh_timeout)
         if not data:
             logger.warning(f"Screener refresh returned empty data (source={params.source})")
             return
@@ -778,7 +952,12 @@ async def _refresh_screener_cache(params: StockScreenerParams) -> None:
         )
         logger.info(f"Background screener refresh complete (source={params.source})")
     except Exception as e:
-        logger.warning(f"Background screener refresh failed (source={params.source}): {e}")
+        logger.warning(
+            "Background screener refresh failed (source=%s): %s: %r",
+            params.source,
+            type(e).__name__,
+            e,
+        )
 
 
 @router.get(

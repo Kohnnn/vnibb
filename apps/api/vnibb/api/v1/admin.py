@@ -654,30 +654,51 @@ async def trigger_data_health_auto_backfill(
     }
 
 
-@router.post("/reinforce")
-@router.post("/data-health/reinforce")
-async def trigger_data_reinforcement(
+async def _schedule_data_reinforcement(
     background_tasks: BackgroundTasks,
-    symbols: Optional[List[str]] = Body(default=None, embed=True),
-    domains: Optional[List[str]] = Body(default=None, embed=True),
-    dry_run: bool = Body(default=True, embed=True),
-    max_symbols: int = Body(default=50, embed=True),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Schedule targeted reinforcement jobs for selected symbols/domains.
-
-    Supported domains: prices, financials, ratios, shareholders, officers
-    """
+    db: AsyncSession,
+    symbols: Optional[List[str]],
+    domains: Optional[List[str]],
+    dry_run: bool,
+    max_symbols: int,
+    mode: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Schedule targeted symbol reinforcement jobs with stale/explicit selection modes."""
     from vnibb.services.data_pipeline import data_pipeline
 
     max_symbols = max(5, min(max_symbols, 200))
+    mode_upper = str(mode or "").strip().upper()
+    if mode_upper and mode_upper not in {"STALE", "SYMBOLS"}:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Unsupported mode",
+                "mode": mode,
+                "allowed_modes": ["STALE", "SYMBOLS"],
+            },
+        )
+
     input_symbols = [
         str(symbol).upper().strip() for symbol in (symbols or []) if symbol and str(symbol).strip()
     ]
 
-    stale_requested = not input_symbols or "STALE" in input_symbols
-    explicit_symbols = sorted({symbol for symbol in input_symbols if symbol != "STALE"})
+    if mode_upper == "STALE":
+        stale_requested = True
+        explicit_symbols: list[str] = []
+    elif mode_upper == "SYMBOLS":
+        stale_requested = False
+        explicit_symbols = sorted({symbol for symbol in input_symbols})
+        if not explicit_symbols:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "mode=SYMBOLS requires at least one symbol",
+                    "mode": "SYMBOLS",
+                },
+            )
+    else:
+        stale_requested = not input_symbols or "STALE" in input_symbols
+        explicit_symbols = sorted({symbol for symbol in input_symbols if symbol != "STALE"})
 
     if explicit_symbols:
         normalized_symbols = explicit_symbols[:max_symbols]
@@ -740,14 +761,87 @@ async def trigger_data_reinforcement(
         "timestamp": datetime.utcnow().isoformat(),
         "dry_run": dry_run,
         "selection_mode": "stale" if stale_requested and not explicit_symbols else "explicit",
+        "mode": "STALE" if stale_requested and not explicit_symbols else "SYMBOLS",
         "domains": sorted(requested_domains),
+        "targets": sorted(requested_domains),
         "symbols_count": len(normalized_symbols),
+        "queued": len(normalized_symbols),
         "symbols_preview": normalized_symbols[:15],
         "jobs": jobs,
         "estimated_requests": estimated_requests,
         "estimated_completion_minutes": estimated_minutes,
         "jobs_scheduled": scheduled_count,
     }
+
+
+@router.get("/reinforce")
+async def trigger_data_reinforcement_get(
+    background_tasks: BackgroundTasks,
+    mode: str = Query(
+        default="STALE",
+        pattern=r"^(STALE|SYMBOLS)$",
+        description="Selection mode: STALE (auto-select) or SYMBOLS",
+    ),
+    symbols: Optional[str] = Query(
+        default=None,
+        description="Comma-separated symbols when mode=SYMBOLS",
+    ),
+    targets: str = Query(
+        default="ratios,prices,financials",
+        description="Comma-separated targets: prices,financials,ratios,shareholders,officers",
+    ),
+    dry_run: bool = Query(default=True),
+    max_symbols: int = Query(default=50, ge=5, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    parsed_symbols = [
+        value.strip().upper() for value in (symbols or "").split(",") if value and value.strip()
+    ]
+    parsed_targets = [
+        value.strip().lower() for value in (targets or "").split(",") if value and value.strip()
+    ]
+
+    return await _schedule_data_reinforcement(
+        background_tasks=background_tasks,
+        db=db,
+        symbols=parsed_symbols,
+        domains=parsed_targets,
+        dry_run=dry_run,
+        max_symbols=max_symbols,
+        mode=mode,
+    )
+
+
+@router.post("/reinforce")
+@router.post("/data-health/reinforce")
+async def trigger_data_reinforcement(
+    background_tasks: BackgroundTasks,
+    mode: Optional[str] = Body(default=None, embed=True),
+    symbols: Optional[List[str]] = Body(default=None, embed=True),
+    domains: Optional[List[str]] = Body(default=None, embed=True),
+    targets: Optional[List[str]] = Body(default=None, embed=True),
+    dry_run: bool = Body(default=True, embed=True),
+    max_symbols: int = Body(default=50, embed=True),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Schedule targeted reinforcement jobs.
+
+    Accepted payload shapes:
+    - Legacy: { symbols: [...], domains: [...] }
+    - Sprint mode: { mode: "STALE"|"SYMBOLS", symbols: [...], targets: [...] }
+    """
+    selected_domains = domains if domains is not None else targets
+
+    return await _schedule_data_reinforcement(
+        background_tasks=background_tasks,
+        db=db,
+        symbols=symbols,
+        domains=selected_domains,
+        dry_run=dry_run,
+        max_symbols=max_symbols,
+        mode=mode,
+    )
 
 
 @router.get("/database/table/{table_name}/schema")

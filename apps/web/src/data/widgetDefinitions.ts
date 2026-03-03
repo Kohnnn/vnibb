@@ -470,6 +470,54 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
+        type: 'volume_flow',
+        name: 'Volume Flow',
+        description: 'Monthly and cumulative volume delta to track buy/sell pressure divergence',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'rsi_seasonal',
+        name: 'RSI Seasonal',
+        description: 'RSI seasonality by month with overbought and oversold frequency',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'bollinger_squeeze',
+        name: 'Bollinger Squeeze',
+        description: 'Bollinger width compression and squeeze state detection',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 5, h: 6, minW: 4, minH: 5 }
+    },
+    {
+        type: 'sortino_monthly',
+        name: 'Sortino Monthly',
+        description: 'Monthly Sortino and Sharpe comparison for quality-of-returns analysis',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'gap_analysis',
+        name: 'Gap Analysis',
+        description: 'Gap-up/down frequency, fill rate, and top gap event table',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
+    },
+    {
+        type: 'macd_crossovers',
+        name: 'MACD Crossovers',
+        description: 'Bullish and bearish crossover history with 1M and 3M follow-through',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
+    },
+    {
         type: 'technical_summary',
         name: 'Technical Summary',
         description: 'Technical indicators with buy/sell signals',

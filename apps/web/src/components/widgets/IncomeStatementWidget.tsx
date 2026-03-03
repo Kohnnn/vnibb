@@ -30,6 +30,7 @@ import {
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
@@ -87,6 +88,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
     const items = data?.data || [];
     const hasData = items.length > 0;
     const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
     const chartData = useMemo(() => {
         if (!items.length) return [];
@@ -401,7 +403,16 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                     />
                 </div>
                 <div className="flex-1 overflow-auto scrollbar-hide pt-1">
-                    {isLoading && !hasData ? (
+                    {timedOut && isLoading && !hasData ? (
+                        <WidgetError
+                            title="Loading timed out"
+                            error={new Error('Request timed out after 15 seconds.')}
+                            onRetry={() => {
+                                resetTimeout()
+                                refetch()
+                            }}
+                        />
+                    ) : isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />

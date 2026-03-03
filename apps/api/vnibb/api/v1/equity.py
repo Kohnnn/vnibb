@@ -73,6 +73,8 @@ from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+VALID_RATIO_PERIOD_RE = re.compile(r"^(?:\d{4}|Q[1-4]-\d{4}|\d{4}-Q[1-4])$")
+
 _REFRESH_LOCK = asyncio.Lock()
 _REFRESH_IN_FLIGHT: set[str] = set()
 
@@ -307,10 +309,97 @@ def _normalize_dividend_yield_percent(value: Any) -> Optional[float]:
         return None
 
     normalized = numeric
+    if 0 < abs(normalized) < 1:
+        normalized *= 100
+
     while abs(normalized) > 100:
         normalized /= 100
 
+    if abs(normalized) > 50:
+        normalized = 50.0 if normalized > 0 else -50.0
+
     return normalized
+
+
+def _normalize_ratio_period(
+    period_value: Any,
+    *,
+    fiscal_year: Any = None,
+    fiscal_quarter: Any = None,
+    period_type: Any = None,
+) -> Optional[str]:
+    text = str(period_value or "").strip().upper()
+    year = _coerce_optional_float(fiscal_year)
+    quarter = _coerce_optional_float(fiscal_quarter)
+    year_int = int(year) if year is not None else None
+    quarter_int = int(quarter) if quarter is not None else None
+    normalized_period_type = str(period_type or "").strip().lower()
+
+    if year_int is not None and not (1900 <= year_int <= 2100):
+        year_int = None
+    if quarter_int is not None and not (1 <= quarter_int <= 4):
+        quarter_int = None
+
+    if text:
+        if re.match(r"^\d{4}$", text):
+            return text
+        q_year = re.match(r"^Q([1-4])-(20\d{2})$", text)
+        if q_year:
+            return text
+        year_q = re.match(r"^(20\d{2})-Q([1-4])$", text)
+        if year_q:
+            return f"Q{year_q.group(2)}-{year_q.group(1)}"
+
+        year_match = re.search(r"(20\d{2})", text)
+        quarter_match = re.search(r"Q([1-4])", text)
+        if year_match and quarter_match:
+            return f"Q{quarter_match.group(1)}-{year_match.group(1)}"
+
+        alt_quarter = re.match(r"^([1-4])[\/_-](20\d{2})$", text)
+        if alt_quarter:
+            return f"Q{alt_quarter.group(1)}-{alt_quarter.group(2)}"
+
+        if text.isdigit():
+            numeric = int(text)
+            if 1900 <= numeric <= 2100:
+                return str(numeric)
+            if 1 <= numeric <= 4 and year_int is not None:
+                return f"Q{numeric}-{year_int}"
+
+    if year_int is None:
+        return None
+
+    if normalized_period_type == "quarter" and quarter_int is not None:
+        return f"Q{quarter_int}-{year_int}"
+
+    if quarter_int is not None and normalized_period_type != "year":
+        return f"Q{quarter_int}-{year_int}"
+
+    return str(year_int)
+
+
+def _ratio_period_sort_key(period_value: Any) -> int:
+    period_text = str(period_value or "").upper()
+    year_match = re.search(r"(20\d{2})", period_text)
+    year = int(year_match.group(1)) if year_match else 0
+    quarter_match = re.search(r"Q([1-4])", period_text)
+    quarter = int(quarter_match.group(1)) if quarter_match else 0
+    return year * 10 + quarter
+
+
+def _dedupe_ratio_rows(rows: List[FinancialRatioData]) -> List[FinancialRatioData]:
+    seen: dict[str, FinancialRatioData] = {}
+    for row in rows:
+        period_text = str(row.period or "").strip()
+        if not period_text or period_text in seen:
+            continue
+        seen[period_text] = row
+
+    return sorted(
+        seen.values(),
+        key=lambda item: _ratio_period_sort_key(item.period),
+        reverse=True,
+    )
 
 
 def _derive_dividend_yield_from_dps(dps: Any, latest_price: Any) -> Optional[float]:
@@ -335,12 +424,12 @@ def _resolve_dividend_yield_percent(
         return derived
 
     if abs(normalized_raw) > 30 >= abs(derived):
-        return derived
+        return _normalize_dividend_yield_percent(derived)
 
     if abs(normalized_raw - derived) >= 10:
-        return derived
+        return _normalize_dividend_yield_percent(derived)
 
-    return normalized_raw
+    return _normalize_dividend_yield_percent(normalized_raw)
 
 
 def _coerce_iso_date(value: Any) -> Optional[str]:
@@ -558,12 +647,15 @@ async def _get_latest_financial_row(
 
 
 def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
-    period_value = (row.period or "").strip()
-    if period_value.isdigit() and int(period_value) < 1900 and row.fiscal_year >= 1900:
-        if row.fiscal_quarter and 1 <= row.fiscal_quarter <= 4:
-            period_value = f"Q{row.fiscal_quarter}-{row.fiscal_year}"
-        else:
-            period_value = str(row.fiscal_year)
+    period_value = (
+        _normalize_ratio_period(
+            row.period,
+            fiscal_year=row.fiscal_year,
+            fiscal_quarter=row.fiscal_quarter,
+            period_type=getattr(row, "period_type", None),
+        )
+        or ""
+    )
 
     raw_payload = getattr(row, "raw_data", None)
     raw_data = raw_payload if isinstance(raw_payload, dict) else {}
@@ -2095,6 +2187,8 @@ async def get_financial_ratios(
                 rows=data,
                 db=db,
             )
+            data = [item for item in data if VALID_RATIO_PERIOD_RE.match(str(item.period or ""))]
+            data = _dedupe_ratio_rows(data)
             usable_data = [item for item in data if _ratio_has_metric_value(item)]
             if usable_data:
                 return StandardResponse(data=usable_data, meta=MetaData(count=len(usable_data)))
@@ -2122,6 +2216,8 @@ async def get_financial_ratios(
             rows=data,
             db=db,
         )
+        data = [item for item in data if VALID_RATIO_PERIOD_RE.match(str(item.period or ""))]
+        data = _dedupe_ratio_rows(data)
         usable_data = [item for item in data if _ratio_has_metric_value(item)]
         payload = usable_data if usable_data else data
         return StandardResponse(data=payload, meta=MetaData(count=len(payload)))

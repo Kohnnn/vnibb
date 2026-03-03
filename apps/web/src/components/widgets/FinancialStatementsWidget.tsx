@@ -12,6 +12,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 type StatementType = 'income' | 'balance' | 'cashflow';
 type Period = 'FY' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'TTM';
@@ -76,6 +77,7 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
     const rawData = data?.data || [];
     const hasData = rawData.length > 0;
     const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
     const displayRows = useMemo(() => {
         const normalizedRows = rawData
@@ -183,7 +185,16 @@ export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatement
             </div>
 
             <div className="flex-1 overflow-auto">
-                {isLoading && !hasData ? (
+                {timedOut && isLoading && !hasData ? (
+                    <WidgetError
+                        title="Loading timed out"
+                        error={new Error('Request timed out after 15 seconds.')}
+                        onRetry={() => {
+                            resetTimeout();
+                            refetch();
+                        }}
+                    />
+                ) : isLoading && !hasData ? (
                     <WidgetSkeleton variant="table" lines={6} />
                 ) : error && !hasData ? (
                     <WidgetError error={error as Error} onRetry={() => refetch()} />

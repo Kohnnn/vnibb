@@ -74,6 +74,12 @@ import { SectorRotationRadarWidget } from './SectorRotationRadarWidget';
 import { MarketBreadthWidget } from './MarketBreadthWidget';
 import { TechnicalSnapshotWidget } from './TechnicalSnapshotWidget';
 import { OwnershipChangesWidget } from './OwnershipChangesWidget';
+import { VolumeFlowWidget } from './VolumeFlowWidget';
+import { RSISeasonalWidget } from './RSISeasonalWidget';
+import { BollingerSqueezeWidget } from './BollingerSqueezeWidget';
+import { SortinoMonthlyWidget } from './SortinoMonthlyWidget';
+import { GapAnalysisWidget } from './GapAnalysisWidget';
+import { MACDCrossoverWidget } from './MACDCrossoverWidget';
 import type { ComponentType } from 'react';
 import dynamic from 'next/dynamic';
 
@@ -194,6 +200,12 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     seasonality_heatmap: SeasonalityHeatmapWidget as ComponentType<WidgetProps>,
     technical_summary: TechnicalSummaryWidget as ComponentType<WidgetProps>,
     technical_snapshot: TechnicalSnapshotWidget as ComponentType<WidgetProps>,
+    volume_flow: VolumeFlowWidget as ComponentType<WidgetProps>,
+    rsi_seasonal: RSISeasonalWidget as ComponentType<WidgetProps>,
+    bollinger_squeeze: BollingerSqueezeWidget as ComponentType<WidgetProps>,
+    sortino_monthly: SortinoMonthlyWidget as ComponentType<WidgetProps>,
+    gap_analysis: GapAnalysisWidget as ComponentType<WidgetProps>,
+    macd_crossovers: MACDCrossoverWidget as ComponentType<WidgetProps>,
     similar_stocks: SimilarStocksWidget as ComponentType<WidgetProps>,
     quick_stats: QuickStatsWidget as ComponentType<WidgetProps>,
 
@@ -271,6 +283,12 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     seasonality_heatmap: { w: 8, h: 7, minW: 6, minH: 5 },
     technical_summary: { w: 5, h: 7, minW: 4, minH: 5 },
     technical_snapshot: { w: 5, h: 6, minW: 4, minH: 5 },
+    volume_flow: { w: 6, h: 7, minW: 4, minH: 5 },
+    rsi_seasonal: { w: 6, h: 7, minW: 4, minH: 5 },
+    bollinger_squeeze: { w: 5, h: 6, minW: 4, minH: 5 },
+    sortino_monthly: { w: 6, h: 7, minW: 4, minH: 5 },
+    gap_analysis: { w: 7, h: 7, minW: 5, minH: 5 },
+    macd_crossovers: { w: 7, h: 7, minW: 5, minH: 5 },
     forex_rates: { w: 5, h: 7, minW: 4, minH: 5 },
     commodities: { w: 5, h: 7, minW: 4, minH: 5 },
     similar_stocks: { w: 4, h: 6, minW: 3, minH: 5 },
@@ -355,6 +373,12 @@ export const widgetNames: Record<WidgetType, string> = {
     seasonality_heatmap: 'Seasonality Heatmap',
     technical_summary: 'Technical Summary',
     technical_snapshot: 'Technical Snapshot',
+    volume_flow: 'Volume Flow',
+    rsi_seasonal: 'RSI Seasonal',
+    bollinger_squeeze: 'Bollinger Squeeze',
+    sortino_monthly: 'Sortino Monthly',
+    gap_analysis: 'Gap Analysis',
+    macd_crossovers: 'MACD Crossovers',
     forex_rates: 'Forex Rates',
     commodities: 'Commodities',
     similar_stocks: 'Similar Stocks',
@@ -436,6 +460,12 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     seasonality_heatmap: 'Year by month return heatmap for seasonal structure',
     technical_summary: 'Indicator-based signals',
     technical_snapshot: 'Daily technical indicator snapshot',
+    volume_flow: 'Order-flow proxy from close-position weighted volume delta',
+    rsi_seasonal: 'Monthly RSI profile with overbought and oversold frequencies',
+    bollinger_squeeze: 'Current Bollinger width and squeeze status signal',
+    sortino_monthly: 'Month-by-month downside-adjusted return profile',
+    gap_analysis: 'Gap-up/down frequencies, fill rate, and largest gap events',
+    macd_crossovers: 'Bullish and bearish MACD crossover history with forward returns',
     forex_rates: 'Currency exchange (VND pairs)',
     commodities: 'Gold, oil, and metals',
     similar_stocks: 'Stocks with high correlation',

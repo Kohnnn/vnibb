@@ -94,23 +94,32 @@ export function formatCompact(
 export function formatRelativeTime(date: Date | string): string {
   const now = new Date();
   const then = typeof date === 'string' ? new Date(date) : date;
-  const diffMs = now.getTime() - then.getTime();
+  const timestamp = then.getTime();
+  if (Number.isNaN(timestamp)) return '-';
 
-  const seconds = Math.floor(diffMs / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-  const weeks = Math.floor(days / 7);
-  const months = Math.floor(days / 30);
-  const years = Math.floor(days / 365);
+  const diffMs = Math.max(0, now.getTime() - timestamp);
+  const minutes = Math.max(1, Math.floor(diffMs / (60 * 1000)));
 
-  if (seconds < 60) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
-  if (weeks < 4) return `${weeks}w ago`;
-  if (months < 12) return `${months}mo ago`;
-  return `${years}y ago`;
+  if (minutes < 60) {
+    return `${minutes} min ago`;
+  }
+
+  const isSameDay =
+    now.getFullYear() === then.getFullYear() &&
+    now.getMonth() === then.getMonth() &&
+    now.getDate() === then.getDate();
+
+  const hours = String(then.getHours()).padStart(2, '0');
+  const mins = String(then.getMinutes()).padStart(2, '0');
+
+  if (isSameDay) {
+    return `today at ${hours}:${mins}`;
+  }
+
+  const year = then.getFullYear();
+  const month = String(then.getMonth() + 1).padStart(2, '0');
+  const day = String(then.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${mins}`;
 }
 
 /**

@@ -88,7 +88,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         onClick={onClose}
-                        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[40]"
+                        className="fixed inset-0 bg-black/55 z-[40]"
                     />
 
                     {/* Sidebar */}
