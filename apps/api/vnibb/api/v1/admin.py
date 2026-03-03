@@ -769,6 +769,7 @@ async def _schedule_data_reinforcement(
         "symbols_preview": normalized_symbols[:15],
         "jobs": jobs,
         "estimated_requests": estimated_requests,
+        "eta_minutes": estimated_minutes,
         "estimated_completion_minutes": estimated_minutes,
         "jobs_scheduled": scheduled_count,
     }

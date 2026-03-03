@@ -158,7 +158,7 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
             {/* Backdrop */}
             <div
-                className="absolute inset-0 bg-slate-950/55 backdrop-blur-md"
+                className="absolute inset-0 bg-slate-950/60"
                 role="button"
                 tabIndex={0}
                 aria-label="Close apps library"
@@ -172,7 +172,7 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
             />
 
                 {/* Modal */}
-                <div className="relative w-full max-w-3xl max-h-[80vh] bg-[var(--bg-surface)]/95 backdrop-blur-xl border border-[var(--border-subtle)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col">
+                <div className="relative w-full max-w-3xl max-h-[80vh] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col">
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] shrink-0">
                         <div>

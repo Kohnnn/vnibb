@@ -456,6 +456,7 @@ def _compute_macd_crossovers(frame: pd.DataFrame) -> Dict[str, Any]:
     ema_slow = enriched["close"].ewm(span=26, adjust=False).mean()
     macd = ema_fast - ema_slow
     signal = macd.ewm(span=9, adjust=False).mean()
+    histogram = macd - signal
 
     bullish = (macd > signal) & (macd.shift(1) <= signal.shift(1))
     bearish = (macd < signal) & (macd.shift(1) >= signal.shift(1))
@@ -496,12 +497,29 @@ def _compute_macd_crossovers(frame: pd.DataFrame) -> Dict[str, Any]:
 
     return {
         "current_state": current_state,
+        "current_macd": _safe_float(macd.iloc[-1] if not macd.empty else None, 4),
+        "current_signal": _safe_float(signal.iloc[-1] if not signal.empty else None, 4),
+        "current_histogram": _safe_float(
+            histogram.iloc[-1] if not histogram.empty else None,
+            4,
+        ),
         "avg_return_after_bullish_1m_pct": _safe_float(
             np.mean(bullish_1m) if bullish_1m else None, 2
         ),
         "avg_return_after_bullish_3m_pct": _safe_float(
             np.mean(bullish_3m) if bullish_3m else None, 2
         ),
+        "macd_series": [
+            {
+                "date": row.time.strftime("%Y-%m-%d"),
+                "macd": _safe_float(row.macd, 4),
+                "signal": _safe_float(row.signal, 4),
+                "histogram": _safe_float(row.histogram, 4),
+            }
+            for row in enriched.assign(macd=macd, signal=signal, histogram=histogram)
+            .tail(252)
+            .itertuples(index=False)
+        ],
         "crossovers": crossover_rows[-80:],
     }
 

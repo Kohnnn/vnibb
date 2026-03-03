@@ -142,7 +142,7 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
           />
 
           {/* Panel */}
-          <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[600px] w-96 flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)]/98 shadow-xl backdrop-blur-md">
+          <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[600px] w-96 flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-[var(--border-subtle)] p-3">
               <div className="flex items-center gap-2">
