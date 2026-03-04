@@ -415,6 +415,7 @@ export function WidgetWrapper({
                     ) : (
                         <WidgetHeaderVisibilityProvider hideHeader>
                             <WidgetErrorBoundary
+                                widgetName={title}
                                 onError={(error) => console.error(`Widget ${id} (${title}) crashed:`, error)}
                             >
                                 {React.isValidElement(children)
@@ -439,6 +440,7 @@ export function WidgetWrapper({
                 title={`${displaySymbol ? `${displaySymbol} - ` : ''}${title}`}
             >
                 <WidgetErrorBoundary
+                    widgetName={title}
                     onError={(error) => console.error(`Maximized Widget ${id} (${title}) crashed:`, error)}
                 >
                     {React.isValidElement(children)

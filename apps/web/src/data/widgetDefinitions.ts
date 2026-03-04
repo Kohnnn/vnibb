@@ -518,6 +518,30 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
     },
     {
+        type: 'parkinson_volatility',
+        name: 'Parkinson Volatility',
+        description: 'High-low range volatility with rolling regime classification',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
+    },
+    {
+        type: 'ema_respect',
+        name: 'EMA Respect',
+        description: 'EMA20/50/200 interaction counts with support and breakdown rates',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
+    },
+    {
+        type: 'drawdown_recovery',
+        name: 'Drawdown Recovery',
+        description: 'Rolling drawdown from peaks with average recovery duration',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
+    },
+    {
         type: 'technical_summary',
         name: 'Technical Summary',
         description: 'Technical indicators with buy/sell signals',

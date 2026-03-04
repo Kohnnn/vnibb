@@ -1277,6 +1277,9 @@ export type QuantMetric =
     | 'sortino'
     | 'calmar'
     | 'macd_crossovers'
+    | 'parkinson_volatility'
+    | 'ema_respect'
+    | 'drawdown_recovery'
 
 export interface QuantResponse {
     data: {

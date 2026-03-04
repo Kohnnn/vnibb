@@ -340,6 +340,10 @@ async def sync_prices(
     symbols: Optional[list[str]] = Query(default=None),
     start_date: Optional[date] = Query(default=None),
     end_date: Optional[date] = Query(default=None),
+    fill_missing_gaps: bool = Query(
+        default=False,
+        description="Detect and backfill missing dates between historical min/max",
+    ),
     async_mode: bool = Query(default=True, description="Run in background"),
 ) -> SyncResponse:
     """Sync daily prices for stocks."""
@@ -351,6 +355,7 @@ async def sync_prices(
             symbols=symbols,
             start_date=start_date,
             end_date=end_date,
+            fill_missing_gaps=fill_missing_gaps,
         )
         return SyncResponse(
             status="started",
@@ -362,6 +367,7 @@ async def sync_prices(
             symbols=symbols,
             start_date=start_date,
             end_date=end_date,
+            fill_missing_gaps=fill_missing_gaps,
         )
         return SyncResponse(
             status="success",

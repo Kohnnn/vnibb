@@ -66,6 +66,7 @@ const CATEGORY_DEFINITIONS = [
 
 const COLOR_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#14b8a6', '#06b6d4']
 const PERFORMANCE_PERIODS = ['1M', '3M', '6M', '1Y', '3Y', '5Y', 'YTD', 'ALL'] as const
+const MAX_SYMBOLS = 5
 
 type PerformancePeriod = (typeof PERFORMANCE_PERIODS)[number]
 
@@ -143,7 +144,7 @@ function ComparisonAnalysisWidgetComponent({
     const seeded = [symbol, ...initialSymbols]
       .map((item) => item?.trim().toUpperCase())
       .filter((item): item is string => Boolean(item))
-    return Array.from(new Set(seeded)).slice(0, 6)
+    return Array.from(new Set(seeded)).slice(0, MAX_SYMBOLS)
   })
   const [period, setPeriod] = useState<Period>('FY')
   const [performancePeriod, setPerformancePeriod] = useState<PerformancePeriod>('1M')
@@ -154,13 +155,13 @@ function ComparisonAnalysisWidgetComponent({
   const comparisonQuery = useQuery({
     queryKey: ['comparison-analysis', symbols.join(','), period],
     queryFn: () => compareStocks(symbols, period),
-    enabled: symbols.length >= 2,
+    enabled: symbols.length >= 3,
   })
 
   const performanceQuery = useQuery({
     queryKey: ['comparison-performance', symbols.join(','), performancePeriod],
     queryFn: () => getComparisonPerformance(symbols, performancePeriod),
-    enabled: symbols.length >= 2,
+    enabled: symbols.length >= 3,
     staleTime: 60 * 1000,
   })
 
@@ -188,16 +189,31 @@ function ComparisonAnalysisWidgetComponent({
 
       return entries
     },
-    enabled: symbols.length >= 2,
+    enabled: symbols.length >= 3,
     staleTime: 5 * 60 * 1000,
   })
 
   const ratioGridRows = ratioGridQuery.data ?? []
-  const hasData = Boolean(comparisonQuery.data?.stocks?.length)
+  const comparisonStocks = comparisonQuery.data?.stocks ?? []
+  const hasData = comparisonStocks.length > 0
   const hasRatioGridData =
     ratioGridRows.length > 0 && ratioGridRows.some((entry) => Boolean(entry.ratios))
   const isFallback = Boolean(comparisonQuery.error && hasData)
-  const primarySymbol = (symbol?.trim().toUpperCase() || symbols[0] || '').toUpperCase()
+  const stockBySymbol = useMemo(() => {
+    return comparisonStocks.reduce<Record<string, any>>((acc, row: any) => {
+      if (row?.symbol) {
+        acc[String(row.symbol).toUpperCase()] = row
+      }
+      return acc
+    }, {})
+  }, [comparisonStocks])
+
+  const ratioRowBySymbol = useMemo(() => {
+    return ratioGridRows.reduce<Record<string, FinancialRatioData | null>>((acc, row) => {
+      acc[row.symbol.toUpperCase()] = row.ratios
+      return acc
+    }, {})
+  }, [ratioGridRows])
 
   const symbolColors = useMemo(() => {
     return symbols.reduce<Record<string, string>>((acc, ticker, index) => {
@@ -233,24 +249,24 @@ function ComparisonAnalysisWidgetComponent({
 
   const addSymbol = () => {
     const cleaned = newSymbol.trim().toUpperCase()
-    if (!cleaned || symbols.includes(cleaned) || symbols.length >= 6) return
+    if (!cleaned || symbols.includes(cleaned) || symbols.length >= MAX_SYMBOLS) return
     setSymbols((prev) => [...prev, cleaned])
     setNewSymbol('')
   }
 
   const removeSymbol = (ticker: string) => {
-    if (symbols.length <= 2) return
+    if (symbols.length <= 3) return
     setSymbols((prev) => prev.filter((item) => item !== ticker))
   }
 
   const addPeerSuggestion = (ticker: string) => {
-    if (symbols.includes(ticker) || symbols.length >= 6) return
+    if (symbols.includes(ticker) || symbols.length >= MAX_SYMBOLS) return
     setSymbols((prev) => [...prev, ticker])
   }
 
   const getBestWorst = (metricId: string) => {
-    if (!comparisonQuery.data?.stocks) return { best: null, worst: null }
-    const values = comparisonQuery.data.stocks
+    if (!comparisonStocks.length) return { best: null, worst: null }
+    const values = comparisonStocks
       .map((stock: any) => stock.metrics?.[metricId])
       .filter((value: unknown): value is number => typeof value === 'number' && Number.isFinite(value))
 
@@ -299,7 +315,7 @@ function ComparisonAnalysisWidgetComponent({
                 >
                   <CompanyLogo symbol={ticker} name={ticker} size={14} />
                   <span>{ticker}</span>
-                  {symbols.length > 2 && (
+                  {symbols.length > 3 && (
                     <button
                       type="button"
                       onClick={() => removeSymbol(ticker)}
@@ -313,7 +329,7 @@ function ComparisonAnalysisWidgetComponent({
               )
             })}
 
-            {symbols.length < 6 && (
+            {symbols.length < MAX_SYMBOLS && (
               <div className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-1">
                 <Search size={11} className="text-[var(--text-muted)]" />
                 <input
@@ -470,10 +486,18 @@ function ComparisonAnalysisWidgetComponent({
         </div>
 
         <div className="flex-1 overflow-auto">
-          {symbols.length < 2 ? (
+          {symbols.length < 3 ? (
             <WidgetEmpty
-              message="Comparison requires at least two tickers."
-              action={{ label: 'Add FPT', onClick: () => setSymbols((prev) => [...prev, 'FPT']) }}
+              message="Comparison matrix requires 3-5 symbols."
+              action={{
+                label: 'Add Peer',
+                onClick: () =>
+                  setSymbols((prev) => {
+                    const fallback = ['FPT', 'HPG', 'TCB', 'VNM'].find((ticker) => !prev.includes(ticker))
+                    if (!fallback || prev.length >= MAX_SYMBOLS) return prev
+                    return [...prev, fallback]
+                  }),
+              }}
             />
           ) : comparisonTimedOut && comparisonQuery.isLoading && !hasData ? (
             <WidgetError
@@ -494,64 +518,69 @@ function ComparisonAnalysisWidgetComponent({
             <table className="data-table financial-dense freeze-first-col w-full text-[11px]">
               <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]/95 backdrop-blur">
                 <tr className="border-b border-[var(--border-color)]">
-                  <th className="w-[172px] bg-[var(--bg-secondary)] text-left">Ticker</th>
-                  {filteredMetrics.map((metric: any) => (
-                    <th key={metric?.id ?? metric?.key} className="text-right">
-                      {metric?.name ?? metric?.label ?? metric?.id ?? metric?.key}
+                  <th className="w-[180px] bg-[var(--bg-secondary)] text-left">Metric</th>
+                  {symbols.map((ticker) => (
+                    <th key={`comparison-head-${ticker}`} className="text-right">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: symbolColors[ticker] }}
+                        />
+                        {ticker}
+                      </span>
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {comparisonQuery.data?.stocks?.map((stock: any) => (
-                  <tr
-                    key={stock.symbol}
-                    className="border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-tertiary)]/40"
-                  >
-                    <td className="bg-[var(--bg-secondary)]">
-                      <div className="flex items-center gap-2">
-                        <CompanyLogo symbol={stock.symbol} name={stock.company_name || stock.symbol} size={16} />
-                        <span className="font-semibold text-[var(--text-primary)]">{stock.symbol}</span>
-                      </div>
-                    </td>
+                {filteredMetrics.map((metric: any) => {
+                  const metricId = metric?.id ?? metric?.key
+                  const metricFormat = metric?.format ?? 'number'
+                  const metricName = metric?.name ?? metric?.label ?? metricId
+                  const { best, worst } = getBestWorst(metricId)
 
-                    {filteredMetrics.map((metric: any) => {
-                      const metricId = metric?.id ?? metric?.key
-                      const metricFormat = metric?.format ?? 'number'
-                      const value = stock.metrics?.[metricId]
-                      const { best, worst } = getBestWorst(metricId)
+                  return (
+                    <tr
+                      key={`metric-row-${metricId}`}
+                      className="border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-tertiary)]/40"
+                    >
+                      <td className="bg-[var(--bg-secondary)] font-semibold text-[var(--text-primary)]">
+                        {metricName}
+                      </td>
+                      {symbols.map((ticker) => {
+                        const stock = stockBySymbol[ticker]
+                        const value = stock?.metrics?.[metricId]
+                        const label = formatMetric(value, metricFormat)
+                        const isMissing = label === EMPTY_VALUE
+                        const isBest = value !== null && value !== undefined && value === best && symbols.length > 1
+                        const isWorst = value !== null && value !== undefined && value === worst && symbols.length > 1
 
-                      const isBest = value !== null && value === best && symbols.length > 1
-                      const isWorst = value !== null && value === worst && symbols.length > 1
-
-                      const label = formatMetric(value, metricFormat)
-                      const isMissing = label === EMPTY_VALUE
-
-                      return (
-                        <td
-                          key={`${stock.symbol}-${metricId}`}
-                          data-type="number"
-                          className={cn(
-                            'font-mono',
-                            isMissing
-                              ? 'text-[var(--text-muted)]'
-                              : isBest
-                                ? 'text-green-500'
-                                : isWorst
-                                  ? 'text-red-500'
-                                  : 'text-[var(--text-primary)]'
-                          )}
-                        >
-                          <div className="inline-flex items-center gap-1">
-                            <span>{label}</span>
-                            {!isMissing && isBest && <TrendingUp size={10} className="opacity-70" />}
-                            {!isMissing && isWorst && <TrendingDown size={10} className="opacity-70" />}
-                          </div>
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))}
+                        return (
+                          <td
+                            key={`metric-cell-${metricId}-${ticker}`}
+                            data-type="number"
+                            className={cn(
+                              'font-mono',
+                              isMissing
+                                ? 'text-[var(--text-muted)]'
+                                : isBest
+                                  ? 'text-green-500'
+                                  : isWorst
+                                    ? 'text-red-500'
+                                    : 'text-[var(--text-primary)]'
+                            )}
+                          >
+                            <div className="inline-flex items-center gap-1">
+                              <span>{label}</span>
+                              {!isMissing && isBest && <TrendingUp size={10} className="opacity-70" />}
+                              {!isMissing && isWorst && <TrendingDown size={10} className="opacity-70" />}
+                            </div>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}
@@ -613,56 +642,70 @@ function ComparisonAnalysisWidgetComponent({
               <table className="data-table financial-dense freeze-first-col w-full text-[11px]">
                 <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]/95 backdrop-blur">
                   <tr className="border-b border-[var(--border-color)]">
-                    <th className="w-[172px] bg-[var(--bg-secondary)] text-left">Name</th>
-                    {(ratioTableView === 'valuation'
-                      ? VALUATION_RATIO_COLUMNS
-                      : FINANCIAL_RATIO_COLUMNS
-                    ).map((column) => (
-                      <th key={column.key} className="text-right">
-                        {column.label}
+                    <th className="w-[180px] bg-[var(--bg-secondary)] text-left">Metric</th>
+                    {symbols.map((ticker) => (
+                      <th key={`ratio-head-${ticker}`} className="text-right">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span
+                            className="h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: symbolColors[ticker] }}
+                          />
+                          {ticker}
+                        </span>
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {ratioGridRows.map((entry) => {
-                    const row = entry.ratios
-                    const isPrimary = entry.symbol === primarySymbol
+                  {(ratioTableView === 'valuation'
+                    ? VALUATION_RATIO_COLUMNS
+                    : FINANCIAL_RATIO_COLUMNS
+                  ).map((column) => {
+                    const numericValues = symbols
+                      .map((ticker) => ratioRowBySymbol[ticker]?.[column.key])
+                      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+                    const best = numericValues.length ? Math.max(...numericValues) : null
+                    const worst = numericValues.length ? Math.min(...numericValues) : null
 
                     return (
                       <tr
-                        key={`ratio-grid-${entry.symbol}`}
-                        className={cn(
-                          'border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-tertiary)]/40',
-                          isPrimary && 'bg-blue-600/5'
-                        )}
+                        key={`ratio-row-${column.key}`}
+                        className="border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-tertiary)]/40"
                       >
-                        <td className="bg-[var(--bg-secondary)]">
-                          <div className="flex items-center gap-2">
-                            <CompanyLogo symbol={entry.symbol} name={entry.symbol} size={16} />
-                            <span className="font-semibold text-[var(--text-primary)]">
-                              {entry.symbol}
-                            </span>
-                          </div>
+                        <td className="bg-[var(--bg-secondary)] font-semibold text-[var(--text-primary)]">
+                          {column.label}
                         </td>
 
-                        {(ratioTableView === 'valuation'
-                          ? VALUATION_RATIO_COLUMNS
-                          : FINANCIAL_RATIO_COLUMNS
-                        ).map((column) => {
-                          const rawValue = row?.[column.key]
+                        {symbols.map((ticker) => {
+                          const rawValue = ratioRowBySymbol[ticker]?.[column.key]
                           const numericValue =
                             typeof rawValue === 'number' && Number.isFinite(rawValue)
                               ? rawValue
                               : null
+                          const label = formatRatioGridValue(numericValue, column.format)
+                          const isBest = numericValue !== null && best !== null && numericValue === best
+                          const isWorst = numericValue !== null && worst !== null && numericValue === worst
 
                           return (
                             <td
-                              key={`${entry.symbol}-${column.key}`}
+                              key={`ratio-cell-${column.key}-${ticker}`}
                               data-type="number"
-                              className="font-mono text-[var(--text-primary)]"
+                              className={cn(
+                                'font-mono',
+                                label === EMPTY_VALUE
+                                  ? 'text-[var(--text-muted)]'
+                                  : isBest
+                                    ? 'text-green-500'
+                                    : isWorst
+                                      ? 'text-red-500'
+                                      : 'text-[var(--text-primary)]'
+                              )}
                             >
-                              {formatRatioGridValue(numericValue, column.format)}
+                              <div className="inline-flex items-center gap-1">
+                                <span>{label}</span>
+                                {label !== EMPTY_VALUE && isBest && <TrendingUp size={10} className="opacity-70" />}
+                                {label !== EMPTY_VALUE && isWorst && <TrendingDown size={10} className="opacity-70" />}
+                              </div>
                             </td>
                           )
                         })}

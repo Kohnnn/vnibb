@@ -127,6 +127,7 @@ class FullMarketSync:
                 total += await data_pipeline.sync_daily_prices(
                     symbols=resolved_symbols,
                     days=price_days,
+                    fill_missing_gaps=True,
                     cache_recent=False,
                 )
             return total

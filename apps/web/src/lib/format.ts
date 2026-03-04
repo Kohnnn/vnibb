@@ -88,29 +88,18 @@ export function formatCompact(
   return `${sign}${abs.toFixed(decimals)}`;
 }
 
-/**
- * Format relative time (e.g., "2 hours ago")
- */
-export function formatRelativeTime(date: Date | string): string {
+function formatAbsoluteDateTime(date: Date | string): string {
   const now = new Date();
   const then = typeof date === 'string' ? new Date(date) : date;
-  const timestamp = then.getTime();
-  if (Number.isNaN(timestamp)) return '-';
+  if (Number.isNaN(then.getTime())) return '-';
 
-  const diffMs = Math.max(0, now.getTime() - timestamp);
-  const minutes = Math.max(1, Math.floor(diffMs / (60 * 1000)));
-
-  if (minutes < 60) {
-    return `${minutes} min ago`;
-  }
+  const hours = String(then.getHours()).padStart(2, '0');
+  const mins = String(then.getMinutes()).padStart(2, '0');
 
   const isSameDay =
     now.getFullYear() === then.getFullYear() &&
     now.getMonth() === then.getMonth() &&
     now.getDate() === then.getDate();
-
-  const hours = String(then.getHours()).padStart(2, '0');
-  const mins = String(then.getMinutes()).padStart(2, '0');
 
   if (isSameDay) {
     return `Today ${hours}:${mins}`;
@@ -123,24 +112,21 @@ export function formatRelativeTime(date: Date | string): string {
 }
 
 /**
+ * Format date-time in absolute style (Today HH:MM or YYYY-MM-DD HH:MM)
+ */
+export function formatRelativeTime(date: Date | string): string {
+  return formatAbsoluteDateTime(date);
+}
+
+/**
  * Format date to localized string
  */
 export function formatDate(
   date: Date | string,
-  format: 'short' | 'medium' | 'long' | 'full' = 'medium',
-  locale: string = 'en-US'
+  _format: 'short' | 'medium' | 'long' | 'full' = 'medium',
+  _locale: string = 'en-US'
 ): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-
-  const formatOptions: Record<string, Intl.DateTimeFormatOptions> = {
-    short: { month: 'numeric', day: 'numeric', year: '2-digit' },
-    medium: { month: 'short', day: 'numeric', year: 'numeric' },
-    long: { month: 'long', day: 'numeric', year: 'numeric' },
-    full: { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' },
-  };
-  const options = formatOptions[format];
-
-  return d.toLocaleDateString(locale, options);
+  return formatAbsoluteDateTime(date);
 }
 
 /**

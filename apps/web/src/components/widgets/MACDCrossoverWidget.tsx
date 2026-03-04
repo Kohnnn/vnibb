@@ -70,6 +70,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
         crossovers?: CrossoverRow[]
       }
     | undefined
+  const backendError = typeof data?.error === 'string' ? data.error : ''
 
   const macdSeries = metric?.macd_series || []
   const crossovers = metric?.crossovers || []
@@ -130,7 +131,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
-        <WidgetEmpty message="No crossover history" icon={<ActivitySquare size={18} />} />
+        <WidgetEmpty message={backendError || 'No crossover history'} icon={<ActivitySquare size={18} />} />
       ) : (
         <>
           <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">

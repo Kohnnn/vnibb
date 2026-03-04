@@ -355,6 +355,24 @@ const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
         syncGroupId: 1,
         config: {},
         layout: { x: 16, y: 14, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'parkinson_volatility',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 21, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'ema_respect',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 21, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'drawdown_recovery',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 21, w: 8, h: 7, minW: 6, minH: 5 }
     }
 ];
 

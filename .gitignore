@@ -106,3 +106,4 @@ apps/api/tests/test_api/test_news_service.py
 apps/api/tests/test_api/test_sectors_endpoint.py
 apps/api/tests/test_api/test_smoke_endpoints.py
 apps/api/tests/test_integration/test_api_integration.py
+docs/sql/financial_ratios_ghost_period_purge.sql

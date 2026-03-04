@@ -102,7 +102,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 bg-black/55 z-[100]"
+                className="fixed inset-0 bg-black/40 z-[100]"
                 role="button"
                 tabIndex={0}
                 aria-label="Close manage tabs"
