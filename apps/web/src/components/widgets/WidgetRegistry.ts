@@ -80,6 +80,9 @@ import { BollingerSqueezeWidget } from './BollingerSqueezeWidget';
 import { SortinoMonthlyWidget } from './SortinoMonthlyWidget';
 import { GapAnalysisWidget } from './GapAnalysisWidget';
 import { MACDCrossoverWidget } from './MACDCrossoverWidget';
+import { ParkinsonVolatilityWidget } from './ParkinsonVolatilityWidget';
+import { EMARespectWidget } from './EMARespectWidget';
+import { DrawdownRecoveryWidget } from './DrawdownRecoveryWidget';
 import type { ComponentType } from 'react';
 import dynamic from 'next/dynamic';
 
@@ -206,6 +209,9 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     sortino_monthly: SortinoMonthlyWidget as ComponentType<WidgetProps>,
     gap_analysis: GapAnalysisWidget as ComponentType<WidgetProps>,
     macd_crossovers: MACDCrossoverWidget as ComponentType<WidgetProps>,
+    parkinson_volatility: ParkinsonVolatilityWidget as ComponentType<WidgetProps>,
+    ema_respect: EMARespectWidget as ComponentType<WidgetProps>,
+    drawdown_recovery: DrawdownRecoveryWidget as ComponentType<WidgetProps>,
     similar_stocks: SimilarStocksWidget as ComponentType<WidgetProps>,
     quick_stats: QuickStatsWidget as ComponentType<WidgetProps>,
 
@@ -289,6 +295,9 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     sortino_monthly: { w: 6, h: 7, minW: 4, minH: 5 },
     gap_analysis: { w: 7, h: 7, minW: 5, minH: 5 },
     macd_crossovers: { w: 7, h: 7, minW: 5, minH: 5 },
+    parkinson_volatility: { w: 7, h: 7, minW: 5, minH: 5 },
+    ema_respect: { w: 7, h: 7, minW: 5, minH: 5 },
+    drawdown_recovery: { w: 7, h: 7, minW: 5, minH: 5 },
     forex_rates: { w: 5, h: 7, minW: 4, minH: 5 },
     commodities: { w: 5, h: 7, minW: 4, minH: 5 },
     similar_stocks: { w: 4, h: 6, minW: 3, minH: 5 },
@@ -379,6 +388,9 @@ export const widgetNames: Record<WidgetType, string> = {
     sortino_monthly: 'Sortino Monthly',
     gap_analysis: 'Gap Analysis',
     macd_crossovers: 'MACD Crossovers',
+    parkinson_volatility: 'Parkinson Volatility',
+    ema_respect: 'EMA Respect',
+    drawdown_recovery: 'Drawdown Recovery',
     forex_rates: 'Forex Rates',
     commodities: 'Commodities',
     similar_stocks: 'Similar Stocks',
@@ -466,6 +478,9 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     sortino_monthly: 'Month-by-month downside-adjusted return profile',
     gap_analysis: 'Gap-up/down frequencies, fill rate, and largest gap events',
     macd_crossovers: 'Bullish and bearish MACD crossover history with forward returns',
+    parkinson_volatility: 'High-low volatility estimator with rolling regime classification',
+    ema_respect: 'EMA20/50/200 support and breakdown behavior scoring',
+    drawdown_recovery: 'Rolling underwater curve and recovery-time statistics',
     forex_rates: 'Currency exchange (VND pairs)',
     commodities: 'Gold, oil, and metals',
     similar_stocks: 'Stocks with high correlation',

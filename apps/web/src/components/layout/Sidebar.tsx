@@ -576,14 +576,13 @@ export function Sidebar({
                         <button
                             className="w-full flex items-center gap-2 px-2 py-1.5 rounded bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--border-strong)] transition-colors text-xs"
                             onClick={() => {
-                                // Trigger command palette with Ctrl+K
+                                // Trigger command palette
                                 const event = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true });
                                 document.dispatchEvent(event);
                             }}
                         >
                             <Search size={12} />
                             <span className="flex-1 text-left">Search</span>
-                            <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bg-elevated)] px-1 rounded">⌘K</span>
                         </button>
                     </div>
                 )}
@@ -691,10 +690,6 @@ export function Sidebar({
                         {!collapsed && (
                             <div className="flex items-center justify-between flex-1">
                                 <span>Settings</span>
-                                <div className="flex items-center gap-1 opacity-40">
-                                    <kbd className="px-1 text-[8px] bg-[var(--bg-elevated)] rounded font-sans">⌘</kbd>
-                                    <kbd className="px-1 text-[8px] bg-[var(--bg-elevated)] rounded font-sans">K</kbd>
-                                </div>
                             </div>
                         )}
                     </button>

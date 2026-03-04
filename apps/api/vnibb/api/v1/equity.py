@@ -18,6 +18,7 @@ from vnibb.core.database import get_db
 from vnibb.core.exceptions import ProviderTimeoutError
 from vnibb.core.cache import cached
 from vnibb.core.config import settings
+from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.services.cache_manager import CacheManager
 
 # Providers
@@ -77,6 +78,11 @@ VALID_RATIO_PERIOD_RE = re.compile(r"^(?:\d{4}|Q[1-4]-\d{4}|\d{4}-Q[1-4])$")
 
 _REFRESH_LOCK = asyncio.Lock()
 _REFRESH_IN_FLIGHT: set[str] = set()
+VN30_PRIORITY_SYMBOLS = {
+    str(symbol).upper()
+    for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
+    if symbol
+}
 
 
 async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]]) -> None:
@@ -93,6 +99,55 @@ async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]])
                 _REFRESH_IN_FLIGHT.discard(key)
 
     asyncio.create_task(runner())
+
+
+def _is_priority_symbol(symbol: str) -> bool:
+    return str(symbol or "").upper() in VN30_PRIORITY_SYMBOLS
+
+
+async def _schedule_critical_reinforcement(
+    symbol: str,
+    endpoint: str,
+    domains: List[str],
+) -> None:
+    symbol_upper = str(symbol or "").upper()
+    if not symbol_upper or not _is_priority_symbol(symbol_upper):
+        return
+
+    normalized_domains = sorted(
+        {str(domain).strip().lower() for domain in domains if domain and str(domain).strip()}
+    )
+    if not normalized_domains:
+        return
+
+    async def _run_reinforcement() -> None:
+        try:
+            from vnibb.services.data_pipeline import data_pipeline
+
+            result = await data_pipeline.run_reinforcement(
+                symbols=[symbol_upper],
+                domains=normalized_domains,
+            )
+            logger.info(
+                "Critical empty payload reinforcement completed (endpoint=%s symbol=%s domains=%s status=%s)",
+                endpoint,
+                symbol_upper,
+                ",".join(normalized_domains),
+                result.get("status"),
+            )
+        except BaseException as exc:
+            if _is_control_flow_exception(exc):
+                raise
+            logger.warning(
+                "Critical empty payload reinforcement failed (endpoint=%s symbol=%s domains=%s): %s",
+                endpoint,
+                symbol_upper,
+                ",".join(normalized_domains),
+                exc,
+            )
+
+    refresh_key = f"reinforce:{endpoint}:{symbol_upper}:{'-'.join(normalized_domains)}"
+    await _schedule_refresh(refresh_key, _run_reinforcement)
 
 
 def _is_control_flow_exception(exc: BaseException) -> bool:
@@ -254,6 +309,29 @@ def _to_historical_data(row: StockPrice) -> EquityHistoricalData:
         close=row.close,
         volume=row.volume,
     )
+
+
+async def _load_historical_from_db(
+    db: AsyncSession,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    interval: str,
+) -> List[EquityHistoricalData]:
+    interval_value = interval or "1D"
+    stmt = (
+        select(StockPrice)
+        .where(
+            StockPrice.symbol == symbol,
+            StockPrice.interval == interval_value,
+            StockPrice.time >= start_date,
+            StockPrice.time <= end_date,
+        )
+        .order_by(StockPrice.time.asc())
+    )
+
+    rows = (await db.execute(stmt)).scalars().all()
+    return [_to_historical_data(row) for row in rows]
 
 
 def _normalize_symbol_input(symbol: str) -> str:
@@ -1425,9 +1503,58 @@ async def get_historical_prices(
             source=source,
         )
         data = await VnstockEquityHistoricalFetcher.fetch(params)
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        if data:
+            return StandardResponse(data=data, meta=MetaData(count=len(data)))
+
+        fallback_data = await _load_historical_from_db(
+            db=db,
+            symbol=symbol_upper,
+            start_date=start_date,
+            end_date=end_date,
+            interval=interval,
+        )
+        if fallback_data:
+            logger.info(
+                "Historical endpoint served DB fallback after empty provider payload (symbol=%s interval=%s)",
+                symbol_upper,
+                interval,
+            )
+            return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+
+        await _schedule_critical_reinforcement(
+            symbol=symbol_upper,
+            endpoint="equity.historical",
+            domains=["prices"],
+        )
+        return StandardResponse(data=[], meta=MetaData(count=0))
     except Exception as e:
-        logger.warning(f"Live API failed for historical {symbol}, trying database fallback: {e}")
+        logger.warning(
+            "Historical endpoint provider failed (symbol=%s interval=%s): %s",
+            symbol_upper,
+            interval,
+            e,
+        )
+
+        fallback_data = await _load_historical_from_db(
+            db=db,
+            symbol=symbol_upper,
+            start_date=start_date,
+            end_date=end_date,
+            interval=interval,
+        )
+        if fallback_data:
+            logger.info(
+                "Historical endpoint recovered via DB fallback after provider error (symbol=%s interval=%s)",
+                symbol_upper,
+                interval,
+            )
+            return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+
+        await _schedule_critical_reinforcement(
+            symbol=symbol_upper,
+            endpoint="equity.historical",
+            domains=["prices"],
+        )
         return StandardResponse(data=[], error=f"Data unavailable: {str(e)}")
 
 
@@ -1975,10 +2102,25 @@ async def get_company_events(symbol: str, limit: int = Query(20, ge=1, le=100)):
 
 @router.get("/{symbol}/shareholders", response_model=StandardResponse[List[Any]])
 async def get_shareholders(symbol: str):
+    symbol_upper = symbol.upper()
     try:
-        data = await VnstockShareholdersFetcher.fetch(ShareholdersQueryParams(symbol=symbol))
+        data = await VnstockShareholdersFetcher.fetch(ShareholdersQueryParams(symbol=symbol_upper))
+        if not data:
+            await _schedule_critical_reinforcement(
+                symbol=symbol_upper,
+                endpoint="equity.shareholders",
+                domains=["shareholders"],
+            )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
-    except Exception as e:
+    except BaseException as e:
+        if _is_control_flow_exception(e):
+            raise
+        logger.warning("Shareholders endpoint failed (symbol=%s): %s", symbol_upper, e)
+        await _schedule_critical_reinforcement(
+            symbol=symbol_upper,
+            endpoint="equity.shareholders",
+            domains=["shareholders"],
+        )
         return StandardResponse(data=[], error=str(e))
 
 
@@ -2220,8 +2362,19 @@ async def get_financial_ratios(
         data = _dedupe_ratio_rows(data)
         usable_data = [item for item in data if _ratio_has_metric_value(item)]
         payload = usable_data if usable_data else data
+        if not payload:
+            await _schedule_critical_reinforcement(
+                symbol=symbol_upper,
+                endpoint="equity.ratios",
+                domains=["ratios"],
+            )
         return StandardResponse(data=payload, meta=MetaData(count=len(payload)))
     except Exception as e:
+        await _schedule_critical_reinforcement(
+            symbol=symbol_upper,
+            endpoint="equity.ratios",
+            domains=["ratios"],
+        )
         return StandardResponse(data=[], error=str(e))
 
 

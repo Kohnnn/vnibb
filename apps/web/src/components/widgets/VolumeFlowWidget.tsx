@@ -63,6 +63,7 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
         divergence_months?: number
       }
     | undefined
+  const backendError = typeof data?.error === 'string' ? data.error : ''
 
   const monthlyAvg = metric?.monthly_avg || {}
   const monthRows = MONTHS.map((month) => ({ month, value: Number(monthlyAvg[month] ?? 0) }))
@@ -109,7 +110,10 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
-        <WidgetEmpty message="No volume flow data" icon={<Waves size={18} />} />
+        <WidgetEmpty
+          message={backendError || `Insufficient Data: Expected at least 30 sessions, got ${cumulativeRows.length}.`}
+          icon={<Waves size={18} />}
+        />
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">

@@ -34,6 +34,9 @@ SUPPORTED_METRICS = (
     "sortino",
     "calmar",
     "macd_crossovers",
+    "parkinson_volatility",
+    "ema_respect",
+    "drawdown_recovery",
 )
 DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
 PERIOD_PATTERN = r"^(1M|3M|6M|1Y|3Y|5Y|YTD|ALL)$"
@@ -524,12 +527,280 @@ def _compute_macd_crossovers(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
+def _classify_volatility_regime(z_score: float | None) -> str:
+    if z_score is None:
+        return "normal"
+    if z_score <= -1:
+        return "low"
+    if z_score < 1:
+        return "normal"
+    if z_score < 2:
+        return "high"
+    return "extreme"
+
+
+def _compute_parkinson_volatility(frame: pd.DataFrame) -> Dict[str, Any]:
+    enriched = frame.copy()
+    valid_hl = (
+        (enriched["high"] > 0) & (enriched["low"] > 0) & (enriched["high"] >= enriched["low"])
+    )
+    hl_log = pd.Series(np.nan, index=enriched.index, dtype=float)
+    hl_log.loc[valid_hl] = np.log(enriched.loc[valid_hl, "high"] / enriched.loc[valid_hl, "low"])
+
+    parkinson_var = (hl_log.pow(2)) / (4 * np.log(2))
+    parkinson_30 = np.sqrt(parkinson_var.rolling(30).mean() * 252) * 100
+
+    returns = enriched["close"].pct_change()
+    close_close_vol_30 = returns.rolling(30).std(ddof=0) * np.sqrt(252) * 100
+
+    parkinson_mean_252 = parkinson_30.rolling(252).mean()
+    parkinson_std_252 = parkinson_30.rolling(252).std(ddof=0).replace(0, np.nan)
+    z_score_series = (parkinson_30 - parkinson_mean_252) / parkinson_std_252
+
+    current_parkinson = parkinson_30.dropna().iloc[-1] if not parkinson_30.dropna().empty else None
+    current_close_close = (
+        close_close_vol_30.dropna().iloc[-1] if not close_close_vol_30.dropna().empty else None
+    )
+    current_ratio = (
+        (current_close_close / current_parkinson)
+        if current_close_close is not None and current_parkinson and current_parkinson > 0
+        else None
+    )
+    current_z_score = (
+        z_score_series.dropna().iloc[-1] if not z_score_series.dropna().empty else None
+    )
+    current_regime = _classify_volatility_regime(
+        float(current_z_score) if current_z_score is not None else None
+    )
+
+    regime_counts = {"low": 0, "normal": 0, "high": 0, "extreme": 0}
+    for z_value in z_score_series.dropna().tolist():
+        regime_counts[_classify_volatility_regime(float(z_value))] += 1
+
+    return {
+        "current_parkinson_vol_30d_pct": _safe_float(current_parkinson, 2),
+        "current_close_close_vol_30d_pct": _safe_float(current_close_close, 2),
+        "close_to_park_ratio": _safe_float(current_ratio, 3),
+        "current_regime": current_regime,
+        "current_regime_z_score": _safe_float(current_z_score, 3),
+        "regime_counts": regime_counts,
+        "series": [
+            {
+                "date": row.time.strftime("%Y-%m-%d"),
+                "parkinson_vol_pct": _safe_float(row.parkinson_vol, 3),
+                "close_close_vol_pct": _safe_float(row.close_close_vol, 3),
+                "z_score": _safe_float(row.z_score, 3),
+                "regime": _classify_volatility_regime(row.z_score)
+                if row.z_score is not None and not np.isnan(row.z_score)
+                else None,
+            }
+            for row in enriched.assign(
+                parkinson_vol=parkinson_30,
+                close_close_vol=close_close_vol_30,
+                z_score=z_score_series,
+            )
+            .tail(400)
+            .itertuples(index=False)
+        ],
+    }
+
+
+def _support_strength_label(rate: float | None) -> str:
+    if rate is None:
+        return "insufficient"
+    if rate >= 75:
+        return "strong"
+    if rate >= 60:
+        return "moderate"
+    if rate >= 45:
+        return "weak"
+    return "fragile"
+
+
+def _compute_ema_respect(frame: pd.DataFrame) -> Dict[str, Any]:
+    enriched = frame.copy()
+    ema_periods = (20, 50, 200)
+    interaction_tolerance_pct = 1.0
+    lookahead_sessions = 5
+
+    rows: List[Dict[str, Any]] = []
+    best_support: tuple[int, float] | None = None
+
+    for period in ema_periods:
+        ema_col = f"ema_{period}"
+        enriched[ema_col] = enriched["close"].ewm(span=period, adjust=False).mean()
+
+        base = enriched[["close", "time", ema_col]].copy()
+        base["distance_pct"] = (
+            (base["close"] - base[ema_col]) / base[ema_col].replace(0, np.nan)
+        ) * 100
+        base["interacts"] = base["distance_pct"].abs() <= interaction_tolerance_pct
+        base["from_above"] = base["close"] >= base[ema_col]
+        base = base.reset_index(drop=True)
+
+        support_tests = 0
+        support_successes = 0
+        support_returns: List[float] = []
+        resistance_tests = 0
+        resistance_successes = 0
+
+        for idx in range(len(base) - lookahead_sessions):
+            row = base.iloc[idx]
+            if not bool(row["interacts"]):
+                continue
+
+            ema_level = row[ema_col]
+            future_slice = base.iloc[idx + 1 : idx + 1 + lookahead_sessions]
+            if future_slice.empty or ema_level is None or np.isnan(ema_level):
+                continue
+
+            current_close = float(row["close"])
+            future_close = float(base.iloc[idx + lookahead_sessions]["close"])
+
+            if bool(row["from_above"]):
+                support_tests += 1
+                if float(future_slice["close"].min()) >= float(ema_level):
+                    support_successes += 1
+                support_returns.append(((future_close / current_close) - 1) * 100)
+            else:
+                resistance_tests += 1
+                if float(future_slice["close"].max()) <= float(ema_level):
+                    resistance_successes += 1
+
+        support_rate = (support_successes / support_tests) * 100 if support_tests else None
+        support_breakdown_rate = (100 - support_rate) if support_rate is not None else None
+        resistance_rate = (
+            (resistance_successes / resistance_tests) * 100 if resistance_tests else None
+        )
+
+        avg_bounce_5d = np.mean(support_returns) if support_returns else None
+        current_ema = base[ema_col].dropna().iloc[-1] if not base[ema_col].dropna().empty else None
+        current_distance = (
+            base["distance_pct"].dropna().iloc[-1]
+            if not base["distance_pct"].dropna().empty
+            else None
+        )
+
+        if support_rate is not None and (best_support is None or support_rate > best_support[1]):
+            best_support = (period, support_rate)
+
+        rows.append(
+            {
+                "ema_period": period,
+                "current_ema": _safe_float(current_ema, 2),
+                "current_distance_pct": _safe_float(current_distance, 2),
+                "interaction_count": int(base["interacts"].sum()),
+                "support_tests": support_tests,
+                "support_bounce_rate_pct": _safe_float(support_rate, 2),
+                "support_breakdown_rate_pct": _safe_float(support_breakdown_rate, 2),
+                "avg_5d_return_after_support_test_pct": _safe_float(avg_bounce_5d, 2),
+                "resistance_tests": resistance_tests,
+                "resistance_rejection_rate_pct": _safe_float(resistance_rate, 2),
+                "support_strength": _support_strength_label(
+                    float(support_rate) if support_rate is not None else None
+                ),
+            }
+        )
+
+    return {
+        "interaction_tolerance_pct": interaction_tolerance_pct,
+        "lookahead_sessions": lookahead_sessions,
+        "best_support_ema": f"EMA{best_support[0]}" if best_support is not None else None,
+        "ema_levels": rows,
+    }
+
+
+def _compute_drawdown_recovery(frame: pd.DataFrame) -> Dict[str, Any]:
+    enriched = frame.copy()
+    close = enriched["close"].astype(float)
+    running_peak = close.cummax()
+    drawdown = ((close / running_peak.replace(0, np.nan)) - 1) * 100
+
+    rolling_52w_high = close.rolling(252, min_periods=20).max()
+    drawdown_52w = ((close / rolling_52w_high.replace(0, np.nan)) - 1) * 100
+
+    episodes: List[Dict[str, Any]] = []
+    start_index: int | None = None
+    trough_index: int | None = None
+
+    for idx, value in enumerate(drawdown.tolist()):
+        if value < 0:
+            if start_index is None:
+                start_index = max(0, idx - 1)
+                trough_index = idx
+            elif trough_index is None or value < drawdown.iloc[trough_index]:
+                trough_index = idx
+            continue
+
+        if start_index is not None and trough_index is not None:
+            episode = {
+                "peak_date": enriched["time"].iloc[start_index].strftime("%Y-%m-%d"),
+                "trough_date": enriched["time"].iloc[trough_index].strftime("%Y-%m-%d"),
+                "recovery_date": enriched["time"].iloc[idx].strftime("%Y-%m-%d"),
+                "depth_pct": _safe_float(drawdown.iloc[trough_index], 2),
+                "days_to_trough": int(trough_index - start_index),
+                "days_to_recovery": int(idx - trough_index),
+            }
+            episodes.append(episode)
+            start_index = None
+            trough_index = None
+
+    if start_index is not None and trough_index is not None:
+        episodes.append(
+            {
+                "peak_date": enriched["time"].iloc[start_index].strftime("%Y-%m-%d"),
+                "trough_date": enriched["time"].iloc[trough_index].strftime("%Y-%m-%d"),
+                "recovery_date": None,
+                "depth_pct": _safe_float(drawdown.iloc[trough_index], 2),
+                "days_to_trough": int(trough_index - start_index),
+                "days_to_recovery": None,
+            }
+        )
+
+    recovered_days = [
+        int(episode["days_to_recovery"])
+        for episode in episodes
+        if episode.get("days_to_recovery") is not None
+    ]
+
+    current_drawdown = drawdown.dropna().iloc[-1] if not drawdown.dropna().empty else None
+    current_52w_drawdown = (
+        drawdown_52w.dropna().iloc[-1] if not drawdown_52w.dropna().empty else None
+    )
+    max_52w_drawdown = drawdown_52w.min() if not drawdown_52w.dropna().empty else None
+
+    return {
+        "current_drawdown_pct": _safe_float(current_drawdown, 2),
+        "current_drawdown_from_52w_high_pct": _safe_float(current_52w_drawdown, 2),
+        "max_drawdown_from_52w_high_pct": _safe_float(max_52w_drawdown, 2),
+        "avg_days_to_recovery": _safe_float(np.mean(recovered_days) if recovered_days else None, 1),
+        "median_days_to_recovery": _safe_float(
+            np.median(recovered_days) if recovered_days else None, 1
+        ),
+        "episodes": episodes[-40:],
+        "underwater_series": [
+            {
+                "date": row.time.strftime("%Y-%m-%d"),
+                "drawdown_pct": _safe_float(row.drawdown, 2),
+                "drawdown_52w_pct": _safe_float(row.drawdown_52w, 2),
+            }
+            for row in enriched.assign(drawdown=drawdown, drawdown_52w=drawdown_52w)
+            .tail(400)
+            .itertuples(index=False)
+        ],
+    }
+
+
 @router.get("/{symbol}", response_model=StandardResponse[QuantResponseData])
 async def get_quant_metrics(
     symbol: str,
     metrics: str = Query(
         default=DEFAULT_METRICS,
-        description="Comma-separated metrics (volume_delta,rsi_seasonal,gap_stats,bollinger,atr,sortino,calmar,macd_crossovers)",
+        description=(
+            "Comma-separated metrics (volume_delta,rsi_seasonal,gap_stats,bollinger,"
+            "atr,sortino,calmar,macd_crossovers,parkinson_volatility,ema_respect,"
+            "drawdown_recovery)"
+        ),
     ),
     period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
@@ -567,7 +838,10 @@ async def get_quant_metrics(
         source=source,
     )
 
-    if frame.empty or len(frame) < 30:
+    min_points_required = 30
+    observed_points = int(len(frame))
+
+    if frame.empty or observed_points < min_points_required:
         payload = QuantResponseData(
             symbol=symbol_upper,
             period=period_upper,
@@ -577,7 +851,10 @@ async def get_quant_metrics(
         return StandardResponse(
             data=payload,
             meta=MetaData(count=0),
-            error="Insufficient historical price data for quant calculations",
+            error=(
+                f"Insufficient Data: Expected at least {min_points_required} sessions, "
+                f"got {observed_points}."
+            ),
         )
 
     calculators: Dict[str, Callable[[pd.DataFrame], Dict[str, Any]]] = {
@@ -589,6 +866,9 @@ async def get_quant_metrics(
         "sortino": _compute_sortino,
         "calmar": _compute_calmar,
         "macd_crossovers": _compute_macd_crossovers,
+        "parkinson_volatility": _compute_parkinson_volatility,
+        "ema_respect": _compute_ema_respect,
+        "drawdown_recovery": _compute_drawdown_recovery,
     }
 
     computed_metrics: Dict[str, Any] = {}

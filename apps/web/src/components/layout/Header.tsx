@@ -247,7 +247,7 @@ export function Header({
   }, [resolvedTheme, setTheme])
 
   return (
-    <header className="sticky top-0 z-40 h-14 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+    <header className="sticky top-0 z-40 h-14 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
       <div className="flex h-full items-center justify-between gap-3 px-4">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="hidden items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] xl:flex">
@@ -289,7 +289,7 @@ export function Header({
                 }, 150)
               }}
               placeholder="Search symbol (e.g., VNM, FPT)"
-              className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] py-1.5 pl-8 pr-16 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/20"
+              className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] py-1.5 pl-8 pr-10 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/20"
             />
             {searchValue && searchValue !== currentSymbol && (
               <button
@@ -306,9 +306,6 @@ export function Header({
                 <X size={12} />
               </button>
             )}
-            <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-              ⌘K
-            </span>
           </div>
         </div>
 

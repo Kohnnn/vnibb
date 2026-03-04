@@ -453,6 +453,51 @@ class DataPipeline:
                 continue
         return None
 
+    def _iter_weekdays(self, start_date: date, end_date: date):
+        current = start_date
+        while current <= end_date:
+            if current.weekday() < 5:
+                yield current
+            current += timedelta(days=1)
+
+    def _build_missing_date_ranges(
+        self,
+        existing_dates: set[date],
+        start_date: date,
+        end_date: date,
+        max_range_days: int = 30,
+    ) -> List[Tuple[date, date]]:
+        if start_date > end_date:
+            return []
+
+        missing_dates = [
+            day for day in self._iter_weekdays(start_date, end_date) if day not in existing_dates
+        ]
+        if not missing_dates:
+            return []
+
+        ranges: List[Tuple[date, date]] = []
+        range_start = missing_dates[0]
+        range_end = missing_dates[0]
+
+        for day in missing_dates[1:]:
+            day_gap = (day - range_end).days
+            contiguous = True
+            for offset in range(1, day_gap):
+                if (range_end + timedelta(days=offset)).weekday() < 5:
+                    contiguous = False
+                    break
+            if contiguous and (day - range_start).days < max_range_days:
+                range_end = day
+                continue
+
+            ranges.append((range_start, range_end))
+            range_start = day
+            range_end = day
+
+        ranges.append((range_start, range_end))
+        return ranges
+
     async def _get_or_create_company_id(self, session: AsyncSession, symbol: str) -> Optional[int]:
         result = await session.execute(select(Company.id).where(Company.symbol == symbol))
         company_id = result.scalar_one_or_none()
@@ -1547,6 +1592,7 @@ class DataPipeline:
         days: int = 30,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        fill_missing_gaps: bool = False,
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
         cache_recent: bool = True,
@@ -1588,27 +1634,92 @@ class DataPipeline:
         total_synced = 0
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
-            await self._wait_for_rate_limit("prices")
             try:
                 from vnstock import Vnstock
 
                 stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
-                df = stock.quote.history(start=start_date_str, end=end_date_str)
-                if df is not None and not df.empty:
-                    async with async_session_maker() as session:
-                        # Get stock ID for foreign key
-                        res = await session.execute(select(Stock.id).where(Stock.symbol == symbol))
-                        stock_id = res.scalar()
-                        if not stock_id:
+
+                fetch_ranges: List[Tuple[date, date]] = [(resolved_start, resolved_end)]
+                existing_dates: set[date] = set()
+
+                async with async_session_maker() as session:
+                    stock_id_result = await session.execute(
+                        select(Stock.id).where(Stock.symbol == symbol)
+                    )
+                    stock_id = stock_id_result.scalar()
+                    if not stock_id:
+                        continue
+
+                    if fill_missing_gaps:
+                        existing_rows_result = await session.execute(
+                            select(StockPrice.time).where(
+                                StockPrice.symbol == symbol,
+                                StockPrice.interval == "1D",
+                            )
+                        )
+                        existing_dates = {
+                            row_time
+                            for (row_time,) in existing_rows_result.fetchall()
+                            if isinstance(row_time, date)
+                        }
+                        if existing_dates:
+                            db_min_time = min(existing_dates)
+                            db_max_time = max(existing_dates)
+                            gap_ranges = self._build_missing_date_ranges(
+                                existing_dates=existing_dates,
+                                start_date=db_min_time,
+                                end_date=db_max_time,
+                                max_range_days=30,
+                            )
+                            fetch_ranges = gap_ranges or []
+
+                            if db_max_time < resolved_end:
+                                tail_start = max(db_max_time + timedelta(days=1), resolved_start)
+                                if tail_start <= resolved_end:
+                                    fetch_ranges.append((tail_start, resolved_end))
+                            if resolved_start < db_min_time:
+                                head_end = min(db_min_time - timedelta(days=1), resolved_end)
+                                if resolved_start <= head_end:
+                                    fetch_ranges.append((resolved_start, head_end))
+
+                            if not fetch_ranges:
+                                fetch_ranges = [(resolved_start, resolved_end)]
+
+                latest_row: Optional[Dict[str, Any]] = None
+                symbol_synced = 0
+                async with async_session_maker() as session:
+                    stock_id_result = await session.execute(
+                        select(Stock.id).where(Stock.symbol == symbol)
+                    )
+                    stock_id = stock_id_result.scalar()
+                    if not stock_id:
+                        continue
+
+                    for range_start, range_end in fetch_ranges:
+                        if range_start > range_end:
                             continue
 
-                        for _, row in df.iterrows():
+                        await self._wait_for_rate_limit("prices")
+                        range_start_str = range_start.strftime("%Y-%m-%d")
+                        range_end_str = range_end.strftime("%Y-%m-%d")
+                        range_df = stock.quote.history(start=range_start_str, end=range_end_str)
+                        if range_df is None or range_df.empty:
+                            logger.debug(
+                                "Price gap fetch returned empty for %s (%s -> %s)",
+                                symbol,
+                                range_start_str,
+                                range_end_str,
+                            )
+                            continue
+
+                        for _, row in range_df.iterrows():
+                            row_time = (
+                                row["time"].date() if hasattr(row["time"], "date") else row["time"]
+                            )
                             val = {
                                 "stock_id": stock_id,
                                 "symbol": symbol,
-                                "time": row["time"].date()
-                                if hasattr(row["time"], "date")
-                                else row["time"],
+                                "time": row_time,
                                 "open": float(row["open"]),
                                 "high": float(row["high"]),
                                 "low": float(row["low"]),
@@ -1619,31 +1730,72 @@ class DataPipeline:
                             }
                             stmt = get_upsert_stmt(StockPrice, ["symbol", "time", "interval"], val)
                             await session.execute(stmt)
-                        await session.commit()
-                        total_synced += len(df)
 
-                    latest = df.iloc[-1].to_dict()
+                        symbol_synced += len(range_df)
+                        latest_candidate = range_df.iloc[-1].to_dict()
+                        latest_row = latest_candidate
+
+                    await session.commit()
+
+                total_synced += symbol_synced
+                if latest_row:
                     latest_payload = {
                         "symbol": symbol,
-                        "time": str(latest.get("time")),
-                        "open": float(latest.get("open")),
-                        "high": float(latest.get("high")),
-                        "low": float(latest.get("low")),
-                        "close": float(latest.get("close")),
-                        "volume": int(latest.get("volume")),
+                        "time": str(latest_row.get("time")),
+                        "open": float(latest_row.get("open")),
+                        "high": float(latest_row.get("high")),
+                        "low": float(latest_row.get("low")),
+                        "close": float(latest_row.get("close")),
+                        "volume": int(latest_row.get("volume")),
                         "interval": "1D",
                     }
                     latest_key = build_cache_key("vnibb", "price", "latest", symbol)
                     await self._cache_set_json(latest_key, latest_payload, CACHE_TTL_PRICE_LATEST)
 
                     if cache_recent:
-                        recent_rows = df.tail(RECENT_PRICE_DAYS).to_dict(orient="records")
+                        recent_start = max(
+                            resolved_start, resolved_end - timedelta(days=RECENT_PRICE_DAYS)
+                        )
+                        async with async_session_maker() as session:
+                            recent_rows_result = await session.execute(
+                                select(
+                                    StockPrice.time,
+                                    StockPrice.open,
+                                    StockPrice.high,
+                                    StockPrice.low,
+                                    StockPrice.close,
+                                    StockPrice.volume,
+                                )
+                                .where(
+                                    StockPrice.symbol == symbol,
+                                    StockPrice.interval == "1D",
+                                    StockPrice.time >= recent_start,
+                                )
+                                .order_by(StockPrice.time.asc())
+                            )
+                            recent_rows = [
+                                {
+                                    "time": row.time.isoformat()
+                                    if hasattr(row.time, "isoformat")
+                                    else row.time,
+                                    "open": float(row.open),
+                                    "high": float(row.high),
+                                    "low": float(row.low),
+                                    "close": float(row.close),
+                                    "volume": int(row.volume),
+                                }
+                                for row in recent_rows_result.fetchall()
+                            ]
+
                         recent_key = build_cache_key("vnibb", "price", "recent", symbol)
                         await self._cache_set_json(recent_key, recent_rows, CACHE_TTL_PRICE_RECENT)
 
-                    if progress is not None:
+                    if progress is not None and symbol_synced > 0:
                         progress["success_count"] = progress.get("success_count", 0) + 1
                         progress["stage_stats"]["prices"]["success"] += 1
+                elif progress is not None:
+                    progress["error_count"] = progress.get("error_count", 0) + 1
+                    progress["stage_stats"]["prices"]["errors"] += 1
             except SystemExit as exc:
                 logger.warning(f"Price sync aborted for {symbol}: {exc}")
                 if progress is not None:
@@ -5056,7 +5208,11 @@ class DataPipeline:
                 domain_started = datetime.utcnow()
                 try:
                     if domain == "prices":
-                        await self.sync_daily_prices(symbols=normalized_symbols, days=40)
+                        await self.sync_daily_prices(
+                            symbols=normalized_symbols,
+                            days=40,
+                            fill_missing_gaps=True,
+                        )
                     elif domain == "financials":
                         await self.sync_financials(symbols=normalized_symbols, period="quarter")
                         await self.sync_financials(symbols=normalized_symbols, period="year")

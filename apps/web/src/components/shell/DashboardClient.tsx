@@ -35,7 +35,6 @@ import {
 } from '@/components/widgets/WidgetParameterDropdown';
 import { type WidgetMultiSelectParam } from '@/components/widgets/WidgetWrapper';
 import { WidgetSettingsModal, AppsLibrary, PromptsLibrary, TemplateSelector } from '@/components/modals';
-import { CommandPalette, useCommandPalette } from '@/components/ui/CommandPalette';
 import { AICopilot } from '@/components/ui/AICopilot';
 import { MarketRibbon } from '@/components/ui/MarketRibbon';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
@@ -43,6 +42,7 @@ import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
 import type { DashboardTemplate } from '@/types/dashboard-templates';
+import { Grid3X3, PlusCircle, RefreshCw } from 'lucide-react';
 
 export default function DashboardPage() {
     return (
@@ -56,9 +56,12 @@ const RIGHT_SIDEBAR_WIDTH = 350;
 
 function DashboardContent() {
     const {
+        state,
         activeDashboard,
         activeTab,
         setActiveTab,
+        createDashboard,
+        setActiveDashboard,
         updateSyncGroupSymbol,
         deleteWidget,
         updateTabLayout,
@@ -117,8 +120,6 @@ function DashboardContent() {
         };
 
         const handleKeyboardNavigation = (event: KeyboardEvent) => {
-            if (isEditableTarget(event.target)) return;
-
             if (event.key === 'Escape') {
                 setIsWidgetLibraryOpen(false);
                 setIsAppsLibraryOpen(false);
@@ -128,6 +129,8 @@ function DashboardContent() {
                 setShowAICopilot(false);
                 return;
             }
+
+            if (isEditableTarget(event.target)) return;
 
             const numeric = Number(event.key);
             if (
@@ -345,6 +348,11 @@ function DashboardContent() {
         });
     }, [activeDashboard, activeTab, addWidget]);
 
+    const handleCreateWorkspace = useCallback(() => {
+        const dashboard = createDashboard({ name: 'Workspace 1' });
+        setActiveDashboard(dashboard.id);
+    }, [createDashboard, setActiveDashboard]);
+
     const quickAddOptions: Array<{ type: WidgetType; label: string }> = [
         { type: 'price_chart', label: 'Price Chart' },
         { type: 'key_metrics', label: 'Key Metrics' },
@@ -561,9 +569,13 @@ function DashboardContent() {
                             )}
                         </div>
                     ) : (
-                        <div className="flex items-center justify-center h-full">
-                            <RefreshCw className="animate-spin text-blue-500" />
-                        </div>
+                        state.dashboards.length === 0 ? (
+                            <EmptyDashboardState onCreateWorkspace={handleCreateWorkspace} />
+                        ) : (
+                            <div className="flex items-center justify-center h-full">
+                                <RefreshCw className="animate-spin text-blue-500" />
+                            </div>
+                        )
                     )}
                 </div>
 
@@ -615,4 +627,22 @@ function DashboardContent() {
     );
 }
 
-import { Grid3X3, RefreshCw } from 'lucide-react';
+function EmptyDashboardState({ onCreateWorkspace }: { onCreateWorkspace: () => void }) {
+    return (
+        <div className="flex h-full flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)]/50 px-6 text-center">
+            <div className="space-y-2">
+                <h2 className="text-lg font-semibold text-[var(--text-primary)]">No Dashboard Workspace</h2>
+                <p className="text-sm text-[var(--text-muted)]">
+                    Create a workspace to start adding widgets and building your layout.
+                </p>
+            </div>
+            <button
+                onClick={onCreateWorkspace}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+            >
+                <PlusCircle size={16} />
+                Create Workspace
+            </button>
+        </div>
+    );
+}

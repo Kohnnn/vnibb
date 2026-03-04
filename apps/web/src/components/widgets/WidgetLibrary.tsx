@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, memo } from 'react';
+import { useState, useMemo, useEffect, memo } from 'react';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { widgetCategories, widgetDefinitions } from '@/data/widgetDefinitions';
 import {
@@ -35,6 +35,20 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
     const dashboardEditable = (activeDashboard?.isEditable ?? true) !== false;
     const [searchQuery, setSearchQuery] = useState('');
     const [activeCategory, setActiveCategory] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                onClose();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, onClose]);
 
     // Persistent recent widgets
     const [recentWidgetTypes, setRecentWidgetTypes] = useState<string[]>(() => {
@@ -88,7 +102,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         onClick={onClose}
-                        className="fixed inset-0 bg-black/55 z-[40]"
+                        className="fixed inset-0 bg-black/40 z-[40]"
                     />
 
                     {/* Sidebar */}
@@ -97,10 +111,10 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: -350, opacity: 0 }}
                         transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-                        className="fixed left-16 md:left-[220px] top-4 bottom-4 w-[calc(100vw-5rem)] md:w-96 max-w-[28rem] bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-2xl z-[65] flex flex-col shadow-2xl overflow-hidden"
+                        className="fixed left-16 md:left-[220px] top-4 bottom-4 w-[calc(100vw-5rem)] md:w-96 max-w-[28rem] bg-[var(--bg-elevated)] border border-[var(--border-default)] rounded-2xl z-[65] flex flex-col shadow-2xl overflow-hidden"
                     >
                         {/* Header */}
-                        <div className="p-4 border-b border-[var(--border-default)] flex items-center justify-between bg-[var(--bg-surface)]">
+                        <div className="p-4 border-b border-[var(--border-default)] flex items-center justify-between bg-[var(--bg-elevated)]">
                             <div className="flex items-center gap-2">
                                 <Layers size={18} className="text-blue-500" />
                                 <span className="text-sm font-black uppercase tracking-widest text-[var(--text-primary)]">Components</span>

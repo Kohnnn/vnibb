@@ -112,7 +112,7 @@ export function TabBar({ symbol }: TabBarProps) {
 
     if (!activeDashboard) {
         return (
-            <div className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/80 backdrop-blur-sm h-9 flex items-center px-4">
+            <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80 h-9 flex items-center px-4">
                 <span className="text-[var(--text-muted)] text-xs">No dashboard selected</span>
             </div>
         );
@@ -294,7 +294,7 @@ export function TabBar({ symbol }: TabBarProps) {
 
     return (
         <>
-            <div className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/80 backdrop-blur-sm" {...swipeHandlers}>
+            <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80" {...swipeHandlers}>
                 <div className="flex items-center gap-0.5 px-3">
                     {/* Tabs */}
                     <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
@@ -317,7 +317,7 @@ export function TabBar({ symbol }: TabBarProps) {
                                         group relative flex items-center gap-1 px-1 py-1 text-xs font-medium 
                                         transition-all whitespace-nowrap rounded-t cursor-pointer
                                         ${isActive
-                                            ? 'text-[var(--text-primary)] bg-[var(--bg-tertiary)] border-t border-l border-r border-[var(--border-color)]'
+                                            ? 'text-[var(--text-primary)] bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]'
                                             : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/50'
                                         }
                                         ${isDragging ? 'opacity-50' : ''}
