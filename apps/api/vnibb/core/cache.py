@@ -61,6 +61,25 @@ CACHE_PREFIX_SHORT = {
 # In-memory fallback cache: {key: (data, expiry)}
 _memory_cache: Dict[str, tuple[Any, datetime]] = {}
 _memory_cache_lock = asyncio.Lock()
+_warned_appwrite_cache_fallback = False
+
+
+def _redis_cache_enabled() -> bool:
+    """Determine whether Redis should be used for cache operations."""
+    global _warned_appwrite_cache_fallback
+
+    backend = settings.resolved_cache_backend
+
+    if backend == "appwrite":
+        if not _warned_appwrite_cache_fallback:
+            logger.warning(
+                "CACHE_BACKEND=appwrite configured but Appwrite cache adapter is not yet active; "
+                "falling back to in-memory cache"
+            )
+            _warned_appwrite_cache_fallback = True
+        return False
+
+    return backend == "redis" and bool(settings.redis_url)
 
 
 def cached(
@@ -85,9 +104,7 @@ def cached(
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            # Check if redis is enabled
-            if not settings.redis_url:
-                return await func(*args, **kwargs)
+            redis_enabled = _redis_cache_enabled()
 
             effective_ttl = (
                 ttl if ttl is not None else CACHE_TTLS.get(key_prefix, settings.redis_cache_ttl)
@@ -150,7 +167,7 @@ def cached(
 
             try:
                 # Try Redis first
-                if settings.redis_url:
+                if redis_enabled:
                     try:
                         cached_data = await redis_client.get_json(cache_key)
                         if cached_data is not None:
@@ -170,7 +187,7 @@ def cached(
                 result = await func(*args, **kwargs)
 
                 # Store in Redis
-                if settings.redis_url:
+                if redis_enabled:
                     try:
                         await redis_client.set_json(cache_key, result, ttl=effective_ttl)
                     except Exception as redis_err:
@@ -205,6 +222,13 @@ class RedisClient:
 
     async def connect(self) -> None:
         """Initialize Redis connection pool."""
+        if not _redis_cache_enabled():
+            return
+
+        if not self.url:
+            logger.warning("Redis URL is empty; skipping Redis connection")
+            return
+
         if self._pool is None:
             self._pool = redis.ConnectionPool.from_url(
                 self.url,
@@ -237,7 +261,7 @@ class RedisClient:
         """Get raw string value from cache."""
         try:
             return await self.client.get(key)
-        except redis.RedisError as e:
+        except (redis.RedisError, RuntimeError) as e:
             logger.warning(f"Redis GET error for key {key}: {e}")
             return None
 
@@ -252,7 +276,7 @@ class RedisClient:
             ttl = ttl or settings.redis_cache_ttl
             await self.client.setex(key, ttl, value)
             return True
-        except redis.RedisError as e:
+        except (redis.RedisError, RuntimeError) as e:
             logger.warning(f"Redis SET error for key {key}: {e}")
             return False
 
@@ -282,7 +306,7 @@ class RedisClient:
                 except json.JSONDecodeError:
                     results[key] = None
             return results
-        except redis.RedisError as e:
+        except (redis.RedisError, RuntimeError) as e:
             logger.warning(f"Redis MGET error: {e}")
             return {key: None for key in keys}
 
@@ -332,7 +356,7 @@ class RedisClient:
                 for key in values.keys():
                     await self.client.expire(key, ttl_value)
             return True
-        except redis.RedisError as e:
+        except (redis.RedisError, RuntimeError) as e:
             logger.warning(f"Redis MSET error: {e}")
             return False
 
@@ -360,7 +384,7 @@ class RedisClient:
         try:
             await self.client.delete(key)
             return True
-        except redis.RedisError as e:
+        except (redis.RedisError, RuntimeError) as e:
             logger.warning(f"Redis DELETE error for key {key}: {e}")
             return False
 
@@ -368,11 +392,14 @@ class RedisClient:
         """Check if key exists in cache."""
         try:
             return bool(await self.client.exists(key))
-        except redis.RedisError:
+        except (redis.RedisError, RuntimeError):
             return False
 
     async def flush_prefix(self, prefix: str) -> int:
         """Delete all keys matching a prefix pattern."""
+        if not _redis_cache_enabled():
+            return 0
+
         try:
             if not self._client:
                 await self.connect()
@@ -382,16 +409,19 @@ class RedisClient:
             if keys:
                 return await self.client.delete(*keys)
             return 0
-        except redis.RedisError as e:
+        except (redis.RedisError, RuntimeError) as e:
             logger.warning(f"Redis FLUSH error for prefix {prefix}: {e}")
             return 0
 
     async def clear_all(self) -> bool:
         """Clear all keys in the current database."""
+        if not _redis_cache_enabled():
+            return True
+
         try:
             await self.client.flushdb()
             return True
-        except redis.RedisError:
+        except (redis.RedisError, RuntimeError):
             return False
 
 

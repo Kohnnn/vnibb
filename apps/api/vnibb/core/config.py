@@ -93,6 +93,20 @@ class Settings(BaseSettings):
     supabase_jwt_secret: Optional[str] = None  # For JWT validation
 
     # ==========================================================================
+    # Appwrite (migration target)
+    # ==========================================================================
+    appwrite_endpoint: Optional[str] = None
+    appwrite_project_id: Optional[str] = None
+    appwrite_api_key: Optional[str] = None
+    appwrite_database_id: Optional[str] = None
+    appwrite_bucket_id: Optional[str] = None
+
+    # ==========================================================================
+    # Cache Backend Selection
+    # ==========================================================================
+    cache_backend: str = "auto"  # auto, redis, memory, appwrite
+
+    # ==========================================================================
     # Redis Cache
     # ==========================================================================
     redis_url: Optional[str] = "redis://localhost:6379/0"
@@ -292,6 +306,16 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid ENVIRONMENT '{v}'. Must be one of: {valid_envs}")
         return v_lower
 
+    @field_validator("cache_backend")
+    @classmethod
+    def validate_cache_backend(cls, v: str) -> str:
+        """Validate selected cache backend."""
+        valid_backends = {"auto", "redis", "memory", "appwrite"}
+        backend = v.lower().strip()
+        if backend not in valid_backends:
+            raise ValueError(f"Invalid CACHE_BACKEND '{v}'. Must be one of: {valid_backends}")
+        return backend
+
     @model_validator(mode="after")
     def validate_production_requirements(self) -> "Settings":
         """Validate production-specific requirements."""
@@ -313,6 +337,20 @@ class Settings(BaseSettings):
             # Warn if no Redis configured
             if not self.redis_url:
                 logger.warning("REDIS_URL not configured - caching and rate limiting disabled")
+
+            if self.cache_backend == "appwrite":
+                required = {
+                    "APPWRITE_ENDPOINT": self.appwrite_endpoint,
+                    "APPWRITE_PROJECT_ID": self.appwrite_project_id,
+                    "APPWRITE_API_KEY": self.appwrite_api_key,
+                    "APPWRITE_DATABASE_ID": self.appwrite_database_id,
+                }
+                missing = [key for key, value in required.items() if not value]
+                if missing:
+                    logger.warning(
+                        "CACHE_BACKEND=appwrite but Appwrite credentials are missing: %s",
+                        ", ".join(missing),
+                    )
 
             if errors:
                 raise ValueError(
@@ -348,6 +386,28 @@ class Settings(BaseSettings):
         if self.database_echo is not None:
             return self.database_echo
         return self.debug and not self.is_production
+
+    @property
+    def resolved_cache_backend(self) -> str:
+        """Resolve active cache backend from explicit selection + available config."""
+        if self.cache_backend != "auto":
+            return self.cache_backend
+
+        if self.redis_url:
+            return "redis"
+
+        appwrite_ready = all(
+            [
+                self.appwrite_endpoint,
+                self.appwrite_project_id,
+                self.appwrite_api_key,
+                self.appwrite_database_id,
+            ]
+        )
+        if appwrite_ready:
+            return "appwrite"
+
+        return "memory"
 
     @property
     def log_format_string(self) -> str:
@@ -386,6 +446,17 @@ def _validate_startup_config(settings: Settings) -> None:
 
         if not settings.redis_url:
             warnings.append("REDIS_URL not set - caching disabled")
+
+    if settings.cache_backend == "appwrite":
+        required = {
+            "APPWRITE_ENDPOINT": settings.appwrite_endpoint,
+            "APPWRITE_PROJECT_ID": settings.appwrite_project_id,
+            "APPWRITE_API_KEY": settings.appwrite_api_key,
+            "APPWRITE_DATABASE_ID": settings.appwrite_database_id,
+        }
+        missing = [key for key, value in required.items() if not value]
+        if missing:
+            warnings.append("CACHE_BACKEND=appwrite missing vars: " + ", ".join(missing))
 
     # Log warnings
     for warning in warnings:

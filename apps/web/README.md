@@ -102,8 +102,14 @@ vercel --prod
 
 ```env
 NEXT_PUBLIC_API_URL=https://your-backend.railway.app
+NEXT_PUBLIC_AUTH_PROVIDER=supabase
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+
+# Optional Appwrite auth migration
+# NEXT_PUBLIC_AUTH_PROVIDER=appwrite
+# NEXT_PUBLIC_APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
+# NEXT_PUBLIC_APPWRITE_PROJECT_ID=your-appwrite-project-id
 ```
 
 ---
