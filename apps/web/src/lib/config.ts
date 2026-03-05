@@ -14,6 +14,11 @@ export const config = {
   // Supabase
   supabaseUrl: env.supabaseUrl || '',
   supabaseAnonKey: env.supabaseAnonKey || '',
+
+  // Appwrite
+  authProvider: env.authProvider,
+  appwriteEndpoint: env.appwriteEndpoint || '',
+  appwriteProjectId: env.appwriteProjectId || '',
   
   // Feature flags
   enableAiAnalysis: env.geminiApiKey ? true : false,
@@ -24,6 +29,10 @@ export const config = {
   // Computed
   get isSupabaseConfigured(): boolean {
     return Boolean(this.supabaseUrl && this.supabaseAnonKey);
+  },
+
+  get isAppwriteConfigured(): boolean {
+    return Boolean(this.appwriteEndpoint && this.appwriteProjectId);
   },
   
   get apiBaseUrl(): string {

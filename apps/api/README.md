@@ -110,6 +110,8 @@ railway up
 
 ```env
 DATABASE_URL=postgresql+asyncpg://...
+CACHE_BACKEND=auto  # auto|redis|memory|appwrite
+REDIS_URL=redis://localhost:6379/0
 VNSTOCK_API_KEY=vnstock_xxx
 VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
 VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple  # Optional premium index for vnii bootstrap
@@ -120,6 +122,15 @@ ENVIRONMENT=production
 GEMINI_API_KEY=your_gemini_api_key
 # Alternative accepted key name:
 # GOOGLE_API_KEY=your_gemini_api_key
+
+# Optional Appwrite migration target
+# APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
+# APPWRITE_PROJECT_ID=your-appwrite-project-id
+# APPWRITE_API_KEY=your-appwrite-server-api-key
+# APPWRITE_DATABASE_ID=your-appwrite-database-id
+# Optional alias names used by MCP helper scripts:
+# APPWRITE_NAME=your-appwrite-project-id
+# APPWRITE_SECRET=your-appwrite-server-api-key
 ```
 
 If neither `GEMINI_API_KEY` nor `GOOGLE_API_KEY` is set, news sentiment falls back to rule-based scoring.

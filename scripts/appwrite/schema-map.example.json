@@ -1,0 +1,87 @@
+{
+  "databaseId": "vnibb",
+  "collections": [
+    {
+      "table": "stocks",
+      "collectionId": "stocks",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": []
+    },
+    {
+      "table": "stock_prices",
+      "collectionId": "stock_prices",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "time"],
+      "permissionsMode": "publicRead",
+      "batchSize": 1000,
+      "precisionColumns": ["open", "high", "low", "close", "adj_close", "value"]
+    },
+    {
+      "table": "intraday_trades",
+      "collectionId": "intraday_trades",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "trade_time", "transaction_id"],
+      "permissionsMode": "publicRead",
+      "batchSize": 1000,
+      "precisionColumns": ["price", "accumulated_val"]
+    },
+    {
+      "table": "income_statements",
+      "collectionId": "income_statements",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "fiscal_year", "period"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["revenue", "net_income", "eps", "ebitda"]
+    },
+    {
+      "table": "balance_sheets",
+      "collectionId": "balance_sheets",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "fiscal_year", "period"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["total_assets", "total_liabilities", "total_equity", "book_value_per_share"]
+    },
+    {
+      "table": "cash_flows",
+      "collectionId": "cash_flows",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "fiscal_year", "period"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["operating_cash_flow", "free_cash_flow", "net_change_in_cash"]
+    },
+    {
+      "table": "financial_ratios",
+      "collectionId": "financial_ratios",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "fiscal_year", "period"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["pe_ratio", "pb_ratio", "ps_ratio", "roe", "roa", "eps"]
+    },
+    {
+      "table": "user_dashboards",
+      "collectionId": "user_dashboards",
+      "cursorColumn": "id",
+      "documentIdColumns": ["id"],
+      "permissionsMode": "ownerReadWrite",
+      "ownerField": "user_id",
+      "batchSize": 200,
+      "precisionColumns": []
+    },
+    {
+      "table": "dashboard_widgets",
+      "collectionId": "dashboard_widgets",
+      "cursorColumn": "id",
+      "documentIdColumns": ["id"],
+      "permissionsMode": "collectionDefault",
+      "batchSize": 200,
+      "precisionColumns": []
+    }
+  ]
+}
