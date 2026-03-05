@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Bell, Plus, X, ArrowUp, ArrowDown, Check, Percent, BellOff, BellRing, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { config } from '@/lib/config';
+import { formatTimestamp } from '@/lib/format';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { fetchStockQuote, quoteQueryKey } from '@/lib/queries';
@@ -458,10 +459,10 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
     return (
         <div className="h-full flex flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between px-2 py-1.5 border-b border-zinc-800">
+            <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--border-color)]">
                 <div className="flex items-center gap-2 text-xs">
                     <Bell size={12} className="text-yellow-400" />
-                    <span className="text-zinc-400">{activeAlerts.length} active</span>
+                    <span className="text-[var(--text-muted)]">{activeAlerts.length} active</span>
                     {wsConnected && (
                         <span className="flex items-center gap-1 text-green-500">
                             <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
@@ -474,7 +475,7 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
                     {notificationPermission !== 'granted' && (
                         <button
                             onClick={handleRequestPermission}
-                            className="p-1 text-yellow-500 hover:text-yellow-400 hover:bg-zinc-800 rounded"
+                            className="p-1 text-yellow-500 hover:text-yellow-400 hover:bg-[var(--bg-hover)] rounded"
                             title="Enable notifications"
                         >
                             <BellOff size={12} />
@@ -482,7 +483,7 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
                     )}
                     <button
                         onClick={() => setShowAdd(!showAdd)}
-                        className="p-1 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded"
+                        className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded"
                     >
                         <Plus size={12} />
                     </button>
@@ -504,20 +505,20 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
 
             {/* Add Form */}
             {showAdd && (
-                <div className="px-2 py-2 border-b border-zinc-800 space-y-2 bg-zinc-900/50">
+                <div className="px-2 py-2 border-b border-[var(--border-color)] space-y-2 bg-[var(--bg-secondary)]">
                     <div className="flex gap-1">
                         <input
                             type="text"
                             placeholder="Symbol"
                             value={newAlert.symbol}
                             onChange={(e) => setNewAlert({ ...newAlert, symbol: e.target.value.toUpperCase() })}
-                            className="w-20 bg-zinc-800 text-white text-xs px-2 py-1.5 rounded border border-zinc-700 focus:border-blue-500 focus:outline-none"
+                            className="w-20 bg-[var(--bg-primary)] text-[var(--text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--border-color)] focus:border-blue-500 focus:outline-none"
                             maxLength={10}
                         />
                         <select
                             value={newAlert.condition}
                             onChange={(e) => setNewAlert({ ...newAlert, condition: e.target.value as PriceAlert['condition'] })}
-                            className="bg-zinc-800 text-white text-xs px-2 py-1.5 rounded border border-zinc-700 focus:border-blue-500 focus:outline-none"
+                            className="bg-[var(--bg-primary)] text-[var(--text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--border-color)] focus:border-blue-500 focus:outline-none"
                         >
                             <option value="above">Price Above</option>
                             <option value="below">Price Below</option>
@@ -531,14 +532,14 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
                             placeholder={newAlert.condition.includes('change') ? 'Percent' : 'Price'}
                             value={newAlert.threshold}
                             onChange={(e) => setNewAlert({ ...newAlert, threshold: e.target.value })}
-                            className="flex-1 bg-zinc-800 text-white text-xs px-2 py-1.5 rounded border border-zinc-700 focus:border-blue-500 focus:outline-none"
+                            className="flex-1 bg-[var(--bg-primary)] text-[var(--text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--border-color)] focus:border-blue-500 focus:outline-none"
                             min={0}
                             step={newAlert.condition.includes('change') ? 0.1 : 100}
                         />
                         <button
                             onClick={addAlert}
                             disabled={!newAlert.symbol || !newAlert.threshold}
-                            className="px-3 bg-yellow-600 hover:bg-yellow-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-xs rounded font-medium transition-colors"
+                            className="px-3 bg-yellow-600 hover:bg-yellow-500 disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)] text-white text-xs rounded font-medium transition-colors"
                         >
                             Add
                         </button>
@@ -559,7 +560,7 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
                         {/* Active Alerts */}
                         {activeAlerts.length > 0 && (
                             <>
-                                <div className="text-[10px] text-zinc-500 px-1 pt-1 uppercase tracking-wider">Active</div>
+                                <div className="text-[10px] text-[var(--text-muted)] px-1 pt-1 uppercase tracking-wider">Active</div>
                                 {activeAlerts.map((alert) => (
                                     <AlertItem
                                         key={alert.id}
@@ -574,7 +575,7 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
                         {/* Inactive Alerts */}
                         {inactiveAlerts.length > 0 && (
                             <>
-                                <div className="text-[10px] text-zinc-500 px-1 pt-2 uppercase tracking-wider">Paused</div>
+                                <div className="text-[10px] text-[var(--text-muted)] px-1 pt-2 uppercase tracking-wider">Paused</div>
                                 {inactiveAlerts.map((alert) => (
                                     <AlertItem
                                         key={alert.id}
@@ -590,10 +591,10 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
                         {triggeredAlerts.length > 0 && (
                             <>
                                 <div className="flex items-center justify-between px-1 pt-2">
-                                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Triggered</span>
+                                    <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Triggered</span>
                                     <button
                                         onClick={clearTriggered}
-                                        className="text-[10px] text-zinc-500 hover:text-red-400 flex items-center gap-1"
+                                        className="text-[10px] text-[var(--text-muted)] hover:text-red-400 flex items-center gap-1"
                                     >
                                         <Trash2 size={10} />
                                         Clear
@@ -631,7 +632,7 @@ function AlertItem({ alert, onRemove, onToggle }: AlertItemProps) {
     return (
         <div
             className={`flex items-center justify-between p-2 rounded transition-colors group ${
-                alert.isActive ? 'bg-zinc-800/50 hover:bg-zinc-800' : 'bg-zinc-900/50 opacity-60'
+                alert.isActive ? 'bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]' : 'bg-[var(--bg-primary)] opacity-60'
             }`}
         >
             <div className="flex items-center gap-2 min-w-0">
@@ -642,13 +643,13 @@ function AlertItem({ alert, onRemove, onToggle }: AlertItemProps) {
                 )}
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-white">{alert.symbol}</span>
-                        <span className="text-xs text-zinc-400 truncate">
+                        <span className="text-sm font-medium text-[var(--text-primary)]">{alert.symbol}</span>
+                        <span className="text-xs text-[var(--text-secondary)] truncate">
                             {formatCondition(alert.condition)} {formatThreshold(alert)}
                         </span>
                     </div>
                     {alert.lastPrice && (
-                        <span className="text-[10px] text-zinc-500">
+                        <span className="text-[10px] text-[var(--text-muted)]">
                             Current: {alert.lastPrice.toLocaleString()}
                         </span>
                     )}
@@ -657,14 +658,14 @@ function AlertItem({ alert, onRemove, onToggle }: AlertItemProps) {
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                     onClick={() => onToggle(alert.id)}
-                    className="p-1 text-zinc-500 hover:text-blue-400"
+                    className="p-1 text-[var(--text-muted)] hover:text-blue-400"
                     title={alert.isActive ? 'Pause alert' : 'Resume alert'}
                 >
                     {alert.isActive ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
                 </button>
                 <button
                     onClick={() => onRemove(alert.id)}
-                    className="p-1 text-zinc-500 hover:text-red-400"
+                    className="p-1 text-[var(--text-muted)] hover:text-red-400"
                     title="Delete alert"
                 >
                     <X size={12} />
@@ -680,8 +681,7 @@ interface TriggeredAlertItemProps {
 }
 
 function TriggeredAlertItem({ alert, onRemove }: TriggeredAlertItemProps) {
-    const triggeredDate = alert.triggeredAt ? new Date(alert.triggeredAt) : null;
-    const timeAgo = triggeredDate ? formatTimeAgo(triggeredDate) : '';
+    const triggeredLabel = alert.triggeredAt ? formatTimestamp(alert.triggeredAt) : '—';
 
     return (
         <div className="flex items-center justify-between p-2 rounded bg-green-500/10 border border-green-500/20 group">
@@ -690,19 +690,19 @@ function TriggeredAlertItem({ alert, onRemove }: TriggeredAlertItemProps) {
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-green-400">{alert.symbol}</span>
-                        <span className="text-xs text-zinc-400 truncate">
+                        <span className="text-xs text-[var(--text-secondary)] truncate">
                             {formatCondition(alert.condition)} {formatThreshold(alert)}
                         </span>
                     </div>
-                    <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+                    <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         {alert.lastPrice && <span>At {alert.lastPrice.toLocaleString()}</span>}
-                        <span>• {timeAgo}</span>
+                        <span>• {triggeredLabel}</span>
                     </div>
                 </div>
             </div>
             <button
                 onClick={() => onRemove(alert.id)}
-                className="p-1 text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="p-1 text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
             >
                 <X size={12} />
             </button>
@@ -710,13 +710,3 @@ function TriggeredAlertItem({ alert, onRemove }: TriggeredAlertItemProps) {
     );
 }
 
-// ============ Utilities ============
-
-function formatTimeAgo(date: Date): string {
-    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-    
-    if (seconds < 60) return 'Just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return `${Math.floor(seconds / 86400)}d ago`;
-}

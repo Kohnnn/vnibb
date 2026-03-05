@@ -19,7 +19,7 @@ const CATEGORIES: { id: MetricCategory; label: string }[] = [
 
 export function MetricCategoryTabs({ activeCategory, onChange }: MetricCategoryTabsProps) {
   return (
-    <div className="flex gap-1 p-1 bg-gray-900/50 rounded-lg border border-gray-800">
+    <div className="flex gap-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-1">
       {CATEGORIES.map((cat) => (
         <button
           key={cat.id}
@@ -28,7 +28,7 @@ export function MetricCategoryTabs({ activeCategory, onChange }: MetricCategoryT
               "px-3 py-1.5 text-[10px] font-bold uppercase tracking-tight rounded-md transition-all",
               activeCategory === cat.id
                 ? "bg-blue-600 text-white shadow-lg"
-                : "text-gray-500 hover:text-gray-300 hover:bg-white/5"
+                : "text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]"
           )}
         >
           {cat.label}

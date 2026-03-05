@@ -79,7 +79,7 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove }: NewsF
       isLoading={isLoading && !hasData}
       noPadding
     >
-      <div aria-label="News flow stream" className="h-full flex flex-col bg-black">
+      <div aria-label="News flow stream" className="h-full flex flex-col bg-[var(--bg-primary)]">
         <NewsFilterBar filters={filters} onFiltersChange={setFilters} />
 
         <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
@@ -113,7 +113,7 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove }: NewsF
                 <button
                   onClick={() => fetchNextPage()}
                   disabled={isFetchingNextPage}
-                  className="w-full py-4 text-center text-[10px] font-black uppercase text-blue-500 hover:text-blue-400 hover:bg-white/5 transition-all"
+                  className="w-full py-4 text-center text-[10px] font-black uppercase text-blue-500 hover:text-blue-400 hover:bg-[var(--bg-hover)] transition-all"
                 >
                   {isFetchingNextPage ? (
                     <div className="flex items-center justify-center gap-2">
@@ -127,7 +127,7 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove }: NewsF
               )}
 
               {!hasNextPage && allNews.length > 0 && (
-                <div className="py-6 text-center text-[10px] font-bold text-gray-700 uppercase tracking-widest">
+                <div className="py-6 text-center text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                   End of Flow
                 </div>
               )}

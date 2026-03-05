@@ -53,7 +53,7 @@ export function NotesWidget({ symbol, isEditing, onRemove }: NotesWidgetProps) {
         <div className="h-full flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-1 py-1 mb-2">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
+                <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                     <StickyNote size={12} className="text-yellow-400" />
                     <span>Notes - {symbol}</span>
                     {!isSaved && <span className="text-orange-400">•</span>}
@@ -62,14 +62,14 @@ export function NotesWidget({ symbol, isEditing, onRemove }: NotesWidgetProps) {
                     <WidgetMeta note="Local notes" align="right" />
                     <button
                         onClick={saveNote}
-                        className="p-1 text-gray-500 hover:text-green-400 hover:bg-gray-800 rounded"
+                        className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-green-400"
                         title="Save"
                     >
                         <Save size={12} />
                     </button>
                     <button
                         onClick={clearNote}
-                        className="p-1 text-gray-500 hover:text-red-400 hover:bg-gray-800 rounded"
+                        className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-red-400"
                         title="Clear"
                     >
                         <Trash2 size={12} />
@@ -83,12 +83,12 @@ export function NotesWidget({ symbol, isEditing, onRemove }: NotesWidgetProps) {
                     value={notes}
                     onChange={(e) => handleChange(e.target.value)}
                     placeholder={`Write your notes about ${symbol}...`}
-                    className="w-full h-full bg-gray-800/30 text-white text-sm p-2 rounded resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="h-full w-full resize-none rounded bg-[var(--bg-tertiary)] p-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
             </div>
 
             {/* Footer */}
-            <div className="px-1 py-1 text-[10px] text-gray-500 text-right">
+            <div className="px-1 py-1 text-right text-[10px] text-[var(--text-muted)]">
                 {notes.length} characters
             </div>
         </div>

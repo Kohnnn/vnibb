@@ -237,7 +237,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                     />
                 ) : (
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-                    <div className="flex items-center justify-between border-b border-white/5 mb-4">
+                    <div className="mb-4 flex items-center justify-between border-b border-[var(--border-subtle)]">
                         <TabsList className="bg-transparent h-9 p-0 gap-4">
                             <TabsTrigger value="browser" className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none px-0 h-full text-xs font-bold uppercase tracking-wider">
                                 <TableIcon className="h-3 w-3 mr-2" /> Browser
@@ -313,7 +313,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                     </div>
 
                     <TabsContent value="browser" className="flex-1 flex flex-col m-0 overflow-hidden">
-                        <div className="flex-1 overflow-auto border rounded-md border-white/5 scrollbar-hide">
+                        <div className="flex-1 overflow-auto rounded-md border border-[var(--border-subtle)] scrollbar-hide">
                             {tableLoading ? (
                                 <WidgetLoading message="Loading rows..." />
                             ) : tableError ? (
@@ -327,7 +327,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                             ) : tableData?.rows?.length > 0 ? (
                                 <Table>
                                     <TableHeader className="bg-muted/30">
-                                        <TableRow className="hover:bg-transparent border-white/5">
+                                        <TableRow className="border-[var(--border-subtle)] hover:bg-transparent">
                                             {Object.keys(tableData.rows[0]).map((col) => (
                                                 <TableHead key={col} className="text-[10px] font-black uppercase tracking-tighter h-8">
                                                     {col}
@@ -339,7 +339,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                         {tableData.rows.map((row: any, i: number) => (
                                             <TableRow 
                                                 key={i} 
-                                                className="border-white/5 hover:bg-white/5 cursor-pointer transition-colors"
+                                                className="cursor-pointer border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-tertiary)]"
                                                 onClick={() => setSelectedRow(row)}
                                             >
                                                 {Object.values(row).map((val: any, j: number) => (
@@ -393,7 +393,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                     <TabsContent value="query" className="flex-1 flex flex-col m-0 gap-4 overflow-hidden">
                         <div className="flex flex-col gap-2">
                             <div className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">SQL Editor (SELECT only)</div>
-                            <div className="relative border rounded-md border-white/10 bg-muted/20">
+                            <div className="relative rounded-md border border-[var(--border-color)] bg-muted/20">
                                 <textarea 
                                     className="w-full h-32 bg-transparent p-4 text-xs font-mono outline-none resize-none"
                                     value={sqlQuery}
@@ -413,7 +413,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
 
                         <div className="flex-1 overflow-hidden flex flex-col">
                              <div className="text-[10px] font-black uppercase text-muted-foreground tracking-widest mb-2">Results</div>
-                             <div className="flex-1 overflow-auto border rounded-md border-white/5 scrollbar-hide">
+                             <div className="flex-1 overflow-auto rounded-md border border-[var(--border-subtle)] scrollbar-hide">
                                 {queryMutation.error ? (
                                     <WidgetError
                                         error={queryMutation.error as Error}
@@ -423,7 +423,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                 ) : queryMutation.data?.rows ? (
                                     <Table>
                                          <TableHeader className="bg-muted/30">
-                                            <TableRow className="hover:bg-transparent border-white/5">
+                                            <TableRow className="border-[var(--border-subtle)] hover:bg-transparent">
                                                 {Object.keys(queryMutation.data.rows[0]).map((col) => (
                                                     <TableHead key={col} className="text-[10px] font-black uppercase tracking-tighter h-8">
                                                         {col}
@@ -433,7 +433,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                         </TableHeader>
                                         <TableBody>
                                             {queryMutation.data.rows.map((row: any, i: number) => (
-                                                <TableRow key={i} className="border-white/5">
+                                                <TableRow key={i} className="border-[var(--border-subtle)]">
                                                     {Object.values(row).map((val: any, j: number) => (
                                                         <TableCell key={j} className="text-[10px] py-2 truncate max-w-[150px] font-mono text-muted-foreground">
                                                             {String(val ?? "-")}
@@ -451,7 +451,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                     </TabsContent>
 
                     <TabsContent value="schema" className="flex-1 flex flex-col m-0 overflow-hidden">
-                         <div className="flex-1 overflow-auto border rounded-md border-white/5 scrollbar-hide">
+                         <div className="flex-1 overflow-auto rounded-md border border-[var(--border-subtle)] scrollbar-hide">
                             {schemaLoading ? (
                                 <WidgetLoading message="Loading schema..." />
                             ) : schemaError ? (
@@ -465,7 +465,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                             ) : schemaData?.columns ? (
                                 <Table>
                                     <TableHeader className="bg-muted/30">
-                                        <TableRow className="hover:bg-transparent border-white/5">
+                                        <TableRow className="border-[var(--border-subtle)] hover:bg-transparent">
                                             <TableHead className="text-[10px] font-black uppercase h-8">Column</TableHead>
                                             <TableHead className="text-[10px] font-black uppercase h-8">Type</TableHead>
                                             <TableHead className="text-[10px] font-black uppercase h-8">Null</TableHead>
@@ -475,7 +475,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                     </TableHeader>
                                     <TableBody>
                                         {schemaData.columns.map((col: any) => (
-                                            <TableRow key={col.name} className="border-white/5">
+                                            <TableRow key={col.name} className="border-[var(--border-subtle)]">
                                                 <TableCell className="text-xs font-bold text-blue-400">{col.name}</TableCell>
                                                 <TableCell className="text-xs font-mono">{col.type}</TableCell>
                                                 <TableCell className="text-xs">{col.nullable ? "YES" : "NO"}</TableCell>
@@ -492,7 +492,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                     </TabsContent>
 
                     <TabsContent value="health" className="flex-1 flex flex-col m-0 overflow-hidden">
-                        <div className="flex-1 overflow-auto border rounded-md border-white/5 p-3 space-y-3">
+                        <div className="flex-1 space-y-3 overflow-auto rounded-md border border-[var(--border-subtle)] p-3">
                             {dataHealthLoading ? (
                                 <WidgetLoading message="Loading health summary..." />
                             ) : dataHealthError ? (
@@ -513,7 +513,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                             { key: "critical", label: "Critical" },
                                             { key: "unknown", label: "Unknown" },
                                         ].map((item) => (
-                                            <div key={item.key} className="rounded border border-white/10 bg-muted/20 p-2">
+                                            <div key={item.key} className="rounded border border-[var(--border-color)] bg-muted/20 p-2">
                                                 <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{item.label}</div>
                                                 <div className="mt-1 text-lg font-black">
                                                     {dataHealth.summary?.[item.key as keyof typeof dataHealth.summary] ?? 0}
@@ -522,10 +522,10 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                         ))}
                                     </div>
 
-                                    <div className="rounded border border-white/10 overflow-hidden">
+                                    <div className="overflow-hidden rounded border border-[var(--border-color)]">
                                         <Table>
                                             <TableHeader className="bg-muted/30">
-                                                <TableRow className="hover:bg-transparent border-white/5">
+                                                <TableRow className="border-[var(--border-subtle)] hover:bg-transparent">
                                                     <TableHead className="text-[10px] font-black uppercase h-8">Table</TableHead>
                                                     <TableHead className="text-[10px] font-black uppercase h-8 text-right">Rows</TableHead>
                                                     <TableHead className="text-[10px] font-black uppercase h-8 text-right">Age (days)</TableHead>
@@ -541,7 +541,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                                     })
                                                     .slice(0, 20)
                                                     .map(([tableName, meta]) => (
-                                                        <TableRow key={tableName} className="border-white/5">
+                                                        <TableRow key={tableName} className="border-[var(--border-subtle)]">
                                                             <TableCell className="text-xs font-bold text-blue-400">{tableName}</TableCell>
                                                             <TableCell className="text-xs text-right font-mono">{Number(meta.count || 0).toLocaleString()}</TableCell>
                                                             <TableCell className="text-xs text-right font-mono">
@@ -570,7 +570,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                                         </Table>
                                     </div>
 
-                                    <div className="rounded border border-white/10 bg-muted/20 p-2">
+                                    <div className="rounded border border-[var(--border-color)] bg-muted/20 p-2">
                                         <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
                                             Backfill planner
                                         </div>
@@ -631,7 +631,7 @@ export function DatabaseBrowserWidget({ config }: DatabaseBrowserWidgetProps) {
                             <X className="h-5 w-5" />
                         </Button>
                     </div>
-                    <div className="flex-1 overflow-auto bg-black/50 rounded-lg border border-white/10">
+                    <div className="flex-1 overflow-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)]">
                         <pre className="p-4 font-mono text-xs leading-relaxed text-blue-100">
                             {JSON.stringify(selectedRow, null, 2)}
                         </pre>

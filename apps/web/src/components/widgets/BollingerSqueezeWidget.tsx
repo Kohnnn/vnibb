@@ -71,7 +71,7 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Minimize2 size={12} className="text-cyan-400" />
           <span>Bollinger Squeeze</span>
         </div>
@@ -82,7 +82,7 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/70'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -101,29 +101,29 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Current BB%</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Current BB%</div>
               <div className="font-mono text-cyan-300">{bbPctProgress.toFixed(2)}%</div>
-              <div className="mt-1 h-1.5 rounded bg-gray-800/50 overflow-hidden">
+              <div className="mt-1 h-1.5 rounded bg-[var(--bg-tertiary)] overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-emerald-500 via-cyan-500 to-red-500"
                   style={{ width: `${bbPctProgress}%` }}
                 />
               </div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Width</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Width</div>
               <div className="font-mono text-amber-300">{bbWidth.toFixed(3)}%</div>
             </div>
           </div>
 
-          <div className="rounded-md border border-gray-800/60 bg-black/20 p-2 mb-2">
+          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 mb-2">
             <div className="mb-2 flex items-center justify-between">
-              <div className="text-[10px] uppercase tracking-widest text-gray-500">BB Width Regime</div>
-              <div className="text-[10px] text-gray-400">Threshold {threshold.toFixed(3)}%</div>
+              <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">BB Width Regime</div>
+              <div className="text-[10px] text-[var(--text-secondary)]">Threshold {threshold.toFixed(3)}%</div>
             </div>
             {widthSeries.length === 0 ? (
-              <div className="py-6 text-center text-[11px] text-gray-500">No width series</div>
+              <div className="py-6 text-center text-[11px] text-[var(--text-muted)]">No width series</div>
             ) : (
               <ChartMountGuard className="h-[130px]" minHeight={120}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -151,18 +151,18 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
             )}
           </div>
 
-          <div className="rounded-md border border-gray-800/60 bg-black/20 px-3 py-2 mb-2">
+          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
             <div className="flex items-center justify-between text-[10px]">
-              <span className="text-gray-500 uppercase tracking-widest">Squeeze State</span>
-              <span className="text-gray-400">Threshold: {threshold.toFixed(3)}%</span>
+              <span className="text-[var(--text-muted)] uppercase tracking-widest">Squeeze State</span>
+              <span className="text-[var(--text-secondary)]">Threshold: {threshold.toFixed(3)}%</span>
             </div>
-            <div className={`mt-1 flex items-center gap-2 text-sm font-semibold ${metric?.squeeze_active ? 'text-emerald-300' : 'text-gray-300'}`}>
-              <CircleDot size={14} className={metric?.squeeze_active ? 'text-emerald-400' : 'text-gray-500'} />
+            <div className={`mt-1 flex items-center gap-2 text-sm font-semibold ${metric?.squeeze_active ? 'text-emerald-300' : 'text-[var(--text-secondary)]'}`}>
+              <CircleDot size={14} className={metric?.squeeze_active ? 'text-emerald-400' : 'text-[var(--text-muted)]'} />
               {metric?.squeeze_active ? 'SQUEEZE ACTIVE' : 'NORMAL'}
             </div>
           </div>
 
-          <div className="rounded-md border border-gray-800/60 bg-black/20 p-3 text-[11px] text-gray-400 leading-relaxed">
+          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 text-[11px] text-[var(--text-secondary)] leading-relaxed">
             Low BB width often indicates compressed volatility. Watch for expansion after a squeeze, especially when price holds above the mid band.
           </div>
         </>

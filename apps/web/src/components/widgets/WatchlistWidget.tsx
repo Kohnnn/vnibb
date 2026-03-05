@@ -211,7 +211,7 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: Watc
                             <span className="text-[10px] text-red-400 font-bold uppercase">Clear watchlist?</span>
                             <div className="flex gap-2">
                                 <button onClick={handleClearAll} className="bg-red-600 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase">Clear</button>
-                                <button onClick={() => setShowClearConfirm(false)} className="text-gray-400 text-[10px] font-bold uppercase">Cancel</button>
+                                <button onClick={() => setShowClearConfirm(false)} className="text-[var(--text-secondary)] text-[10px] font-bold uppercase">Cancel</button>
                             </div>
                         </div>
                     </div>

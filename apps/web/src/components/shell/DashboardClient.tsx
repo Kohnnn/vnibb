@@ -534,7 +534,7 @@ function DashboardContent() {
                                                             symbol={globalSymbol}
                                                         />
                                                     ) : (
-                                                        <div className="p-4 text-gray-500">Widget not found: {widgetType}</div>
+                                                        <div className="p-4 text-[var(--text-muted)]">Widget not found: {widgetType}</div>
                                                     )}
                                                 </WidgetWrapper>
                                             </div>

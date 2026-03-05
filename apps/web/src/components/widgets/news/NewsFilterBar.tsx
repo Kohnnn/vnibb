@@ -16,16 +16,16 @@ interface NewsFilterBarProps {
 
 const SENTIMENTS = [
   { id: 'bullish', label: 'Bullish', icon: TrendingUp, color: 'text-green-400' },
-  { id: 'neutral', label: 'Neutral', icon: Minus, color: 'text-gray-400' },
+  { id: 'neutral', label: 'Neutral', icon: Minus, color: 'text-[var(--text-secondary)]' },
   { id: 'bearish', label: 'Bearish', icon: TrendingDown, color: 'text-red-400' },
 ];
 
 function NewsFilterBarComponent({ filters, onFiltersChange }: NewsFilterBarProps) {
   return (
     <div className="flex items-center gap-2 p-2 border-b border-[var(--border-default)] bg-[var(--bg-primary)]">
-      <div className="flex items-center gap-1.5 shrink-0 px-1 border-r border-gray-800 mr-1">
-          <Filter size={12} className="text-gray-600" />
-          <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest hidden sm:inline">Filters</span>
+      <div className="flex items-center gap-1.5 shrink-0 px-1 border-r border-[var(--border-color)] mr-1">
+          <Filter size={12} className="text-[var(--text-muted)]" />
+          <span className="text-[10px] font-black uppercase text-[var(--text-muted)] tracking-widest hidden sm:inline">Filters</span>
       </div>
 
       {/* Symbol tags */}
@@ -50,7 +50,7 @@ function NewsFilterBarComponent({ filters, onFiltersChange }: NewsFilterBarProps
       </div>
 
       {/* Sentiment filters */}
-      <div className="ml-auto flex bg-gray-900 rounded p-0.5 border border-gray-800">
+      <div className="ml-auto flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-color)]">
         {SENTIMENTS.map(s => (
           <button
             key={s.id}
@@ -61,8 +61,8 @@ function NewsFilterBarComponent({ filters, onFiltersChange }: NewsFilterBarProps
             className={cn(
                 "flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase transition-all",
                 filters.sentiment === s.id
-                    ? "bg-gray-800 " + s.color
-                    : "text-gray-600 hover:text-gray-400"
+                    ? "bg-[var(--bg-tertiary)] " + s.color
+                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             )}
           >
             <s.icon size={10} />

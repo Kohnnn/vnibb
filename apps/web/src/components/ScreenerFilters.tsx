@@ -368,7 +368,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
 
             {/* Save Preset Modal */}
             {showPresetModal && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.6)]">
                     <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-lg p-4 w-80 shadow-2xl">
                         <h3 className="text-sm font-medium text-[var(--text-primary)] mb-3">Save Filter Preset</h3>
                         <input

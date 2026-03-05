@@ -14,7 +14,7 @@ export function PeriodToggleGroup({
   options = ['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM']
 }: PeriodToggleGroupProps) {
   return (
-    <div className="flex bg-gray-800/50 rounded-md p-0.5 gap-0.5">
+    <div className="flex gap-0.5 rounded-md bg-[var(--bg-secondary)] p-0.5">
       {options.map((option) => (
         <button
           key={option}
@@ -22,7 +22,7 @@ export function PeriodToggleGroup({
           className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
             value === option
               ? 'bg-blue-600 text-white'
-              : 'text-gray-400 hover:text-white hover:bg-gray-700'
+              : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
           }`}
         >
           {option}

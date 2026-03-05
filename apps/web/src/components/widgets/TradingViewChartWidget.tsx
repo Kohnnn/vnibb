@@ -34,7 +34,7 @@ export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChar
       noPadding
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching}

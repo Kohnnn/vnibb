@@ -101,12 +101,12 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
       widgetId={id}
       showLinkToggle
     >
-        <div className="h-full flex flex-col bg-black overflow-hidden">
+        <div className="h-full flex flex-col bg-[var(--bg-primary)] overflow-hidden">
         {/* Actions bar */}
         <div className="flex items-center justify-between p-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)]">
           <div className="flex items-center gap-2">
             <BrainCircuit size={16} className="text-cyan-400" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Gemini Intelligence</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Gemini Intelligence</span>
           </div>
           <div className="flex items-center gap-2">
             <WidgetMeta note="AI analysis" isFetching={isLoading} align="right" />
@@ -122,7 +122,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
               className={cn(
                   "flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all",
                   isLoading 
-                      ? "bg-gray-800 text-gray-500 cursor-not-allowed" 
+                      ? "bg-[var(--bg-tertiary)] text-[var(--text-muted)] cursor-not-allowed" 
                       : "bg-cyan-600 text-white hover:bg-cyan-500 shadow-lg shadow-cyan-900/20"
               )}
               aria-label={analysis ? 'Re-analyze stock' : 'Analyze stock'}
@@ -153,13 +153,13 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
                 </button>
             </div>
           ) : analysis ? (
-            <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-headings:mb-2 prose-headings:mt-4 first:prose-headings:mt-0">
+            <div className="prose prose-sm max-w-none text-[var(--text-secondary)] prose-headings:text-[var(--text-primary)] prose-strong:text-[var(--text-primary)] prose-p:leading-relaxed prose-headings:mb-2 prose-headings:mt-4 first:prose-headings:mt-0">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {analysis}
                 </ReactMarkdown>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-4 text-center opacity-40">
+            <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] gap-4 text-center opacity-40">
                 <div className="relative">
                     <BrainCircuit size={48} strokeWidth={1} />
                     {isLoading && (
@@ -177,7 +177,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         </div>
 
         {/* Disclaimer */}
-        <div className="px-4 py-2 border-t border-gray-800 bg-gray-900/20 text-[9px] text-gray-600 italic">
+        <div className="px-4 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[9px] text-[var(--text-muted)] italic">
             AI-generated content. For educational purposes only. Verify with your own research.
         </div>
       </div>

@@ -172,7 +172,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                 width={width}
                                                 height={height}
                                                 fill={color}
-                                                className="hover:brightness-110 transition-all cursor-pointer hover:stroke-white/20 hover:stroke-2"
+                                                className="cursor-pointer transition-all hover:brightness-110 hover:stroke-[var(--text-primary)] hover:stroke-2"
                                                 stroke="var(--border-default)"
                                                 strokeWidth={1}
                                             >
@@ -187,7 +187,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                     x={node.x0 + width / 2}
                                                     y={node.y0 + height / 2 + 4}
                                                     textAnchor="middle"
-                                                    className="fill-white/90 font-black pointer-events-none select-none drop-shadow-md"
+                                                    className="pointer-events-none select-none fill-[var(--text-primary)] font-black drop-shadow-md"
                                                     style={{ fontSize: Math.min(width / 6, height / 2, 11) }}
                                                 >
                                                     {node.data.name.split('-')[0].substring(0, 8)}

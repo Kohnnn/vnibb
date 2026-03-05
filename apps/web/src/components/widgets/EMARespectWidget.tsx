@@ -34,7 +34,7 @@ function tone(strength: string): string {
   if (strength === 'moderate') return 'text-cyan-300'
   if (strength === 'weak') return 'text-amber-300'
   if (strength === 'fragile') return 'text-red-300'
-  return 'text-gray-300'
+  return 'text-[var(--text-secondary)]'
 }
 
 function pct(value: number | null | undefined): string {
@@ -72,7 +72,7 @@ export function EMARespectWidget({ symbol }: EMARespectWidgetProps) {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Rows3 size={12} className="text-cyan-400" />
           <span>EMA Respect Analysis</span>
         </div>
@@ -83,7 +83,7 @@ export function EMARespectWidget({ symbol }: EMARespectWidgetProps) {
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/70'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -102,24 +102,24 @@ export function EMARespectWidget({ symbol }: EMARespectWidgetProps) {
       ) : (
         <>
           <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Best Support</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Best Support</div>
               <div className="font-semibold text-cyan-300">{metric?.best_support_ema || '-'}</div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Tolerance</div>
-              <div className="font-mono text-gray-200">±{Number(metric?.interaction_tolerance_pct ?? 0).toFixed(1)}%</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Tolerance</div>
+              <div className="font-mono text-[var(--text-primary)]">±{Number(metric?.interaction_tolerance_pct ?? 0).toFixed(1)}%</div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Lookahead</div>
-              <div className="font-mono text-gray-200">{metric?.lookahead_sessions ?? 0} sessions</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Lookahead</div>
+              <div className="font-mono text-[var(--text-primary)]">{metric?.lookahead_sessions ?? 0} sessions</div>
             </div>
           </div>
 
-          <div className="flex-1 overflow-auto rounded-md border border-gray-800/60 bg-black/20 p-2">
+          <div className="flex-1 overflow-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
             <table className="w-full text-[10px]">
               <thead>
-                <tr className="text-gray-500 border-b border-gray-800/70">
+                <tr className="text-[var(--text-muted)] border-b border-[var(--border-color)]">
                   <th className="text-left py-1">EMA</th>
                   <th className="text-right py-1">Dist</th>
                   <th className="text-right py-1">Support</th>
@@ -131,8 +131,8 @@ export function EMARespectWidget({ symbol }: EMARespectWidgetProps) {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.ema_period} className="border-b border-gray-900/80 text-gray-300">
-                    <td className="py-1 font-semibold text-gray-100">EMA{row.ema_period}</td>
+                  <tr key={row.ema_period} className="border-b border-[var(--border-color)] text-[var(--text-secondary)]">
+                    <td className="py-1 font-semibold text-[var(--text-primary)]">EMA{row.ema_period}</td>
                     <td className="py-1 text-right font-mono">{pct(row.current_distance_pct)}</td>
                     <td className="py-1 text-right font-mono">
                       {pct(row.support_bounce_rate_pct)} ({row.support_tests})

@@ -4,11 +4,11 @@ import { memo } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { useQuery } from '@tanstack/react-query';
 import { ExternalLink, Clock, Newspaper } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { API_BASE_URL } from '@/lib/api';
+import { formatTimestamp } from '@/lib/format';
 
 function decodeHtml(value: string | null | undefined): string {
   if (!value) return '';
@@ -45,10 +45,10 @@ function parseNewsDate(value: string | null | undefined): Date | null {
   return parsed;
 }
 
-function formatPublishedDistance(value: string | null | undefined): string {
+function formatPublishedTime(value: string | null | undefined): string {
   const parsed = parseNewsDate(value);
   if (!parsed) return 'Unknown time';
-  return formatDistanceToNow(parsed, { addSuffix: true });
+  return formatTimestamp(parsed);
 }
 
 function MarketNewsWidgetComponent() {
@@ -137,7 +137,7 @@ function MarketNewsWidgetComponent() {
                   <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
                     <div className="flex items-center gap-1">
                       <Clock className="w-2.5 h-2.5" />
-                      {formatPublishedDistance(item.publishedDate)}
+                      {formatPublishedTime(item.publishedDate)}
                     </div>
                     <span className="text-[var(--text-muted)]/60">•</span>
                     <span className="px-1.5 py-0.5 bg-[var(--bg-secondary)] rounded border border-[var(--border-color)] uppercase font-bold text-[9px]">

@@ -29,7 +29,7 @@ export function AnnotationToolbar({
   ];
 
   return (
-    <div className="flex items-center gap-2 p-1 bg-gray-900 border border-gray-800 rounded-lg">
+    <div className="flex items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-1">
       {/* Tool buttons */}
       <div className="flex items-center gap-0.5">
         {tools.map(tool => (
@@ -40,7 +40,7 @@ export function AnnotationToolbar({
                 "p-1.5 rounded transition-all",
                 selectedTool === tool.id
                     ? "bg-blue-600 text-white shadow-lg"
-                    : "text-gray-500 hover:text-white hover:bg-gray-800"
+                    : "text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
             )}
             title={tool.label}
             aria-label={tool.label}
@@ -50,31 +50,31 @@ export function AnnotationToolbar({
         ))}
       </div>
 
-      <div className="w-px h-4 bg-gray-800 mx-1" />
+      <div className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
 
       {/* Color picker */}
       <div className="relative group">
         <button
-          className="p-1.5 rounded hover:bg-gray-800 transition-colors flex items-center gap-1"
+          className="flex items-center gap-1 rounded p-1.5 transition-colors hover:bg-[var(--bg-tertiary)]"
           title="Color"
           aria-label="Annotation color"
         >
           <div 
-            className="w-3.5 h-3.5 rounded-full border border-white/20"
+            className="h-3.5 w-3.5 rounded-full border border-[var(--border-color)]"
             style={{ backgroundColor: activeColor }}
           />
-          <ChevronDown size={10} className="text-gray-600" />
+          <ChevronDown size={10} className="text-[var(--text-muted)]" />
         </button>
         
         {/* Color dropdown */}
-        <div className="absolute top-full left-0 mt-1 hidden group-hover:grid grid-cols-4 gap-1 p-2 bg-gray-900 border border-gray-800 rounded-lg shadow-2xl z-50">
+        <div className="absolute left-0 top-full z-50 mt-1 hidden grid-cols-4 gap-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] p-2 shadow-2xl group-hover:grid">
           {ANNOTATION_COLORS.map(color => (
             <button
               key={color}
               onClick={() => onColorChange(color)}
               className={cn(
                 "w-4 h-4 rounded-full border border-transparent transition-all",
-                activeColor === color ? "border-white scale-125" : "hover:scale-110"
+                activeColor === color ? "scale-125 border-[var(--text-primary)]" : "hover:scale-110"
               )}
               style={{ backgroundColor: color }}
               aria-label={`Set annotation color ${color}`}
@@ -83,7 +83,7 @@ export function AnnotationToolbar({
         </div>
       </div>
 
-      <div className="w-px h-4 bg-gray-800 mx-1" />
+      <div className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
 
       {/* Clear all */}
       <button
@@ -95,7 +95,7 @@ export function AnnotationToolbar({
           }
         }}
         disabled={annotationCount === 0}
-        className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-bold uppercase text-[var(--text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-30"
         title="Clear all annotations"
         aria-label="Clear all annotations"
       >

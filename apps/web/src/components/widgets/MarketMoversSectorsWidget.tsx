@@ -68,7 +68,7 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove }: MarketM
       widgetId={id}
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
@@ -91,24 +91,24 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove }: MarketM
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <TrendingUp size={14} className="text-emerald-400" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Market Movers</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Market Movers</span>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Top Gainers</div>
                   {topGainers.length === 0 ? (
-                    <div className="text-xs text-gray-500">No gainers yet.</div>
+                    <div className="text-xs text-[var(--text-muted)]">No gainers yet.</div>
                   ) : (
                     topGainers.map((item, index) => (
                       <button
                         key={`gainer-${item?.symbol}-${index}`}
                         type="button"
                         onClick={() => item?.symbol && setLinkedSymbol(item.symbol)}
-                        className="w-full flex items-center justify-between rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2 text-left hover:bg-white/5 transition-colors"
+                        className="w-full flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-left hover:bg-[var(--bg-hover)] transition-colors"
                       >
                         <div>
-                          <div className="text-xs font-semibold text-gray-200">{item?.symbol}</div>
-                          <div className="text-[10px] text-gray-500 line-clamp-1">{item?.sectorName}</div>
+                          <div className="text-xs font-semibold text-[var(--text-primary)]">{item?.symbol}</div>
+                          <div className="text-[10px] text-[var(--text-muted)] line-clamp-1">{item?.sectorName}</div>
                         </div>
                         <div className="text-xs font-bold text-emerald-400">
                           {item?.changePct !== null && item?.changePct !== undefined
@@ -122,18 +122,18 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove }: MarketM
                 <div className="space-y-2">
                   <div className="text-[10px] text-red-400 font-bold uppercase tracking-wider">Top Losers</div>
                   {topLosers.length === 0 ? (
-                    <div className="text-xs text-gray-500">No losers yet.</div>
+                    <div className="text-xs text-[var(--text-muted)]">No losers yet.</div>
                   ) : (
                     topLosers.map((item, index) => (
                       <button
                         key={`loser-${item?.symbol}-${index}`}
                         type="button"
                         onClick={() => item?.symbol && setLinkedSymbol(item.symbol)}
-                        className="w-full flex items-center justify-between rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2 text-left hover:bg-white/5 transition-colors"
+                        className="w-full flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-left hover:bg-[var(--bg-hover)] transition-colors"
                       >
                         <div>
-                          <div className="text-xs font-semibold text-gray-200">{item?.symbol}</div>
-                          <div className="text-[10px] text-gray-500 line-clamp-1">{item?.sectorName}</div>
+                          <div className="text-xs font-semibold text-[var(--text-primary)]">{item?.symbol}</div>
+                          <div className="text-[10px] text-[var(--text-muted)] line-clamp-1">{item?.sectorName}</div>
                         </div>
                         <div className="text-xs font-bold text-red-400">
                           {item?.changePct !== null && item?.changePct !== undefined
@@ -150,7 +150,7 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove }: MarketM
             <section className="space-y-3">
               <div className="flex items-center gap-2">
                 <LayoutGrid size={14} className="text-blue-400" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Sector Performance</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Sector Performance</span>
               </div>
               <div className="space-y-2">
                 {sortedSectors.map((sector) => {
@@ -160,11 +160,11 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove }: MarketM
                   return (
                     <div
                       key={sector.sectorId}
-                      className="flex items-center justify-between rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2"
+                      className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                     >
                       <div>
-                        <div className="text-xs font-semibold text-gray-200">{name}</div>
-                        <div className="text-[10px] text-gray-500">{sector.totalStocks} stocks</div>
+                        <div className="text-xs font-semibold text-[var(--text-primary)]">{name}</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">{sector.totalStocks} stocks</div>
                       </div>
                       <div className={`text-xs font-bold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
                         {isUp ? '+' : ''}{change.toFixed(2)}%

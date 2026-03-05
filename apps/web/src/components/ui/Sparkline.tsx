@@ -40,7 +40,7 @@ export function Sparkline({
     const isUp = delta >= 0;
 
     return (
-      <div className="rounded border border-white/10 bg-black/80 px-2 py-1 text-[10px] text-gray-200">
+      <div className="rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">
         <div className="font-semibold">{formatValue(value)}</div>
         <div className={isUp ? 'text-emerald-400' : 'text-red-400'}>
           {isUp ? '+' : ''}{formatValue(delta)} ({isUp ? '+' : ''}{deltaPct.toFixed(2)}%)

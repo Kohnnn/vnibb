@@ -62,7 +62,7 @@ export function VolumeAnalysisWidget({ symbol }: VolumeAnalysisWidgetProps) {
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2 text-xs">
                     <BarChart2 size={12} className="text-cyan-400" />
-                    <span className="text-gray-400">Avg: {formatVolume(avgVolume)}</span>
+                    <span className="text-[var(--text-secondary)]">Avg: {formatVolume(avgVolume)}</span>
                     <span className={volumeChange >= 0 ? 'text-green-400' : 'text-red-400'}>
                         {volumeChange >= 0 ? '+' : ''}{volumeChange.toFixed(0)}%
                     </span>
@@ -70,14 +70,14 @@ export function VolumeAnalysisWidget({ symbol }: VolumeAnalysisWidgetProps) {
                 <button
                     onClick={() => refetch()}
                     disabled={isFetching}
-                    className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded"
+                    className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                     type="button"
                 >
                     <BarChart2 size={12} className={isFetching ? 'animate-pulse' : ''} />
                 </button>
             </div>
 
-            <div className="pb-2 border-b border-gray-800/50">
+            <div className="border-b border-[var(--border-subtle)] pb-2">
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
@@ -103,10 +103,10 @@ export function VolumeAnalysisWidget({ symbol }: VolumeAnalysisWidgetProps) {
 
                             return (
                                 <div key={i} className="flex items-center gap-2">
-                                    <div className="w-12 text-[10px] text-gray-500 shrink-0">
+                                    <div className="w-12 shrink-0 text-[10px] text-[var(--text-muted)]">
                                         {day.date.slice(5)}
                                     </div>
-                                    <div className="flex-1 h-5 bg-gray-800/30 rounded overflow-hidden relative">
+                                    <div className="relative h-5 flex-1 overflow-hidden rounded bg-[var(--bg-tertiary)]">
                                         <div
                                             className={`h-full transition-all ${isUp
                                                 ? isAboveAvg ? 'bg-green-500' : 'bg-green-500/50'
@@ -114,7 +114,7 @@ export function VolumeAnalysisWidget({ symbol }: VolumeAnalysisWidgetProps) {
                                                 }`}
                                             style={{ width: `${widthPct}%` }}
                                         />
-                                        <span className="absolute right-1 top-0.5 text-[10px] text-gray-400">
+                                        <span className="absolute right-1 top-0.5 text-[10px] text-[var(--text-secondary)]">
                                             {formatVolume(day.volume)}
                                         </span>
                                     </div>
@@ -132,7 +132,7 @@ export function VolumeAnalysisWidget({ symbol }: VolumeAnalysisWidgetProps) {
                 )}
             </div>
 
-            <div className="flex items-center justify-center gap-4 pt-2 text-[10px] text-gray-500">
+            <div className="flex items-center justify-center gap-4 pt-2 text-[10px] text-[var(--text-muted)]">
                 <div className="flex items-center gap-1">
                     <div className="w-3 h-2 bg-green-500 rounded" />
                     <span>↑ High Vol</span>

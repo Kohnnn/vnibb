@@ -71,7 +71,7 @@ export function SidebarTrigger({ isOpen, onClick }: { isOpen: boolean; onClick: 
     return (
         <button
             onClick={onClick}
-            className="p-2 text-gray-400 hover:text-blue-400 transition-colors"
+            className="p-2 text-[var(--text-secondary)] transition-colors hover:text-blue-400"
             title="Open Copilot"
             aria-label="Open Copilot"
         >

@@ -84,7 +84,7 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Waves size={12} className="text-cyan-400" />
           <span>Volume Flow (Order Flow Proxy)</span>
         </div>
@@ -95,7 +95,7 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/70'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -117,34 +117,34 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">20D Cumulative</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Cumulative</div>
               <div className={`font-mono ${Number(metric?.current_20d_cumulative_delta || 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
                 {formatCompact(Number(metric?.current_20d_cumulative_delta || 0))}
               </div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Divergence Months</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Divergence Months</div>
               <div className="font-mono text-amber-300">{metric?.divergence_months ?? 0}</div>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Strongest Buy</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Strongest Buy</div>
               <div className="text-emerald-300 font-semibold">{metric?.strongest_buy_month || '-'}</div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Strongest Sell</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Strongest Sell</div>
               <div className="text-red-300 font-semibold">{metric?.strongest_sell_month || '-'}</div>
             </div>
           </div>
 
           <div className="flex-1 overflow-auto space-y-2 pr-1">
-            <div className="rounded-md border border-gray-800/60 bg-black/20 p-2">
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
               <div className="mb-2 flex items-center justify-between">
-                <div className="text-[10px] uppercase tracking-widest text-gray-500">Monthly Avg Delta</div>
-                <div className="text-[10px] text-gray-400">Green buying / Red selling</div>
+                <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Monthly Avg Delta</div>
+                <div className="text-[10px] text-[var(--text-secondary)]">Green buying / Red selling</div>
               </div>
               <ChartMountGuard className="h-[120px]" minHeight={110}>
                 <ResponsiveContainer width="100%" height="100%">
@@ -176,13 +176,13 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
               </ChartMountGuard>
             </div>
 
-            <div className="rounded-md border border-gray-800/60 bg-black/20 p-2">
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
               <div className="mb-2 flex items-center justify-between">
-                <div className="text-[10px] uppercase tracking-widest text-gray-500">Cumulative Delta vs Price</div>
-                <div className="text-[10px] text-gray-400">Last 252 sessions</div>
+                <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Cumulative Delta vs Price</div>
+                <div className="text-[10px] text-[var(--text-secondary)]">Last 252 sessions</div>
               </div>
               {cumulativeRows.length === 0 ? (
-                <div className="py-6 text-center text-[11px] text-gray-500">No cumulative delta series</div>
+                <div className="py-6 text-center text-[11px] text-[var(--text-muted)]">No cumulative delta series</div>
               ) : (
                 <ChartMountGuard className="h-[130px]" minHeight={120}>
                   <ResponsiveContainer width="100%" height="100%">
@@ -213,8 +213,8 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
                 const width = Math.max(2, (Math.abs(row.value) / maxAbs) * 100)
                 return (
                   <div key={row.month} className="flex items-center gap-2">
-                    <div className="w-8 text-[10px] text-gray-500">{row.month}</div>
-                    <div className="flex-1 h-4 bg-gray-800/30 rounded overflow-hidden">
+                    <div className="w-8 text-[10px] text-[var(--text-muted)]">{row.month}</div>
+                    <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
                       <div className={`h-full ${isPositive ? 'bg-emerald-500/70' : 'bg-red-500/70'}`} style={{ width: `${width}%` }} />
                     </div>
                     <div className={`w-16 text-[10px] text-right font-mono ${isPositive ? 'text-emerald-300' : 'text-red-300'}`}>

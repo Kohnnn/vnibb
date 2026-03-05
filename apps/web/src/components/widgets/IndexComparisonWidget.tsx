@@ -25,7 +25,7 @@ function IndexComparisonWidgetComponent() {
   return (
     <WidgetContainer title="Index Comparison" onRefresh={() => refetch()} isLoading={isLoading && !hasData}>
       <div className="h-full flex flex-col">
-        <div className="pb-2 border-b border-gray-800/50">
+        <div className="border-b border-[var(--border-subtle)] pb-2">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
@@ -54,11 +54,11 @@ function IndexComparisonWidgetComponent() {
               return (
                 <div
                   key={`${index.symbol}-${idx}`}
-                  className="p-3 bg-gray-900/40 rounded-lg border border-gray-800 flex flex-col justify-between hover:border-gray-700 transition-colors"
+                  className="flex flex-col justify-between rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 transition-colors hover:border-[var(--border-color)]"
                 >
-                  <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{index.name}</div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">{index.name}</div>
                   <div className="flex items-baseline justify-between mt-1">
-                    <div className="text-lg font-black text-white">
+                    <div className="text-lg font-black text-[var(--text-primary)]">
                       {dataPoint?.current_value?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '—'}
                     </div>
                     <div

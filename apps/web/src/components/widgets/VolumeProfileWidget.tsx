@@ -121,7 +121,7 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
     return (
       <div className="h-full flex flex-col">
         <div className="flex items-center justify-between px-1 py-1 mb-2">
-          <div className="flex items-center gap-2 text-xs text-gray-400">
+          <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
             <BarChart2 size={12} className="text-cyan-400" />
             <span>6M Volume Profile</span>
           </div>
@@ -142,7 +142,7 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <BarChart2 size={12} className="text-cyan-400" />
           <span>6M Volume Profile</span>
         </div>
@@ -156,16 +156,16 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">POC</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">POC</div>
           <div className="text-cyan-300 font-mono">{pocPrice ? pocPrice.toFixed(2) : '-'}</div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">VAH</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">VAH</div>
           <div className="text-emerald-300 font-mono">{vahPrice ? vahPrice.toFixed(2) : '-'}</div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">VAL</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">VAL</div>
           <div className="text-amber-300 font-mono">{valPrice ? valPrice.toFixed(2) : '-'}</div>
         </div>
       </div>
@@ -182,20 +182,20 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
 
             return (
               <div key={`${bin.price}-${index}`} className="flex items-center gap-2">
-                <div className="w-14 text-[10px] text-gray-500 shrink-0 font-mono">{bin.price.toFixed(2)}</div>
-                <div className="flex-1 h-4 bg-gray-800/30 rounded overflow-hidden relative">
+                <div className="w-14 text-[10px] text-[var(--text-muted)] shrink-0 font-mono">{bin.price.toFixed(2)}</div>
+                <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden relative">
                   <div
                     className={`h-full ${
                       isPOC
                         ? 'bg-cyan-500'
                         : isInValueArea
                           ? 'bg-emerald-500/70'
-                          : 'bg-gray-500/45'
+                          : 'bg-[var(--text-muted)]/45'
                     }`}
                     style={{ width: `${Math.max(2, widthPct)}%` }}
                   />
                 </div>
-                <div className="w-12 text-[10px] text-gray-400 text-right shrink-0">{formatVolume(bin.volume)}</div>
+                <div className="w-12 text-[10px] text-[var(--text-secondary)] text-right shrink-0">{formatVolume(bin.volume)}</div>
               </div>
             );
           })}

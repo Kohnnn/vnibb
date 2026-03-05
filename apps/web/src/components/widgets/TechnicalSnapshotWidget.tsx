@@ -20,10 +20,10 @@ function formatSignal(signal?: string) {
 }
 
 function signalColor(signal?: string) {
-  if (!signal) return 'text-gray-400';
+  if (!signal) return 'text-[var(--text-secondary)]';
   if (signal.includes('strong_buy') || signal.includes('buy')) return 'text-emerald-400';
   if (signal.includes('strong_sell') || signal.includes('sell')) return 'text-red-400';
-  return 'text-gray-400';
+  return 'text-[var(--text-secondary)]';
 }
 
 export function TechnicalSnapshotWidget({ id, symbol, onRemove }: TechnicalSnapshotWidgetProps) {
@@ -58,7 +58,7 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove }: TechnicalSnaps
       widgetId={id}
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
@@ -77,12 +77,12 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove }: TechnicalSnaps
             <WidgetEmpty message="Technical indicators not available" icon={<Activity size={18} />} />
           ) : (
             <div className="space-y-3">
-              <div className="rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2">
-                <div className="text-[10px] text-gray-500 uppercase tracking-widest">Overall Signal</div>
+              <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2">
+                <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Overall Signal</div>
                 <div className={`text-sm font-bold ${signalColor(data?.signals?.overall_signal)}`}>
                   {formatSignal(data?.signals?.overall_signal)}
                 </div>
-                <div className="text-[10px] text-gray-500">
+                <div className="text-[10px] text-[var(--text-muted)]">
                   {data?.signals?.buy_count} buy • {data?.signals?.sell_count} sell • {data?.signals?.neutral_count} neutral
                 </div>
               </div>
@@ -98,10 +98,10 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove }: TechnicalSnaps
                 ].map((item) => (
                   <div
                     key={item.label}
-                    className="rounded-lg border border-gray-800/60 bg-black/20 px-2 py-2"
+                    className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-2"
                   >
-                    <div className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">{item.label}</div>
-                    <div className="text-xs font-mono text-gray-200">{item.value}</div>
+                    <div className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">{item.label}</div>
+                    <div className="text-xs font-mono text-[var(--text-primary)]">{item.value}</div>
                   </div>
                 ))}
               </div>

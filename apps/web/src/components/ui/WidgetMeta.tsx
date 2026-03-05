@@ -2,7 +2,7 @@
 
 import { Clock, RefreshCw, Database, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatRelativeTime, formatTime } from '@/lib/format';
+import { formatTime, formatTimestamp } from '@/lib/format';
 
 interface WidgetMetaProps {
   updatedAt?: number | string | Date | null;
@@ -34,20 +34,20 @@ export function WidgetMeta({
   className,
 }: WidgetMetaProps) {
   const updatedDate = toDate(updatedAt);
-  const updatedLabel = updatedDate ? formatRelativeTime(updatedDate) : null;
+  const updatedLabel = updatedDate ? formatTimestamp(updatedDate) : null;
   const exactTime = updatedDate ? formatTime(updatedDate, true) : null;
 
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center gap-2 text-[10px] text-gray-500',
+        'flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]',
         align === 'right' ? 'justify-end' : 'justify-start',
         className
       )}
     >
       {updatedLabel && (
         <span className="inline-flex items-center gap-1" title={exactTime ? `Updated ${exactTime}` : undefined}>
-          <Clock size={10} className="text-gray-500" />
+          <Clock size={10} className="text-[var(--text-muted)]" />
           <span suppressHydrationWarning>Updated {updatedLabel}</span>
         </span>
       )}
@@ -66,10 +66,10 @@ export function WidgetMeta({
         </span>
       )}
 
-      {note && <span className="text-gray-500">{note}</span>}
+      {note && <span className="text-[var(--text-muted)]">{note}</span>}
 
       {sourceLabel && (
-        <span className="inline-flex items-center gap-1 text-gray-500">
+        <span className="inline-flex items-center gap-1 text-[var(--text-muted)]">
           <Database size={10} className="opacity-70" />
           {sourceLabel}
         </span>

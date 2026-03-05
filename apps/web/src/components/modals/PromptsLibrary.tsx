@@ -141,7 +141,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
         <div className="fixed inset-0 z-50 flex items-center justify-center">
             {/* Backdrop */}
             <div
-                className="absolute inset-0 bg-black/60"
+                className="absolute inset-0 bg-[rgba(0,0,0,0.6)]"
                 role="button"
                 tabIndex={0}
                 aria-label="Close prompts library"

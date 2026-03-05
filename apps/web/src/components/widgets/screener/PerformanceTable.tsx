@@ -54,15 +54,15 @@ export function PerformanceTable({ data }: PerformanceTableProps) {
   return (
     <div className="h-full overflow-auto scrollbar-hide">
       <table className="data-table w-full text-[11px] border-separate border-spacing-0">
-        <thead className="sticky top-0 bg-secondary z-10 shadow-sm border-b border-gray-800">
+        <thead className="sticky top-0 z-10 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-sm">
           <tr>
-            <th className="text-left px-4 py-2 text-gray-500 font-bold uppercase tracking-tighter w-[180px] bg-secondary border-b border-gray-800">Symbol</th>
-            <th className="text-right px-3 py-2 text-gray-500 font-bold uppercase tracking-tighter bg-secondary border-b border-gray-800">Price</th>
+            <th className="w-[180px] border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-2 text-left font-bold uppercase tracking-tighter text-[var(--text-muted)]">Symbol</th>
+            <th className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-right font-bold uppercase tracking-tighter text-[var(--text-muted)]">Price</th>
             {TIMEFRAME_COLUMNS.map(col => (
               <th
                 key={col.key}
                 onClick={() => toggleSort(col.key)}
-                className="text-right px-3 py-2 text-gray-500 font-bold uppercase tracking-tighter cursor-pointer hover:bg-white/5 transition-colors bg-secondary border-b border-gray-800"
+                className="cursor-pointer border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-right font-bold uppercase tracking-tighter text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-tertiary)]"
               >
                 <div className="flex items-center justify-end gap-1">
                   {col.label}
@@ -74,19 +74,19 @@ export function PerformanceTable({ data }: PerformanceTableProps) {
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-800/30">
+        <tbody className="divide-y divide-[var(--border-subtle)]">
           {sortedData.map((row, index) => (
-            <tr key={`${row.symbol}-${index}`} className="hover:bg-white/5 transition-colors group">
-              <td className="px-4 py-2 border-r border-gray-800/10">
+            <tr key={`${row.symbol}-${index}`} className="group transition-colors hover:bg-[var(--bg-tertiary)]">
+              <td className="border-r border-[var(--border-subtle)] px-4 py-2">
                 <div className="flex items-center gap-2">
                   <CompanyLogo symbol={row.symbol} size={20} />
                   <div>
-                    <div className="text-gray-100 font-bold tracking-tight">{row.symbol}</div>
-                    <div className="text-[9px] text-gray-600 font-medium truncate max-w-[110px] uppercase tracking-tighter">{row.name}</div>
+                    <div className="font-bold tracking-tight text-[var(--text-primary)]">{row.symbol}</div>
+                    <div className="max-w-[110px] truncate text-[9px] font-medium uppercase tracking-tighter text-[var(--text-muted)]">{row.name}</div>
                   </div>
                 </div>
               </td>
-              <td className="text-right px-3 py-2 font-mono text-gray-300 group-hover:text-white">
+              <td className="px-3 py-2 text-right font-mono text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">
                 {row.price.toLocaleString()}
               </td>
               {TIMEFRAME_COLUMNS.map(col => {
@@ -99,7 +99,7 @@ export function PerformanceTable({ data }: PerformanceTableProps) {
                     key={col.key}
                     className={cn(
                         "text-right px-3 py-2 font-mono font-medium",
-                        isPositive ? 'text-green-500 bg-green-500/5' : isNegative ? 'text-red-500 bg-red-500/5' : 'text-gray-500'
+                        isPositive ? 'bg-green-500/5 text-green-500' : isNegative ? 'bg-red-500/5 text-red-500' : 'text-[var(--text-muted)]'
                     )}
                   >
                     {isPositive ? '+' : ''}{value?.toFixed(2)}%

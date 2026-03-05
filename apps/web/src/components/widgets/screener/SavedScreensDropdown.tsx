@@ -57,8 +57,8 @@ export function SavedScreensDropdown({
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-            "flex items-center gap-2 h-8 px-3 bg-secondary/80 border border-gray-700 rounded-lg text-[11px] font-bold uppercase tracking-tight text-white hover:bg-gray-800 transition-all",
-            isOpen && "border-blue-500 bg-gray-800"
+            "flex h-8 items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 text-[11px] font-bold uppercase tracking-tight text-[var(--text-primary)] transition-all hover:bg-[var(--bg-tertiary)]",
+            isOpen && "border-blue-500 bg-[var(--bg-tertiary)]"
         )}
       >
         <Bookmark size={12} className="text-blue-500" />
@@ -67,25 +67,25 @@ export function SavedScreensDropdown({
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 w-64 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl z-[130] overflow-hidden animate-in fade-in slide-in-from-top-1 duration-200">
-          <div className="p-3 border-b border-gray-800 bg-gray-950/50">
-             <h4 className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Screener Presets</h4>
+        <div className="absolute left-0 top-full z-[130] mt-2 w-64 overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] shadow-2xl duration-200 animate-in fade-in slide-in-from-top-1">
+          <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+             <h4 className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">Screener Presets</h4>
           </div>
 
           <div className="max-h-72 overflow-y-auto p-1 scrollbar-hide">
             {/* Built-in screens */}
             <div className="mb-2">
-                <div className="px-2 py-1 text-[8px] font-bold text-gray-700 uppercase tracking-widest">Standard</div>
+                <div className="px-2 py-1 text-[8px] font-bold uppercase tracking-widest text-[var(--text-muted)]">Standard</div>
                 {BUILT_IN_SCREENS.map((screen) => (
                 <button
                     key={screen.id}
                     onClick={() => { onSelect(screen); setIsOpen(false); }}
                     className={cn(
                         "w-full flex items-center gap-2 px-2 py-2 text-left text-[11px] font-medium rounded transition-colors group",
-                        activeScreenId === screen.id ? 'bg-blue-600/10 text-blue-400' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                        activeScreenId === screen.id ? 'bg-blue-600/10 text-blue-400' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
                     )}
                 >
-                    <Star size={10} className={cn(activeScreenId === screen.id ? "fill-blue-500 text-blue-500" : "text-gray-700 group-hover:text-gray-500")} />
+                    <Star size={10} className={cn(activeScreenId === screen.id ? "fill-blue-500 text-blue-500" : "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]")} />
                     {screen.name}
                 </button>
                 ))}
@@ -93,8 +93,8 @@ export function SavedScreensDropdown({
 
             {/* Custom screens */}
             {customScreens.length > 0 && (
-                <div className="mb-1 border-t border-gray-800 pt-1">
-                    <div className="px-2 py-1 text-[8px] font-bold text-gray-700 uppercase tracking-widest">My Screens</div>
+                <div className="mb-1 border-t border-[var(--border-subtle)] pt-1">
+                    <div className="px-2 py-1 text-[8px] font-bold uppercase tracking-widest text-[var(--text-muted)]">My Screens</div>
                     {customScreens.map((screen) => (
                     <div
                         key={screen.id}
@@ -104,15 +104,15 @@ export function SavedScreensDropdown({
                             onClick={() => { onSelect(screen); setIsOpen(false); }}
                             className={cn(
                                 "flex-1 flex items-center gap-2 px-2 py-2 text-left text-[11px] font-medium rounded transition-colors",
-                                activeScreenId === screen.id ? 'bg-blue-600/10 text-blue-400' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                                activeScreenId === screen.id ? 'bg-blue-600/10 text-blue-400' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
                             )}
                         >
-                            <Bookmark size={10} className={activeScreenId === screen.id ? "fill-blue-500 text-blue-500" : "text-gray-600"} />
+                            <Bookmark size={10} className={activeScreenId === screen.id ? "fill-blue-500 text-blue-500" : "text-[var(--text-muted)]"} />
                             {screen.name}
                         </button>
                         <button
                             onClick={() => onDelete(screen.id)}
-                            className="p-2 text-gray-700 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                            className="p-2 text-[var(--text-muted)] opacity-0 transition-colors group-hover:opacity-100 hover:text-red-500"
                         >
                             <Trash2 size={10} />
                         </button>
@@ -123,14 +123,14 @@ export function SavedScreensDropdown({
           </div>
 
           {/* Save new screen */}
-          <div className="p-2 border-t border-gray-800 bg-gray-950/50">
+          <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2">
             <div className="flex gap-2">
               <input
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="Save current as..."
-                className="flex-1 px-2 py-1.5 text-[10px] bg-gray-800 border border-gray-700 rounded text-white outline-none focus:border-blue-500 placeholder-gray-600"
+                className="flex-1 rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] text-[var(--text-primary)] outline-none placeholder-[var(--text-muted)] focus:border-blue-500"
               />
               <button
                 disabled={!newName.trim()}

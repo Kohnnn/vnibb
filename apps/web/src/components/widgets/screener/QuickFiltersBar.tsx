@@ -33,7 +33,7 @@ export function QuickFiltersBar({ activeFilter, onFilterSelect }: QuickFiltersBa
               "px-3 py-1 text-[10px] font-bold rounded-full whitespace-nowrap transition-all uppercase tracking-tighter border",
               activeFilter === filter.id
                 ? "bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-900/20"
-                : "bg-gray-800 text-gray-400 border-gray-700 hover:bg-gray-700 hover:text-gray-200"
+                : "border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
           )}
         >
           {filter.label}

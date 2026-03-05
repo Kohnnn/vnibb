@@ -67,6 +67,7 @@ const CATEGORY_DEFINITIONS = [
 const COLOR_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#14b8a6', '#06b6d4']
 const PERFORMANCE_PERIODS = ['1M', '3M', '6M', '1Y', '3Y', '5Y', 'YTD', 'ALL'] as const
 const MAX_SYMBOLS = 5
+const MIN_SYMBOLS = 2
 
 type PerformancePeriod = (typeof PERFORMANCE_PERIODS)[number]
 
@@ -155,13 +156,13 @@ function ComparisonAnalysisWidgetComponent({
   const comparisonQuery = useQuery({
     queryKey: ['comparison-analysis', symbols.join(','), period],
     queryFn: () => compareStocks(symbols, period),
-    enabled: symbols.length >= 3,
+    enabled: symbols.length >= MIN_SYMBOLS,
   })
 
   const performanceQuery = useQuery({
     queryKey: ['comparison-performance', symbols.join(','), performancePeriod],
     queryFn: () => getComparisonPerformance(symbols, performancePeriod),
-    enabled: symbols.length >= 3,
+    enabled: symbols.length >= MIN_SYMBOLS,
     staleTime: 60 * 1000,
   })
 
@@ -189,7 +190,7 @@ function ComparisonAnalysisWidgetComponent({
 
       return entries
     },
-    enabled: symbols.length >= 3,
+    enabled: symbols.length >= MIN_SYMBOLS,
     staleTime: 5 * 60 * 1000,
   })
 
@@ -255,7 +256,7 @@ function ComparisonAnalysisWidgetComponent({
   }
 
   const removeSymbol = (ticker: string) => {
-    if (symbols.length <= 3) return
+    if (symbols.length <= MIN_SYMBOLS) return
     setSymbols((prev) => prev.filter((item) => item !== ticker))
   }
 
@@ -315,7 +316,7 @@ function ComparisonAnalysisWidgetComponent({
                 >
                   <CompanyLogo symbol={ticker} name={ticker} size={14} />
                   <span>{ticker}</span>
-                  {symbols.length > 3 && (
+                  {symbols.length > MIN_SYMBOLS && (
                     <button
                       type="button"
                       onClick={() => removeSymbol(ticker)}
@@ -486,9 +487,9 @@ function ComparisonAnalysisWidgetComponent({
         </div>
 
         <div className="flex-1 overflow-auto">
-          {symbols.length < 3 ? (
+          {symbols.length < MIN_SYMBOLS ? (
             <WidgetEmpty
-              message="Comparison matrix requires 3-5 symbols."
+              message="Comparison matrix requires 2-5 symbols."
               action={{
                 label: 'Add Peer',
                 onClick: () =>
@@ -516,7 +517,7 @@ function ComparisonAnalysisWidgetComponent({
             <WidgetEmpty message="No comparison data available." />
           ) : (
             <table className="data-table financial-dense freeze-first-col w-full text-[11px]">
-              <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]/95 backdrop-blur">
+              <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]/95">
                 <tr className="border-b border-[var(--border-color)]">
                   <th className="w-[180px] bg-[var(--bg-secondary)] text-left">Metric</th>
                   {symbols.map((ticker) => (
@@ -640,7 +641,7 @@ function ComparisonAnalysisWidgetComponent({
               <WidgetEmpty message="No ratio snapshot data available for selected symbols." />
             ) : (
               <table className="data-table financial-dense freeze-first-col w-full text-[11px]">
-                <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]/95 backdrop-blur">
+                <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]/95">
                   <tr className="border-b border-[var(--border-color)]">
                     <th className="w-[180px] bg-[var(--bg-secondary)] text-left">Metric</th>
                     {symbols.map((ticker) => (

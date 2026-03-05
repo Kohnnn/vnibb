@@ -7,7 +7,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useInsiderDeals } from '@/lib/queries';
-import { formatRelativeTime } from '@/lib/format';
+import { formatTimestamp } from '@/lib/format';
 import { formatNumber, formatVND } from '@/lib/formatters';
 
 interface InsiderDealTimelineWidgetProps {
@@ -58,7 +58,7 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove }: InsiderDealT
       widgetId={id}
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
+        <div className="px-3 py-2 border-b border-[var(--border-color)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
@@ -77,19 +77,19 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove }: InsiderDealT
             <WidgetEmpty message="No insider deals available yet" icon={<UserRound size={18} />} />
           ) : (
             <>
-              <div className="grid grid-cols-3 gap-2 rounded-lg border border-gray-800/60 bg-black/20 p-3">
+              <div className="grid grid-cols-3 gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3">
                 <div>
-                  <div className="text-[10px] text-gray-500 uppercase tracking-widest">Buys</div>
+                  <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Buys</div>
                   <div className="text-xs font-semibold text-emerald-400">{summary.buyCount}</div>
-                  <div className="text-[10px] text-gray-500">{formatVND(summary.buyValue)}</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">{formatVND(summary.buyValue)}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-gray-500 uppercase tracking-widest">Sells</div>
+                  <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Sells</div>
                   <div className="text-xs font-semibold text-red-400">{summary.sellCount}</div>
-                  <div className="text-[10px] text-gray-500">{formatVND(summary.sellValue)}</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">{formatVND(summary.sellValue)}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-gray-500 uppercase tracking-widest">Net</div>
+                  <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Net</div>
                   <div className={`text-xs font-semibold ${summary.netValue >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                     {summary.netValue >= 0 ? '+' : '-'}{formatVND(Math.abs(summary.netValue))}
                   </div>
@@ -104,25 +104,25 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove }: InsiderDealT
                   return (
                     <div
                       key={deal.id}
-                      className="flex items-center justify-between rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2"
+                      className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                     >
                       <div>
-                        <div className="text-xs font-semibold text-gray-200">
+                        <div className="text-xs font-semibold text-[var(--text-primary)]">
                           {deal.insider_name || 'Insider'}
                         </div>
-                        <div className="text-[10px] text-gray-500">{deal.insider_position || '—'}</div>
-                        <div className="text-[10px] text-gray-500">
-                          {formatRelativeTime(deal.announce_date)}
+                        <div className="text-[10px] text-[var(--text-muted)]">{deal.insider_position || '—'}</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">
+                          {formatTimestamp(deal.announce_date)}
                         </div>
                       </div>
                       <div className="text-right">
                         <div className={`text-[10px] font-bold ${isBuy ? 'text-emerald-400' : 'text-red-400'}`}>
                           {action}
                         </div>
-                        <div className="text-[10px] text-gray-500">
+                        <div className="text-[10px] text-[var(--text-muted)]">
                           {formatNumber(deal.deal_quantity)} @ {formatVND(deal.deal_price)}
                         </div>
-                        <div className="text-[10px] text-gray-500">{formatVND(value)}</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">{formatVND(value)}</div>
                       </div>
                     </div>
                   );

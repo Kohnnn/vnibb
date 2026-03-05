@@ -32,7 +32,7 @@ function formatDate(dateStr: string): string {
 function getSentimentColor(score: number): string {
   if (score > 30) return 'text-green-400';
   if (score < -30) return 'text-red-400';
-  return 'text-zinc-400';
+  return 'text-[var(--text-secondary)]';
 }
 
 function getSentimentLabel(score: number): string {
@@ -96,7 +96,7 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
         <div className="flex items-center gap-2">
           {sentiment && (
             <div className="flex items-center gap-1.5 text-xs">
-              <span className="text-gray-500">Sentiment:</span>
+              <span className="text-[var(--text-muted)]">Sentiment:</span>
               <span className={`font-medium ${getSentimentColor(sentiment.sentiment_score)}`}>
                 {sentiment.sentiment_score > 0 ? '+' : ''}{sentiment.sentiment_score.toFixed(0)}
               </span>
@@ -120,7 +120,7 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
               refetchSentiment();
             }}
             disabled={isFetching}
-            className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
+            className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
           >
             <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
           </button>
@@ -134,7 +134,7 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
           className={`flex-1 px-2 py-1 text-[10px] rounded transition-colors ${
             filter === 'all'
               ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-              : 'bg-gray-800/50 text-gray-400 hover:bg-gray-800'
+              : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
           }`}
         >
           All
@@ -144,7 +144,7 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
           className={`flex-1 px-2 py-1 text-[10px] rounded transition-colors ${
             filter === 'buy'
               ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-              : 'bg-gray-800/50 text-gray-400 hover:bg-gray-800'
+              : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
           }`}
         >
           Buy
@@ -154,7 +154,7 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
           className={`flex-1 px-2 py-1 text-[10px] rounded transition-colors ${
             filter === 'sell'
               ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-              : 'bg-gray-800/50 text-gray-400 hover:bg-gray-800'
+              : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
           }`}
         >
           Sell
@@ -179,12 +179,12 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
               return (
                 <div
                   key={deal.id}
-                  className="p-2 bg-gray-800/30 rounded hover:bg-gray-800/50 transition-colors"
+                  className="rounded bg-[var(--bg-secondary)] p-2 transition-colors hover:bg-[var(--bg-tertiary)]"
                 >
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <div className="flex items-center gap-1.5 flex-1 min-w-0">
                       <ActionIcon size={12} className={actionColor} />
-                      <span className="text-xs text-gray-200 truncate" title={deal.insider_name || 'Unknown'}>
+                      <span className="truncate text-xs text-[var(--text-primary)]" title={deal.insider_name || 'Unknown'}>
                         {deal.insider_name || 'Unknown'}
                       </span>
                     </div>
@@ -192,14 +192,14 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
                       {formatCurrency(deal.deal_value)}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-[10px] text-gray-500">
+                  <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)]">
                     <span className="truncate" title={deal.insider_position || ''}>
                       {deal.insider_position || 'N/A'}
                     </span>
                     <span>{formatDate(deal.announce_date)}</span>
                   </div>
                   {deal.deal_quantity && (
-                    <div className="text-[10px] text-gray-500 mt-0.5">
+                    <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">
                       {deal.deal_quantity.toLocaleString()} shares @ {formatCurrency(deal.deal_price || 0)}
                     </div>
                   )}
@@ -212,19 +212,19 @@ export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetPro
 
       {/* Summary Footer */}
       {sentiment && !isLoading && (
-        <div className="mt-2 pt-2 border-t border-gray-800">
+        <div className="mt-2 border-t border-[var(--border-subtle)] pt-2">
           <div className="grid grid-cols-2 gap-2 text-[10px]">
             <div className="flex items-center justify-between">
-              <span className="text-gray-500">Buy:</span>
+              <span className="text-[var(--text-muted)]">Buy:</span>
               <span className="text-green-400 font-medium">{formatCurrency(sentiment.buy_value)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-gray-500">Sell:</span>
+              <span className="text-[var(--text-muted)]">Sell:</span>
               <span className="text-red-400 font-medium">{formatCurrency(sentiment.sell_value)}</span>
             </div>
           </div>
           <div className="flex items-center justify-between mt-1">
-            <span className="text-gray-500">Net:</span>
+            <span className="text-[var(--text-muted)]">Net:</span>
             <span className={`font-medium ${sentiment.net_value >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {sentiment.net_value >= 0 ? '+' : ''}{formatCurrency(sentiment.net_value)}
             </span>

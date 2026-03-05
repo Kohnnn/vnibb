@@ -84,7 +84,7 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <ShieldAlert size={12} className="text-amber-400" />
           <span>Drawdown & Recovery</span>
         </div>
@@ -95,7 +95,7 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/70'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -114,32 +114,32 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
       ) : (
         <>
           <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Current DD</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Current DD</div>
               <div className="font-mono text-amber-200">{formatPct(metric?.current_drawdown_pct)}</div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">52W DD</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">52W DD</div>
               <div className="font-mono text-red-300">{formatPct(metric?.current_drawdown_from_52w_high_pct)}</div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Avg Recovery</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Avg Recovery</div>
               <div className="font-mono text-cyan-300">
                 {metric?.avg_days_to_recovery != null ? `${Number(metric.avg_days_to_recovery).toFixed(1)}d` : '-'}
               </div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Median Recovery</div>
-              <div className="font-mono text-gray-200">
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Median Recovery</div>
+              <div className="font-mono text-[var(--text-primary)]">
                 {metric?.median_days_to_recovery != null ? `${Number(metric.median_days_to_recovery).toFixed(1)}d` : '-'}
               </div>
             </div>
           </div>
 
-          <div className="rounded-md border border-gray-800/60 bg-black/20 p-2 mb-2">
+          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 mb-2">
             <div className="mb-2 flex items-center justify-between">
-              <div className="text-[10px] uppercase tracking-widest text-gray-500">Underwater Curve</div>
-              <div className="text-[10px] text-gray-400">Current vs 52W high</div>
+              <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Underwater Curve</div>
+              <div className="text-[10px] text-[var(--text-secondary)]">Current vs 52W high</div>
             </div>
             <ChartMountGuard className="h-[150px]" minHeight={120}>
               <ResponsiveContainer width="100%" height="100%">
@@ -185,10 +185,10 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
             </ChartMountGuard>
           </div>
 
-          <div className="flex-1 overflow-auto rounded-md border border-gray-800/60 bg-black/20 p-2">
+          <div className="flex-1 overflow-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
             <table className="w-full text-[10px]">
               <thead>
-                <tr className="text-gray-500 border-b border-gray-800/70">
+                <tr className="text-[var(--text-muted)] border-b border-[var(--border-color)]">
                   <th className="text-left py-1">Peak</th>
                   <th className="text-left py-1">Trough</th>
                   <th className="text-right py-1">Depth</th>
@@ -198,7 +198,7 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
               </thead>
               <tbody>
                 {episodes.slice(-12).reverse().map((episode) => (
-                  <tr key={`${episode.peak_date}-${episode.trough_date}`} className="border-b border-gray-900/80 text-gray-300">
+                  <tr key={`${episode.peak_date}-${episode.trough_date}`} className="border-b border-[var(--border-color)] text-[var(--text-secondary)]">
                     <td className="py-1">{episode.peak_date}</td>
                     <td className="py-1">{episode.trough_date}</td>
                     <td className="py-1 text-right font-mono text-red-300">{formatPct(episode.depth_pct)}</td>

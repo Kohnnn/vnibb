@@ -147,7 +147,7 @@ export function DrawdownDeepDiveWidget({ symbol }: DrawdownDeepDiveWidgetProps) 
   return (
     <div className="h-full flex flex-col">
       <div className="mb-2 flex items-center justify-between px-1 py-1">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <ShieldAlert size={12} className="text-amber-400" />
           <span>Drawdown Deep Dive</span>
         </div>
@@ -155,32 +155,32 @@ export function DrawdownDeepDiveWidget({ symbol }: DrawdownDeepDiveWidgetProps) 
       </div>
 
       <div className="mb-2 grid grid-cols-3 gap-2 text-[10px]">
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="uppercase tracking-widest text-gray-500">Current DD</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="uppercase tracking-widest text-[var(--text-muted)]">Current DD</div>
           <div className="font-mono text-amber-200">{formatPct(currentDrawdown)}</div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="uppercase tracking-widest text-gray-500">Max DD</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="uppercase tracking-widest text-[var(--text-muted)]">Max DD</div>
           <div className="font-mono text-red-300">{formatPct(maxDrawdown)}</div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="uppercase tracking-widest text-gray-500">Avg Recovery</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="uppercase tracking-widest text-[var(--text-muted)]">Avg Recovery</div>
           <div className="font-mono text-cyan-300">{avgRecovery > 0 ? `${Math.round(avgRecovery)}d` : '-'}</div>
         </div>
       </div>
 
-      <div className="mb-2 rounded-md border border-gray-800/50 bg-black/10 p-2 text-[10px]">
-        <div className="mb-1 text-gray-500">Underwater curve (last 22 sessions)</div>
+      <div className="mb-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2 text-[10px]">
+        <div className="mb-1 text-[var(--text-muted)]">Underwater curve (last 22 sessions)</div>
         <div className="space-y-1">
           {recent.map((point, index) => {
             const widthPct = (Math.abs(point.drawdownPct) / magnitude) * 100
             return (
               <div key={`${point.time}-${index}`} className="flex items-center gap-2">
-                <div className="w-14 shrink-0 text-gray-500">{shortDate(point.time).slice(5)}</div>
-                <div className="h-3 flex-1 overflow-hidden rounded bg-gray-800/30">
+                <div className="w-14 shrink-0 text-[var(--text-muted)]">{shortDate(point.time).slice(5)}</div>
+                <div className="h-3 flex-1 overflow-hidden rounded bg-[var(--bg-tertiary)]">
                   <div className="h-full bg-rose-500/60" style={{ width: `${Math.max(widthPct, 2)}%` }} />
                 </div>
-                <div className="w-12 text-right font-mono text-gray-300">{point.drawdownPct.toFixed(1)}%</div>
+                <div className="w-12 text-right font-mono text-[var(--text-primary)]">{point.drawdownPct.toFixed(1)}%</div>
               </div>
             )
           })}
@@ -196,12 +196,12 @@ export function DrawdownDeepDiveWidget({ symbol }: DrawdownDeepDiveWidgetProps) 
           <WidgetEmpty message="Not enough history to compute drawdown profile" icon={<ShieldAlert size={18} />} />
         ) : (
           episodes.slice(-8).reverse().map((episode, index) => (
-            <div key={`${episode.troughDate}-${index}`} className="rounded border border-gray-800/50 bg-black/10 px-2 py-1.5 text-[10px]">
+            <div key={`${episode.troughDate}-${index}`} className="rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[10px]">
               <div className="flex items-center justify-between">
-                <span className="text-gray-400">Peak {shortDate(episode.peakDate)}</span>
+                <span className="text-[var(--text-secondary)]">Peak {shortDate(episode.peakDate)}</span>
                 <span className="font-mono text-red-300">{formatPct(episode.depthPct)}</span>
               </div>
-              <div className="mt-1 flex items-center justify-between text-gray-500">
+              <div className="mt-1 flex items-center justify-between text-[var(--text-muted)]">
                 <span>Trough {shortDate(episode.troughDate)}</span>
                 <span>
                   {episode.daysToTrough}d to trough

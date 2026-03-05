@@ -166,7 +166,7 @@ export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Droplets size={12} className="text-cyan-400" />
           <span>Amihud Illiquidity</span>
         </div>
@@ -180,19 +180,19 @@ export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">Current</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Current</div>
           <div className="font-mono text-cyan-300">{formatAmihud(current)}</div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">20D Trend</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Trend</div>
           <div className={trendPct <= 0 ? 'text-emerald-300 font-mono' : 'text-red-300 font-mono'}>
             {trendPct >= 0 ? '+' : ''}
             {trendPct.toFixed(2)}%
           </div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">Liquidity</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Liquidity</div>
           <div className={`font-semibold ${liquidityState.className}`}>{liquidityState.label}</div>
         </div>
       </div>
@@ -201,10 +201,10 @@ export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps
         {yearly.map((row) => {
           const widthPct = (row.value / maxYearly) * 100
           return (
-            <div key={row.year} className="rounded border border-gray-800/40 px-2 py-1 bg-black/10">
-              <div className="text-gray-500">{row.year}</div>
+            <div key={row.year} className="rounded border border-[var(--border-subtle)] px-2 py-1 bg-[var(--bg-secondary)]">
+              <div className="text-[var(--text-muted)]">{row.year}</div>
               <div className="text-cyan-300 font-mono">{formatAmihud(row.value)}</div>
-              <div className="mt-1 h-1.5 rounded bg-gray-800/40 overflow-hidden">
+              <div className="mt-1 h-1.5 rounded bg-[var(--bg-tertiary)] overflow-hidden">
                 <div className="h-full bg-cyan-500/70" style={{ width: `${Math.max(6, widthPct)}%` }} />
               </div>
             </div>
@@ -227,14 +227,14 @@ export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps
 
             return (
               <div key={`${row.time}-${index}`} className="flex items-center gap-2">
-                <div className="w-12 text-[10px] text-gray-500 shrink-0">{toDateLabel(row.time)}</div>
-                <div className="flex-1 h-4 bg-gray-800/30 rounded overflow-hidden">
+                <div className="w-12 text-[10px] text-[var(--text-muted)] shrink-0">{toDateLabel(row.time)}</div>
+                <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
                   <div
                     className={`h-full ${improving ? 'bg-emerald-500/65' : 'bg-red-500/65'}`}
                     style={{ width: `${Math.max(2, widthPct)}%` }}
                   />
                 </div>
-                <div className="w-16 text-[10px] text-right text-gray-300 font-mono">
+                <div className="w-16 text-[10px] text-right text-[var(--text-primary)] font-mono">
                   {formatAmihud(row.value)}
                 </div>
                 {improving ? (
@@ -248,7 +248,7 @@ export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps
         )}
       </div>
 
-      <div className="pt-2 text-[10px] text-gray-500 text-right">
+      <div className="pt-2 text-[10px] text-[var(--text-muted)] text-right">
         Lower values indicate less price impact per {formatCompact(1_000_000)} shares.
       </div>
     </div>

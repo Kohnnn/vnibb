@@ -88,34 +88,34 @@ export function formatCompact(
   return `${sign}${abs.toFixed(decimals)}`;
 }
 
-function formatAbsoluteDateTime(date: Date | string): string {
+export function formatTimestamp(
+  date: Date | string | number | null | undefined
+): string {
+  if (date === null || date === undefined) return '-';
+
+  const parsed = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(parsed.getTime())) return '-';
+
   const now = new Date();
-  const then = typeof date === 'string' ? new Date(date) : date;
-  if (Number.isNaN(then.getTime())) return '-';
+  const hhmm = parsed.toLocaleTimeString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
 
-  const hours = String(then.getHours()).padStart(2, '0');
-  const mins = String(then.getMinutes()).padStart(2, '0');
+  const isToday =
+    parsed.getFullYear() === now.getFullYear() &&
+    parsed.getMonth() === now.getMonth() &&
+    parsed.getDate() === now.getDate();
 
-  const isSameDay =
-    now.getFullYear() === then.getFullYear() &&
-    now.getMonth() === then.getMonth() &&
-    now.getDate() === then.getDate();
-
-  if (isSameDay) {
-    return `Today ${hours}:${mins}`;
+  if (isToday) {
+    return `Today ${hhmm}`;
   }
 
-  const year = then.getFullYear();
-  const month = String(then.getMonth() + 1).padStart(2, '0');
-  const day = String(then.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day} ${hours}:${mins}`;
-}
-
-/**
- * Format date-time in absolute style (Today HH:MM or YYYY-MM-DD HH:MM)
- */
-export function formatRelativeTime(date: Date | string): string {
-  return formatAbsoluteDateTime(date);
+  const yyyy = parsed.getFullYear();
+  const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+  const dd = String(parsed.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd} ${hhmm}`;
 }
 
 /**
@@ -126,7 +126,7 @@ export function formatDate(
   _format: 'short' | 'medium' | 'long' | 'full' = 'medium',
   _locale: string = 'en-US'
 ): string {
-  return formatAbsoluteDateTime(date);
+  return formatTimestamp(date);
 }
 
 /**

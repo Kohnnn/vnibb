@@ -542,6 +542,46 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
     },
     {
+        type: 'gamma_exposure',
+        name: 'Gamma Exposure',
+        description: 'Volatility-based gamma regime proxy until options OI integration is available',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 6, minW: 4, minH: 5 }
+    },
+    {
+        type: 'momentum',
+        name: 'Momentum',
+        description: 'Multi-horizon momentum dashboard with 1M to 12M composite trend score',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 6, minW: 4, minH: 5 }
+    },
+    {
+        type: 'earnings_quality',
+        name: 'Earnings Quality',
+        description: 'Earnings quality score from margins, cash conversion, and leverage checks',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 6, minW: 4, minH: 5 }
+    },
+    {
+        type: 'smart_money',
+        name: 'Smart Money',
+        description: 'Institutional flow lens combining foreign trading and block-trade activity',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 6, minW: 4, minH: 5 }
+    },
+    {
+        type: 'relative_rotation',
+        name: 'Relative Rotation',
+        description: 'Relative Strength rotation quadrant based on RS trend and momentum',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 6, minW: 4, minH: 5 }
+    },
+    {
         type: 'technical_summary',
         name: 'Technical Summary',
         description: 'Technical indicators with buy/sell signals',

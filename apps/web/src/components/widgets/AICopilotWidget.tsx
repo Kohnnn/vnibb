@@ -237,10 +237,10 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
     return (
         <div className="flex flex-col h-full p-3 min-h-[300px]">
             {/* Header */}
-            <div className="flex items-center justify-between pb-2 mb-2 border-b border-gray-800">
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-[var(--border-color)]">
                 <div className="flex items-center gap-2">
                     <Sparkles size={16} className="text-cyan-400" />
-                    <span className="text-sm font-medium text-gray-200">AI Copilot</span>
+                    <span className="text-sm font-medium text-[var(--text-primary)]">AI Copilot</span>
                     {context?.symbol && (
                         <span className="text-xs px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded">
                             {context.symbol}
@@ -251,7 +251,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                     <WidgetMeta note="AI chat" isFetching={isLoading} align="right" />
                     <button
                         onClick={exportChat}
-                        className="p-1 text-gray-500 hover:text-gray-300 transition-colors"
+                        className="p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
                         title="Export chat"
                         aria-label="Export chat"
                     >
@@ -267,7 +267,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                         key={prompt.id}
                         onClick={() => handleQuickPrompt(prompt)}
                         disabled={isLoading}
-                        className="px-2 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-md transition-colors disabled:opacity-50"
+                        className="px-2 py-1 text-xs bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-md transition-colors disabled:opacity-50"
                     >
                         {prompt.label}
                     </button>
@@ -280,10 +280,10 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                     <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                         <div className={`relative max-w-[90%] rounded-lg px-3 py-2 text-sm group ${message.role === 'user'
                             ? 'bg-blue-600 text-white'
-                            : 'bg-gray-800/70 text-gray-200'
+                            : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] border border-[var(--border-subtle)]'
                             }`}>
                             {/* Markdown content */}
-                            <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0">
+                            <div className="prose prose-sm max-w-none text-inherit prose-headings:text-[var(--text-primary)] prose-strong:text-[var(--text-primary)] prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0">
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {message.content || (message.isStreaming ? '...' : '')}
                                 </ReactMarkdown>
@@ -298,7 +298,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                             {message.role === 'assistant' && !message.isStreaming && message.content && (
                                 <button
                                     onClick={() => copyMessage(message.content, message.id)}
-                                    className="absolute top-1 right-1 p-1 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-gray-300 transition-all"
+                                    className="absolute top-1 right-1 p-1 opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-all"
                                 >
                                     {copiedId === message.id ? <Check size={12} /> : <Copy size={12} />}
                                 </button>
@@ -311,7 +311,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
             </div>
 
             {/* Input */}
-            <div className="flex items-center gap-2 mt-3 pt-2 border-t border-gray-800">
+            <div className="flex items-center gap-2 mt-3 pt-2 border-t border-[var(--border-color)]">
                 <input
                     type="text"
                     value={input}
@@ -320,7 +320,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                     onKeyDown={handleKeyDown}
                     placeholder={context?.symbol ? `Ask about ${context.symbol}...` : 'Ask about stocks...'}
                     disabled={isLoading}
-                    className="flex-1 px-3 py-2 text-sm bg-gray-800/50 border border-gray-700 rounded-lg focus:border-cyan-500 focus:outline-none text-white placeholder-gray-500 disabled:opacity-50"
+                    className="flex-1 px-3 py-2 text-sm bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg focus:border-cyan-500 focus:outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)] disabled:opacity-50"
                 />
                 {isLoading ? (
                     <button
@@ -334,7 +334,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                     <button
                         onClick={() => sendMessage()}
                         disabled={!input.trim()}
-                        className="p-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                        className="p-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-[var(--bg-tertiary)] disabled:cursor-not-allowed text-white rounded-lg transition-colors"
                         aria-label="Send message"
                     >
                         <Send size={16} />

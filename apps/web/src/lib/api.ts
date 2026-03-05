@@ -199,7 +199,7 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
 
 // ============ Equity API ============
 
-import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
+import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, AnalystEstimatesResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
 import type { ScreenerResponse } from '@/types/screener';
 import type { Dashboard, DashboardCreate, DashboardUpdate, WidgetCreate } from '@/types/dashboard';
 import type { FullTechnicalAnalysis, SignalSummary, TechnicalIndicators } from '@/types/technical';
@@ -288,6 +288,10 @@ export async function getCompanyEvents(
             limit: options?.limit,
         },
     });
+}
+
+export async function getAnalystEstimates(symbol: string): Promise<AnalystEstimatesResponse> {
+    return fetchAPI<AnalystEstimatesResponse>(`/equity/${symbol}/estimates`);
 }
 
 export async function getShareholders(symbol: string): Promise<ShareholdersResponse> {
@@ -1310,6 +1314,205 @@ export async function getQuantMetrics(
         },
         timeout: 30000,
     })
+}
+
+export interface GammaExposureBand {
+    strike: number | null;
+    offset_pct: number | null;
+    net_gamma: number | null;
+}
+
+export interface GammaExposurePayload {
+    symbol: string;
+    period: QuantPeriod;
+    computed_at: string;
+    current_close: number | null;
+    current_realized_vol_30d_pct: number | null;
+    regime_z_score: number | null;
+    net_gamma_proxy: number | null;
+    dealer_position_proxy: 'long_gamma' | 'short_gamma' | 'neutral' | 'unknown';
+    regime_label: string;
+    bands: GammaExposureBand[];
+    data_quality_note?: string;
+}
+
+export interface GammaExposureResponse {
+    data: GammaExposurePayload;
+    meta?: { count?: number };
+    error?: string | null;
+}
+
+export interface MomentumPeerPoint {
+    symbol: string;
+    momentum_12_1_pct: number | null;
+}
+
+export interface MomentumProfilePayload {
+    symbol: string;
+    period: QuantPeriod;
+    computed_at: string;
+    returns_pct: {
+        r1m?: number | null;
+        r3m?: number | null;
+        r6m?: number | null;
+        r12m?: number | null;
+        momentum_12_1?: number | null;
+    };
+    momentum_score: number;
+    trend_label: string;
+    sector?: string | null;
+    sector_rank?: number | null;
+    sector_total?: number | null;
+    sector_percentile?: number | null;
+    peer_distribution: MomentumPeerPoint[];
+}
+
+export interface MomentumProfileResponse {
+    data: MomentumProfilePayload;
+    meta?: { count?: number };
+    error?: string | null;
+}
+
+export interface EarningsQualitySeriesPoint {
+    period: string;
+    accruals_ratio_pct?: number | null;
+    revenue_quality_pct?: number | null;
+    eps?: number | null;
+    net_income?: number | null;
+    operating_cash_flow?: number | null;
+}
+
+export interface EarningsQualityPayload {
+    symbol: string;
+    computed_at: string;
+    grade: string;
+    quality_score: number | null;
+    trend: 'Improving' | 'Stable' | 'Declining' | string;
+    accruals_ratio_pct: number | null;
+    revenue_quality_pct: number | null;
+    earnings_persistence: number | null;
+    component_scores: {
+        accrual?: number | null;
+        revenue_quality?: number | null;
+        persistence?: number | null;
+    };
+    checks: string[];
+    series: EarningsQualitySeriesPoint[];
+}
+
+export interface EarningsQualityResponse {
+    data: EarningsQualityPayload;
+    meta?: { count?: number };
+    error?: string | null;
+}
+
+export interface SmartMoneyEvent {
+    date: string;
+    volume?: number | null;
+    value?: number | null;
+    type: 'accumulation' | 'distribution' | string;
+    source?: string;
+}
+
+export interface SmartMoneyPayload {
+    symbol: string;
+    computed_at: string;
+    net_institutional: 'buying' | 'selling' | 'neutral' | string;
+    flow_score: number;
+    net_foreign_20d_value?: number | null;
+    block_buy_20d_value?: number | null;
+    block_sell_20d_value?: number | null;
+    synthetic_block_bias?: number | null;
+    block_trades: SmartMoneyEvent[];
+}
+
+export interface SmartMoneyResponse {
+    data: SmartMoneyPayload;
+    meta?: { count?: number };
+    error?: string | null;
+}
+
+export interface RelativeRotationPoint {
+    symbol: string;
+    rs_ratio: number | null;
+    rs_momentum: number | null;
+    quadrant: 'Leading' | 'Weakening' | 'Lagging' | 'Improving' | 'Unknown' | string;
+    trail: Array<{
+        rs_ratio: number | null;
+        rs_momentum: number | null;
+    }>;
+}
+
+export interface RelativeRotationPayload {
+    symbol: string;
+    benchmark: string;
+    computed_at: string;
+    selected: RelativeRotationPoint | null;
+    universe: RelativeRotationPoint[];
+}
+
+export interface RelativeRotationResponse {
+    data: RelativeRotationPayload;
+    meta?: { count?: number };
+    error?: string | null;
+}
+
+export async function getGammaExposure(
+    symbol: string,
+    options?: {
+        period?: QuantPeriod;
+        source?: 'KBS' | 'VCI' | 'DNSE';
+    }
+): Promise<GammaExposureResponse> {
+    return fetchAPI<GammaExposureResponse>(`/quant/${symbol}/gamma-exposure`, {
+        params: {
+            period: options?.period ?? '3Y',
+            source: options?.source,
+        },
+        timeout: 30000,
+    });
+}
+
+export async function getMomentumProfile(
+    symbol: string,
+    options?: {
+        period?: QuantPeriod;
+        source?: 'KBS' | 'VCI' | 'DNSE';
+    }
+): Promise<MomentumProfileResponse> {
+    return fetchAPI<MomentumProfileResponse>(`/quant/${symbol}/momentum`, {
+        params: {
+            period: options?.period ?? '3Y',
+            source: options?.source,
+        },
+        timeout: 30000,
+    });
+}
+
+export async function getEarningsQuality(symbol: string): Promise<EarningsQualityResponse> {
+    return fetchAPI<EarningsQualityResponse>(`/quant/${symbol}/earnings-quality`, {
+        timeout: 30000,
+    });
+}
+
+export async function getSmartMoneyFlow(symbol: string): Promise<SmartMoneyResponse> {
+    return fetchAPI<SmartMoneyResponse>(`/quant/${symbol}/smart-money`, {
+        timeout: 30000,
+    });
+}
+
+export async function getRelativeRotation(
+    symbol: string,
+    options?: {
+        lookbackDays?: number;
+    }
+): Promise<RelativeRotationResponse> {
+    return fetchAPI<RelativeRotationResponse>(`/quant/${symbol}/relative-rotation`, {
+        params: {
+            lookback_days: options?.lookbackDays,
+        },
+        timeout: 30000,
+    });
 }
 
 // ============ AI Copilot API ============

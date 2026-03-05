@@ -57,25 +57,25 @@ export function SyncDropdown({
     if (!isOpen) return null;
 
     return (
-        <div className="absolute top-full left-0 mt-1 w-64 bg-[#0d1f3c] border border-[#1e3a5f] rounded-lg shadow-xl z-20 overflow-hidden text-sm animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute left-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] text-sm shadow-xl duration-100 animate-in fade-in zoom-in-95">
             {/* Ticker Input */}
-            <form onSubmit={handleSymbolSubmit} className="p-2 border-b border-[#1e3a5f]">
+            <form onSubmit={handleSymbolSubmit} className="border-b border-[var(--border-subtle)] p-2">
                 <div className="relative">
-                    <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
                     <input
                         ref={inputRef}
                         type="text"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         placeholder={currentSymbol || "Search ticker..."}
-                        className="w-full bg-[#1e3a5f]/50 border border-[#1e3a5f] rounded px-8 py-1.5 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 text-xs"
+                        className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-8 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:border-blue-500 focus:outline-none"
                     />
                 </div>
             </form>
 
             <div className="max-h-60 overflow-y-auto py-1">
                 {/* Available Groups */}
-                <div className="px-2 pb-1 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                     Sync Groups
                 </div>
 
@@ -94,10 +94,10 @@ export function SyncDropdown({
                         >
                             {group.id}
                         </div>
-                        <span className={`flex-1 ${currentGroupId === group.id ? 'text-white font-medium' : 'text-gray-300'}`}>
+                        <span className={`flex-1 ${currentGroupId === group.id ? 'font-medium text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>
                             {group.name}
                         </span>
-                        <span className="text-xs text-gray-500 group-hover:text-gray-300 transition-colors">
+                        <span className="text-xs text-[var(--text-muted)] transition-colors group-hover:text-[var(--text-secondary)]">
                             {group.currentSymbol}
                         </span>
                         {currentGroupId === group.id && (
@@ -120,13 +120,13 @@ export function SyncDropdown({
                 {/* Unlink / No Group */}
                 {currentGroupId !== undefined && (
                     <>
-                        <div className="border-t border-[#1e3a5f] my-1" />
+                        <div className="my-1 border-t border-[var(--border-subtle)]" />
                         <button
                             onClick={() => {
                                 onGroupChange(undefined);
                                 onClose();
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-gray-400 hover:bg-red-500/10 hover:text-red-400 transition-colors"
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--text-secondary)] transition-colors hover:bg-red-500/10 hover:text-red-400"
                         >
                             <X size={14} />
                             <span>Unlink from Group</span>
