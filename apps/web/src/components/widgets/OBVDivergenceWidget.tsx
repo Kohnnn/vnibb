@@ -103,7 +103,11 @@ export function OBVDivergenceWidget({ symbol }: OBVDivergenceWidgetProps) {
         ? 'Bearish Divergence'
         : 'No Divergence';
   const signalClass =
-    signal === 'bullish' ? 'text-emerald-300' : signal === 'bearish' ? 'text-red-300' : 'text-gray-300';
+    signal === 'bullish'
+      ? 'text-emerald-300'
+      : signal === 'bearish'
+        ? 'text-red-300'
+        : 'text-[var(--text-secondary)]';
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view OBV divergence" icon={<Activity size={18} />} />;
@@ -112,7 +116,7 @@ export function OBVDivergenceWidget({ symbol }: OBVDivergenceWidgetProps) {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Activity size={12} className="text-cyan-400" />
           <span>OBV vs Price ({lookback}D)</span>
         </div>
@@ -125,22 +129,22 @@ export function OBVDivergenceWidget({ symbol }: OBVDivergenceWidgetProps) {
         />
       </div>
 
-      <div className="rounded-md border border-gray-800/60 bg-black/20 px-3 py-2 mb-2">
-        <div className="text-[10px] text-gray-500 uppercase tracking-widest">Signal</div>
+      <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
+        <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Signal</div>
         <div className={`text-sm font-semibold ${signalClass}`}>{signalLabel}</div>
-        <div className="mt-1 text-[10px] text-gray-400">Confidence: {confidence}%</div>
+        <div className="mt-1 text-[10px] text-[var(--text-secondary)]">Confidence: {confidence}%</div>
       </div>
 
       <div className="grid grid-cols-2 gap-2 mb-2">
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-[10px] text-gray-500 uppercase tracking-widest">Price %</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Price %</div>
           <div className={`text-xs font-mono ${priceDeltaPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
             {priceDeltaPct >= 0 ? '+' : ''}
             {priceDeltaPct.toFixed(2)}%
           </div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-[10px] text-gray-500 uppercase tracking-widest">OBV %</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">OBV %</div>
           <div className={`text-xs font-mono ${obvDeltaPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
             {obvDeltaPct >= 0 ? '+' : ''}
             {obvDeltaPct.toFixed(2)}%
@@ -163,14 +167,14 @@ export function OBVDivergenceWidget({ symbol }: OBVDivergenceWidgetProps) {
 
             return (
               <div key={`${point.time}-${index}`} className="flex items-center gap-2">
-                <div className="w-14 text-[10px] text-gray-500 shrink-0">{String(point.time).slice(5, 10)}</div>
-                <div className="flex-1 h-4 bg-gray-800/30 rounded overflow-hidden">
+                <div className="w-14 text-[10px] text-[var(--text-muted)] shrink-0">{String(point.time).slice(5, 10)}</div>
+                <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
                   <div
                     className={`h-full ${isUp ? 'bg-emerald-500/70' : 'bg-red-500/70'}`}
                     style={{ width: `${Math.max(2, widthPct)}%` }}
                   />
                 </div>
-                <div className="w-16 text-[10px] text-gray-400 text-right font-mono">{formatCompact(point.value)}</div>
+                <div className="w-16 text-[10px] text-[var(--text-secondary)] text-right font-mono">{formatCompact(point.value)}</div>
                 {isUp ? (
                   <TrendingUp size={10} className="text-emerald-400" />
                 ) : (

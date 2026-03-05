@@ -36,9 +36,9 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
   };
 
   return (
-    <div className="space-y-2 p-3 bg-gray-900/50 rounded-lg border border-gray-800">
+    <div className="space-y-2 p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)]">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Filters</span>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Filters</span>
         <button
           onClick={addFilter}
           className="flex items-center gap-1 text-[10px] font-bold text-blue-400 hover:text-blue-300 uppercase"
@@ -50,14 +50,14 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
       {filters.map((filter, index) => (
         <div key={filter.id} className="flex items-center gap-2">
           {index > 0 && (
-            <span className="text-[10px] font-black text-gray-700 w-6">AND</span>
+            <span className="text-[10px] font-black text-[var(--text-muted)] w-6">AND</span>
           )}
           
           <select
             value={filter.field}
             onChange={(e) => updateFilter(filter.id, { field: e.target.value })}
             aria-label="Filter field"
-            className="flex-1 bg-gray-800 text-white text-[11px] rounded px-2 py-1.5 border border-gray-700 outline-none focus:border-blue-500"
+            className="flex-1 bg-[var(--bg-tertiary)] text-[var(--text-primary)] text-[11px] rounded px-2 py-1.5 border border-[var(--border-color)] outline-none focus:border-blue-500"
           >
             {availableFields.map(f => (
               <option key={f.id} value={f.id}>{f.label}</option>
@@ -68,7 +68,7 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
             value={filter.operator}
             onChange={(e) => updateFilter(filter.id, { operator: e.target.value as Filter['operator'] })}
             aria-label="Filter operator"
-            className="bg-gray-800 text-white text-[11px] rounded px-2 py-1.5 border border-gray-700 outline-none focus:border-blue-500"
+            className="bg-[var(--bg-tertiary)] text-[var(--text-primary)] text-[11px] rounded px-2 py-1.5 border border-[var(--border-color)] outline-none focus:border-blue-500"
           >
             <option value="gt">&gt;</option>
             <option value="lt">&lt;</option>
@@ -81,12 +81,12 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
             value={filter.value as number}
             onChange={(e) => updateFilter(filter.id, { value: parseFloat(e.target.value) })}
             aria-label="Filter value"
-            className="w-20 bg-gray-800 text-white text-[11px] rounded px-2 py-1.5 border border-gray-700 outline-none focus:border-blue-500 font-mono"
+            className="w-20 bg-[var(--bg-tertiary)] text-[var(--text-primary)] text-[11px] rounded px-2 py-1.5 border border-[var(--border-color)] outline-none focus:border-blue-500 font-mono"
           />
 
           <button
             onClick={() => removeFilter(filter.id)}
-            className="p-1 text-gray-600 hover:text-red-400 transition-colors"
+            className="p-1 text-[var(--text-muted)] hover:text-red-400 transition-colors"
           >
             <X size={14} />
           </button>
@@ -94,7 +94,7 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
       ))}
 
       {filters.length === 0 && (
-        <p className="text-[10px] text-gray-600 text-center py-2 italic">No filters applied. Showing all results.</p>
+        <p className="text-[10px] text-[var(--text-muted)] text-center py-2 italic">No filters applied. Showing all results.</p>
       )}
     </div>
   );

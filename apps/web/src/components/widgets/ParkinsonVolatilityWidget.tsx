@@ -90,7 +90,7 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Activity size={12} className="text-cyan-400" />
           <span>Parkinson Volatility</span>
         </div>
@@ -101,7 +101,7 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/70'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -120,34 +120,34 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
       ) : (
         <>
           <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Park 30D</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Park 30D</div>
               <div className="font-mono text-cyan-300">
                 {Number(metric?.current_parkinson_vol_30d_pct ?? 0).toFixed(2)}%
               </div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Close 30D</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Close 30D</div>
               <div className="font-mono text-amber-300">
                 {Number(metric?.current_close_close_vol_30d_pct ?? 0).toFixed(2)}%
               </div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Ratio</div>
-              <div className="font-mono text-gray-200">
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Ratio</div>
+              <div className="font-mono text-[var(--text-primary)]">
                 {Number(metric?.close_to_park_ratio ?? 0).toFixed(3)}x
               </div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Regime</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Regime</div>
               <div className={`font-semibold uppercase ${regimeTone(currentRegime)}`}>{currentRegime}</div>
             </div>
           </div>
 
-          <div className={`rounded-md border border-gray-800/60 bg-gradient-to-br ${regimeBand(currentRegime)} p-2 mb-2`}>
+          <div className={`rounded-md border border-[var(--border-color)] bg-gradient-to-br ${regimeBand(currentRegime)} p-2 mb-2`}>
             <div className="mb-2 flex items-center justify-between">
-              <div className="text-[10px] uppercase tracking-widest text-gray-500">30D Volatility Regime</div>
-              <div className="text-[10px] text-gray-400">Z-score {Number(metric?.current_regime_z_score ?? 0).toFixed(2)}</div>
+              <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">30D Volatility Regime</div>
+              <div className="text-[10px] text-[var(--text-secondary)]">Z-score {Number(metric?.current_regime_z_score ?? 0).toFixed(2)}</div>
             </div>
             <ChartMountGuard className="h-[165px]" minHeight={130}>
               <ResponsiveContainer width="100%" height="100%">

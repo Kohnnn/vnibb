@@ -40,8 +40,8 @@ export function SubsidiariesWidget({ symbol }: SubsidiariesWidgetProps) {
 
     return (
         <div className="h-full flex flex-col">
-            <div className="flex items-center justify-between pb-2 border-b border-gray-800/50">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-2">
+                <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                     <Building size={12} />
                     <span>{subsidiaries.length} subsidiaries</span>
                 </div>
@@ -64,15 +64,15 @@ export function SubsidiariesWidget({ symbol }: SubsidiariesWidgetProps) {
                     subsidiaries.map((sub, index) => (
                         <div
                             key={index}
-                            className="p-2 rounded bg-gray-800/20 hover:bg-gray-800/40"
+                            className="rounded bg-[var(--bg-secondary)] p-2 hover:bg-[var(--bg-tertiary)]"
                         >
                             <div className="flex items-start justify-between gap-2">
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-gray-200 font-medium truncate" title={sub.company_name || ''}>
+                                    <p className="truncate text-sm font-medium text-[var(--text-primary)]" title={sub.company_name || ''}>
                                         {sub.company_name || 'Unnamed'}
                                     </p>
                                     {sub.charter_capital && (
-                                        <p className="text-[10px] text-gray-500 mt-0.5">
+                                        <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">
                                             Capital: {formatCapital(sub.charter_capital)}
                                         </p>
                                     )}
@@ -81,7 +81,7 @@ export function SubsidiariesWidget({ symbol }: SubsidiariesWidgetProps) {
                                     className={`shrink-0 px-1.5 py-0.5 rounded text-xs font-medium ${
                                         (sub.ownership_pct || 0) >= 50
                                             ? 'bg-blue-500/20 text-blue-400'
-                                            : 'bg-gray-500/20 text-gray-400'
+                                            : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
                                     }`}
                                 >
                                     {formatPct(sub.ownership_pct)}

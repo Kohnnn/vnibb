@@ -196,7 +196,7 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove }: Shar
       exportFilename={`share_stats_${symbol}`}
     >
       <div className="h-full flex flex-col">
-      <div className="pb-2 border-b border-gray-800/50">
+      <div className="pb-2 border-b border-[var(--border-subtle)]">
         <WidgetMeta
           updatedAt={screenerUpdatedAt}
           isFetching={isFetching && hasData}

@@ -26,7 +26,7 @@ const eventTypeColors: Record<string, string> = {
     DIVIDEND: 'text-green-400 bg-green-400/10',
     SPLIT: 'text-cyan-400 bg-cyan-400/10',
     AGM: 'text-blue-400 bg-blue-400/10',
-    DEFAULT: 'text-gray-400 bg-gray-400/10',
+    DEFAULT: 'text-[var(--text-secondary)] bg-[var(--bg-tertiary)]',
 };
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -75,7 +75,7 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
     return (
         <div aria-label="Events calendar" className="h-full flex flex-col">
             <div className="flex items-center justify-between px-1 py-1 mb-2">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
+                <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
                     <Calendar size={12} />
                     <span>{events.length} events</span>
                 </div>
@@ -83,7 +83,7 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
                     onClick={() => refetch()}
                     disabled={isFetching}
                     aria-label="Refresh events"
-                    className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
+                    className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors"
                     title="Refresh events"
                     type="button"
                 >
@@ -91,7 +91,7 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
                 </button>
             </div>
 
-            <div className="pb-2 border-b border-gray-800/50">
+            <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
@@ -118,7 +118,7 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
                         return (
                             <div
                                 key={index}
-                                className="p-2 rounded bg-gray-800/20 hover:bg-gray-800/40 cursor-pointer transition-colors border-l-2 border-transparent hover:border-blue-500"
+                                className="p-2 rounded bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors border-l-2 border-transparent hover:border-blue-500"
                                 onClick={() => setExpandedIndex(isExpanded ? null : index)}
                                 role="button"
                                 tabIndex={0}
@@ -139,39 +139,39 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
                                                 {event.event_type || 'Event'}
                                             </span>
                                         </div>
-                                        <p className={`text-sm text-gray-200 mt-0.5 ${isExpanded ? '' : 'line-clamp-1'}`}>
+                                        <p className={`text-sm text-[var(--text-primary)] mt-0.5 ${isExpanded ? '' : 'line-clamp-1'}`}>
                                             {event.event_name || event.description || 'Unnamed event'}
                                         </p>
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-3 mt-2 text-[10px] text-gray-500">
+                                <div className="flex items-center gap-3 mt-2 text-[10px] text-[var(--text-muted)]">
                                     {event.event_date && <span>📅 {formatDate(event.event_date)}</span>}
                                     {event.ex_date && <span>Ex: {formatDate(event.ex_date)}</span>}
                                 </div>
 
                                 {isExpanded && (
-                                    <div className="mt-2 pt-2 border-t border-gray-700/50 space-y-1 text-xs">
+                                    <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] space-y-1 text-xs">
                                         {event.value && (
                                             <div className="flex justify-between">
-                                                <span className="text-gray-500">Value</span>
-                                                <span className="text-white font-medium">{event.value}</span>
+                                                <span className="text-[var(--text-muted)]">Value</span>
+                                                <span className="text-[var(--text-primary)] font-medium">{event.value}</span>
                                             </div>
                                         )}
                                         {event.record_date && event.record_date !== 'None' && (
                                             <div className="flex justify-between">
-                                                <span className="text-gray-500">Record Date</span>
-                                                <span className="text-gray-300">{formatDate(event.record_date)}</span>
+                                                <span className="text-[var(--text-muted)]">Record Date</span>
+                                                <span className="text-[var(--text-secondary)]">{formatDate(event.record_date)}</span>
                                             </div>
                                         )}
                                         {event.payment_date && event.payment_date !== 'None' && (
                                             <div className="flex justify-between">
-                                                <span className="text-gray-500">Payment Date</span>
-                                                <span className="text-gray-300">{formatDate(event.payment_date)}</span>
+                                                <span className="text-[var(--text-muted)]">Payment Date</span>
+                                                <span className="text-[var(--text-secondary)]">{formatDate(event.payment_date)}</span>
                                             </div>
                                         )}
                                         {event.description && event.description !== event.event_name && (
-                                            <p className="text-gray-400 mt-1">{event.description}</p>
+                                            <p className="text-[var(--text-secondary)] mt-1">{event.description}</p>
                                         )}
                                     </div>
                                 )}

@@ -52,7 +52,7 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove }: IntradayTradesW
             id: 'time',
             header: 'Time',
             accessor: (row) => (
-                <div className="flex items-center gap-1.5 text-gray-500 font-mono text-[10px]">
+                <div className="flex items-center gap-1.5 font-mono text-[10px] text-[var(--text-muted)]">
                     <Clock size={10} className="opacity-50" />
                     {formatTime(row.time)}
                 </div>
@@ -63,7 +63,7 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove }: IntradayTradesW
             id: 'price',
             header: 'Price',
             accessor: (row) => (
-                <span className="font-bold text-white font-mono">{formatPrice(row.price)}</span>
+                <span className="font-mono font-bold text-[var(--text-primary)]">{formatPrice(row.price)}</span>
             ),
             align: 'right',
             width: 80,
@@ -72,7 +72,7 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove }: IntradayTradesW
             id: 'volume',
             header: 'Volume',
             accessor: (row) => (
-                <span className="text-gray-400 font-mono">{formatVolume(row.volume)}</span>
+                <span className="font-mono text-[var(--text-secondary)]">{formatVolume(row.volume)}</span>
             ),
             align: 'right',
         },
@@ -92,7 +92,7 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove }: IntradayTradesW
                         ) : isSell ? (
                             <span className="text-[10px] font-black text-red-500 bg-red-500/10 px-1 rounded">S</span>
                         ) : (
-                            <span className="text-gray-600">-</span>
+                            <span className="text-[var(--text-muted)]">-</span>
                         )}
                     </div>
                 );
@@ -118,8 +118,8 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove }: IntradayTradesW
             exportData={trades}
             exportFilename={`trades_${symbol}_${new Date().toISOString().split('T')[0]}`}
         >
-            <div className="h-full flex flex-col bg-black">
-                <div className="px-3 py-2 border-b border-gray-800/50">
+            <div className="h-full flex flex-col bg-[var(--bg-primary)]">
+                <div className="border-b border-[var(--border-subtle)] px-3 py-2">
                     <WidgetMeta
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
@@ -140,14 +140,14 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove }: IntradayTradesW
                     )}
                 </div>
 
-                <div className="px-3 py-1.5 border-t border-gray-800 bg-gray-900/20 flex items-center justify-between">
-                    <div className="text-[9px] font-bold text-gray-600 uppercase tracking-tighter flex items-center gap-1">
+                <div className="flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-1.5">
+                    <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-tighter text-[var(--text-muted)]">
                         <Activity size={10} />
                         Total {trades.length.toLocaleString()} Ticks
                     </div>
                     <div className="flex items-center gap-1">
                         <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                        <span className="text-[9px] text-gray-500 font-bold uppercase">Live</span>
+                        <span className="text-[9px] font-bold uppercase text-[var(--text-muted)]">Live</span>
                     </div>
                 </div>
             </div>

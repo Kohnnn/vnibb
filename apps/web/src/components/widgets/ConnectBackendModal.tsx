@@ -93,7 +93,7 @@ export function ConnectBackendModal({ isOpen, onClose, onConnect }: ConnectBacke
     };
 
     return (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[rgba(0,0,0,0.6)] animate-in fade-in duration-150">
             <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-2xl shadow-2xl w-full max-w-md mx-4 animate-in zoom-in-95 duration-200">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-color)]">

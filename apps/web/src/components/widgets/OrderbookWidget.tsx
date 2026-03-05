@@ -56,7 +56,7 @@ function OrderbookWidgetComponent({ symbol = 'VNM', widgetId }: OrderbookWidgetP
           />
         </div>
 
-        <div className="flex text-[10px] font-bold text-gray-500 px-3 py-2 border-b border-gray-800 uppercase tracking-wider">
+        <div className="flex text-[10px] font-bold text-[var(--text-muted)] px-3 py-2 border-b border-[var(--border-color)] uppercase tracking-wider">
           <div className="w-1/3">Bid Vol</div>
           <div className="w-1/3 text-center">Price</div>
           <div className="w-1/3 text-right">Ask Vol</div>
@@ -71,7 +71,7 @@ function OrderbookWidgetComponent({ symbol = 'VNM', widgetId }: OrderbookWidgetP
             <WidgetEmpty message="Order book data not available yet" />
           ) : (
             entries.map((entry: any, i: number) => (
-              <div key={i} className="flex items-center px-3 py-1.5 relative border-b border-gray-800/20">
+              <div key={i} className="flex items-center px-3 py-1.5 relative border-b border-[var(--border-subtle)]">
                 <div
                   className="absolute left-0 top-0 h-full bg-green-500/10"
                   style={{ width: `${((entry.bid_vol || 0) / maxVolume) * 50}%` }}
@@ -84,7 +84,7 @@ function OrderbookWidgetComponent({ symbol = 'VNM', widgetId }: OrderbookWidgetP
                 <div className="w-1/3 text-xs text-green-400 font-mono relative z-10">
                   {entry.bid_vol?.toLocaleString() || '--'}
                 </div>
-                <div className="w-1/3 text-center text-xs text-white font-bold relative z-10">
+                <div className="w-1/3 text-center text-xs text-[var(--text-primary)] font-bold relative z-10">
                   {entry.price?.toLocaleString() || '--'}
                 </div>
                 <div className="w-1/3 text-right text-xs text-red-400 font-mono relative z-10">

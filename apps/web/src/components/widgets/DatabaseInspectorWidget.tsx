@@ -140,7 +140,7 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?
         id: key,
         header: key,
         accessor: (row) => (
-            <span className="text-gray-400 font-mono text-[10px]">
+            <span className="text-[var(--text-secondary)] font-mono text-[10px]">
                 {formatValue(row[key])}
             </span>
         ),
@@ -190,7 +190,7 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?
                 className={`px-2 py-1 text-[10px] font-bold rounded transition-all uppercase ${
                   selectedTable === table.name
                     ? 'bg-blue-600 text-white shadow-lg'
-                    : 'bg-gray-800 text-gray-500 hover:text-gray-300 hover:bg-gray-700'
+                    : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >
                 {table.name} ({table.count})
@@ -204,20 +204,20 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?
           {selectedTable ? (
             <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Search & Actions */}
-                <div className="flex items-center gap-2 p-2 bg-gray-900/30 border-b border-gray-800">
+                <div className="flex items-center gap-2 p-2 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
                     <div className="relative flex-1">
-                        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+                        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
                         <input
                             type="text"
                             placeholder={`Search in ${selectedTable}...`}
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
-                            className="w-full pl-7 pr-2 py-1 text-[10px] bg-gray-800 border border-gray-700 rounded text-white focus:outline-none focus:border-blue-500"
+                            className="w-full pl-7 pr-2 py-1 text-[10px] bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
                         />
                     </div>
                     <button
                         onClick={handleExport}
-                        className="p-1.5 text-gray-500 hover:text-white hover:bg-gray-700 rounded transition-colors"
+                        className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors"
                         title="Export CSV"
                     >
                         <Download size={14} />
@@ -225,9 +225,9 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?
                 </div>
 
                 {/* Data Table */}
-                <div className="flex-1 overflow-hidden bg-black">
+                <div className="flex-1 overflow-hidden bg-[var(--bg-primary)]">
                     {sampleLoading ? (
-                        <div className="p-10 flex flex-col items-center justify-center text-gray-600 gap-2">
+                        <div className="p-10 flex flex-col items-center justify-center text-[var(--text-muted)] gap-2">
                              <RefreshCw size={24} className="animate-spin" />
                              <span className="text-[10px] font-bold uppercase tracking-widest">Fetching data...</span>
                         </div>
@@ -243,7 +243,7 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh }: { onRemove?
                 </div>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-gray-600 gap-2 opacity-50">
+            <div className="flex-1 flex flex-col items-center justify-center text-[var(--text-muted)] gap-2 opacity-50">
                 <Database size={48} strokeWidth={1} />
                 <p className="text-xs uppercase font-bold tracking-widest">Select a table to browse data</p>
             </div>

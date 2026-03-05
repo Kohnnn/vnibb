@@ -53,7 +53,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                         <AlertTriangle size={20} />
                         <span className="text-sm font-medium">Something went wrong</span>
                     </div>
-                    <p className="text-xs text-gray-500 mb-3 max-w-[200px]">
+                    <p className="mb-3 max-w-[200px] text-xs text-[var(--text-muted)]">
                         {this.state.error?.message || 'An unexpected error occurred'}
                     </p>
                     <button
@@ -103,7 +103,7 @@ export function WidgetErrorFallback({
                             onRetry();
                         }
                     }}
-                    className="flex items-center gap-1 px-2 py-1 text-[10px] text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors"
+                    className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                     aria-label="Retry"
                 >
                     <RefreshCw size={10} />

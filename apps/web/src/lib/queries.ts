@@ -36,6 +36,7 @@ export const queryKeys = {
     profile: (symbol: string) => ['profile', symbol] as const,
     companyNews: (symbol: string) => ['companyNews', symbol] as const,
     companyEvents: (symbol: string) => ['companyEvents', symbol] as const,
+    analystEstimates: (symbol: string) => ['analystEstimates', symbol] as const,
     shareholders: (symbol: string) => ['shareholders', symbol] as const,
     officers: (symbol: string) => ['officers', symbol] as const,
     intraday: (symbol: string) => ['intraday', symbol] as const,
@@ -98,6 +99,14 @@ export const queryKeys = {
     rsGainers: (limit: number, lookbackDays: number) => ['rsGainers', limit, lookbackDays] as const,
     quant: (symbol: string, period: string, metrics: string[], source: string) =>
         ['quant', symbol, period, metrics.join(','), source] as const,
+    gammaExposure: (symbol: string, period: string, source: string) =>
+        ['gammaExposure', symbol, period, source] as const,
+    momentumProfile: (symbol: string, period: string, source: string) =>
+        ['momentumProfile', symbol, period, source] as const,
+    earningsQuality: (symbol: string) => ['earningsQuality', symbol] as const,
+    smartMoneyFlow: (symbol: string) => ['smartMoneyFlow', symbol] as const,
+    relativeRotation: (symbol: string, lookbackDays: number) =>
+        ['relativeRotation', symbol, lookbackDays] as const,
 };
 
 // ============ Equity Queries ============
@@ -184,6 +193,15 @@ export function useCompanyEvents(
         queryFn: () => api.getCompanyEvents(symbol, { limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 10 * 60 * 1000, // 10 minutes
+    });
+}
+
+export function useAnalystEstimates(symbol: string, enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.analystEstimates(symbol),
+        queryFn: () => api.getAnalystEstimates(symbol),
+        enabled: enabled && !!symbol,
+        staleTime: 10 * 60 * 1000,
     });
 }
 
@@ -1037,6 +1055,87 @@ export function useQuantMetrics(
         queryFn: () => api.getQuantMetrics(symbol, { period, metrics, source: quantSource }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
+        retry: 2,
+    });
+}
+
+export function useGammaExposure(
+    symbol: string,
+    options?: {
+        period?: api.QuantPeriod;
+        source?: 'KBS' | 'VCI' | 'DNSE' | 'TCBS';
+        enabled?: boolean;
+    }
+) {
+    const preferredSource = useVnstockSource();
+    const period = options?.period || '3Y';
+    const source = options?.source || preferredSource;
+    const quantSource: 'KBS' | 'VCI' | 'DNSE' = source === 'TCBS' ? 'VCI' : source;
+
+    return useQuery({
+        queryKey: queryKeys.gammaExposure(symbol, period, quantSource),
+        queryFn: () => api.getGammaExposure(symbol, { period, source: quantSource }),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 5 * 60 * 1000,
+        retry: 2,
+    });
+}
+
+export function useMomentumProfile(
+    symbol: string,
+    options?: {
+        period?: api.QuantPeriod;
+        source?: 'KBS' | 'VCI' | 'DNSE' | 'TCBS';
+        enabled?: boolean;
+    }
+) {
+    const preferredSource = useVnstockSource();
+    const period = options?.period || '3Y';
+    const source = options?.source || preferredSource;
+    const quantSource: 'KBS' | 'VCI' | 'DNSE' = source === 'TCBS' ? 'VCI' : source;
+
+    return useQuery({
+        queryKey: queryKeys.momentumProfile(symbol, period, quantSource),
+        queryFn: () => api.getMomentumProfile(symbol, { period, source: quantSource }),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 5 * 60 * 1000,
+        retry: 2,
+    });
+}
+
+export function useEarningsQuality(symbol: string, enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.earningsQuality(symbol),
+        queryFn: () => api.getEarningsQuality(symbol),
+        enabled: enabled && !!symbol,
+        staleTime: 15 * 60 * 1000,
+        retry: 2,
+    });
+}
+
+export function useSmartMoneyFlow(symbol: string, enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.smartMoneyFlow(symbol),
+        queryFn: () => api.getSmartMoneyFlow(symbol),
+        enabled: enabled && !!symbol,
+        staleTime: 5 * 60 * 1000,
+        retry: 2,
+    });
+}
+
+export function useRelativeRotation(
+    symbol: string,
+    options?: {
+        lookbackDays?: number;
+        enabled?: boolean;
+    }
+) {
+    const lookbackDays = options?.lookbackDays ?? 260;
+    return useQuery({
+        queryKey: queryKeys.relativeRotation(symbol, lookbackDays),
+        queryFn: () => api.getRelativeRotation(symbol, { lookbackDays }),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 10 * 60 * 1000,
         retry: 2,
     });
 }

@@ -45,10 +45,10 @@ export class WidgetErrorBoundary extends Component<Props, State> {
             return (
                 <div className="flex flex-col items-center justify-center h-full p-4 text-center">
                     <AlertTriangle size={32} className="text-amber-500 mb-3" />
-                    <h3 className="text-sm font-medium text-gray-300 mb-1">
+                    <h3 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">
                         Widget Error
                     </h3>
-                    <p className="text-xs text-gray-500 mb-3 max-w-[200px]">
+                    <p className="mb-3 max-w-[200px] text-xs text-[var(--text-muted)]">
                         {this.props.widgetType
                             ? `The ${this.props.widgetType} widget encountered an error.`
                             : 'This widget encountered an error.'}

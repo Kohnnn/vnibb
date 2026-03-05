@@ -25,7 +25,7 @@ function getSignalColor(signal: string): string {
         case 'buy': return 'text-green-400';
         case 'strong_sell':
         case 'sell': return 'text-red-400';
-        default: return 'text-gray-400';
+        default: return 'text-[var(--text-secondary)]';
     }
 }
 
@@ -35,7 +35,7 @@ function getSignalBg(signal: string): string {
         case 'buy': return 'bg-green-500/20';
         case 'strong_sell':
         case 'sell': return 'bg-red-500/20';
-        default: return 'bg-gray-500/20';
+        default: return 'bg-[var(--bg-tertiary)]';
     }
 }
 
@@ -44,8 +44,8 @@ function getTrendColor(strength: string): string {
         case 'very_strong': return 'text-blue-400';
         case 'strong': return 'text-cyan-400';
         case 'moderate': return 'text-yellow-400';
-        case 'weak': return 'text-gray-400';
-        default: return 'text-gray-500';
+        case 'weak': return 'text-[var(--text-secondary)]';
+        default: return 'text-[var(--text-muted)]';
     }
 }
 
@@ -68,14 +68,14 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
     }[timeframe];
 
     const headerActions = (
-        <div className="flex bg-gray-900 rounded-md p-0.5 border border-gray-800 mr-2">
+        <div className="flex bg-[var(--bg-secondary)] rounded-md p-0.5 border border-[var(--border-color)] mr-2">
             {(['D', 'W', 'M'] as Timeframe[]).map((tf) => (
                 <button
                     key={tf}
                     onClick={() => setTimeframe(tf)}
                     className={`px-2 py-0.5 text-[10px] font-medium rounded ${timeframe === tf
-                            ? 'bg-gray-800 text-white shadow-sm'
-                            : 'text-gray-500 hover:text-gray-300'
+                            ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] shadow-sm'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                         } transition-all`}
                 >
                     {tf}
@@ -112,28 +112,28 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
                     />
 
                     {/* Signal Indicator */}
-                    <Card className="bg-gray-900/40 border-gray-800 p-3 flex flex-col items-center justify-center relative overflow-hidden">
+                    <Card className="bg-[var(--bg-secondary)] border-[var(--border-color)] p-3 flex flex-col items-center justify-center relative overflow-hidden">
                         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent opacity-30" />
-                        <div className="text-[10px] text-gray-500 uppercase font-semibold mb-1 tracking-tighter">Overall Signal</div>
+                        <div className="text-[10px] text-[var(--text-muted)] uppercase font-semibold mb-1 tracking-tighter">Overall Signal</div>
                         <Badge variant="outline" className={`text-sm py-0.5 px-3 font-bold border-none ${getSignalBg(overallSignal)} ${getSignalColor(overallSignal)}`}>
                             {overallSignal.replace('_', ' ').toUpperCase()}
                         </Badge>
                         <div className="flex gap-4 mt-3 text-[10px] font-mono">
                             <div className="flex flex-col items-center">
                                 <span className="text-green-400 font-bold">{signals?.buy_count || 0}</span>
-                                <span className="text-gray-600">Buy</span>
+                                <span className="text-[var(--text-muted)]">Buy</span>
                             </div>
                             <div className="flex flex-col items-center">
-                                <span className="text-gray-400 font-bold">{signals?.neutral_count || 0}</span>
-                                <span className="text-gray-600">Neutral</span>
+                                <span className="text-[var(--text-secondary)] font-bold">{signals?.neutral_count || 0}</span>
+                                <span className="text-[var(--text-muted)]">Neutral</span>
                             </div>
                             <div className="flex flex-col items-center">
                                 <span className="text-red-400 font-bold">{signals?.sell_count || 0}</span>
-                                <span className="text-gray-600">Sell</span>
+                                <span className="text-[var(--text-muted)]">Sell</span>
                             </div>
                         </div>
                         <div className="mt-2 text-[9px]">
-                            <span className="text-gray-500">Trend Strength: </span>
+                            <span className="text-[var(--text-muted)]">Trend Strength: </span>
                             <span className={`${getTrendColor(signals?.trend_strength || '')} font-bold capitalize`}>
                                 {(signals?.trend_strength || 'N/A').replace('_', ' ')}
                             </span>
@@ -143,11 +143,11 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
                     {/* Moving Averages */}
                     <div className="space-y-1.5">
                         <div className="flex items-center justify-between px-1 text-left">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Moving Averages</span>
+                            <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Moving Averages</span>
                             <TooltipProvider>
                                 <Tooltip>
-                                    <TooltipTrigger><Info size={10} className="text-gray-600" /></TooltipTrigger>
-                                    <TooltipContent className="text-[10px] bg-gray-900 border-gray-800">SMA/EMA crossovers and price relative position</TooltipContent>
+                                    <TooltipTrigger><Info size={10} className="text-[var(--text-muted)]" /></TooltipTrigger>
+                                    <TooltipContent className="text-[10px] bg-[var(--bg-secondary)] border-[var(--border-color)] text-[var(--text-secondary)]">SMA/EMA crossovers and price relative position</TooltipContent>
                                 </Tooltip>
                             </TooltipProvider>
                         </div>
@@ -156,12 +156,12 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
                                 const isSMA = name.startsWith('sma');
                                 const val = isSMA ? ta.moving_averages.sma[name] : ta.moving_averages.ema[name];
                                 return (
-                                    <div key={name} className="flex flex-col p-2 rounded bg-gray-800/20 border border-gray-800/10 hover:border-gray-800/50 transition-colors">
+                                    <div key={name} className="flex flex-col p-2 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] hover:border-[var(--border-color)] transition-colors">
                                         <div className="flex items-center justify-between mb-0.5">
-                                            <span className="text-[10px] text-gray-400 font-bold">{name.toUpperCase()}</span>
+                                            <span className="text-[10px] text-[var(--text-secondary)] font-bold">{name.toUpperCase()}</span>
                                             <span className={`text-[9px] font-bold ${getSignalColor(signal)}`}>{signal.toUpperCase()}</span>
                                         </div>
-                                        <div className="text-xs text-white font-mono">{val?.toLocaleString()}</div>
+                                        <div className="text-xs text-[var(--text-primary)] font-mono">{val?.toLocaleString()}</div>
                                     </div>
                                 );
                             })}
@@ -171,23 +171,23 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
                     {/* Oscillators */}
                     <div className="space-y-1.5">
                         <div className="flex items-center justify-between px-1 text-left">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Oscillators</span>
+                            <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Oscillators</span>
                         </div>
                         <div className="grid grid-cols-3 gap-1.5">
-                            <div className="flex flex-col p-1.5 rounded bg-gray-800/20 items-center">
-                                <span className="text-[9px] text-gray-500 font-bold">RSI</span>
+                            <div className="flex flex-col p-1.5 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] items-center">
+                                <span className="text-[9px] text-[var(--text-muted)] font-bold">RSI</span>
                                 <span className={`text-[11px] font-mono ${getSignalColor(ta?.oscillators.rsi.signal || '')}`}>
                                     {ta?.oscillators.rsi.value?.toFixed(1) || '--'}
                                 </span>
                             </div>
-                            <div className="flex flex-col p-1.5 rounded bg-gray-800/20 items-center">
-                                <span className="text-[9px] text-gray-500 font-bold">MACD</span>
+                            <div className="flex flex-col p-1.5 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] items-center">
+                                <span className="text-[9px] text-[var(--text-muted)] font-bold">MACD</span>
                                 <span className={`text-[11px] font-mono ${getSignalColor(ta?.oscillators.macd.signal || '')}`}>
                                     {ta?.oscillators.macd.histogram?.toFixed(2) || '--'}
                                 </span>
                             </div>
-                            <div className="flex flex-col p-1.5 rounded bg-gray-800/20 items-center">
-                                <span className="text-[9px] text-gray-500 font-bold">STOCH</span>
+                            <div className="flex flex-col p-1.5 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] items-center">
+                                <span className="text-[9px] text-[var(--text-muted)] font-bold">STOCH</span>
                                 <span className={`text-[11px] font-mono ${getSignalColor(ta?.oscillators.stochastic.signal || '')}`}>
                                     {ta?.oscillators.stochastic.k?.toFixed(1) || '--'}
                                 </span>
@@ -198,20 +198,20 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
                     {/* Support & Resistance */}
                     <div className="space-y-1.5">
                         <div className="flex items-center justify-between px-1 text-left">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Levels</span>
+                            <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Levels</span>
                         </div>
                         <div className="space-y-1 text-left">
                             <div className="flex justify-between items-center p-2 rounded bg-red-950/10 border-l-2 border-red-500/50">
-                                <span className="text-[10px] text-gray-400 font-bold uppercase">Resistance</span>
+                                <span className="text-[10px] text-[var(--text-secondary)] font-bold uppercase">Resistance</span>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-xs text-white font-mono">{ta?.levels.support_resistance.nearest_resistance?.toLocaleString() || '--'}</span>
+                                    <span className="text-xs text-[var(--text-primary)] font-mono">{ta?.levels.support_resistance.nearest_resistance?.toLocaleString() || '--'}</span>
                                     <span className="text-[9px] text-red-400">+{ta?.levels.support_resistance.resistance_proximity_pct?.toFixed(1)}%</span>
                                 </div>
                             </div>
                             <div className="flex justify-between items-center p-2 rounded bg-green-950/10 border-l-2 border-green-500/50">
-                                <span className="text-[10px] text-gray-400 font-bold uppercase">Support</span>
+                                <span className="text-[10px] text-[var(--text-secondary)] font-bold uppercase">Support</span>
                                 <div className="flex items-center gap-2">
-                                    <span className="text-xs text-white font-mono">{ta?.levels.support_resistance.nearest_support?.toLocaleString() || '--'}</span>
+                                    <span className="text-xs text-[var(--text-primary)] font-mono">{ta?.levels.support_resistance.nearest_support?.toLocaleString() || '--'}</span>
                                     <span className="text-[9px] text-green-400">-{ta?.levels.support_resistance.support_proximity_pct?.toFixed(1)}%</span>
                                 </div>
                             </div>
@@ -221,13 +221,13 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
                     {/* Fibonacci */}
                     <div className="pb-2">
                         <div className="flex items-center justify-between px-1 mb-1.5 text-left">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Fibonacci Retracement</span>
+                            <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Fibonacci Retracement</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] p-2 rounded bg-gray-900/60 font-mono text-left">
+                        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] p-2 rounded bg-[var(--bg-secondary)] border border-[var(--border-subtle)] font-mono text-left">
                             {ta?.levels.fibonacci.levels && Object.entries(ta.levels.fibonacci.levels).map(([ratio, level]) => (
                                 <div key={ratio} className="flex justify-between">
-                                    <span className="text-gray-600 font-bold">{ratio}</span>
-                                    <span className="text-gray-300">{level.toLocaleString()}</span>
+                                    <span className="text-[var(--text-muted)] font-bold">{ratio}</span>
+                                    <span className="text-[var(--text-secondary)]">{level.toLocaleString()}</span>
                                 </div>
                             ))}
                         </div>
@@ -237,4 +237,3 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
         </WidgetContainer>
     );
 }
-

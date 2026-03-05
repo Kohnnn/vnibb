@@ -146,7 +146,7 @@ export function TradingViewAdvancedChart({
 
   if (!tvSymbol) {
     return (
-      <div className={cn('flex items-center justify-center text-xs text-gray-500', className)}>
+      <div className={cn('flex items-center justify-center text-xs text-[var(--text-muted)]', className)}>
         Select a symbol to load TradingView
       </div>
     );
@@ -159,11 +159,11 @@ export function TradingViewAdvancedChart({
     >
       <div ref={widgetMountRef} className="absolute inset-0 h-full w-full" />
       {status !== 'ready' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40 p-4 text-center text-[11px] text-gray-300">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[rgba(0,0,0,0.45)] p-4 text-center text-[11px] text-[var(--text-secondary)]">
           {status === 'failed' ? (
             <>
               <div>TradingView embed failed for this symbol.</div>
-              <div className="text-[10px] text-gray-400">
+              <div className="text-[10px] text-[var(--text-muted)]">
                 Tried: {candidates.join(', ')}
               </div>
               <div className="flex items-center gap-2">
@@ -173,7 +173,7 @@ export function TradingViewAdvancedChart({
                     setCandidateIndex(0);
                     setStatus('loading');
                   }}
-                  className="inline-flex items-center gap-1 rounded border border-gray-600 px-2 py-1 text-[10px] text-gray-200 hover:border-gray-400"
+                  className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:border-[var(--border-default)]"
                 >
                   <RefreshCw size={10} />
                   Retry
@@ -192,7 +192,7 @@ export function TradingViewAdvancedChart({
           ) : (
             <>
               <div>Loading TradingView chart...</div>
-              <div className="text-[10px] text-gray-400">Trying: {tvSymbol}</div>
+              <div className="text-[10px] text-[var(--text-muted)]">Trying: {tvSymbol}</div>
             </>
           )}
         </div>

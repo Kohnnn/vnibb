@@ -10,13 +10,17 @@ import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
-from vnibb.models.stock import StockPrice
+from vnibb.core.vn_sectors import VN_SECTORS
+from vnibb.models.alerts import BlockTrade
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.trading import ForeignTrading
 from vnibb.providers.vnstock.equity_historical import (
     EquityHistoricalQueryParams,
     VnstockEquityHistoricalFetcher,
@@ -54,6 +58,9 @@ MONTH_LABELS = {
     11: "Nov",
     12: "Dec",
 }
+VN30_SYMBOLS = tuple(
+    symbol.upper() for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
+)
 
 
 class QuantResponseData(BaseModel):
@@ -100,6 +107,94 @@ def _build_month_map(series: pd.Series, decimals: int = 2) -> Dict[str, float | 
     for month, label in MONTH_LABELS.items():
         payload[label] = _safe_float(series.get(month), decimals=decimals)
     return payload
+
+
+def _safe_divide(
+    numerator: float | int | None,
+    denominator: float | int | None,
+    *,
+    scale: float = 1.0,
+    decimals: int = 4,
+) -> float | None:
+    if numerator is None or denominator is None:
+        return None
+    try:
+        num = float(numerator)
+        den = float(denominator)
+    except (TypeError, ValueError):
+        return None
+
+    if den == 0 or np.isnan(num) or np.isnan(den) or np.isinf(num) or np.isinf(den):
+        return None
+
+    return _safe_float((num / den) * scale, decimals=decimals)
+
+
+def _classify_gamma_regime(net_gamma_proxy: float | None) -> str:
+    if net_gamma_proxy is None:
+        return "unknown"
+    if net_gamma_proxy >= 12:
+        return "long_gamma"
+    if net_gamma_proxy <= -12:
+        return "short_gamma"
+    return "neutral"
+
+
+def _label_gamma_regime(regime: str) -> str:
+    if regime == "long_gamma":
+        return "Dealer Long Gamma"
+    if regime == "short_gamma":
+        return "Dealer Short Gamma"
+    if regime == "neutral":
+        return "Balanced"
+    return "Unknown"
+
+
+def _classify_rrg_quadrant(rs_ratio: float | None, rs_momentum: float | None) -> str:
+    if rs_ratio is None or rs_momentum is None:
+        return "Unknown"
+    if rs_ratio >= 100 and rs_momentum >= 100:
+        return "Leading"
+    if rs_ratio >= 100 and rs_momentum < 100:
+        return "Weakening"
+    if rs_ratio < 100 and rs_momentum < 100:
+        return "Lagging"
+    return "Improving"
+
+
+def _compute_rrg_metrics(
+    rs_series: pd.Series,
+    *,
+    ratio_lookback: int = 60,
+    momentum_lookback: int = 10,
+) -> tuple[float | None, float | None]:
+    series = pd.to_numeric(rs_series, errors="coerce").dropna()
+    if series.empty:
+        return None, None
+
+    ratio_window = series.tail(ratio_lookback)
+    ratio_mean = ratio_window.mean()
+    ratio_std = ratio_window.std(ddof=0)
+
+    if ratio_std and not np.isnan(ratio_std):
+        rs_ratio = 100 + ((series.iloc[-1] - ratio_mean) / ratio_std) * 10
+    else:
+        rs_ratio = 100.0
+
+    momentum_base = series.pct_change(momentum_lookback) * 100
+    momentum_window = momentum_base.dropna().tail(ratio_lookback)
+    if momentum_window.empty:
+        return _safe_float(rs_ratio, decimals=2), None
+
+    momentum_std = momentum_window.std(ddof=0)
+    if momentum_std and not np.isnan(momentum_std):
+        rs_momentum = (
+            100 + ((momentum_window.iloc[-1] - momentum_window.mean()) / momentum_std) * 10
+        )
+    else:
+        rs_momentum = 100.0
+
+    return _safe_float(rs_ratio, decimals=2), _safe_float(rs_momentum, decimals=2)
 
 
 async def _load_price_frame(
@@ -789,6 +884,738 @@ def _compute_drawdown_recovery(frame: pd.DataFrame) -> Dict[str, Any]:
             .itertuples(index=False)
         ],
     }
+
+
+def _grade_from_quality_score(score: float | None) -> str:
+    if score is None:
+        return "N/A"
+    if score >= 80:
+        return "A"
+    if score >= 65:
+        return "B"
+    if score >= 50:
+        return "C"
+    return "D"
+
+
+@router.get("/{symbol}/gamma-exposure", response_model=StandardResponse[Dict[str, Any]])
+async def get_gamma_exposure_proxy(
+    symbol: str,
+    period: str = Query(default="3Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Gamma exposure proxy using volatility regime until warrant OI feed is integrated."""
+    symbol_upper = symbol.upper().strip()
+    if not symbol_upper:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    end_date = date.today()
+    period_upper = period.upper()
+    frame = await _load_price_frame(
+        db=db,
+        symbol=symbol_upper,
+        start_date=_resolve_start_date(period_upper, end_date),
+        end_date=end_date,
+        source=source,
+    )
+
+    if frame.empty or len(frame) < 40:
+        return StandardResponse(
+            data={
+                "symbol": symbol_upper,
+                "period": period_upper,
+                "computed_at": datetime.utcnow(),
+                "bands": [],
+            },
+            meta=MetaData(count=0),
+            error="Insufficient historical data for gamma proxy.",
+        )
+
+    volatility = _compute_parkinson_volatility(frame.copy())
+    z_score = _safe_float(volatility.get("current_regime_z_score"), decimals=3)
+    current_close = _safe_float(frame["close"].iloc[-1], decimals=2)
+    current_vol_30 = _safe_float(volatility.get("current_parkinson_vol_30d_pct"), decimals=2)
+
+    net_gamma_proxy = _safe_float((-z_score * 20) if z_score is not None else 0, decimals=2)
+    regime = _classify_gamma_regime(net_gamma_proxy)
+    regime_label = _label_gamma_regime(regime)
+
+    band_rows: List[Dict[str, Any]] = []
+    if current_close is not None:
+        for offset in (-0.15, -0.1, -0.05, 0, 0.05, 0.1, 0.15):
+            strike = current_close * (1 + offset)
+            curve_shape = float(np.exp(-((offset / 0.075) ** 2)))
+            gamma_at_strike = (
+                (net_gamma_proxy or 0.0) * curve_shape if net_gamma_proxy is not None else 0.0
+            )
+
+            band_rows.append(
+                {
+                    "strike": _safe_float(strike, decimals=2),
+                    "offset_pct": _safe_float(offset * 100, decimals=2),
+                    "net_gamma": _safe_float(gamma_at_strike, decimals=2),
+                }
+            )
+
+    payload: Dict[str, Any] = {
+        "symbol": symbol_upper,
+        "period": period_upper,
+        "computed_at": datetime.utcnow(),
+        "current_close": current_close,
+        "current_realized_vol_30d_pct": current_vol_30,
+        "regime_z_score": z_score,
+        "net_gamma_proxy": net_gamma_proxy,
+        "dealer_position_proxy": regime,
+        "regime_label": regime_label,
+        "bands": band_rows,
+        "data_quality_note": "Proxy derived from volatility regime; listed warrant OI pending.",
+    }
+    return StandardResponse(data=payload, meta=MetaData(count=len(band_rows)))
+
+
+@router.get("/{symbol}/momentum", response_model=StandardResponse[Dict[str, Any]])
+async def get_momentum_profile(
+    symbol: str,
+    period: str = Query(default="3Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Classic 12-1 momentum profile with peer ranking snapshot."""
+    symbol_upper = symbol.upper().strip()
+    if not symbol_upper:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    period_upper = period.upper()
+    end_date = date.today()
+    start_date = _resolve_start_date(period_upper, end_date)
+    frame = await _load_price_frame(
+        db=db,
+        symbol=symbol_upper,
+        start_date=start_date,
+        end_date=end_date,
+        source=source,
+    )
+
+    closes = pd.to_numeric(frame.get("close"), errors="coerce").dropna().tolist()
+
+    def calc_return(lookback: int) -> float | None:
+        if len(closes) <= lookback:
+            return None
+        baseline = closes[-1 - lookback]
+        latest = closes[-1]
+        if baseline == 0:
+            return None
+        return _safe_float(((latest / baseline) - 1) * 100, decimals=2)
+
+    r1m = calc_return(21)
+    r3m = calc_return(63)
+    r6m = calc_return(126)
+    r12m = calc_return(252)
+    momentum_12_1 = _safe_float((r12m - r1m) if r12m is not None and r1m is not None else None, 2)
+
+    score = 0
+    for value in (r1m, r3m, r6m, r12m):
+        if value is None:
+            continue
+        if value > 0:
+            score += 1
+        elif value < 0:
+            score -= 1
+
+    trend_label = "Sideways"
+    if score >= 3:
+        trend_label = "Strong Uptrend"
+    elif score >= 1:
+        trend_label = "Uptrend"
+    elif score <= -3:
+        trend_label = "Strong Downtrend"
+    elif score <= -1:
+        trend_label = "Downtrend"
+
+    has_data = len(closes) >= 80
+    if not has_data:
+        return StandardResponse(
+            data={
+                "symbol": symbol_upper,
+                "period": period_upper,
+                "computed_at": datetime.utcnow(),
+                "returns_pct": {},
+                "peer_distribution": [],
+            },
+            meta=MetaData(count=0),
+            error="Insufficient historical data for momentum profile.",
+        )
+
+    sector_result = await db.execute(
+        select(Stock.sector).where(Stock.symbol == symbol_upper).limit(1)
+    )
+    sector = sector_result.scalar_one_or_none()
+
+    peer_distribution: List[Dict[str, Any]] = []
+    sector_rank: int | None = None
+    sector_total: int | None = None
+    sector_percentile: float | None = None
+
+    if sector:
+        peers_result = await db.execute(
+            select(Stock.symbol).where(
+                Stock.sector == sector,
+                Stock.is_active == 1,
+            )
+        )
+        peer_symbols = [row[0] for row in peers_result.all() if row[0]]
+        if symbol_upper not in peer_symbols:
+            peer_symbols.append(symbol_upper)
+
+        if peer_symbols:
+            peer_prices_result = await db.execute(
+                select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+                .where(
+                    and_(
+                        StockPrice.symbol.in_(peer_symbols),
+                        StockPrice.interval == "1D",
+                        StockPrice.time >= start_date,
+                        StockPrice.time <= end_date,
+                    )
+                )
+                .order_by(StockPrice.symbol, StockPrice.time)
+            )
+
+            peer_frame = pd.DataFrame(
+                peer_prices_result.all(),
+                columns=["symbol", "time", "close"],
+            )
+            if not peer_frame.empty:
+                peer_frame["close"] = pd.to_numeric(peer_frame["close"], errors="coerce")
+                peer_frame = peer_frame.dropna(subset=["close"])
+
+                momentum_map: Dict[str, float] = {}
+                for peer_symbol, group in peer_frame.groupby("symbol"):
+                    peer_closes = group.sort_values("time")["close"].tolist()
+                    if len(peer_closes) <= 252 or peer_closes[-253] == 0 or peer_closes[-22] == 0:
+                        continue
+
+                    peer_r12 = ((peer_closes[-1] / peer_closes[-253]) - 1) * 100
+                    peer_r1 = ((peer_closes[-1] / peer_closes[-22]) - 1) * 100
+                    peer_momentum = peer_r12 - peer_r1
+                    momentum_map[peer_symbol] = float(peer_momentum)
+
+                ranked = sorted(
+                    momentum_map.items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )
+
+                if ranked:
+                    sector_total = len(ranked)
+                    for rank_index, (peer_symbol, _value) in enumerate(ranked, start=1):
+                        if peer_symbol == symbol_upper:
+                            sector_rank = rank_index
+                            break
+
+                    if sector_rank is not None and sector_total and sector_total > 0:
+                        sector_percentile = _safe_float(
+                            (1 - ((sector_rank - 1) / sector_total)) * 100,
+                            decimals=1,
+                        )
+
+                    peer_distribution = [
+                        {
+                            "symbol": peer_symbol,
+                            "momentum_12_1_pct": _safe_float(value, decimals=2),
+                        }
+                        for peer_symbol, value in ranked[:15]
+                    ]
+
+    payload: Dict[str, Any] = {
+        "symbol": symbol_upper,
+        "period": period_upper,
+        "computed_at": datetime.utcnow(),
+        "returns_pct": {
+            "r1m": r1m,
+            "r3m": r3m,
+            "r6m": r6m,
+            "r12m": r12m,
+            "momentum_12_1": momentum_12_1,
+        },
+        "momentum_score": score,
+        "trend_label": trend_label,
+        "sector": sector,
+        "sector_rank": sector_rank,
+        "sector_total": sector_total,
+        "sector_percentile": sector_percentile,
+        "peer_distribution": peer_distribution,
+    }
+    return StandardResponse(data=payload, meta=MetaData(count=len(peer_distribution)))
+
+
+@router.get("/{symbol}/earnings-quality", response_model=StandardResponse[Dict[str, Any]])
+async def get_earnings_quality(
+    symbol: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Earnings quality scorecard from quarterly accruals/cash conversion/persistence."""
+    symbol_upper = symbol.upper().strip()
+    if not symbol_upper:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    income_result = await db.execute(
+        select(
+            IncomeStatement.fiscal_year,
+            IncomeStatement.fiscal_quarter,
+            IncomeStatement.revenue,
+            IncomeStatement.net_income,
+            IncomeStatement.eps,
+        )
+        .where(
+            IncomeStatement.symbol == symbol_upper,
+            IncomeStatement.fiscal_quarter.isnot(None),
+        )
+        .order_by(IncomeStatement.fiscal_year.desc(), IncomeStatement.fiscal_quarter.desc())
+        .limit(12)
+    )
+    cash_result = await db.execute(
+        select(
+            CashFlow.fiscal_year,
+            CashFlow.fiscal_quarter,
+            CashFlow.operating_cash_flow,
+        )
+        .where(
+            CashFlow.symbol == symbol_upper,
+            CashFlow.fiscal_quarter.isnot(None),
+        )
+        .order_by(CashFlow.fiscal_year.desc(), CashFlow.fiscal_quarter.desc())
+        .limit(12)
+    )
+    balance_result = await db.execute(
+        select(
+            BalanceSheet.fiscal_year,
+            BalanceSheet.fiscal_quarter,
+            BalanceSheet.total_assets,
+        )
+        .where(
+            BalanceSheet.symbol == symbol_upper,
+            BalanceSheet.fiscal_quarter.isnot(None),
+        )
+        .order_by(BalanceSheet.fiscal_year.desc(), BalanceSheet.fiscal_quarter.desc())
+        .limit(12)
+    )
+
+    income_rows = income_result.all()
+    cash_map = {
+        (row[0], row[1]): row[2]
+        for row in cash_result.all()
+        if row[0] is not None and row[1] is not None
+    }
+    asset_map = {
+        (row[0], row[1]): row[2]
+        for row in balance_result.all()
+        if row[0] is not None and row[1] is not None
+    }
+
+    period_rows: List[Dict[str, Any]] = []
+    for fiscal_year, fiscal_quarter, revenue, net_income, eps in income_rows:
+        if fiscal_year is None or fiscal_quarter is None:
+            continue
+
+        key = (fiscal_year, fiscal_quarter)
+        if key not in cash_map or key not in asset_map:
+            continue
+
+        operating_cash_flow = cash_map.get(key)
+        total_assets = asset_map.get(key)
+        accruals_ratio = _safe_divide(
+            (net_income - operating_cash_flow)
+            if net_income is not None and operating_cash_flow is not None
+            else None,
+            total_assets,
+            scale=100,
+            decimals=2,
+        )
+        revenue_quality = _safe_divide(
+            operating_cash_flow,
+            revenue,
+            scale=100,
+            decimals=2,
+        )
+
+        period_rows.append(
+            {
+                "period": f"Q{fiscal_quarter}-{fiscal_year}",
+                "fiscal_year": fiscal_year,
+                "fiscal_quarter": fiscal_quarter,
+                "revenue": _safe_float(revenue, 2),
+                "net_income": _safe_float(net_income, 2),
+                "operating_cash_flow": _safe_float(operating_cash_flow, 2),
+                "total_assets": _safe_float(total_assets, 2),
+                "eps": _safe_float(eps, 4),
+                "accruals_ratio_pct": accruals_ratio,
+                "revenue_quality_pct": revenue_quality,
+            }
+        )
+
+    if not period_rows:
+        return StandardResponse(
+            data={
+                "symbol": symbol_upper,
+                "computed_at": datetime.utcnow(),
+                "series": [],
+                "checks": [],
+            },
+            meta=MetaData(count=0),
+            error="Insufficient quarterly statement coverage for earnings quality.",
+        )
+
+    latest = period_rows[0]
+    previous = period_rows[1] if len(period_rows) > 1 else None
+
+    eps_values = [row["eps"] for row in reversed(period_rows) if row.get("eps") is not None]
+    earnings_persistence = None
+    if len(eps_values) >= 4:
+        eps_prev = np.array(eps_values[:-1], dtype=float)
+        eps_curr = np.array(eps_values[1:], dtype=float)
+        if np.std(eps_prev) > 0 and np.std(eps_curr) > 0:
+            earnings_persistence = _safe_float(np.corrcoef(eps_prev, eps_curr)[0][1], 3)
+
+    accrual_score = (
+        _safe_float(max(0.0, 100 - min(abs(latest["accruals_ratio_pct"]) * 8, 100)), 2)
+        if latest.get("accruals_ratio_pct") is not None
+        else None
+    )
+    revenue_score = (
+        _safe_float(max(0.0, min(latest["revenue_quality_pct"], 120) / 1.2), 2)
+        if latest.get("revenue_quality_pct") is not None
+        else None
+    )
+    persistence_score = (
+        _safe_float(((earnings_persistence + 1) / 2) * 100, 2)
+        if earnings_persistence is not None
+        else None
+    )
+
+    component_scores = [
+        item for item in (accrual_score, revenue_score, persistence_score) if item is not None
+    ]
+    quality_score = _safe_float(float(np.mean(component_scores)), 2) if component_scores else None
+    grade = _grade_from_quality_score(quality_score)
+
+    def _blend_score(row: Dict[str, Any]) -> float | None:
+        parts: List[float] = []
+        accrual_value = row.get("accruals_ratio_pct")
+        revenue_value = row.get("revenue_quality_pct")
+        if accrual_value is not None:
+            parts.append(max(0.0, 100 - min(abs(float(accrual_value)) * 8, 100)))
+        if revenue_value is not None:
+            parts.append(max(0.0, min(float(revenue_value), 120) / 1.2))
+        return float(np.mean(parts)) if parts else None
+
+    trend = "Stable"
+    latest_blend = _blend_score(latest)
+    previous_blend = _blend_score(previous) if previous else None
+    if latest_blend is not None and previous_blend is not None:
+        delta = latest_blend - previous_blend
+        if delta >= 5:
+            trend = "Improving"
+        elif delta <= -5:
+            trend = "Declining"
+
+    checks: List[str] = []
+    if latest.get("accruals_ratio_pct") is not None and abs(latest["accruals_ratio_pct"]) <= 5:
+        checks.append("Accruals ratio within ±5%")
+    if latest.get("revenue_quality_pct") is not None and latest["revenue_quality_pct"] >= 80:
+        checks.append("Cash conversion >= 80% of revenue")
+    if earnings_persistence is not None and earnings_persistence >= 0.5:
+        checks.append("EPS persistence correlation >= 0.5")
+
+    payload: Dict[str, Any] = {
+        "symbol": symbol_upper,
+        "computed_at": datetime.utcnow(),
+        "grade": grade,
+        "quality_score": quality_score,
+        "trend": trend,
+        "accruals_ratio_pct": latest.get("accruals_ratio_pct"),
+        "revenue_quality_pct": latest.get("revenue_quality_pct"),
+        "earnings_persistence": earnings_persistence,
+        "component_scores": {
+            "accrual": accrual_score,
+            "revenue_quality": revenue_score,
+            "persistence": persistence_score,
+        },
+        "checks": checks,
+        "series": period_rows[:8],
+    }
+    return StandardResponse(data=payload, meta=MetaData(count=len(period_rows[:8])))
+
+
+@router.get("/{symbol}/smart-money", response_model=StandardResponse[Dict[str, Any]])
+async def get_smart_money_flow(
+    symbol: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Institutional pressure proxy from foreign flow + block trade + volume spikes."""
+    symbol_upper = symbol.upper().strip()
+    if not symbol_upper:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    foreign_result = await db.execute(
+        select(
+            ForeignTrading.trade_date,
+            ForeignTrading.buy_value,
+            ForeignTrading.sell_value,
+            ForeignTrading.net_value,
+        )
+        .where(ForeignTrading.symbol == symbol_upper)
+        .order_by(ForeignTrading.trade_date.desc())
+        .limit(60)
+    )
+    block_result = await db.execute(
+        select(
+            BlockTrade.trade_time,
+            BlockTrade.side,
+            BlockTrade.quantity,
+            BlockTrade.value,
+        )
+        .where(BlockTrade.symbol == symbol_upper)
+        .order_by(BlockTrade.trade_time.desc())
+        .limit(60)
+    )
+
+    foreign_rows = foreign_result.all()
+    block_rows = block_result.all()
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=200)
+    price_frame = await _load_price_frame(
+        db=db,
+        symbol=symbol_upper,
+        start_date=start_date,
+        end_date=end_date,
+        source=settings.vnstock_source,
+    )
+
+    synthetic_events: List[Dict[str, Any]] = []
+    if not price_frame.empty and len(price_frame) > 40:
+        enriched = price_frame.copy()
+        enriched["avg_vol_20"] = enriched["volume"].rolling(20).mean()
+        enriched["vol_ratio"] = enriched["volume"] / enriched["avg_vol_20"].replace(0, np.nan)
+        enriched["prev_close"] = enriched["close"].shift(1)
+        enriched["price_change_pct"] = (
+            (enriched["close"] - enriched["prev_close"]) / enriched["prev_close"].replace(0, np.nan)
+        ) * 100
+
+        for row in enriched[enriched["vol_ratio"] >= 3].tail(25).itertuples(index=False):
+            event_type = "accumulation" if (row.price_change_pct or 0) >= 0 else "distribution"
+            synthetic_events.append(
+                {
+                    "date": row.time.strftime("%Y-%m-%d"),
+                    "volume": int(row.volume) if row.volume is not None else None,
+                    "value": _safe_float((row.close or 0) * (row.volume or 0), 2),
+                    "type": event_type,
+                    "source": "volume_spike_proxy",
+                }
+            )
+
+    block_events: List[Dict[str, Any]] = []
+    for row in block_rows[:25]:
+        side_raw = row[1].value if hasattr(row[1], "value") else str(row[1])
+        side = side_raw.upper().replace("TRADESIDE.", "")
+        event_type = "accumulation" if side.endswith("BUY") else "distribution"
+        block_events.append(
+            {
+                "date": row[0].strftime("%Y-%m-%d"),
+                "volume": int(row[2]) if row[2] is not None else None,
+                "value": _safe_float(row[3], 2),
+                "type": event_type,
+                "source": "block_trade_table",
+            }
+        )
+
+    merged_events = sorted(
+        block_events + synthetic_events,
+        key=lambda item: item["date"],
+        reverse=True,
+    )[:25]
+
+    net_foreign_20d = _safe_float(
+        sum(float(row[3] or 0) for row in foreign_rows[:20]),
+        decimals=2,
+    )
+    block_buy_20d = _safe_float(
+        sum(
+            float(row[3] or 0)
+            for row in block_rows[:20]
+            if (row[1].value if hasattr(row[1], "value") else str(row[1]))
+            .upper()
+            .replace("TRADESIDE.", "")
+            .endswith("BUY")
+        ),
+        decimals=2,
+    )
+    block_sell_20d = _safe_float(
+        sum(
+            float(row[3] or 0)
+            for row in block_rows[:20]
+            if not (row[1].value if hasattr(row[1], "value") else str(row[1]))
+            .upper()
+            .replace("TRADESIDE.", "")
+            .endswith("BUY")
+        ),
+        decimals=2,
+    )
+
+    spike_bias = sum(1 if item["type"] == "accumulation" else -1 for item in synthetic_events)
+    flow_score = 0
+    if (net_foreign_20d or 0) > 0:
+        flow_score += 1
+    elif (net_foreign_20d or 0) < 0:
+        flow_score -= 1
+
+    block_net_20d = (block_buy_20d or 0) - (block_sell_20d or 0)
+    if block_net_20d > 0:
+        flow_score += 1
+    elif block_net_20d < 0:
+        flow_score -= 1
+
+    if spike_bias > 0:
+        flow_score += 1
+    elif spike_bias < 0:
+        flow_score -= 1
+
+    if flow_score >= 2:
+        net_institutional = "buying"
+    elif flow_score <= -2:
+        net_institutional = "selling"
+    else:
+        net_institutional = "neutral"
+
+    payload: Dict[str, Any] = {
+        "symbol": symbol_upper,
+        "computed_at": datetime.utcnow(),
+        "net_institutional": net_institutional,
+        "flow_score": flow_score,
+        "net_foreign_20d_value": net_foreign_20d,
+        "block_buy_20d_value": block_buy_20d,
+        "block_sell_20d_value": block_sell_20d,
+        "synthetic_block_bias": spike_bias,
+        "block_trades": merged_events,
+    }
+    return StandardResponse(data=payload, meta=MetaData(count=len(merged_events)))
+
+
+@router.get("/{symbol}/relative-rotation", response_model=StandardResponse[Dict[str, Any]])
+async def get_relative_rotation(
+    symbol: str,
+    lookback_days: int = Query(default=260, ge=120, le=520),
+    db: AsyncSession = Depends(get_db),
+):
+    """Relative Rotation Graph (RRG) snapshot for VN30 versus VNINDEX."""
+    symbol_upper = symbol.upper().strip()
+    if not symbol_upper:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=max(lookback_days * 2, 320))
+    universe_symbols = set(VN30_SYMBOLS)
+    universe_symbols.add(symbol_upper)
+
+    prices_result = await db.execute(
+        select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+        .where(
+            and_(
+                StockPrice.symbol.in_(sorted(universe_symbols)),
+                StockPrice.interval == "1D",
+                StockPrice.time >= start_date,
+                StockPrice.time <= end_date,
+            )
+        )
+        .order_by(StockPrice.symbol, StockPrice.time)
+    )
+    index_result = await db.execute(
+        select(StockIndex.time, StockIndex.close)
+        .where(
+            and_(
+                StockIndex.index_code == "VNINDEX",
+                StockIndex.time >= start_date,
+                StockIndex.time <= end_date,
+            )
+        )
+        .order_by(StockIndex.time)
+    )
+
+    price_frame = pd.DataFrame(prices_result.all(), columns=["symbol", "time", "close"])
+    index_frame = pd.DataFrame(index_result.all(), columns=["time", "close_index"])
+
+    if price_frame.empty or index_frame.empty:
+        return StandardResponse(
+            data={
+                "symbol": symbol_upper,
+                "benchmark": "VNINDEX",
+                "computed_at": datetime.utcnow(),
+                "selected": None,
+                "universe": [],
+            },
+            meta=MetaData(count=0),
+            error="Insufficient data for relative rotation.",
+        )
+
+    price_frame["close"] = pd.to_numeric(price_frame["close"], errors="coerce")
+    price_frame = price_frame.dropna(subset=["close"])
+    index_frame["close_index"] = pd.to_numeric(index_frame["close_index"], errors="coerce")
+    index_frame = index_frame.dropna(subset=["close_index"])
+
+    universe_points: List[Dict[str, Any]] = []
+    for stock_symbol, group in price_frame.groupby("symbol"):
+        merged = group.merge(index_frame, on="time", how="inner")
+        if len(merged) < 80:
+            continue
+
+        rs_series = (merged["close"] / merged["close_index"]).replace([np.inf, -np.inf], np.nan)
+        rs_series = rs_series.dropna() * 100
+        if len(rs_series) < 80:
+            continue
+
+        rs_ratio, rs_momentum = _compute_rrg_metrics(rs_series)
+        if rs_ratio is None or rs_momentum is None:
+            continue
+
+        trail_count = min(5, len(rs_series))
+        trail: List[Dict[str, float | None]] = []
+        for offset in range(trail_count):
+            idx = len(rs_series) - trail_count + offset
+            trail_ratio, trail_momentum = _compute_rrg_metrics(rs_series.iloc[: idx + 1])
+            trail.append(
+                {
+                    "rs_ratio": trail_ratio,
+                    "rs_momentum": trail_momentum,
+                }
+            )
+
+        universe_points.append(
+            {
+                "symbol": stock_symbol,
+                "rs_ratio": rs_ratio,
+                "rs_momentum": rs_momentum,
+                "quadrant": _classify_rrg_quadrant(rs_ratio, rs_momentum),
+                "trail": trail,
+            }
+        )
+
+    universe_points = sorted(
+        universe_points,
+        key=lambda item: (item.get("rs_ratio") is not None, item.get("rs_ratio")),
+        reverse=True,
+    )
+    selected = next((item for item in universe_points if item["symbol"] == symbol_upper), None)
+
+    payload: Dict[str, Any] = {
+        "symbol": symbol_upper,
+        "benchmark": "VNINDEX",
+        "computed_at": datetime.utcnow(),
+        "selected": selected,
+        "universe": universe_points,
+    }
+    return StandardResponse(data=payload, meta=MetaData(count=len(universe_points)))
 
 
 @router.get("/{symbol}", response_model=StandardResponse[QuantResponseData])

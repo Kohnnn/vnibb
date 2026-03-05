@@ -19,7 +19,7 @@ const MARKETS: { id: Market; label: string }[] = [
 
 function MarketToggleComponent({ value, onChange }: MarketToggleProps) {
   return (
-    <div className="flex bg-gray-900 rounded-lg p-0.5 border border-gray-800">
+    <div className="flex rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
       {MARKETS.map(market => (
         <button
           key={market.id}
@@ -28,7 +28,7 @@ function MarketToggleComponent({ value, onChange }: MarketToggleProps) {
             "px-3 py-1 text-[10px] font-black uppercase tracking-tighter rounded transition-all",
             value === market.id 
               ? "bg-blue-600 text-white shadow-sm" 
-              : "text-gray-500 hover:text-gray-300"
+              : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
           )}
         >
           {market.label}

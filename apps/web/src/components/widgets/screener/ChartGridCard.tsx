@@ -28,14 +28,14 @@ export function ChartGridCard({
   return (
     <div
       onClick={onClick}
-      className="p-3 bg-secondary/80 rounded-xl border border-gray-800/50 hover:border-blue-500/50 hover:bg-gray-800/50 cursor-pointer transition-all duration-300 group"
+      className="group cursor-pointer rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 transition-all duration-300 hover:border-blue-500/50 hover:bg-[var(--bg-tertiary)]"
     >
       {/* Header: Logo + Ticker */}
       <div className="flex items-center gap-3 mb-3">
         <CompanyLogo symbol={symbol} size={32} className="shadow-lg group-hover:scale-105 transition-transform" />
         <div className="flex-1 min-w-0">
           <div className="text-sm font-black text-white truncate tracking-tight group-hover:text-blue-400 transition-colors uppercase">{symbol}</div>
-          <div className="text-[10px] text-gray-500 truncate font-bold uppercase tracking-tighter">{name}</div>
+          <div className="truncate text-[10px] font-bold uppercase tracking-tighter text-[var(--text-muted)]">{name}</div>
         </div>
       </div>
 
@@ -45,8 +45,8 @@ export function ChartGridCard({
       </div>
 
       {/* Price + Change */}
-      <div className="flex items-baseline justify-between pt-1 border-t border-gray-800/20">
-        <span className="text-sm font-mono font-bold text-gray-100">
+      <div className="flex items-baseline justify-between border-t border-[var(--border-subtle)] pt-1">
+        <span className="text-sm font-mono font-bold text-[var(--text-primary)]">
           {price.toLocaleString()}
         </span>
         <span className={cn(

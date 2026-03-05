@@ -28,7 +28,7 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-black text-white p-4 md:p-8">
+    <div className="min-h-screen bg-[var(--bg-primary)] p-4 text-[var(--text-primary)] md:p-8">
       <div className="max-w-4xl mx-auto">
         <header className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
@@ -40,7 +40,7 @@ export default function SettingsPage() {
                   router.back();
                 }
               }}
-              className="p-2 hover:bg-white/5 rounded-lg transition-colors"
+              className="rounded-lg p-2 transition-colors hover:bg-[var(--bg-hover)]"
               aria-label="Go back"
             >
               <ArrowLeft size={20} />
@@ -63,15 +63,15 @@ export default function SettingsPage() {
               <Palette size={18} />
               Appearance
             </button>
-            <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
+            <button className="w-full flex items-center gap-3 rounded-lg px-4 py-2.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <Database size={18} />
               Data Source
             </button>
-            <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
+            <button className="w-full flex items-center gap-3 rounded-lg px-4 py-2.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <Globe size={18} />
               Backend
             </button>
-            <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
+            <button className="w-full flex items-center gap-3 rounded-lg px-4 py-2.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <Shield size={18} />
               Security
             </button>
@@ -80,8 +80,8 @@ export default function SettingsPage() {
           {/* Content */}
           <main className="md:col-span-3 space-y-8">
             {/* Appearance Section */}
-            <section className="bg-[#0a0a0a] border border-[#222] rounded-xl overflow-hidden">
-              <div className="p-4 border-b border-[#222] bg-[#0d0d0d]">
+            <section className="overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
                 <h2 className="font-semibold flex items-center gap-2">
                   <Palette size={18} className="text-blue-500" />
                   Appearance
@@ -91,7 +91,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-medium">Dark Mode</h3>
-                    <p className="text-xs text-gray-500">Enable high-contrast dark theme</p>
+                    <p className="text-xs text-[var(--text-muted)]">Enable high-contrast dark theme</p>
                   </div>
                   <div className="w-12 h-6 bg-blue-600 rounded-full flex items-center px-1">
                     <div className="w-4 h-4 bg-white rounded-full ml-auto" />
@@ -101,8 +101,8 @@ export default function SettingsPage() {
             </section>
 
             {/* Data Source Section */}
-            <section className="bg-[#0a0a0a] border border-[#222] rounded-xl overflow-hidden">
-              <div className="p-4 border-b border-[#222] bg-[#0d0d0d]">
+            <section className="overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
                 <h2 className="font-semibold flex items-center gap-2">
                   <Database size={18} className="text-emerald-500" />
                   vnstock Provider
@@ -116,26 +116,26 @@ export default function SettingsPage() {
                     className={`w-full flex flex-col items-start px-4 py-3 rounded-lg border text-left transition-all ${
                       preferredVnstockSource === source.value
                         ? 'bg-blue-600/10 border-blue-500/50 ring-1 ring-blue-500/20'
-                        : 'bg-black/40 border-[#222] hover:border-[#333]'
+                        : 'bg-[var(--bg-secondary)] border-[var(--border-color)] hover:border-[var(--border-default)]'
                     }`}
                   >
                     <div className="flex items-center justify-between w-full">
-                      <span className={`text-sm font-bold ${preferredVnstockSource === source.value ? 'text-blue-400' : 'text-white'}`}>
+                      <span className={`text-sm font-bold ${preferredVnstockSource === source.value ? 'text-blue-400' : 'text-[var(--text-primary)]'}`}>
                         {source.label}
                       </span>
                       {preferredVnstockSource === source.value && (
                         <div className="w-2 h-2 rounded-full bg-blue-500" />
                       )}
                     </div>
-                    <span className="text-xs text-gray-500 mt-1">{source.description}</span>
+                    <span className="mt-1 text-xs text-[var(--text-muted)]">{source.description}</span>
                   </button>
                 ))}
               </div>
             </section>
 
             {/* Backend Section */}
-            <section className="bg-[#0a0a0a] border border-[#222] rounded-xl overflow-hidden">
-              <div className="p-4 border-b border-[#222] bg-[#0d0d0d]">
+            <section className="overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
                 <h2 className="font-semibold flex items-center gap-2">
                   <Globe size={18} className="text-cyan-500" />
                   Backend API
@@ -145,7 +145,7 @@ export default function SettingsPage() {
                 <div className="space-y-2">
                   <label
                     htmlFor="settings-api-endpoint"
-                    className="text-xs font-medium text-gray-400 uppercase tracking-wider"
+                    className="text-xs font-medium uppercase tracking-wider text-[var(--text-secondary)]"
                   >
                     API Endpoint
                   </label>
@@ -154,10 +154,10 @@ export default function SettingsPage() {
                     type="text" 
                     value={apiUrl}
                     onChange={(e) => setApiUrl(e.target.value)}
-                    className="w-full bg-black border border-[#222] focus:border-blue-500 outline-none rounded-lg px-4 py-2 text-sm font-mono"
+                    className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-2 text-sm font-mono text-[var(--text-primary)] outline-none focus:border-blue-500"
                     placeholder="https://vnibb.zeabur.app"
                   />
-                  <p className="text-[10px] text-gray-500 italic">
+                  <p className="text-[10px] italic text-[var(--text-muted)]">
                     Overrides the default environment variable. Requires page refresh.
                   </p>
                 </div>

@@ -40,7 +40,7 @@ export function ColumnCustomizer({ columns, onChange }: ColumnCustomizerProps) {
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
             "p-1.5 rounded transition-colors",
-            isOpen ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white hover:bg-gray-800"
+            isOpen ? "bg-blue-600 text-white" : "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
         )}
         title="Customize Columns"
       >
@@ -48,33 +48,33 @@ export function ColumnCustomizer({ columns, onChange }: ColumnCustomizerProps) {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl z-[100] overflow-hidden">
-          <div className="p-3 border-b border-gray-800 bg-gray-900/50">
-            <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Customize Columns</h4>
+        <div className="absolute right-0 top-full z-[100] mt-2 w-56 overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] shadow-2xl">
+          <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+            <h4 className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Customize Columns</h4>
           </div>
           <div className="max-h-72 overflow-y-auto p-1 scrollbar-hide">
             {columns.map((column) => (
               <div
                 key={column.id}
-                className="flex items-center gap-2 px-2 py-1.5 hover:bg-white/5 rounded cursor-pointer group"
+                className="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-[var(--bg-tertiary)]"
                 onClick={() => toggleColumn(column.id)}
               >
-                <GripVertical size={12} className="text-gray-700 group-hover:text-gray-500" />
+                <GripVertical size={12} className="text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]" />
                 {column.visible ? (
                   <Eye size={12} className="text-blue-400" />
                 ) : (
-                  <EyeOff size={12} className="text-gray-700" />
+                  <EyeOff size={12} className="text-[var(--text-muted)]" />
                 )}
                 <span className={cn(
                     "text-[11px] font-medium flex-1",
-                    column.visible ? 'text-gray-200' : 'text-gray-600'
+                    column.visible ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'
                 )}>
                   {column.label}
                 </span>
               </div>
             ))}
           </div>
-          <div className="p-2 border-t border-gray-800 bg-gray-900/50 text-center">
+          <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2 text-center">
               <button 
                 onClick={() => onChange(columns.map(c => ({ ...c, visible: true })))}
                 className="text-[9px] font-bold text-blue-500 hover:text-blue-400 uppercase tracking-tighter"

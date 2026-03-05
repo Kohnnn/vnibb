@@ -319,7 +319,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                 </div>
 
                 {/* Table Area with Horizontal Scroll */}
-                <div className="flex-1 overflow-auto scrollbar-thin scrollbar-thumb-gray-800 p-0.5">
+                <div className="flex-1 overflow-auto p-0.5 scrollbar-thin scrollbar-thumb-[var(--border-color)]">
                     {activeQuery.isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
                     ) : activeQuery.error && !hasData ? (
@@ -342,9 +342,9 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                 </div>
                             )}
                             <table className="data-table financial-dense freeze-first-col w-full text-[11px] border-collapse table-fixed">
-                                <thead className="sticky top-0 bg-secondary/95 backdrop-blur-sm z-20">
+                                <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]">
                                     <tr className="border-b border-[var(--border-color)] shadow-sm">
-                                            <th className="text-left p-2 pl-2.5 text-muted-foreground font-black uppercase tracking-widest w-[152px] bg-secondary/95 backdrop-blur-sm sticky left-0 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.2)]">Metric</th>
+                                            <th className="sticky left-0 z-30 w-[152px] bg-[var(--bg-secondary)] p-2 pl-2.5 text-left font-black uppercase tracking-widest text-muted-foreground shadow-[2px_0_5px_rgba(0,0,0,0.2)]">Metric</th>
                                         {tableData?.periods.map(p => (
                                             <th key={p} className="text-right p-2 text-muted-foreground font-black min-w-[96px]">{p}</th>
                                         ))}
@@ -360,7 +360,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                                 i % 2 === 1 && "bg-[var(--bg-secondary)]/40"
                                             )}
                                         >
-                                            <td className="p-2 pl-2.5 font-medium text-[var(--text-secondary)] group-hover:text-blue-300 transition-colors border-r border-[var(--border-subtle)] bg-secondary/95 backdrop-blur-sm sticky left-0 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.15)]">
+                                            <td className="sticky left-0 z-10 border-r border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2 pl-2.5 font-medium text-[var(--text-secondary)] shadow-[2px_0_5px_rgba(0,0,0,0.15)] transition-colors group-hover:text-blue-300">
                                                 {row.label}
                                             </td>
                                             {tableData.periods.map(p => {

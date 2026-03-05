@@ -47,8 +47,8 @@ export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidget
 
     return (
         <div className="h-full flex flex-col">
-            <div className="flex items-center justify-between pb-2 border-b border-gray-800/50">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
+            <div className="flex items-center justify-between pb-2 border-b border-[var(--border-subtle)]">
+                <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
                     <Users size={12} className="text-cyan-400" />
                     <span>Similar to {upperSymbol}</span>
                 </div>
@@ -79,19 +79,19 @@ export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidget
                                     setLinkedSymbol(peer.symbol);
                                 }
                             }}
-                            className="w-full flex items-center justify-between p-2 rounded bg-gray-800/20 hover:bg-gray-800/40 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                            className="w-full flex items-center justify-between p-2 rounded bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
                         >
                             <div>
-                                <div className="text-sm font-medium text-white">{peer.symbol}</div>
-                                <div className="text-[10px] text-gray-500 truncate max-w-[140px]">
+                                <div className="text-sm font-medium text-[var(--text-primary)]">{peer.symbol}</div>
+                                <div className="text-[10px] text-[var(--text-muted)] truncate max-w-[140px]">
                                     {peer.name || peer.industry || peer.sector || '-'}
                                 </div>
                             </div>
                             <div className="text-right">
-                                <div className="text-xs text-gray-400">
+                                <div className="text-xs text-[var(--text-secondary)]">
                                     P/E: {peer.pe_ratio?.toFixed(1) || '-'}
                                 </div>
-                                <div className="text-xs text-gray-400">
+                                <div className="text-xs text-[var(--text-secondary)]">
                                     MCap: {formatMarketCap(peer.market_cap)}
                                 </div>
                             </div>

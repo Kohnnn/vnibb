@@ -248,7 +248,7 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-40 h-14 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-      <div className="flex h-full items-center justify-between gap-3 px-4">
+      <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(260px,420px)_auto] items-center gap-3 px-4">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="hidden items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] xl:flex">
             <span>VNIBB</span>
@@ -258,7 +258,47 @@ export function Header({
             <span className="text-[var(--text-primary)]">{currentSymbol}</span>
           </div>
 
-          <div className="relative w-full max-w-sm">
+          <div className="hidden items-center gap-2 lg:flex">
+            <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1">
+              <span className="text-xs font-semibold text-[var(--text-primary)]">
+                {formatHeaderPrice(quote?.price)}
+              </span>
+              <span className={cn('text-xs font-semibold', quoteChangeClass)}>
+                {formatHeaderPercent(quote?.changePct)}
+              </span>
+              {sparklinePoints && (
+                <svg viewBox="0 0 100 28" className="h-6 w-20" aria-hidden="true">
+                  <polyline
+                    fill="none"
+                    stroke={quoteIsPositive ? '#34d399' : '#f87171'}
+                    strokeWidth="2"
+                    points={sparklinePoints}
+                  />
+                </svg>
+              )}
+            </div>
+
+            <div
+              className={cn(
+                'inline-flex items-center rounded-full border px-2 py-1',
+                healthBadge.className
+              )}
+              title={healthTitle}
+              aria-label={healthTitle}
+            >
+              <span
+                className={cn(
+                  'h-2 w-2 rounded-full',
+                  healthBadge.dotClassName,
+                  marketStatus.isOpen && connectionStatus === 'online' ? 'animate-pulse' : ''
+                )}
+              />
+              <span className="sr-only">{healthBadge.label}</span>
+            </div>
+          </div>
+        </div>
+
+          <div className="relative w-full max-w-md justify-self-center">
             <Search
               className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
               size={14}
@@ -307,48 +347,8 @@ export function Header({
               </button>
             )}
           </div>
-        </div>
 
-        <div className="hidden items-center gap-2 lg:flex">
-          <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1">
-            <span className="text-xs font-semibold text-[var(--text-primary)]">
-              {formatHeaderPrice(quote?.price)}
-            </span>
-            <span className={cn('text-xs font-semibold', quoteChangeClass)}>
-              {formatHeaderPercent(quote?.changePct)}
-            </span>
-            {sparklinePoints && (
-              <svg viewBox="0 0 100 28" className="h-6 w-20" aria-hidden="true">
-                <polyline
-                  fill="none"
-                  stroke={quoteIsPositive ? '#34d399' : '#f87171'}
-                  strokeWidth="2"
-                  points={sparklinePoints}
-                />
-              </svg>
-            )}
-          </div>
-
-          <div
-            className={cn(
-              'inline-flex items-center rounded-full border px-2 py-1',
-              healthBadge.className
-            )}
-            title={healthTitle}
-            aria-label={healthTitle}
-          >
-            <span
-              className={cn(
-                'h-2 w-2 rounded-full',
-                healthBadge.dotClassName,
-                marketStatus.isOpen && connectionStatus === 'online' ? 'animate-pulse' : ''
-              )}
-            />
-            <span className="sr-only">{healthBadge.label}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1 md:gap-2">
+        <div className="flex items-center gap-1 justify-self-end">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button

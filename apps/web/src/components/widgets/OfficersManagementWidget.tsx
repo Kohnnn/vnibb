@@ -34,8 +34,8 @@ export function OfficersManagementWidget({ symbol }: OfficersManagementWidgetPro
 
     return (
         <div className="h-full flex flex-col">
-            <div className="flex items-center justify-between pb-2 border-b border-gray-800/50">
-                <div className="flex items-center gap-2 text-xs text-gray-500">
+            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-2">
+                <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                     <Briefcase size={12} />
                     <span>{officers.length} executives</span>
                 </div>
@@ -58,20 +58,20 @@ export function OfficersManagementWidget({ symbol }: OfficersManagementWidgetPro
                     officers.map((officer, index) => (
                         <div
                             key={index}
-                            className="flex items-start gap-2 p-2 rounded bg-gray-800/20 hover:bg-gray-800/40"
+                            className="flex items-start gap-2 rounded bg-[var(--bg-secondary)] p-2 hover:bg-[var(--bg-tertiary)]"
                         >
                             <div className="p-1.5 bg-blue-500/10 rounded-full">
                                 <UserCircle size={16} className="text-blue-400" />
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="text-sm text-gray-200 font-medium truncate">
+                                <p className="truncate text-sm font-medium text-[var(--text-primary)]">
                                     {officer.name || 'Unknown'}
                                 </p>
-                                <p className="text-xs text-gray-500 truncate">
+                                <p className="truncate text-xs text-[var(--text-muted)]">
                                     {officer.position || 'Executive'}
                                 </p>
                                 {officer.shares_owned && (
-                                    <p className="text-[10px] text-gray-600 mt-0.5">
+                                    <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">
                                         Owns: {formatShares(officer.shares_owned)} shares
                                     </p>
                                 )}

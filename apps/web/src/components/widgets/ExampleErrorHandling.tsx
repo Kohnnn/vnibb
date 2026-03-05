@@ -78,13 +78,13 @@ export function ExampleWidget({
                 {!isLoading && !error && data && (
                     <div className="p-4 space-y-3">
                         <div className="flex items-center justify-between">
-                            <span className="text-sm text-gray-400">Price</span>
-                            <span className="text-lg font-semibold text-white">
+                            <span className="text-sm text-[var(--text-secondary)]">Price</span>
+                            <span className="text-lg font-semibold text-[var(--text-primary)]">
                                 {data.price?.toLocaleString('vi-VN')} VND
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
-                            <span className="text-sm text-gray-400">Change</span>
+                            <span className="text-sm text-[var(--text-secondary)]">Change</span>
                             <span
                                 className={`text-sm font-medium ${(data.changePct ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'
                                     }`}
@@ -93,8 +93,8 @@ export function ExampleWidget({
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
-                            <span className="text-sm text-gray-400">Volume</span>
-                            <span className="text-sm text-gray-300">
+                            <span className="text-sm text-[var(--text-secondary)]">Volume</span>
+                            <span className="text-sm text-[var(--text-secondary)]">
                                 {data.volume?.toLocaleString('vi-VN')}
                             </span>
                         </div>

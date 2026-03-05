@@ -95,8 +95,8 @@ export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-1 py-1 mb-3">
         <div className="flex items-center gap-2">
-          <Settings size={14} className="text-gray-400" />
-          <h3 className="text-sm font-medium text-zinc-100">Alert Settings</h3>
+          <Settings size={14} className="text-[var(--text-secondary)]" />
+          <h3 className="text-sm font-medium text-[var(--text-primary)]">Alert Settings</h3>
         </div>
         <div className="flex items-center gap-2">
           <WidgetMeta
@@ -120,45 +120,45 @@ export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
       <div className="flex-1 overflow-y-auto space-y-4">
         {/* Alert Types */}
         <div className="space-y-2">
-          <h4 className="text-xs font-medium text-gray-400 uppercase">Alert Types</h4>
+          <h4 className="text-xs font-medium uppercase text-[var(--text-secondary)]">Alert Types</h4>
           
-          <label className="flex items-center justify-between p-2 bg-gray-800/30 rounded hover:bg-gray-800/50 cursor-pointer">
-            <span className="text-sm text-gray-200">Insider Buy Alerts</span>
+          <label className="flex cursor-pointer items-center justify-between rounded bg-[var(--bg-secondary)] p-2 hover:bg-[var(--bg-tertiary)]">
+            <span className="text-sm text-[var(--text-primary)]">Insider Buy Alerts</span>
             <input
               type="checkbox"
               checked={formData.enable_insider_buy_alerts}
               onChange={(e) => setFormData({ ...formData, enable_insider_buy_alerts: e.target.checked })}
-              className="w-4 h-4 text-blue-500 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+              className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
             />
           </label>
 
-          <label className="flex items-center justify-between p-2 bg-gray-800/30 rounded hover:bg-gray-800/50 cursor-pointer">
-            <span className="text-sm text-gray-200">Insider Sell Alerts</span>
+          <label className="flex cursor-pointer items-center justify-between rounded bg-[var(--bg-secondary)] p-2 hover:bg-[var(--bg-tertiary)]">
+            <span className="text-sm text-[var(--text-primary)]">Insider Sell Alerts</span>
             <input
               type="checkbox"
               checked={formData.enable_insider_sell_alerts}
               onChange={(e) => setFormData({ ...formData, enable_insider_sell_alerts: e.target.checked })}
-              className="w-4 h-4 text-blue-500 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+              className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
             />
           </label>
 
-          <label className="flex items-center justify-between p-2 bg-gray-800/30 rounded hover:bg-gray-800/50 cursor-pointer">
-            <span className="text-sm text-gray-200">Ownership Change Alerts</span>
+          <label className="flex cursor-pointer items-center justify-between rounded bg-[var(--bg-secondary)] p-2 hover:bg-[var(--bg-tertiary)]">
+            <span className="text-sm text-[var(--text-primary)]">Ownership Change Alerts</span>
             <input
               type="checkbox"
               checked={formData.enable_ownership_change_alerts}
               onChange={(e) => setFormData({ ...formData, enable_ownership_change_alerts: e.target.checked })}
-              className="w-4 h-4 text-blue-500 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+              className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
             />
           </label>
         </div>
 
         {/* Thresholds */}
         <div className="space-y-2">
-          <h4 className="text-xs font-medium text-gray-400 uppercase">Thresholds</h4>
+          <h4 className="text-xs font-medium uppercase text-[var(--text-secondary)]">Thresholds</h4>
           
-          <div className="p-2 bg-gray-800/30 rounded">
-            <label className="block text-sm text-gray-200 mb-1">
+          <div className="rounded bg-[var(--bg-secondary)] p-2">
+            <label className="mb-1 block text-sm text-[var(--text-primary)]">
               Block Trade Threshold (VND billions)
             </label>
             <input
@@ -167,15 +167,15 @@ export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
               onChange={(e) => setFormData({ ...formData, block_trade_threshold: Number(e.target.value) })}
               min={1}
               max={1000}
-              className="w-full px-3 py-1.5 text-sm bg-gray-700 text-gray-200 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+              className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-blue-500 focus:outline-none"
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
               Alert when trade value exceeds this amount
             </p>
           </div>
 
-          <div className="p-2 bg-gray-800/30 rounded">
-            <label className="block text-sm text-gray-200 mb-1">
+          <div className="rounded bg-[var(--bg-secondary)] p-2">
+            <label className="mb-1 block text-sm text-[var(--text-primary)]">
               Ownership Change Threshold (%)
             </label>
             <input
@@ -185,9 +185,9 @@ export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
               min={1}
               max={100}
               step={0.1}
-              className="w-full px-3 py-1.5 text-sm bg-gray-700 text-gray-200 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+              className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-blue-500 focus:outline-none"
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
               Alert when ownership changes by this percentage
             </p>
           </div>
@@ -195,19 +195,19 @@ export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
 
         {/* Notification Methods */}
         <div className="space-y-2">
-          <h4 className="text-xs font-medium text-gray-400 uppercase">Notification Methods</h4>
+          <h4 className="text-xs font-medium uppercase text-[var(--text-secondary)]">Notification Methods</h4>
           
-          <div className="p-2 bg-gray-800/30 rounded">
+          <div className="rounded bg-[var(--bg-secondary)] p-2">
             <label className="flex items-center justify-between cursor-pointer">
               <div className="flex items-center gap-2">
                 <Bell size={14} className="text-blue-400" />
-                <span className="text-sm text-gray-200">Browser Notifications</span>
+                <span className="text-sm text-[var(--text-primary)]">Browser Notifications</span>
               </div>
               <input
                 type="checkbox"
                 checked={formData.enable_browser_notifications}
                 onChange={(e) => setFormData({ ...formData, enable_browser_notifications: e.target.checked })}
-                className="w-4 h-4 text-blue-500 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
               />
             </label>
             {notificationPermission === 'denied' && (
@@ -225,32 +225,32 @@ export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
             )}
           </div>
 
-          <div className="p-2 bg-gray-800/30 rounded">
+          <div className="rounded bg-[var(--bg-secondary)] p-2">
             <label className="flex items-center justify-between cursor-pointer">
               <div className="flex items-center gap-2">
                 <Volume2 size={14} className="text-yellow-400" />
-                <span className="text-sm text-gray-200">Sound Alerts</span>
+                <span className="text-sm text-[var(--text-primary)]">Sound Alerts</span>
               </div>
               <input
                 type="checkbox"
                 checked={formData.enable_sound_alerts}
                 onChange={(e) => setFormData({ ...formData, enable_sound_alerts: e.target.checked })}
-                className="w-4 h-4 text-blue-500 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
               />
             </label>
           </div>
 
-          <div className="p-2 bg-gray-800/30 rounded">
+          <div className="rounded bg-[var(--bg-secondary)] p-2">
             <label className="flex items-center justify-between mb-2 cursor-pointer">
               <div className="flex items-center gap-2">
                 <Mail size={14} className="text-green-400" />
-                <span className="text-sm text-gray-200">Email Notifications</span>
+                <span className="text-sm text-[var(--text-primary)]">Email Notifications</span>
               </div>
               <input
                 type="checkbox"
                 checked={formData.enable_email_notifications}
                 onChange={(e) => setFormData({ ...formData, enable_email_notifications: e.target.checked })}
-                className="w-4 h-4 text-blue-500 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
               />
             </label>
             {formData.enable_email_notifications && (
@@ -259,7 +259,7 @@ export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
                 value={formData.notification_email || ''}
                 onChange={(e) => setFormData({ ...formData, notification_email: e.target.value })}
                 placeholder="your@email.com"
-                className="w-full px-3 py-1.5 text-sm bg-gray-700 text-gray-200 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+                className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-blue-500 focus:outline-none"
               />
             )}
           </div>

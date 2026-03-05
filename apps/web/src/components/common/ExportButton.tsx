@@ -65,7 +65,9 @@ export function ExportButton({
     };
 
     // Resolve styles (fallback to simple tailwind if vars not defined)
-    const variantClass = variants[variant] || "border border-gray-700 bg-transparent hover:bg-gray-800 text-gray-300";
+    const variantClass =
+        variants[variant] ||
+        "border border-[var(--border-color)] bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]";
     const sizeClass = sizes[size] || "h-8 px-3 text-xs";
 
     return (
@@ -88,7 +90,7 @@ export function ExportButton({
             </button>
 
             {isOpen && (
-                <div className="absolute right-0 z-50 mt-2 w-40 origin-top-right rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                <div className="absolute right-0 z-50 mt-2 w-40 origin-top-right rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-lg ring-1 ring-[rgba(0,0,0,0.05)] focus:outline-none">
                     <div className="py-1">
                         <button
                             onClick={() => handleExport('csv')}

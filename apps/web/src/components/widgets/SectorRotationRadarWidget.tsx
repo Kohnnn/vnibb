@@ -45,7 +45,7 @@ export function SectorRotationRadarWidget({ id, widgetGroup, onRemove }: SectorR
       widgetId={id}
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
@@ -72,10 +72,10 @@ export function SectorRotationRadarWidget({ id, widgetGroup, onRemove }: SectorR
                   return (
                     <div
                       key={`leader-${sector.sectorId}`}
-                      className="flex items-center justify-between rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2"
+                      className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                     >
                       <div>
-                        <div className="text-xs font-semibold text-gray-200">{name}</div>
+                        <div className="text-xs font-semibold text-[var(--text-primary)]">{name}</div>
                         {gainer && (
                           <button
                             type="button"
@@ -101,10 +101,10 @@ export function SectorRotationRadarWidget({ id, widgetGroup, onRemove }: SectorR
                   return (
                     <div
                       key={`laggard-${sector.sectorId}`}
-                      className="flex items-center justify-between rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2"
+                      className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                     >
                       <div>
-                        <div className="text-xs font-semibold text-gray-200">{name}</div>
+                        <div className="text-xs font-semibold text-[var(--text-primary)]">{name}</div>
                         {loser && (
                           <button
                             type="button"

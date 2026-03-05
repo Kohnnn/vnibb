@@ -45,7 +45,7 @@ export function MiniChart({ symbol, exchange, width = '100%', height = 40 }: Min
   }, [tvSymbol]);
 
   if (!symbol) {
-    return <div className="h-[40px] w-full bg-gray-900/20 rounded animate-pulse" />;
+    return <div className="h-[40px] w-full animate-pulse rounded bg-[var(--bg-tertiary)]" />;
   }
 
   return (

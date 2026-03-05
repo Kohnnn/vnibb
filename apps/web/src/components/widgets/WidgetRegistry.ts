@@ -16,6 +16,7 @@ import { StockSplitsWidget } from './StockSplitsWidget';
 import { CompanyFilingsWidget } from './CompanyFilingsWidget';
 import { NewsFeedWidget } from './NewsFeedWidget';
 import { EventsCalendarWidget } from './EventsCalendarWidget';
+import { AnalystEstimatesWidget } from './AnalystEstimatesWidget';
 import { MajorShareholdersWidget } from './MajorShareholdersWidget';
 import { OfficersManagementWidget } from './OfficersManagementWidget';
 import { IntradayTradesWidget } from './IntradayTradesWidget';
@@ -83,6 +84,11 @@ import { MACDCrossoverWidget } from './MACDCrossoverWidget';
 import { ParkinsonVolatilityWidget } from './ParkinsonVolatilityWidget';
 import { EMARespectWidget } from './EMARespectWidget';
 import { DrawdownRecoveryWidget } from './DrawdownRecoveryWidget';
+import { GammaExposureWidget } from './GammaExposureWidget';
+import { MomentumWidget } from './MomentumWidget';
+import { EarningsQualityWidget } from './EarningsQualityWidget';
+import { SmartMoneyWidget } from './SmartMoneyWidget';
+import { RelativeRotationWidget } from './RelativeRotationWidget';
 import type { ComponentType } from 'react';
 import dynamic from 'next/dynamic';
 
@@ -150,6 +156,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     company_filings: CompanyFilingsWidget as ComponentType<WidgetProps>,
     major_shareholders: MajorShareholdersWidget as ComponentType<WidgetProps>,
     institutional_ownership: MajorShareholdersWidget as ComponentType<WidgetProps>,
+    analyst_estimates: AnalystEstimatesWidget as ComponentType<WidgetProps>,
     officers_management: OfficersManagementWidget as ComponentType<WidgetProps>,
     subsidiaries: SubsidiariesWidget as ComponentType<WidgetProps>,
 
@@ -212,6 +219,11 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     parkinson_volatility: ParkinsonVolatilityWidget as ComponentType<WidgetProps>,
     ema_respect: EMARespectWidget as ComponentType<WidgetProps>,
     drawdown_recovery: DrawdownRecoveryWidget as ComponentType<WidgetProps>,
+    gamma_exposure: GammaExposureWidget as ComponentType<WidgetProps>,
+    momentum: MomentumWidget as ComponentType<WidgetProps>,
+    earnings_quality: EarningsQualityWidget as ComponentType<WidgetProps>,
+    smart_money: SmartMoneyWidget as ComponentType<WidgetProps>,
+    relative_rotation: RelativeRotationWidget as ComponentType<WidgetProps>,
     similar_stocks: SimilarStocksWidget as ComponentType<WidgetProps>,
     quick_stats: QuickStatsWidget as ComponentType<WidgetProps>,
 
@@ -298,6 +310,11 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     parkinson_volatility: { w: 7, h: 7, minW: 5, minH: 5 },
     ema_respect: { w: 7, h: 7, minW: 5, minH: 5 },
     drawdown_recovery: { w: 7, h: 7, minW: 5, minH: 5 },
+    gamma_exposure: { w: 6, h: 6, minW: 4, minH: 5 },
+    momentum: { w: 6, h: 6, minW: 4, minH: 5 },
+    earnings_quality: { w: 6, h: 6, minW: 4, minH: 5 },
+    smart_money: { w: 6, h: 6, minW: 4, minH: 5 },
+    relative_rotation: { w: 6, h: 6, minW: 4, minH: 5 },
     forex_rates: { w: 5, h: 7, minW: 4, minH: 5 },
     commodities: { w: 5, h: 7, minW: 4, minH: 5 },
     similar_stocks: { w: 4, h: 6, minW: 3, minH: 5 },
@@ -391,6 +408,11 @@ export const widgetNames: Record<WidgetType, string> = {
     parkinson_volatility: 'Parkinson Volatility',
     ema_respect: 'EMA Respect',
     drawdown_recovery: 'Drawdown Recovery',
+    gamma_exposure: 'Gamma Exposure',
+    momentum: 'Momentum',
+    earnings_quality: 'Earnings Quality',
+    smart_money: 'Smart Money',
+    relative_rotation: 'Relative Rotation',
     forex_rates: 'Forex Rates',
     commodities: 'Commodities',
     similar_stocks: 'Similar Stocks',
@@ -481,6 +503,11 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     parkinson_volatility: 'High-low volatility estimator with rolling regime classification',
     ema_respect: 'EMA20/50/200 support and breakdown behavior scoring',
     drawdown_recovery: 'Rolling underwater curve and recovery-time statistics',
+    gamma_exposure: 'Gamma regime proxy derived from volatility structure while options OI feed is pending',
+    momentum: '1M/3M/6M/12M momentum profile with composite trend score',
+    earnings_quality: 'Quality score from profitability, cash conversion, and leverage checks',
+    smart_money: 'Foreign flow and block-trade bias to infer accumulation vs distribution',
+    relative_rotation: 'Relative Strength rating trend and quadrant classification',
     forex_rates: 'Currency exchange (VND pairs)',
     commodities: 'Gold, oil, and metals',
     similar_stocks: 'Stocks with high correlation',

@@ -190,7 +190,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
           ].map((item, i) => (
             <div
               key={i}
-              className="p-2.5 rounded-xl bg-[var(--bg-tertiary)]/70 border border-[var(--border-subtle)] backdrop-blur-sm flex flex-col group hover:border-[var(--border-color)] transition-colors"
+              className="group flex flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2.5 transition-colors hover:border-[var(--border-color)]"
             >
               <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest mb-1 group-hover:text-blue-400 transition-colors">
                 {item.label}

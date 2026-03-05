@@ -104,7 +104,7 @@ function getDivergenceSignal(points: VolumeDeltaPoint[]) {
   if (points.length < LOOKBACK_DAYS) {
     return {
       label: 'No signal',
-      className: 'text-gray-300',
+      className: 'text-[var(--text-secondary)]',
       priceChange: 0,
       deltaChange: 0,
     }
@@ -178,7 +178,7 @@ export function VolumeDeltaWidget({ symbol }: VolumeDeltaWidgetProps) {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Scale size={12} className="text-cyan-400" />
           <span>Volume Delta ({LOOKBACK_DAYS}D)</span>
         </div>
@@ -192,28 +192,28 @@ export function VolumeDeltaWidget({ symbol }: VolumeDeltaWidgetProps) {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">Today</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Today</div>
           <div className={`font-mono ${lastPoint?.delta >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
             {lastPoint?.delta >= 0 ? '+' : ''}
             {formatCompact(lastPoint?.delta ?? 0)}
           </div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">20D Cum</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Cum</div>
           <div className={`font-mono ${rollingDelta >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
             {rollingDelta >= 0 ? '+' : ''}
             {formatCompact(rollingDelta)}
           </div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">Close Pos</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Close Pos</div>
           <div className="font-mono text-cyan-300">{((lastPoint?.closePosition ?? 0) * 100).toFixed(0)}%</div>
         </div>
       </div>
 
-      <div className="rounded-md border border-gray-800/60 bg-black/20 px-3 py-2 mb-2">
-        <div className="text-[10px] text-gray-500 uppercase tracking-widest">Flow Signal</div>
+      <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
+        <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Flow Signal</div>
         <div className={`text-sm font-semibold ${divergence.className}`}>{divergence.label}</div>
         <div className="grid grid-cols-2 gap-2 mt-1 text-[10px]">
           <div className={divergence.priceChange >= 0 ? 'text-emerald-300' : 'text-red-300'}>
@@ -229,8 +229,8 @@ export function VolumeDeltaWidget({ symbol }: VolumeDeltaWidgetProps) {
 
       <div className="grid grid-cols-3 gap-1 mb-2 text-[10px]">
         {monthlyAverages.map((row) => (
-          <div key={row.month} className="rounded border border-gray-800/40 px-2 py-1 bg-black/10">
-            <div className="text-gray-500">M{row.month}</div>
+          <div key={row.month} className="rounded border border-[var(--border-subtle)] px-2 py-1 bg-[var(--bg-secondary)]">
+            <div className="text-[var(--text-muted)]">M{row.month}</div>
             <div className={row.avgDelta >= 0 ? 'text-emerald-300 font-mono' : 'text-red-300 font-mono'}>
               {row.avgDelta >= 0 ? '+' : ''}
               {formatCompact(row.avgDelta)}
@@ -253,8 +253,8 @@ export function VolumeDeltaWidget({ symbol }: VolumeDeltaWidgetProps) {
 
             return (
               <div key={`${point.time}-${index}`} className="flex items-center gap-2">
-                <div className="w-12 text-[10px] text-gray-500 shrink-0">{toDateLabel(point.time)}</div>
-                <div className="flex-1 h-4 bg-gray-800/30 rounded overflow-hidden">
+                <div className="w-12 text-[10px] text-[var(--text-muted)] shrink-0">{toDateLabel(point.time)}</div>
+                <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
                   <div
                     className={`h-full ${isPositive ? 'bg-emerald-500/70' : 'bg-red-500/70'}`}
                     style={{ width: `${Math.max(2, widthPct)}%` }}

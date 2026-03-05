@@ -56,7 +56,7 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <BarChart3 size={12} className="text-cyan-400" />
           <span>Sortino Monthly</span>
         </div>
@@ -67,7 +67,7 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/70'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -86,20 +86,20 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Best Months</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Best Months</div>
               <div className="text-emerald-300">{metric?.best_months?.join(', ') || '-'}</div>
             </div>
-            <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-              <div className="text-gray-500 uppercase tracking-widest">Avoid Months</div>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="text-[var(--text-muted)] uppercase tracking-widest">Avoid Months</div>
               <div className="text-red-300">{metric?.avoid_months?.join(', ') || '-'}</div>
             </div>
           </div>
 
-          <div className="rounded-md border border-gray-800/60 bg-black/20 p-2 mb-2">
+          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 mb-2">
             <div className="mb-2 flex items-center justify-between">
-              <div className="text-[10px] uppercase tracking-widest text-gray-500">Monthly Risk-Adjusted Returns</div>
-              <div className="text-[10px] text-gray-400">Sortino and Sharpe</div>
+              <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Monthly Risk-Adjusted Returns</div>
+              <div className="text-[10px] text-[var(--text-secondary)]">Sortino and Sharpe</div>
             </div>
             <ChartMountGuard className="h-[150px]" minHeight={130}>
               <ResponsiveContainer width="100%" height="100%">
@@ -134,11 +134,11 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
               const width = Math.max(2, (Math.abs(row.sortino) / maxAbs) * 100)
               return (
                 <div key={row.month} className="flex items-center gap-2">
-                  <div className="w-8 text-[10px] text-gray-500">{row.month}</div>
-                  <div className="flex-1 h-4 bg-gray-800/30 rounded overflow-hidden">
+                  <div className="w-8 text-[10px] text-[var(--text-muted)]">{row.month}</div>
+                  <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
                     <div className={`h-full ${row.sortino >= 0 ? 'bg-emerald-500/70' : 'bg-red-500/70'}`} style={{ width: `${width}%` }} />
                   </div>
-                  <div className="w-14 text-[10px] text-right font-mono text-gray-300">S {row.sortino.toFixed(2)}</div>
+                  <div className="w-14 text-[10px] text-right font-mono text-[var(--text-primary)]">S {row.sortino.toFixed(2)}</div>
                   <div className="w-14 text-[10px] text-right font-mono text-cyan-300">H {row.sharpe.toFixed(2)}</div>
                 </div>
               )

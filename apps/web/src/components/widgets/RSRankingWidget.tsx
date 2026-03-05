@@ -95,19 +95,19 @@ export function RSRankingWidget({ widgetGroup }: RSRankingWidgetProps) {
                                 setLinkedSymbol(stock.symbol);
                             }
                         }}
-                        className="bg-gray-900/40 border-gray-800 p-2 hover:bg-gray-800/60 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                        className="bg-[var(--bg-secondary)] border-[var(--border-color)] p-2 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
                     >
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 flex-1 min-w-0">
-                                <span className="text-[10px] text-gray-500 font-mono w-6 text-right">#{index + 1}</span>
+                                <span className="text-[10px] text-[var(--text-muted)] font-mono w-6 text-right">#{index + 1}</span>
                                 <div className="flex flex-col min-w-0 flex-1">
-                                    <span className="text-xs font-bold text-white truncate">{stock.symbol}</span>
-                                    <span className="text-[9px] text-gray-500 truncate">{stock.company_name || stock.industry}</span>
+                                    <span className="text-xs font-bold text-[var(--text-primary)] truncate">{stock.symbol}</span>
+                                    <span className="text-[9px] text-[var(--text-muted)] truncate">{stock.company_name || stock.industry}</span>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
                                 {stock.price && (
-                                    <span className="text-[10px] text-gray-400 font-mono">{stock.price.toLocaleString()}</span>
+                                    <span className="text-[10px] text-[var(--text-secondary)] font-mono">{stock.price.toLocaleString()}</span>
                                 )}
                                 <div className="flex flex-col items-end">
                                     <Badge
@@ -136,7 +136,7 @@ export function RSRankingWidget({ widgetGroup }: RSRankingWidgetProps) {
             <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
                     <Zap size={14} className="text-blue-400" />
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">RS Rankings</span>
+                    <span className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">RS Rankings</span>
                 </div>
                 <div className="flex items-center gap-2">
                     <WidgetMeta
@@ -150,7 +150,7 @@ export function RSRankingWidget({ widgetGroup }: RSRankingWidgetProps) {
                         onClick={handleRefresh}
                         disabled={activeQuery.isFetching}
                         aria-label="Refresh RS rankings"
-                        className="p-1 text-gray-500 hover:text-white hover:bg-gray-800 rounded transition-colors"
+                        className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors"
                         type="button"
                     >
                         <RefreshCw size={12} className={activeQuery.isFetching ? 'animate-spin' : ''} />
@@ -159,14 +159,14 @@ export function RSRankingWidget({ widgetGroup }: RSRankingWidgetProps) {
             </div>
 
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="flex-1 flex flex-col overflow-hidden">
-                <TabsList className="grid w-full grid-cols-3 bg-gray-900 border border-gray-800 p-0.5 h-8">
-                    <TabsTrigger value="leaders" className="text-[10px] data-[state=active]:bg-gray-800 data-[state=active]:text-green-400">
+                <TabsList className="grid w-full grid-cols-3 bg-[var(--bg-secondary)] border border-[var(--border-color)] p-0.5 h-8">
+                    <TabsTrigger value="leaders" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-green-400">
                         Leaders
                     </TabsTrigger>
-                    <TabsTrigger value="laggards" className="text-[10px] data-[state=active]:bg-gray-800 data-[state=active]:text-red-400">
+                    <TabsTrigger value="laggards" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-red-400">
                         Laggards
                     </TabsTrigger>
-                    <TabsTrigger value="gainers" className="text-[10px] data-[state=active]:bg-gray-800 data-[state=active]:text-blue-400">
+                    <TabsTrigger value="gainers" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-blue-400">
                         Gainers
                     </TabsTrigger>
                 </TabsList>

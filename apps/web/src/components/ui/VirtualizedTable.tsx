@@ -66,7 +66,7 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
 
   if (data.length === 0) {
     return (
-      <div className={cn("flex items-center justify-center h-40 text-gray-500", className)}>
+      <div className={cn("flex h-40 items-center justify-center text-[var(--text-muted)]", className)}>
         {emptyMessage}
       </div>
     );
@@ -76,7 +76,7 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
     <div className={cn("flex flex-col h-full overflow-hidden", className)}>
       {/* Header */}
       <div 
-        className="flex bg-gray-900 border-b border-gray-800 sticky top-0 z-10 shrink-0"
+        className="sticky top-0 z-10 flex shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]"
         style={{ height: headerHeight }}
       >
         {columns.map(column => {
@@ -88,8 +88,8 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
               key={column.id}
               onClick={() => canSort && handleSort(column.id)}
               className={cn(
-                  "flex items-center px-3 text-[10px] font-black text-gray-500 uppercase tracking-wider transition-colors select-none",
-                  canSort ? 'cursor-pointer hover:text-gray-300 hover:bg-white/5' : '',
+                  "flex select-none items-center px-3 text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] transition-colors",
+                  canSort ? 'cursor-pointer hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]' : '',
                   column.align === 'right' ? 'justify-end text-right' : 
                   column.align === 'center' ? 'justify-center text-center' : 'justify-start text-left'
               )}
@@ -134,9 +134,9 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
               <div
                 key={virtualItem.key}
                 className={cn(
-                    "absolute top-0 left-0 w-full flex items-center border-b border-gray-800/30 transition-colors",
-                    isClickable ? 'cursor-pointer hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30' : '',
-                    virtualItem.index % 2 ? 'bg-gray-900/10' : 'bg-transparent'
+                    "absolute left-0 top-0 flex w-full items-center border-b border-[var(--border-subtle)] transition-colors",
+                    isClickable ? 'cursor-pointer hover:bg-[var(--bg-tertiary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30' : '',
+                    virtualItem.index % 2 ? 'bg-[var(--bg-secondary)]/40' : 'bg-transparent'
                 )}
                 style={{
                   height: `${virtualItem.size}px`,

@@ -94,7 +94,7 @@ export function ATRRegimeWidget({ symbol }: ATRRegimeWidgetProps) {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Gauge size={12} className="text-cyan-400" />
           <span>ATR Regime (14D)</span>
         </div>
@@ -108,34 +108,34 @@ export function ATRRegimeWidget({ symbol }: ATRRegimeWidgetProps) {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">ATR</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">ATR</div>
           <div className="text-cyan-300 font-mono">{formatPrice(lastAtr)}</div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">ATR %</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">ATR %</div>
           <div className="text-amber-300 font-mono">{atrPct.toFixed(2)}%</div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="text-gray-500 uppercase tracking-widest">Regime</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Regime</div>
           <div className={`font-semibold ${regime.className}`}>{regime.label}</div>
         </div>
       </div>
 
-      <div className="rounded-md border border-gray-800/60 bg-black/20 px-3 py-2 mb-2">
+      <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
         <div className="flex items-center justify-between mb-1">
-          <div className="text-[10px] text-gray-500 uppercase tracking-widest">Sizing Model</div>
-          <div className="text-[10px] text-gray-400">Rank: {rank.toFixed(0)}%</div>
+          <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Sizing Model</div>
+          <div className="text-[10px] text-[var(--text-secondary)]">Rank: {rank.toFixed(0)}%</div>
         </div>
         <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
-          <div className="text-gray-500">Risk Budget</div>
-          <div className="text-right text-gray-300 font-mono">{formatCompact(riskBudget)}</div>
-          <div className="text-gray-500">Stop Distance</div>
-          <div className="text-right text-gray-300 font-mono">{formatPrice(stopDistance)}</div>
-          <div className="text-gray-500">Suggested Shares</div>
+          <div className="text-[var(--text-muted)]">Risk Budget</div>
+          <div className="text-right text-[var(--text-primary)] font-mono">{formatCompact(riskBudget)}</div>
+          <div className="text-[var(--text-muted)]">Stop Distance</div>
+          <div className="text-right text-[var(--text-primary)] font-mono">{formatPrice(stopDistance)}</div>
+          <div className="text-[var(--text-muted)]">Suggested Shares</div>
           <div className="text-right text-cyan-300 font-mono">{suggestedShares.toLocaleString()}</div>
-          <div className="text-gray-500">Position Value</div>
-          <div className="text-right text-gray-300 font-mono">{formatCompact(suggestedValue)}</div>
+          <div className="text-[var(--text-muted)]">Position Value</div>
+          <div className="text-right text-[var(--text-primary)] font-mono">{formatCompact(suggestedValue)}</div>
         </div>
       </div>
 
@@ -154,14 +154,14 @@ export function ATRRegimeWidget({ symbol }: ATRRegimeWidgetProps) {
 
             return (
               <div key={`${point.time}-${index}`} className="flex items-center gap-2">
-                <div className="w-14 text-[10px] text-gray-500 shrink-0">{String(point.time).slice(5, 10)}</div>
-                <div className="flex-1 h-4 bg-gray-800/30 rounded overflow-hidden">
+                <div className="w-14 text-[10px] text-[var(--text-muted)] shrink-0">{String(point.time).slice(5, 10)}</div>
+                <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
                   <div
                     className={`h-full ${isRising ? 'bg-amber-500/70' : 'bg-cyan-500/70'}`}
                     style={{ width: `${Math.max(2, widthPct)}%` }}
                   />
                 </div>
-                <div className="w-14 text-[10px] text-gray-400 text-right font-mono">{point.value.toFixed(2)}</div>
+                <div className="w-14 text-[10px] text-[var(--text-secondary)] text-right font-mono">{point.value.toFixed(2)}</div>
                 {isRising ? (
                   <TrendingUp size={10} className="text-amber-400" />
                 ) : (

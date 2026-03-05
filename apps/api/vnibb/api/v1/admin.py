@@ -4,13 +4,14 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks, Body
+from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks, Body, Header
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.database import get_db, engine
 from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
+from vnibb.core.middleware.logging import get_recent_error_events
 
 router = APIRouter(tags=["Admin"])
 
@@ -37,6 +38,23 @@ FRESHNESS_TABLES = [
     "company_news",
     "company_events",
 ]
+
+
+def require_admin_access(
+    x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key"),
+) -> None:
+    """Protect sensitive admin endpoints with optional API key auth."""
+    configured_key = settings.admin_api_key
+    if not configured_key:
+        if settings.environment.lower() == "production":
+            raise HTTPException(
+                status_code=503,
+                detail="ADMIN_API_KEY must be configured to access this endpoint in production",
+            )
+        return
+
+    if x_admin_key != configured_key:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 def _quote_identifier(table_name: str) -> str:
@@ -392,6 +410,20 @@ async def list_all_tables(db: AsyncSession = Depends(get_db)):
         "total_tables": len(tables_info),
         "timestamp": datetime.utcnow().isoformat(),
         "last_checked": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/errors/recent")
+async def get_recent_errors(
+    limit: int = Query(default=50, ge=1, le=200),
+    _auth: None = Depends(require_admin_access),
+):
+    """Return recent server-side request errors captured by middleware."""
+    errors = get_recent_error_events(limit=limit)
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "count": len(errors),
+        "errors": errors,
     }
 
 

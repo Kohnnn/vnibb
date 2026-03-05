@@ -57,11 +57,11 @@ export function HealthDashboard() {
         : 'bg-red-500/10 border-red-500/30';
 
   return (
-    <div className="p-6 bg-gray-900 rounded-lg border border-gray-800">
+    <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-6">
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
           <Server className="w-6 h-6 text-blue-400" />
-          <h2 className="text-xl font-bold text-white">System Health</h2>
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">System Health</h2>
         </div>
         <button 
           onClick={fetchHealth} 
@@ -72,10 +72,10 @@ export function HealthDashboard() {
             }
           }}
           disabled={loading}
-          className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+          className="rounded-lg p-2 transition-colors hover:bg-[var(--bg-tertiary)]"
           aria-label="Refresh health status"
         >
-          <RefreshCw className={`w-5 h-5 text-gray-400 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`h-5 w-5 text-[var(--text-secondary)] ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
       
@@ -91,25 +91,25 @@ export function HealthDashboard() {
           <div className={`flex items-center gap-3 p-4 rounded-lg border ${statusClass}`}>
             <StatusIcon status={health.status} />
             <div>
-              <span className="text-white font-medium capitalize">{health.status}</span>
-              <span className="text-gray-500 ml-2">v{health.version}</span>
+              <span className="font-medium capitalize text-[var(--text-primary)]">{health.status}</span>
+              <span className="ml-2 text-[var(--text-muted)]">v{health.version}</span>
             </div>
-            <span className="ml-auto text-gray-500 text-sm">{health.environment}</span>
+            <span className="ml-auto text-sm text-[var(--text-muted)]">{health.environment}</span>
           </div>
           
           {/* Components Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {Object.entries(health.components).map(([name, data]) => (
-              <div key={name} className="p-4 bg-gray-800 rounded-lg">
+              <div key={name} className="rounded-lg bg-[var(--bg-tertiary)] p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <StatusIcon status={data.status} />
-                  <span className="text-gray-200 font-medium capitalize">{name}</span>
+                  <span className="font-medium capitalize text-[var(--text-primary)]">{name}</span>
                 </div>
                 <div className="space-y-1">
                   {Object.entries(data).filter(([k]) => k !== 'status').map(([key, value]) => (
                     <div key={key} className="flex justify-between text-sm">
-                      <span className="text-gray-500 capitalize">{key.replace(/_/g, ' ')}</span>
-                      <span className="text-gray-300">{String(value)}</span>
+                      <span className="capitalize text-[var(--text-muted)]">{key.replace(/_/g, ' ')}</span>
+                      <span className="text-[var(--text-secondary)]">{String(value)}</span>
                     </div>
                   ))}
                 </div>
@@ -118,7 +118,7 @@ export function HealthDashboard() {
           </div>
           
           {/* Last Updated */}
-          <p className="text-gray-600 text-xs text-right">
+          <p className="text-right text-xs text-[var(--text-muted)]">
             Last updated: {new Date(health.timestamp).toLocaleTimeString()}
           </p>
         </div>

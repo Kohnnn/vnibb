@@ -2100,6 +2100,43 @@ async def get_company_events(symbol: str, limit: int = Query(20, ge=1, le=100)):
         return StandardResponse(data=[], error=str(e))
 
 
+@router.get("/{symbol}/calendar", response_model=StandardResponse[dict[str, Any]])
+@cached(ttl=settings.news_retention_days * 86400, key_prefix="company_calendar_v26")
+async def get_company_calendar(symbol: str, limit: int = Query(20, ge=1, le=100)):
+    symbol_upper = symbol.upper()
+    try:
+        events = await VnstockCompanyEventsFetcher.fetch(
+            CompanyEventsQueryParams(symbol=symbol_upper, limit=limit)
+        )
+        payload = {
+            "symbol": symbol_upper,
+            "source": "company_events",
+            "message": "Upcoming company calendar events",
+            "data": events,
+        }
+        return StandardResponse(data=payload, meta=MetaData(count=len(events)))
+    except Exception as e:
+        payload = {
+            "symbol": symbol_upper,
+            "source": "unavailable",
+            "message": "Company calendar data not yet available.",
+            "data": [],
+        }
+        return StandardResponse(data=payload, meta=MetaData(count=0), error=str(e))
+
+
+@router.get("/{symbol}/estimates", response_model=StandardResponse[dict[str, Any]])
+async def get_analyst_estimates(symbol: str):
+    symbol_upper = symbol.upper()
+    payload = {
+        "symbol": symbol_upper,
+        "source": "unavailable",
+        "message": "VN market analyst consensus data not yet available.",
+        "data": [],
+    }
+    return StandardResponse(data=payload, meta=MetaData(count=0))
+
+
 @router.get("/{symbol}/shareholders", response_model=StandardResponse[List[Any]])
 async def get_shareholders(symbol: str):
     symbol_upper = symbol.upper()

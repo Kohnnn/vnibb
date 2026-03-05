@@ -92,7 +92,7 @@ function computeLag1Autocorrelation(returns: number[]): number | null {
 
 function classifyHurst(hurst: number | null): { label: string; className: string; note: string } {
   if (hurst == null) {
-    return { label: 'Insufficient Data', className: 'text-gray-300', note: 'Need longer series' }
+    return { label: 'Insufficient Data', className: 'text-[var(--text-secondary)]', note: 'Need longer series' }
   }
   if (hurst > 0.55) {
     return { label: 'Trending', className: 'text-emerald-300', note: 'Momentum persistence likely' }
@@ -156,7 +156,7 @@ export function HurstMarketStructureWidget({ symbol }: HurstMarketStructureWidge
   return (
     <div className="h-full flex flex-col">
       <div className="mb-2 flex items-center justify-between px-1 py-1">
-        <div className="flex items-center gap-2 text-xs text-gray-400">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Sigma size={12} className="text-cyan-300" />
           <span>Hurst & Market Structure</span>
         </div>
@@ -164,22 +164,22 @@ export function HurstMarketStructureWidget({ symbol }: HurstMarketStructureWidge
       </div>
 
       <div className="mb-2 grid grid-cols-3 gap-2 text-[10px]">
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="uppercase tracking-widest text-gray-500">Hurst</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="uppercase tracking-widest text-[var(--text-muted)]">Hurst</div>
           <div className="font-mono text-cyan-300">{formatNumber(hurst ?? Number.NaN)}</div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="uppercase tracking-widest text-gray-500">Lag-1 AC</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="uppercase tracking-widest text-[var(--text-muted)]">Lag-1 AC</div>
           <div className="font-mono text-emerald-300">{formatNumber((lag1 ?? 0) * 100, 2)}%</div>
         </div>
-        <div className="rounded-md border border-gray-800/60 bg-black/20 px-2 py-1">
-          <div className="uppercase tracking-widest text-gray-500">Structure</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="uppercase tracking-widest text-[var(--text-muted)]">Structure</div>
           <div className={structure.className}>{structure.label}</div>
         </div>
       </div>
 
-      <div className="mb-2 rounded-md border border-gray-800/50 bg-black/10 px-2 py-1.5 text-[10px] text-gray-400">
-        <span className="text-gray-500">Interpretation:</span> <span className={structure.className}>{structure.note}</span>
+      <div className="mb-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[10px] text-[var(--text-secondary)]">
+        <span className="text-[var(--text-muted)]">Interpretation:</span> <span className={structure.className}>{structure.note}</span>
       </div>
 
       <div className="flex-1 overflow-auto pr-1">
@@ -191,8 +191,8 @@ export function HurstMarketStructureWidget({ symbol }: HurstMarketStructureWidge
           <WidgetEmpty message="Not enough historical data for Hurst estimation" icon={<Sigma size={18} />} />
         ) : (
           <div className="space-y-2">
-            <div className="rounded-md border border-gray-800/50 bg-black/10 p-2">
-              <div className="mb-2 text-[10px] uppercase tracking-widest text-gray-500">Rolling Regime</div>
+            <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2">
+              <div className="mb-2 text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Rolling Regime</div>
               <div className="space-y-1">
                 {rollingWindows.map((window, index) => {
                   const value = window.value ?? 0.5
@@ -206,18 +206,18 @@ export function HurstMarketStructureWidget({ symbol }: HurstMarketStructureWidge
 
                   return (
                     <div key={`${window.label}-${index}`} className="flex items-center gap-2">
-                      <div className="w-14 shrink-0 text-gray-500">{window.label}</div>
-                      <div className="h-3 flex-1 overflow-hidden rounded bg-gray-800/30">
+                      <div className="w-14 shrink-0 text-[var(--text-muted)]">{window.label}</div>
+                      <div className="h-3 flex-1 overflow-hidden rounded bg-[var(--bg-tertiary)]">
                         <div className={className} style={{ width: `${widthPct}%`, height: '100%' }} />
                       </div>
-                      <div className="w-12 text-right font-mono text-gray-300">{formatNumber(value, 3)}</div>
+                      <div className="w-12 text-right font-mono text-[var(--text-primary)]">{formatNumber(value, 3)}</div>
                     </div>
                   )
                 })}
               </div>
             </div>
 
-            <div className="rounded-md border border-gray-800/50 bg-black/10 p-2 text-[10px] text-gray-500">
+            <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2 text-[10px] text-[var(--text-muted)]">
               H &gt; 0.55: persistent trend. H &lt; 0.45: mean reversion. Near 0.50: random walk.
             </div>
           </div>

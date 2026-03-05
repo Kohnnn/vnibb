@@ -47,7 +47,7 @@ function getImpactColor(impact: string): string {
         case 'high': return 'bg-red-500';
         case 'medium': return 'bg-yellow-500';
         case 'low': return 'bg-green-500';
-        default: return 'bg-gray-500';
+        default: return 'bg-[var(--border-color)]';
     }
 }
 
@@ -81,24 +81,24 @@ export function EconomicCalendarWidget({}: EconomicCalendarWidgetProps) {
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2">
                     <Calendar size={12} className="text-blue-400" />
-                    <div className="flex bg-gray-800 rounded text-[10px]">
+                    <div className="flex rounded bg-[var(--bg-tertiary)] text-[10px]">
                         <button
                             onClick={() => setFilter('all')}
-                            className={`px-2 py-0.5 rounded ${filter === 'all' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
+                            className={`px-2 py-0.5 rounded ${filter === 'all' ? 'bg-blue-600 text-white' : 'text-[var(--text-secondary)]'}`}
                             type="button"
                         >
                             All
                         </button>
                         <button
                             onClick={() => setFilter('high')}
-                            className={`px-2 py-0.5 rounded ${filter === 'high' ? 'bg-red-600 text-white' : 'text-gray-400'}`}
+                            className={`px-2 py-0.5 rounded ${filter === 'high' ? 'bg-red-600 text-white' : 'text-[var(--text-secondary)]'}`}
                             type="button"
                         >
                             High
                         </button>
                         <button
                             onClick={() => setFilter('vn')}
-                            className={`px-2 py-0.5 rounded ${filter === 'vn' ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
+                            className={`px-2 py-0.5 rounded ${filter === 'vn' ? 'bg-blue-600 text-white' : 'text-[var(--text-secondary)]'}`}
                             type="button"
                         >
                             🇻🇳
@@ -107,7 +107,7 @@ export function EconomicCalendarWidget({}: EconomicCalendarWidgetProps) {
                 </div>
             </div>
 
-            <div className="pb-2 border-b border-gray-800/50">
+            <div className="border-b border-[var(--border-subtle)] pb-2">
                 <WidgetMeta note="Sample data" align="right" />
             </div>
 
@@ -118,7 +118,7 @@ export function EconomicCalendarWidget({}: EconomicCalendarWidgetProps) {
                     Object.entries(groupedEvents).map(([date, events]) => (
                         <div key={date}>
                             <div
-                                className={`text-[10px] px-1 py-0.5 rounded mb-1 ${date === today ? 'bg-blue-500/20 text-blue-400' : 'text-gray-500'}`}
+                                className={`mb-1 rounded px-1 py-0.5 text-[10px] ${date === today ? 'bg-blue-500/20 text-blue-400' : 'text-[var(--text-muted)]'}`}
                             >
                                 {formatDate(date)} {date === today && '(Today)'}
                             </div>
@@ -126,16 +126,16 @@ export function EconomicCalendarWidget({}: EconomicCalendarWidgetProps) {
                                 {events.map((event) => (
                                     <div
                                         key={event.id}
-                                        className="flex items-start gap-2 p-2 rounded bg-gray-800/30 hover:bg-gray-800/50"
+                                        className="flex items-start gap-2 rounded bg-[var(--bg-secondary)] p-2 hover:bg-[var(--bg-tertiary)]"
                                     >
                                         <div className={`w-1 h-full min-h-[24px] rounded ${getImpactColor(event.impact)}`} />
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5">
                                                 <span className="text-sm">{COUNTRY_FLAGS[event.country] || '🌍'}</span>
-                                                <span className="text-xs text-gray-400">{event.time}</span>
+                                                <span className="text-xs text-[var(--text-secondary)]">{event.time}</span>
                                             </div>
-                                            <div className="text-sm text-white font-medium truncate">{event.event}</div>
-                                            <div className="flex gap-2 text-[10px] text-gray-400 mt-0.5">
+                                            <div className="truncate text-sm font-medium text-[var(--text-primary)]">{event.event}</div>
+                                            <div className="mt-0.5 flex gap-2 text-[10px] text-[var(--text-secondary)]">
                                                 {event.forecast && <span>F: {event.forecast}</span>}
                                                 {event.previous && <span>P: {event.previous}</span>}
                                             </div>

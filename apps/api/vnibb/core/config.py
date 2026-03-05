@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     api_port: int = 8000
     api_prefix: str = "/api/v1"
     api_request_timeout_seconds: int = 30
+    admin_api_key: Optional[str] = None
     cors_origins: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",

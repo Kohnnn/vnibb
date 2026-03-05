@@ -69,7 +69,7 @@ export function MarketBreadthWidget({ id, onRemove }: MarketBreadthWidgetProps) 
       widgetId={id}
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={updatedAt}
             isFetching={isFetching && hasData}
@@ -93,18 +93,18 @@ export function MarketBreadthWidget({ id, onRemove }: MarketBreadthWidgetProps) 
                 return (
                   <div
                     key={row.label}
-                    className="rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2"
+                    className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                   >
                     <div className="flex items-center justify-between">
-                      <div className="text-xs font-semibold text-gray-200">{row.label}</div>
-                      <div className="text-[10px] text-gray-500">{formatNumber(row.total)}</div>
+                      <div className="text-xs font-semibold text-[var(--text-primary)]">{row.label}</div>
+                      <div className="text-[10px] text-[var(--text-muted)]">{formatNumber(row.total)}</div>
                     </div>
                     <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
                       <div className="text-emerald-400">▲ {row.advancers}</div>
                       <div className="text-red-400">▼ {row.decliners}</div>
-                      <div className="text-gray-400">= {row.unchanged}</div>
+                      <div className="text-[var(--text-secondary)]">= {row.unchanged}</div>
                     </div>
-                    <div className="mt-1 text-[10px] text-gray-500">
+                    <div className="mt-1 text-[10px] text-[var(--text-muted)]">
                       A/D ratio {ratio ? ratio.toFixed(2) : '--'}
                     </div>
                   </div>

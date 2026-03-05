@@ -83,7 +83,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
       exportFilename={`valuation_multiples_${symbol}`}
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}

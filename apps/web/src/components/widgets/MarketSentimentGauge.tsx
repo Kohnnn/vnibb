@@ -31,14 +31,14 @@ export function MarketSentimentGauge() {
     if (isLoading) {
         return (
             <div className="h-full flex items-center justify-center">
-                <div className="animate-pulse text-gray-500">Loading sentiment...</div>
+                <div className="animate-pulse text-[var(--text-muted)]">Loading sentiment...</div>
             </div>
         );
     }
 
     if (!data || data.total_articles === 0) {
         return (
-            <div className="h-full flex flex-col items-center justify-center text-gray-500">
+            <div className="h-full flex flex-col items-center justify-center text-[var(--text-muted)]">
                 <Activity size={32} className="mb-2 opacity-30" />
                 <p className="text-sm">No sentiment data available</p>
             </div>
@@ -57,9 +57,9 @@ export function MarketSentimentGauge() {
         },
         neutral: {
             icon: Minus,
-            color: 'text-gray-400',
-            bg: 'bg-gray-500/20',
-            border: 'border-gray-500/50',
+            color: 'text-[var(--text-secondary)]',
+            bg: 'bg-[var(--bg-tertiary)]',
+            border: 'border-[var(--border-subtle)]',
         },
         bearish: {
             icon: TrendingDown,
@@ -75,7 +75,7 @@ export function MarketSentimentGauge() {
     // Trend arrow
     const trendConfig = {
         improving: { icon: TrendingUp, color: 'text-green-400', label: 'Improving' },
-        stable: { icon: Minus, color: 'text-gray-400', label: 'Stable' },
+        stable: { icon: Minus, color: 'text-[var(--text-secondary)]', label: 'Stable' },
         declining: { icon: TrendingDown, color: 'text-red-400', label: 'Declining' },
     };
 
@@ -88,7 +88,7 @@ export function MarketSentimentGauge() {
             <div className={`flex items-center justify-center gap-3 p-4 rounded-lg border ${config.bg} ${config.border} mb-4`}>
                 <Icon size={32} className={config.color} />
                 <div>
-                    <div className="text-xs text-gray-400 mb-1">Market Sentiment</div>
+                    <div className="mb-1 text-xs text-[var(--text-muted)]">Market Sentiment</div>
                     <div className={`text-2xl font-bold capitalize ${config.color}`}>
                         {data.overall}
                     </div>
@@ -97,8 +97,8 @@ export function MarketSentimentGauge() {
 
             {/* Sentiment Distribution - Horizontal Bar */}
             <div className="mb-4">
-                <div className="text-xs text-gray-400 mb-2">Sentiment Distribution</div>
-                <div className="flex h-8 rounded overflow-hidden border border-gray-700">
+                <div className="mb-2 text-xs text-[var(--text-muted)]">Sentiment Distribution</div>
+                <div className="flex h-8 overflow-hidden rounded border border-[var(--border-subtle)]">
                     {/* Bullish */}
                     <div
                         className="bg-green-500/80 flex items-center justify-center text-xs font-medium text-white transition-all"
@@ -109,7 +109,7 @@ export function MarketSentimentGauge() {
                     </div>
                     {/* Neutral */}
                     <div
-                        className="bg-gray-500/80 flex items-center justify-center text-xs font-medium text-white transition-all"
+                        className="flex items-center justify-center bg-[var(--bg-tertiary)] text-xs font-medium text-[var(--text-primary)] transition-all"
                         style={{ width: `${neutralPercentage}%` }}
                         title={`Neutral: ${neutralPercentage.toFixed(1)}%`}
                     >
@@ -132,9 +132,9 @@ export function MarketSentimentGauge() {
                     <div className="text-xs text-green-400 mb-1">Bullish</div>
                     <div className="text-lg font-bold text-green-400">{data.bullish_count}</div>
                 </div>
-                <div className="p-2 bg-gray-500/10 border border-gray-500/30 rounded">
-                    <div className="text-xs text-gray-400 mb-1">Neutral</div>
-                    <div className="text-lg font-bold text-gray-400">{data.neutral_count}</div>
+                <div className="rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2">
+                    <div className="mb-1 text-xs text-[var(--text-secondary)]">Neutral</div>
+                    <div className="text-lg font-bold text-[var(--text-secondary)]">{data.neutral_count}</div>
                 </div>
                 <div className="p-2 bg-red-500/10 border border-red-500/30 rounded">
                     <div className="text-xs text-red-400 mb-1">Bearish</div>
@@ -143,8 +143,8 @@ export function MarketSentimentGauge() {
             </div>
 
             {/* Trend */}
-            <div className="flex items-center justify-between p-3 bg-gray-800/30 rounded border border-gray-700/50">
-                <span className="text-xs text-gray-400">Trend:</span>
+            <div className="flex items-center justify-between rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+                <span className="text-xs text-[var(--text-muted)]">Trend:</span>
                 <div className={`flex items-center gap-1 ${trend.color}`}>
                     <TrendIcon size={14} />
                     <span className="text-sm font-medium">{trend.label}</span>
@@ -152,7 +152,7 @@ export function MarketSentimentGauge() {
             </div>
 
             {/* Footer */}
-            <div className="mt-auto pt-3 border-t border-gray-800 text-[10px] text-gray-500 text-center">
+            <div className="mt-auto border-t border-[var(--border-subtle)] pt-3 text-center text-[10px] text-[var(--text-muted)]">
                 Based on {data.total_articles} articles analyzed
             </div>
         </div>

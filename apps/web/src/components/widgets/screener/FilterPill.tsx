@@ -42,7 +42,7 @@ export function FilterPill({ label, value, presets, onSelect, onRemove }: Filter
           "inline-flex items-center rounded-full border h-7 transition-all duration-200 overflow-hidden",
           value
             ? 'bg-blue-600/10 border-blue-500/30 text-blue-300'
-            : 'bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+            : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
       )}>
         <button
           onClick={() => setIsOpen(!isOpen)}
@@ -51,7 +51,7 @@ export function FilterPill({ label, value, presets, onSelect, onRemove }: Filter
           <span>{label}</span>
           {value && (
               <>
-                <span className="text-gray-600 font-black">|</span>
+                <span className="font-black text-[var(--text-muted)]">|</span>
                 <span className="text-blue-400">{value}</span>
               </>
           )}
@@ -71,15 +71,15 @@ export function FilterPill({ label, value, presets, onSelect, onRemove }: Filter
       </div>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 w-48 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl z-[110] overflow-hidden animate-in fade-in zoom-in-95 duration-100">
-          <div className="p-2 border-b border-gray-800 bg-gray-950/50">
+        <div className="absolute left-0 top-full z-[110] mt-2 w-48 overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] shadow-2xl duration-100 animate-in fade-in zoom-in-95">
+          <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2">
             <input
               type="text"
               autoFocus
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search..."
-              className="w-full px-2 py-1.5 text-[11px] bg-gray-800 border border-gray-700 rounded text-white outline-none focus:border-blue-500 placeholder-gray-600 font-medium"
+              className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11px] font-medium text-[var(--text-primary)] outline-none placeholder-[var(--text-muted)] focus:border-blue-500"
             />
           </div>
           <div className="max-h-48 overflow-y-auto p-1 scrollbar-hide">
@@ -91,18 +91,18 @@ export function FilterPill({ label, value, presets, onSelect, onRemove }: Filter
                   setIsOpen(false);
                   setSearchQuery('');
                 }}
-                className="w-full px-3 py-2 text-left text-[11px] text-gray-400 hover:bg-blue-600 hover:text-white rounded transition-colors font-medium flex items-center justify-between group"
+                className="group flex w-full items-center justify-between rounded px-3 py-2 text-left text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-blue-600 hover:text-white"
               >
                 {preset.label}
                 <ChevronDown size={10} className="opacity-0 group-hover:opacity-50 -rotate-90" />
               </button>
             ))}
             {filteredPresets.length === 0 && (
-                <div className="py-4 text-center text-[10px] text-gray-600 font-bold uppercase italic">No matches</div>
+                <div className="py-4 text-center text-[10px] font-bold uppercase italic text-[var(--text-muted)]">No matches</div>
             )}
           </div>
-          <div className="p-2 border-t border-gray-800 bg-gray-950/50">
-            <button className="w-full py-1 text-[9px] font-black text-gray-500 hover:text-blue-400 uppercase tracking-widest text-center transition-colors">
+          <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2">
+            <button className="w-full py-1 text-center text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] transition-colors hover:text-blue-400">
               Advanced Filter...
             </button>
           </div>

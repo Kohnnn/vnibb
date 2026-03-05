@@ -59,7 +59,7 @@ export function StockSplitsWidget({ symbol }: StockSplitsWidgetProps) {
 
     return (
         <div className="h-full flex flex-col">
-            <div className="pb-2 border-b border-gray-800/50">
+            <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
@@ -77,7 +77,7 @@ export function StockSplitsWidget({ symbol }: StockSplitsWidgetProps) {
                 ) : (
                     <table className="data-table w-full text-sm">
                         <thead>
-                            <tr className="text-left text-xs text-gray-500 uppercase">
+                            <tr className="text-left text-xs text-[var(--text-muted)] uppercase">
                                 <th className="pb-2 pr-4">Execution Date</th>
                                 <th className="pb-2 pr-4 text-center">Split From</th>
                                 <th className="pb-2 text-center">Split To</th>
@@ -88,8 +88,8 @@ export function StockSplitsWidget({ symbol }: StockSplitsWidgetProps) {
                                 const ratio = parseSplitRatio(row.value || row.description || row.event_name);
                                 const executionDate = row.event_date || row.record_date || row.ex_date;
                                 return (
-                                    <tr key={`${executionDate || 'split'}-${idx}`} className="border-t border-gray-800/50 hover:bg-gray-800/30">
-                                        <td className="py-2 pr-4 text-gray-300">{formatDate(executionDate || undefined)}</td>
+                                    <tr key={`${executionDate || 'split'}-${idx}`} className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
+                                        <td className="py-2 pr-4 text-[var(--text-secondary)]">{formatDate(executionDate || undefined)}</td>
                                         <td className="py-2 pr-4 text-center text-blue-400 font-medium">{ratio.from}</td>
                                         <td className="py-2 text-center text-green-400 font-medium">{ratio.to}</td>
                                     </tr>

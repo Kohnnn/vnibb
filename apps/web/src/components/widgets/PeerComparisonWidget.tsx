@@ -218,20 +218,20 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
         return (
             <div className="flex-1 overflow-auto">
                 <table className="data-table w-full text-[10px] border-collapse">
-                    <thead className="text-gray-500 sticky top-0 bg-gray-900 border-b border-gray-800">
+                    <thead className="text-[var(--text-muted)] sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
                         <tr>
-                            <th className="text-left py-2 px-2 font-medium bg-gray-900 z-10 w-32 border-r border-gray-800/50">Metric</th>
+                            <th className="text-left py-2 px-2 font-medium bg-[var(--bg-secondary)] z-10 w-32 border-r border-[var(--border-subtle)]">Metric</th>
                             {peers.map((sym, index) => (
                                 <th key={`${sym}-${index}`} className="text-right py-2 px-2 font-medium min-w-[80px]">
                                     <div className="flex flex-col">
-                                        <span className="text-white font-bold">{sym}</span>
+                                        <span className="text-[var(--text-primary)] font-bold">{sym}</span>
                                         <span className="text-[8px] font-normal truncate opacity-60">
                                             {compData.data[sym]?.name || 'Loading...'}
                                         </span>
                                     </div>
                                 </th>
                             ))}
-                            <th className="text-right py-2 px-2 font-medium min-w-[70px] text-amber-400/80 border-l border-gray-800/50">
+                            <th className="text-right py-2 px-2 font-medium min-w-[70px] text-amber-400/80 border-l border-[var(--border-subtle)]">
                                 <div className="flex flex-col">
                                     <span>Sector</span>
                                     <span className="text-[8px] font-normal opacity-60">Avg</span>
@@ -239,12 +239,12 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                             </th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800/30">
+                    <tbody className="divide-y divide-[var(--border-subtle)]">
                         {compData.metrics.map(metric => {
                             const sectorValue = sectorAvg[metric.key];
                             return (
-                                <tr key={metric.key} className="hover:bg-gray-800/20">
-                                    <td className="py-1.5 px-2 text-gray-400 border-r border-gray-800/50 sticky left-0 bg-gray-900/80 backdrop-blur-sm">
+                                <tr key={metric.key} className="hover:bg-[var(--bg-hover)]">
+                                    <td className="py-1.5 px-2 text-[var(--text-secondary)] border-r border-[var(--border-subtle)] sticky left-0 bg-[var(--bg-secondary)]">
                                         {metric.label}
                                     </td>
                                     {peers.map((sym, index) => {
@@ -264,7 +264,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                                 const max = Math.max(...allValues);
                                                 if (value === max && allValues.length > 1) cellClass += " text-green-400";
                                                 else if (value === min && allValues.length > 1) cellClass += " text-red-400";
-                                                else cellClass += " text-gray-300";
+                                                else cellClass += " text-[var(--text-secondary)]";
                                             }
                                         }
 
@@ -275,7 +275,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                         );
 
                                     })}
-                                    <td className="text-right px-2 font-mono text-amber-400/60 border-l border-gray-800/50">
+                                    <td className="text-right px-2 font-mono text-amber-400/60 border-l border-[var(--border-subtle)]">
                                         {sectorValue !== undefined ? formatCellValue(sectorValue, metric.format) : '-'}
                                     </td>
                                 </tr>
@@ -299,15 +299,15 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
     const renderCharts = () => (
         <div className="flex-1 flex flex-col gap-4 p-2 overflow-auto">
             {/* Radar Chart for Key Metrics */}
-            <div className="bg-gray-800/20 rounded-lg p-3 border border-gray-800/50 h-[300px]">
-                <h3 className="text-xs font-medium text-gray-400 mb-4 flex items-center gap-2">
+            <div className="bg-[var(--bg-secondary)] rounded-lg p-3 border border-[var(--border-subtle)] h-[300px]">
+                <h3 className="text-xs font-medium text-[var(--text-secondary)] mb-4 flex items-center gap-2">
                     <Radar size={14} /> Key Metrics Comparison
                 </h3>
                 <ChartSizeBox className="h-[85%]" minHeight={180}>
                     {({ width, height }) => (
                         <RadarChart width={width} height={height} data={radarData}>
-                            <PolarGrid stroke="#374151" />
-                            <PolarAngleAxis dataKey="subject" tick={{ fill: '#9CA3AF', fontSize: 10 }} />
+                            <PolarGrid stroke="var(--border-subtle)" />
+                            <PolarAngleAxis dataKey="subject" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
                             {peers.map((sym, i) => (
                                 <ReRadar
                                     key={`${sym}-${i}`}
@@ -333,17 +333,17 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
             </div>
 
             {/* Price Performance */}
-            <div className="bg-gray-800/20 rounded-lg p-3 border border-gray-800/50 h-[300px]">
+            <div className="bg-[var(--bg-secondary)] rounded-lg p-3 border border-[var(--border-subtle)] h-[300px]">
                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xs font-medium text-gray-400 flex items-center gap-2">
+                    <h3 className="text-xs font-medium text-[var(--text-secondary)] flex items-center gap-2">
                         <LineChartIcon size={14} /> Normalized Price Performance (Base 100)
                     </h3>
-                    <div className="flex bg-gray-800 rounded text-[10px]">
+                    <div className="flex bg-[var(--bg-tertiary)] rounded text-[10px]">
                         {['3M', '6M', '1Y', 'YTD'].map((p, index) => (
                             <button
                                 key={`${p}-${index}`}
                                 onClick={() => setPeriod(p)}
-                                className={`px-2 py-0.5 rounded ${period === p ? 'bg-blue-600 text-white' : 'text-gray-400'}`}
+                                className={`px-2 py-0.5 rounded ${period === p ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
                             >
                                 {p}
                             </button>
@@ -353,16 +353,16 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                 <ChartSizeBox className="h-[80%]" minHeight={180}>
                     {({ width, height }) => (
                         <LineChart width={width} height={height} data={chartPriceData}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" opacity={0.45} />
                             <XAxis
                                 dataKey="date"
-                                tick={{ fill: '#9CA3AF', fontSize: 9 }}
+                                tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                 axisLine={false}
                                 tickLine={false}
                             />
                             <YAxis
                                 domain={['auto', 'auto']}
-                                tick={{ fill: '#9CA3AF', fontSize: 9 }}
+                                tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
                                 axisLine={false}
                                 tickLine={false}
                             />
@@ -393,13 +393,13 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
     );
 
     return (
-        <div className="h-full flex flex-col bg-gray-900/50 text-white rounded-lg">
+        <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)] rounded-lg">
             {/* Header Area */}
-            <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between gap-4">
+            <div className="px-3 py-2 border-b border-[var(--border-color)] flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1 bg-gray-800/50 p-1 rounded border border-gray-700/50">
+                    <div className="flex items-center gap-1 bg-[var(--bg-secondary)] p-1 rounded border border-[var(--border-subtle)]">
                         {peers.map((sym, index) => (
-                            <div key={`${sym}-${index}`} className="flex items-center gap-1 bg-gray-700 px-2 py-0.5 rounded text-[10px] font-medium group">
+                            <div key={`${sym}-${index}`} className="flex items-center gap-1 bg-[var(--bg-tertiary)] px-2 py-0.5 rounded text-[10px] font-medium group">
                                 {sym}
                                 {peers.length > 2 && (
                                     <button onClick={() => removePeer(sym)} className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity">
@@ -411,7 +411,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                         {peers.length < 6 && (
                             <button
                                 onClick={() => setShowSelector(!showSelector)}
-                                className="p-1 hover:bg-gray-700 rounded transition-colors text-gray-400 hover:text-white"
+                                className="p-1 hover:bg-[var(--bg-hover)] rounded transition-colors text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                             >
                                 <Plus size={12} />
                             </button>
@@ -431,21 +431,21 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                     <div className="relative">
                         <button
                             onClick={() => setShowSetsMenu(!showSetsMenu)}
-                            className="p-1.5 text-gray-500 hover:text-white bg-gray-800/50 rounded border border-gray-700/50"
+                            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-secondary)] rounded border border-[var(--border-subtle)]"
                             title="Saved Comparisons"
                         >
                             <FolderOpen size={14} />
                         </button>
                         {showSetsMenu && (
-                            <div className="absolute top-8 right-0 z-50 w-56 bg-gray-800 border border-gray-700 rounded-lg shadow-2xl p-2 animate-in fade-in slide-in-from-top-2 duration-200">
-                                <div className="mb-2 pb-2 border-b border-gray-700">
+                            <div className="absolute top-8 right-0 z-50 w-56 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl p-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <div className="mb-2 pb-2 border-b border-[var(--border-subtle)]">
                                     <div className="flex gap-1">
                                         <input
                                             type="text"
                                             value={saveSetName}
                                             onChange={(e) => setSaveSetName(e.target.value)}
                                             placeholder="Save current as..."
-                                            className="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[10px] focus:ring-1 focus:ring-blue-500 outline-none"
+                                            className="flex-1 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded px-2 py-1 text-[10px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:ring-1 focus:ring-blue-500 outline-none"
                                         />
                                         <button
                                             onClick={handleSaveSet}
@@ -457,20 +457,20 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                     </div>
                                 </div>
                                 {sets.length === 0 ? (
-                                    <p className="text-[10px] text-gray-500 text-center py-2">No saved sets</p>
+                                    <p className="text-[10px] text-[var(--text-muted)] text-center py-2">No saved sets</p>
                                 ) : (
                                     <div className="space-y-1 max-h-40 overflow-auto">
                                         {sets.map(set => (
                                             <div
                                                 key={set.id}
-                                                className="flex items-center justify-between px-2 py-1.5 hover:bg-gray-700 rounded text-[10px] group"
+                                                className="flex items-center justify-between px-2 py-1.5 hover:bg-[var(--bg-hover)] rounded text-[10px] group"
                                             >
                                                 <button
                                                     onClick={() => handleLoadSet(set)}
                                                     className="flex-1 text-left"
                                                 >
-                                                    <span className="font-medium text-white">{set.name}</span>
-                                                    <span className="text-gray-500 ml-1">({set.symbols.length})</span>
+                                                    <span className="font-medium text-[var(--text-primary)]">{set.name}</span>
+                                                    <span className="text-[var(--text-muted)] ml-1">({set.symbols.length})</span>
                                                 </button>
                                                 <button
                                                     onClick={() => deleteSet(set.id)}
@@ -485,16 +485,16 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                             </div>
                         )}
                     </div>
-                    <div className="flex bg-gray-800/50 rounded p-0.5 border border-gray-700/50">
+                    <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-subtle)]">
                         <button
                             onClick={() => setActiveTab('table')}
-                            className={`p-1.5 rounded transition-all ${activeTab === 'table' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                            className={`p-1.5 rounded transition-all ${activeTab === 'table' ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                         >
                             <TableIcon size={14} />
                         </button>
                         <button
                             onClick={() => setActiveTab('radar')}
-                            className={`p-1.5 rounded transition-all ${activeTab === 'radar' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                            className={`p-1.5 rounded transition-all ${activeTab === 'radar' ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                         >
                             <LayoutGrid size={14} />
                         </button>
@@ -502,13 +502,13 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
 
                     <button
                         onClick={() => setHeatmapEnabled(!heatmapEnabled)}
-                        className={`p-1.5 rounded transition-all border border-gray-700/50 ${heatmapEnabled ? 'bg-blue-600/20 text-blue-400 border-blue-500/50' : 'text-gray-500 hover:text-white bg-gray-800/50'}`}
+                        className={`p-1.5 rounded transition-all border border-[var(--border-subtle)] ${heatmapEnabled ? 'bg-blue-600/20 text-blue-400 border-blue-500/50' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-secondary)]'}`}
                         title="Toggle Heatmap"
                     >
                         <Grid3X3 size={14} />
                     </button>
 
-                    <button onClick={() => refetch()} className="p-1.5 text-gray-500 hover:text-white bg-gray-800/50 rounded border border-gray-700/50">
+                    <button onClick={() => refetch()} className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-secondary)] rounded border border-[var(--border-subtle)]">
 
                         <RefreshCw size={14} />
                     </button>
@@ -518,31 +518,31 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
 
             {/* Peer Selector Panel */}
             {showSelector && (
-                <div className="absolute top-12 left-3 z-50 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-2xl p-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="absolute top-12 left-3 z-50 w-64 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl p-3 animate-in fade-in slide-in-from-top-2 duration-200">
                     <div className="relative mb-3">
-                        <Search size={14} className="absolute left-2 top-2 text-gray-500" />
+                        <Search size={14} className="absolute left-2 top-2 text-[var(--text-muted)]" />
                         <input
                             type="text"
                             value={newPeer}
                             onChange={(e) => setNewPeer(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && addPeer(newPeer)}
                             placeholder="Enter ticker..."
-                            className="w-full bg-gray-900 border border-gray-700 rounded pl-8 pr-2 py-1.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                            className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded pl-8 pr-2 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:ring-1 focus:ring-blue-500 outline-none"
                             autoFocus
                         />
                     </div>
                     {peerSuggestions?.peers && (
                         <div>
-                            <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-2 block">Suggestions</span>
+                            <span className="text-[10px] text-[var(--text-muted)] uppercase font-bold tracking-wider mb-2 block">Suggestions</span>
                             <div className="space-y-1">
                                 {peerSuggestions.peers.map((p, index) => (
                                     <button
                                         key={`${p.symbol}-${index}`}
                                         onClick={() => addPeer(p.symbol)}
-                                        className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-gray-700 rounded text-xs transition-colors group"
+                                        className="w-full flex items-center justify-between px-2 py-1.5 hover:bg-[var(--bg-hover)] rounded text-xs transition-colors group"
                                     >
                                         <span className="font-bold">{p.symbol}</span>
-                                        <span className="text-[10px] text-gray-500 group-hover:text-gray-300">{p.name || ''}</span>
+                                        <span className="text-[10px] text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]">{p.name || ''}</span>
                                     </button>
                                 ))}
                             </div>

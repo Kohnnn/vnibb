@@ -39,7 +39,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const decimalOptions = [0, 1, 2, 3];
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(0,0,0,0.6)] animate-in fade-in duration-200">
       <div className="bg-[var(--bg-surface)] rounded-xl border border-[var(--border-default)] w-full max-w-3xl max-h-[80vh] flex shadow-2xl overflow-hidden">
         {/* Sidebar */}
         <div className="w-48 bg-[var(--bg-secondary)] border-r border-[var(--border-default)] p-4 shrink-0 hidden md:block">

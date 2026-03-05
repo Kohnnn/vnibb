@@ -9,11 +9,12 @@ Provides:
 """
 
 from .rate_limit import RateLimitMiddleware
-from .logging import RequestLoggingMiddleware
+from .logging import RequestLoggingMiddleware, get_recent_error_events
 from .versioning import APIVersionMiddleware
 
 __all__ = [
     "RateLimitMiddleware",
-    "RequestLoggingMiddleware", 
+    "RequestLoggingMiddleware",
+    "get_recent_error_events",
     "APIVersionMiddleware",
 ]

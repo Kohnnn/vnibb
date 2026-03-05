@@ -102,7 +102,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         onClick={onClose}
-                        className="fixed inset-0 bg-black/40 z-[40]"
+                        className="fixed inset-0 z-[40] bg-[rgba(0,0,0,0.5)]"
                     />
 
                     {/* Sidebar */}
@@ -224,7 +224,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                         {/* Enhanced Preview Thumbnail */}
                                                         <div className="mt-3 h-20 bg-[var(--bg-primary)] rounded-xl border border-[var(--border-subtle)] relative overflow-hidden group-hover:border-blue-500/30 transition-all">
                                                             <WidgetPreview type={widget.type} />
-                                                            <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                                                            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[rgba(0,0,0,0.2)] via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                                                             <div className="absolute bottom-1.5 left-2 right-2 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
                                                                 <span className="text-[7px] font-bold text-[var(--text-muted)] bg-[var(--bg-surface)] px-1 rounded">
                                                                     {widget.defaultLayout.w}×{widget.defaultLayout.h}

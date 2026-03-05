@@ -70,6 +70,27 @@ export interface CompanyEventsResponse {
   data: CompanyEventData[];
 }
 
+export interface AnalystEstimateDataRow {
+  period: string;
+  eps_estimate: number | null;
+  revenue_estimate: number | null;
+}
+
+export interface AnalystEstimatesPayload {
+  symbol: string;
+  source: string;
+  message: string;
+  data: AnalystEstimateDataRow[];
+}
+
+export interface AnalystEstimatesResponse {
+  data: AnalystEstimatesPayload;
+  meta?: {
+    count: number;
+  };
+  error?: string | null;
+}
+
 export interface ShareholderData {
   symbol: string;
   shareholder_name?: string;

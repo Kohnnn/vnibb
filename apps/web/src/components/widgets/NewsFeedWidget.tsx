@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { API_BASE_URL } from '@/lib/api';
+import { formatTimestamp } from '@/lib/format';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -61,9 +62,9 @@ function SentimentBadge({ sentiment, score }: { sentiment?: string; score?: numb
         },
         neutral: {
             icon: Minus,
-            bg: 'bg-gray-500/10',
-            text: 'text-gray-400',
-            border: 'border-gray-500/30',
+            bg: 'bg-[var(--bg-hover)]',
+            text: 'text-[var(--text-muted)]',
+            border: 'border-[var(--border-color)]',
             label: 'Neutral'
         },
         bearish: {
@@ -86,28 +87,8 @@ function SentimentBadge({ sentiment, score }: { sentiment?: string; score?: numb
     );
 }
 
-// Format date relative to now
-function formatDateRelative(dateStr: string | null | undefined): string {
-    if (!dateStr) return '';
-
-    try {
-        const date = new Date(dateStr);
-        const now = new Date();
-        const diffMs = now.getTime() - date.getTime();
-        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-        const diffDays = Math.floor(diffHours / 24);
-
-        if (diffHours < 1) return 'Just now';
-        if (diffHours < 24) return `${diffHours}h ago`;
-        if (diffDays < 7) return `${diffDays}d ago`;
-
-        return date.toLocaleDateString('vi-VN', {
-            month: 'short',
-            day: 'numeric',
-        });
-    } catch {
-        return '';
-    }
+function formatPublishedTime(dateStr: string | null | undefined): string {
+    return formatTimestamp(dateStr);
 }
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -237,7 +218,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
 
                     {/* Filter chips */}
                     <div className="flex items-center gap-2 flex-wrap text-left">
-                        <Filter size={10} className="text-gray-500" />
+                        <Filter size={10} className="text-[var(--text-muted)]" />
 
                         {/* Sentiment filter */}
                         <select
@@ -284,7 +265,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                     ) : filteredNews.length === 0 ? (
                         <WidgetEmpty message="No matching news found. Try adjusting filters." icon={<Newspaper size={18} />} />
                     ) : (
-                        <div className="divide-y divide-gray-800/30 text-left">
+                        <div className="divide-y divide-[var(--border-color)] text-left">
                             {filteredNews.map((item, index) => (
                                 <div
                                     key={`${item.id ?? item.url ?? item.title}-${index}`}
@@ -295,17 +276,17 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                                     <div className="flex items-start gap-2">
                                         <div className="flex-1 min-w-0">
                                             {/* Title */}
-                                            <h4 className={`text-sm text-gray-200 font-medium leading-tight mb-1 ${expandedId === item.id ? '' : 'line-clamp-2'
+                                            <h4 className={`text-sm text-[var(--text-primary)] font-medium leading-tight mb-1 ${expandedId === item.id ? '' : 'line-clamp-2'
                                                 }`}>
                                                 {item.title}
                                             </h4>
 
                                             {/* Meta */}
-                                            <div className="flex items-center gap-2 flex-wrap text-[10px] text-gray-500">
+                                            <div className="flex items-center gap-2 flex-wrap text-[10px] text-[var(--text-muted)]">
                                                 {item.published_date && (
                                                     <span className="flex items-center gap-1">
                                                         <Clock size={10} />
-                                                        {formatDateRelative(item.published_date)}
+                                                        {formatPublishedTime(item.published_date)}
                                                     </span>
                                                 )}
                                                 {item.source && (
@@ -342,7 +323,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                                                 e.stopPropagation();
                                                 toggleBookmark(item.id);
                                             }}
-                                            className="p-1 text-gray-500 hover:text-yellow-400 transition-colors"
+                                            className="p-1 text-[var(--text-muted)] hover:text-yellow-400 transition-colors"
                                         >
                                             {bookmarkedIds.has(item.id) ? (
                                                 <BookmarkCheck size={14} className="text-yellow-400" />
@@ -361,7 +342,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                                                     <div className="text-[9px] text-blue-400 mb-1 font-medium">
                                                         AI SUMMARY
                                                     </div>
-                                                    <p className="text-xs text-gray-300 leading-relaxed">
+                                                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
                                                         {item.ai_summary}
                                                     </p>
                                                 </div>
@@ -369,7 +350,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
 
                                             {/* Original summary */}
                                             {item.summary && !item.ai_summary && (
-                                                <p className="text-xs text-gray-400 leading-relaxed">
+                                                <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
                                                     {item.summary}
                                                 </p>
                                             )}
@@ -377,7 +358,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                                             {/* Sectors */}
                                             {item.sectors.length > 0 && (
                                                 <div className="flex items-center gap-1 flex-wrap">
-                                                    <span className="text-[9px] text-gray-500">Sectors:</span>
+                                                    <span className="text-[9px] text-[var(--text-muted)]">Sectors:</span>
                                                     {item.sectors.map(sector => (
                                                         <span
                                                             key={sector}

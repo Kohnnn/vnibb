@@ -6,7 +6,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useCompanyNews, useDividends, useInsiderDeals } from '@/lib/queries';
-import { formatRelativeTime } from '@/lib/format';
+import { formatTimestamp } from '@/lib/format';
 import { formatNumber, formatPercent, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 
@@ -103,7 +103,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
       widgetId={id}
     >
       <div aria-label="News and corporate actions" className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-gray-800/60">
+        <div className="px-3 py-2 border-b border-[var(--border-color)]">
           <WidgetMeta
             updatedAt={updatedAt}
             isFetching={isFetching && hasData}
@@ -122,14 +122,14 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
         ) : !hasData ? (
           <WidgetEmpty message="No news or corporate actions available" icon={<Newspaper size={18} />} />
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-gray-800/60 flex-1">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-[var(--border-color)] flex-1">
             <section className="p-3 flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Newspaper size={14} className="text-blue-400" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Company News</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Company News</span>
                 </div>
-                <span className="text-[10px] text-gray-500">{news.length} items</span>
+                <span className="text-[10px] text-[var(--text-muted)]">{news.length} items</span>
               </div>
 
               {newsLoading && !hasNews ? (
@@ -137,7 +137,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
               ) : newsError && !hasNews ? (
                 <WidgetError error={newsError as Error} onRetry={() => refetchNews()} />
               ) : !hasNews ? (
-                <div className="text-xs text-gray-500">No news available yet.</div>
+                <div className="text-xs text-[var(--text-muted)]">No news available yet.</div>
               ) : (
                 <div className="space-y-2">
                   {news.map((item, idx) => (
@@ -146,12 +146,12 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
                       href={item.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="block rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2 hover:bg-white/5 transition-colors"
+                      className="block rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors"
                     >
-                      <div className="text-xs font-semibold text-gray-200 line-clamp-2">{item.title}</div>
-                      <div className="mt-1 flex items-center gap-2 text-[10px] text-gray-500">
+                      <div className="text-xs font-semibold text-[var(--text-primary)] line-clamp-2">{item.title}</div>
+                      <div className="mt-1 flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         {item.source && <span>{item.source}</span>}
-                        {item.published_at && <span>• {formatRelativeTime(item.published_at)}</span>}
+                        {item.published_at && <span>• {formatTimestamp(item.published_at)}</span>}
                       </div>
                     </a>
                   ))}
@@ -163,9 +163,9 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <BadgeDollarSign size={14} className="text-emerald-400" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Corporate Actions</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Corporate Actions</span>
                 </div>
-                <span className="text-[10px] text-gray-500">{dividends.length + insiderDeals.length} items</span>
+                <span className="text-[10px] text-[var(--text-muted)]">{dividends.length + insiderDeals.length} items</span>
               </div>
 
               {dividendsLoading && insiderLoading && !hasActions ? (
@@ -175,30 +175,30 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
               ) : (
                 <div className="space-y-3">
                   <div className="space-y-2">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Dividends</div>
+                    <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Dividends</div>
                     {dividends.length === 0 ? (
-                      <div className="text-xs text-gray-500">No dividends available yet.</div>
+                      <div className="text-xs text-[var(--text-muted)]">No dividends available yet.</div>
                     ) : (
                       <div className="space-y-2">
                         {dividends.slice(0, 4).map((dividend, idx) => (
                           <div
                             key={`${dividend.ex_date}-${idx}`}
-                            className="flex items-center justify-between rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2"
+                            className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                           >
                             <div className="space-y-1">
-                              <div className="text-xs font-semibold text-gray-200">
+                              <div className="text-xs font-semibold text-[var(--text-primary)]">
                                 {formatDividendValue(dividend)}
                               </div>
-                              <div className="text-[10px] text-gray-500">
+                              <div className="text-[10px] text-[var(--text-muted)]">
                                 {formatDividendType(dividend.dividend_type || dividend.type)}
                                 {dividend.dividend_yield !== null && dividend.dividend_yield !== undefined
                                   ? ` • ${formatPercent(dividend.dividend_yield)}`
                                   : ''}
-                                {dividend.ex_date ? ` • Ex ${formatRelativeTime(dividend.ex_date)}` : ''}
+                                {dividend.ex_date ? ` • Ex ${formatTimestamp(dividend.ex_date)}` : ''}
                               </div>
                             </div>
                             {dividend.payment_date && (
-                              <div className="text-[10px] text-gray-500">Pay {formatRelativeTime(dividend.payment_date)}</div>
+                              <div className="text-[10px] text-[var(--text-muted)]">Pay {formatTimestamp(dividend.payment_date)}</div>
                             )}
                           </div>
                         ))}
@@ -207,9 +207,9 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
                   </div>
 
                   <div className="space-y-2">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Insider Deals</div>
+                    <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Insider Deals</div>
                     {insiderDeals.length === 0 ? (
-                      <div className="text-xs text-gray-500">No insider deals available yet.</div>
+                      <div className="text-xs text-[var(--text-muted)]">No insider deals available yet.</div>
                     ) : (
                       <div className="space-y-2">
                         {insiderDeals.slice(0, 4).map((deal) => {
@@ -218,13 +218,13 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
                           return (
                             <div
                               key={deal.id}
-                              className="flex items-center justify-between rounded-lg border border-gray-800/60 bg-black/20 px-3 py-2"
+                              className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                             >
                               <div>
-                                <div className="text-xs font-semibold text-gray-200">
+                                <div className="text-xs font-semibold text-[var(--text-primary)]">
                                   {deal.insider_name || 'Insider'}
                                 </div>
-                                <div className="text-[10px] text-gray-500">
+                                <div className="text-[10px] text-[var(--text-muted)]">
                                   {deal.insider_position || '—'}
                                 </div>
                               </div>
@@ -232,10 +232,10 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
                                 <div className={`text-[10px] font-bold ${isBuy ? 'text-green-400' : 'text-red-400'}`}>
                                   {action}
                                 </div>
-                                <div className="text-[10px] text-gray-500">
+                                <div className="text-[10px] text-[var(--text-muted)]">
                                   {formatNumber(deal.deal_quantity)} @ {formatVND(deal.deal_price)}
                                 </div>
-                                <div className="text-[10px] text-gray-500">{formatRelativeTime(deal.announce_date)}</div>
+                                <div className="text-[10px] text-[var(--text-muted)]">{formatTimestamp(deal.announce_date)}</div>
                               </div>
                             </div>
                           );

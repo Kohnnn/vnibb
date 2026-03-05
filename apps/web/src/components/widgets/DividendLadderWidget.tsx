@@ -7,7 +7,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useDividends } from '@/lib/queries';
-import { formatRelativeTime, formatDate } from '@/lib/format';
+import { formatTimestamp } from '@/lib/format';
 import { formatPercent, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 
@@ -154,12 +154,12 @@ export function DividendLadderWidget({ id, symbol, onRemove }: DividendLadderWid
                   key={`${event.type}-${event.date}-${index}`}
                   className="flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2"
                 >
-                  <div>
-                    <div className="text-xs font-semibold text-[var(--text-primary)]">{event.label}</div>
-                    <div className="text-[10px] text-[var(--text-muted)]">
-                      {formatDate(event.date, 'short')} • {formatRelativeTime(event.date)}
+                    <div>
+                      <div className="text-xs font-semibold text-[var(--text-primary)]">{event.label}</div>
+                      <div className="text-[10px] text-[var(--text-muted)]">
+                        {formatTimestamp(event.date)}
+                      </div>
                     </div>
-                  </div>
                   <div className="text-right">
                     <div className="text-xs font-mono text-[var(--text-primary)]">{event.payoutLabel}</div>
                     <div className="text-[10px] text-[var(--text-muted)]">
