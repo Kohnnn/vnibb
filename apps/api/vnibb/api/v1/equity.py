@@ -2333,7 +2333,7 @@ async def get_rating(symbol: str):
 
 
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
-@cached(ttl=86400, key_prefix="ratios")
+@cached(ttl=86400, key_prefix="ratios_v2")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
@@ -2416,7 +2416,7 @@ async def get_financial_ratios(
 
 
 @router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])
-@cached(ttl=86400, key_prefix="ratios_history")
+@cached(ttl=86400, key_prefix="ratios_history_v2")
 async def get_ratio_history(
     symbol: str,
     ratios: str = Query("pe,pb,ps", description="Comma-separated ratio keys"),
@@ -2549,7 +2549,7 @@ async def get_metrics_history(
 @router.get(
     "/{symbol}/income-statement", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=86400, key_prefix="income_statement")
+@cached(ttl=86400, key_prefix="income_statement_v2")
 async def get_income_statement(
     symbol: str,
     period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
@@ -2606,7 +2606,7 @@ async def get_income_statement(
 @router.get(
     "/{symbol}/balance-sheet", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=86400, key_prefix="balance_sheet")
+@cached(ttl=86400, key_prefix="balance_sheet_v2")
 async def get_balance_sheet(
     symbol: str,
     period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
@@ -2648,7 +2648,7 @@ async def get_balance_sheet(
 
 
 @router.get("/{symbol}/cash-flow", response_model=StandardResponse[List[FinancialStatementData]])
-@cached(ttl=86400, key_prefix="cash_flow")
+@cached(ttl=86400, key_prefix="cash_flow_v2")
 async def get_cash_flow(
     symbol: str,
     period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),

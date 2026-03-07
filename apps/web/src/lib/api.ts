@@ -1270,7 +1270,7 @@ export async function getPeerCompanies(symbol: string, limit = 5): Promise<Peers
 
 // ============ Quant API ============
 
-export type QuantPeriod = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'YTD' | 'ALL'
+export type QuantPeriod = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | '10Y' | 'YTD' | 'ALL'
 
 export type QuantMetric =
     | 'volume_delta'
@@ -1291,6 +1291,7 @@ export interface QuantResponse {
         period: QuantPeriod
         computed_at: string
         metrics: Record<string, any>
+        warning?: string | null
     }
     meta?: {
         count?: number
@@ -1351,6 +1352,7 @@ export interface MomentumProfilePayload {
     symbol: string;
     period: QuantPeriod;
     computed_at: string;
+    data_quality_note?: string;
     returns_pct: {
         r1m?: number | null;
         r3m?: number | null;

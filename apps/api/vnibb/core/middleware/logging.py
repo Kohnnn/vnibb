@@ -11,6 +11,7 @@ Provides:
 import logging
 import re
 import time
+import traceback
 import uuid
 from collections import deque
 from datetime import datetime
@@ -111,6 +112,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         status_code: int | None,
         error_type: str,
         error: str,
+        stack_trace: str | None = None,
     ) -> None:
         RECENT_ERROR_EVENTS.append(
             {
@@ -124,6 +126,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 "status_code": status_code,
                 "error_type": error_type,
                 "error": error,
+                "stack_trace": stack_trace,
             }
         )
 
@@ -156,14 +159,16 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             # Log error
             duration_ms = (time.time() - start_time) * 1000
             now_iso = datetime.utcnow().isoformat()
+            stack_trace = traceback.format_exc(limit=12)
             logger.error(
-                "[%s] %s: %s: %s | Request: %s | At: %s",
+                "[%s] %s: %s: %s\nRequest: %s\nAt: %s\n%s",
                 symbol or "UNKNOWN",
                 sanitized_path,
                 type(exc).__name__,
                 str(exc),
                 str(request.url),
                 now_iso,
+                stack_trace,
                 extra={
                     "request_id": request_id,
                     "method": request.method,
@@ -175,6 +180,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                     "duration_ms": round(duration_ms, 2),
                     "error": str(exc),
                     "error_type": type(exc).__name__,
+                    "stack_trace": stack_trace[:2000],
                 },
             )
             self._record_recent_error(
@@ -187,6 +193,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 status_code=500,
                 error_type=type(exc).__name__,
                 error=str(exc),
+                stack_trace=stack_trace[:4000],
             )
             raise
 

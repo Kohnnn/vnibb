@@ -303,37 +303,37 @@ const MAIN_DEEP_DIVE_TEMPLATE: TemplateWidget[] = [
 
 const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
     {
-        type: 'volume_profile',
+        type: 'volume_flow',
         syncGroupId: 1,
         config: {},
         layout: { x: 0, y: 0, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'seasonality_heatmap',
+        type: 'rsi_seasonal',
         syncGroupId: 1,
         config: {},
         layout: { x: 8, y: 0, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'obv_divergence',
+        type: 'bollinger_squeeze',
         syncGroupId: 1,
         config: {},
         layout: { x: 16, y: 0, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'volume_flow',
+        type: 'macd_crossovers',
         syncGroupId: 1,
         config: {},
         layout: { x: 0, y: 7, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'rsi_seasonal',
+        type: 'ema_respect',
         syncGroupId: 1,
         config: {},
         layout: { x: 8, y: 7, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'bollinger_squeeze',
+        type: 'drawdown_recovery',
         syncGroupId: 1,
         config: {},
         layout: { x: 16, y: 7, w: 8, h: 7, minW: 6, minH: 5 }
@@ -345,35 +345,128 @@ const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
         layout: { x: 0, y: 14, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'gap_analysis',
+        type: 'parkinson_volatility',
         syncGroupId: 1,
         config: {},
         layout: { x: 8, y: 14, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'macd_crossovers',
+        type: 'gap_analysis',
         syncGroupId: 1,
         config: {},
         layout: { x: 16, y: 14, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'parkinson_volatility',
+        type: 'gamma_exposure',
         syncGroupId: 1,
         config: {},
         layout: { x: 0, y: 21, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'ema_respect',
+        type: 'momentum',
         syncGroupId: 1,
         config: {},
         layout: { x: 8, y: 21, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'drawdown_recovery',
+        type: 'smart_money',
         syncGroupId: 1,
         config: {},
         layout: { x: 16, y: 21, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'earnings_quality',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 28, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'relative_rotation',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 28, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'volume_delta',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 28, w: 8, h: 7, minW: 6, minH: 5 }
     }
+];
+
+const MAIN_COMPARISON_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'comparison_analysis',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 24, h: 8, minW: 12, minH: 6 }
+    },
+    {
+        type: 'peer_comparison',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 8, w: 12, h: 7, minW: 8, minH: 5 }
+    },
+    {
+        type: 'rs_ranking',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 8, w: 12, h: 7, minW: 8, minH: 5 }
+    },
+];
+
+const MAIN_FUNDAMENTALS_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'income_statement',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'balance_sheet',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 0, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'cash_flow',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 8, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'financial_ratios',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 8, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+];
+
+const MAIN_NEWS_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'news_feed',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'news_corporate_actions',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 0, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'events_calendar',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 8, w: 12, h: 6, minW: 8, minH: 4 }
+    },
+    {
+        type: 'market_news',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 8, w: 12, h: 6, minW: 8, minH: 4 }
+    },
 ];
 
 // Map template name to widgets
@@ -685,6 +778,9 @@ const createMainDashboardTabs = (): DashboardTab[] => {
     const macroId = 'tab-main-macro-discovery';
     const deepDiveId = 'tab-main-deep-dive';
     const quantId = 'tab-main-quantitative-edge';
+    const comparisonId = 'tab-main-comparison';
+    const fundamentalsId = 'tab-main-fundamentals';
+    const newsId = 'tab-main-news-events';
 
     return [
         {
@@ -704,6 +800,24 @@ const createMainDashboardTabs = (): DashboardTab[] => {
             name: 'Quant & Technical',
             order: 2,
             widgets: createWidgetsFromTemplate(MAIN_QUANT_TEMPLATE, quantId),
+        },
+        {
+            id: comparisonId,
+            name: 'Comparison',
+            order: 3,
+            widgets: createWidgetsFromTemplate(MAIN_COMPARISON_TEMPLATE, comparisonId),
+        },
+        {
+            id: fundamentalsId,
+            name: 'Fundamentals',
+            order: 4,
+            widgets: createWidgetsFromTemplate(MAIN_FUNDAMENTALS_TEMPLATE, fundamentalsId),
+        },
+        {
+            id: newsId,
+            name: 'News & Events',
+            order: 5,
+            widgets: createWidgetsFromTemplate(MAIN_NEWS_TEMPLATE, newsId),
         },
     ];
 };

@@ -111,6 +111,7 @@ railway up
 ```env
 DATABASE_URL=postgresql+asyncpg://...
 CACHE_BACKEND=auto  # auto|redis|memory|appwrite
+DATA_BACKEND=postgres  # postgres|appwrite|hybrid
 REDIS_URL=redis://localhost:6379/0
 VNSTOCK_API_KEY=vnstock_xxx
 VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
@@ -128,6 +129,7 @@ GEMINI_API_KEY=your_gemini_api_key
 # APPWRITE_PROJECT_ID=your-appwrite-project-id
 # APPWRITE_API_KEY=your-appwrite-server-api-key
 # APPWRITE_DATABASE_ID=your-appwrite-database-id
+# DATA_BACKEND=hybrid  # Start with hybrid before full appwrite cutover
 # Optional alias names used by MCP helper scripts:
 # APPWRITE_NAME=your-appwrite-project-id
 # APPWRITE_SECRET=your-appwrite-server-api-key

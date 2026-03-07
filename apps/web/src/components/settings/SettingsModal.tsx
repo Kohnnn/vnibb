@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { X, Settings as SettingsIcon, Database, Bell, Palette, Server } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { useUnit } from '@/contexts/UnitContext';
 import { formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
 
@@ -17,6 +18,7 @@ type SettingTab = 'general' | 'data' | 'notifications' | 'appearance';
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingTab>('general');
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
+  const { resolvedTheme, setTheme } = useTheme();
   const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
   
   if (!isOpen) return null;
@@ -199,8 +201,30 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Theme</h4>
                   <div className="flex gap-2">
-                    <button className="px-4 py-2 bg-blue-600/20 border border-blue-500 rounded-lg text-blue-400 font-bold text-sm">Dark</button>
-                    <button className="px-4 py-2 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg text-[var(--text-muted)] text-sm">Light (Locked)</button>
+                    <button
+                      type="button"
+                      onClick={() => setTheme('dark')}
+                      className={cn(
+                        "px-4 py-2 rounded-lg border text-sm font-bold transition-colors",
+                        resolvedTheme === 'dark'
+                          ? "bg-blue-600/20 border-blue-500 text-blue-400"
+                          : "bg-[var(--bg-secondary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]"
+                      )}
+                    >
+                      Dark
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTheme('light')}
+                      className={cn(
+                        "px-4 py-2 rounded-lg border text-sm font-bold transition-colors",
+                        resolvedTheme === 'light'
+                          ? "bg-blue-600/20 border-blue-500 text-blue-400"
+                          : "bg-[var(--bg-secondary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]"
+                      )}
+                    >
+                      Light
+                    </button>
                   </div>
                 </div>
               </div>
