@@ -13,7 +13,7 @@ interface MomentumWidgetProps {
   onRemove?: () => void
 }
 
-const PERIOD_OPTIONS = ['1Y', '3Y', '5Y'] as const
+const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y', '10Y'] as const
 
 type PeriodOption = (typeof PERIOD_OPTIONS)[number]
 
@@ -91,7 +91,7 @@ export function MomentumWidget({ symbol }: MomentumWidgetProps) {
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={period} align="right" />
+          <WidgetMeta updatedAt={data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={period} align="right" />
         </div>
       </div>
 

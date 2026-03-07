@@ -25,6 +25,46 @@ function parseIntSafe(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+function parseDotEnv(content) {
+  const parsed = {}
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) continue
+
+    const idx = line.indexOf('=')
+    if (idx <= 0) continue
+
+    const key = line.slice(0, idx).trim()
+    let value = line.slice(idx + 1).trim()
+
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+
+    parsed[key] = value
+  }
+  return parsed
+}
+
+async function loadEnvFile() {
+  const envFile = resolve(getEnv('APPWRITE_ENV_FILE', './apps/api/.env'))
+  try {
+    const content = await readFile(envFile, 'utf8')
+    const parsed = parseDotEnv(content)
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!(key in process.env)) {
+        process.env[key] = value
+      }
+    }
+    return envFile
+  } catch {
+    return null
+  }
+}
+
 function quoteIdentifier(name) {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
     throw new Error(`Unsafe identifier: ${name}`)
@@ -68,6 +108,8 @@ function hashRows(rows) {
 }
 
 async function main() {
+  const loadedEnvFile = await loadEnvFile()
+
   const supabaseUrl = getEnv('SUPABASE_DATABASE_URL', getEnv('DATABASE_URL_SYNC'))
   if (!supabaseUrl) {
     throw new Error('Set SUPABASE_DATABASE_URL or DATABASE_URL_SYNC')
@@ -83,6 +125,7 @@ async function main() {
 
   const baseline = {
     generatedAt: new Date().toISOString(),
+    loadedEnvFile,
     schemaMapPath: resolve(schemaMapPath),
     sampleSize,
     tables: []

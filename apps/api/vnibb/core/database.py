@@ -18,8 +18,6 @@ from typing import AsyncGenerator, Optional
 
 from sqlalchemy import create_engine, MetaData, event, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
-from sqlalchemy.pool import QueuePool, NullPool
-
 logger = logging.getLogger(__name__)
 
 
@@ -78,13 +76,26 @@ if not _ALEMBIC_RUNNING:
         return connect_args
 
 
+    async_engine_kwargs = {
+        "echo": settings.should_echo_sql,
+        "pool_pre_ping": True,
+        "connect_args": _build_connect_args(),
+    }
+
+    if not settings.database_url.startswith("sqlite"):
+        async_engine_kwargs.update(
+            {
+                "pool_size": settings.database_pool_size,
+                "max_overflow": settings.database_max_overflow,
+                "pool_timeout": settings.database_pool_timeout,
+                "pool_recycle": settings.database_pool_recycle,
+            }
+        )
+
     # Async engine for FastAPI application
     engine = create_async_engine(
         settings.database_url,
-        echo=settings.should_echo_sql,
-        pool_pre_ping=True,  # Verify connections before use
-        poolclass=NullPool,  # Use NullPool for PgBouncer compatibility
-        connect_args=_build_connect_args(),
+        **async_engine_kwargs,
     )
 
 

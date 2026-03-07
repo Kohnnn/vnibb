@@ -27,7 +27,7 @@ interface TabBarProps {
     symbol?: string;
 }
 
-export function TabBar({ symbol }: TabBarProps) {
+export function TabBar(_props: TabBarProps) {
     const [isManageModalOpen, setIsManageModalOpen] = useState(false);
     const [editingTabId, setEditingTabId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
@@ -421,15 +421,6 @@ export function TabBar({ symbol }: TabBarProps) {
                         <span>quick switch</span>
                         {reachedTabLimit && <span className="text-amber-400">max {MAX_TABS} tabs</span>}
                     </div>
-
-                    {/* Ticker badge */}
-                    {symbol && (
-                        <div className="flex items-center gap-1.5 pr-1.5">
-                            <span className="px-2 py-0.5 text-xs font-medium bg-blue-500/15 text-blue-400 rounded border border-blue-500/20">
-                                {symbol}
-                            </span>
-                        </div>
-                    )}
                 </div>
             </div>
 

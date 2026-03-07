@@ -24,6 +24,32 @@ Scope: VNIBB production stack migration with zero data-loss posture
 - Vercel frontend:
   `https://vercel.com/vphk2001-gmailcoms-projects/vnibb-web`
 
+## Appwrite Connectivity Status
+
+- Connectivity verified via `scripts/appwrite/check_appwrite_connectivity.mjs`.
+- Project ID: `69a9c5ab0003bd4e280c`.
+- Database: `VniBB` (`69a9c70d0026c7d08f51`).
+- Current collection count: `9` (schema bootstrap completed).
+
+## Migration Progress Snapshot
+
+- Baseline exported: `scripts/appwrite/supabase_baseline.json`.
+- Collection bootstrap completed via `scripts/appwrite/ensure_appwrite_collections.mjs`.
+- Text-safe attribute bootstrap completed for immutable collections via `scripts/appwrite/ensure_appwrite_attributes_textsafe.mjs`.
+- Live backfill status:
+  - `stocks`: `1,738` docs (synced)
+  - `income_statements`: `32,837` docs migrated (source currently lower due upstream cleanup)
+  - `balance_sheets`: `83,060` docs migrated (source currently lower due upstream cleanup)
+  - `cash_flows`: `46,334` docs migrated (source currently lower due upstream cleanup)
+  - `financial_ratios`: `12,249` docs migrated with rolling catch-up (source actively changing)
+  - `stock_prices`: `163,439 / 802,619` docs migrated (chunked backfill in progress)
+- Parity verification uses `scripts/appwrite/verify_appwrite_counts.mjs`.
+
+Important data note:
+
+- Supabase source table counts are currently volatile because cleanup + ingestion jobs run concurrently.
+- Appwrite intentionally keeps already-migrated historical records to avoid data loss, so target may be a superset when source shrinks after cleanup.
+
 ## What This Changes in VNIBB
 
 - Frontend auth client (`apps/web/src/lib/supabase.ts`) migrates to Appwrite SDK client init.
@@ -179,9 +205,17 @@ new Client()
 - Baseline export script: `scripts/appwrite/export_supabase_baseline.mjs`
 - Connectivity check script: `scripts/appwrite/check_appwrite_connectivity.mjs`
 - MCP launcher script: `scripts/appwrite/run_mcp_from_env.mjs`
+- Collection bootstrap script: `scripts/appwrite/ensure_appwrite_collections.mjs`
+- Attribute bootstrap script: `scripts/appwrite/ensure_appwrite_attributes_textsafe.mjs`
+- Collection reset script: `scripts/appwrite/reset_appwrite_collections.mjs`
+- Count verification script: `scripts/appwrite/verify_appwrite_counts.mjs`
+- Chunked loop runner script: `scripts/appwrite/run_backfill_loop.mjs`
+- Migration state inspector: `scripts/appwrite/inspect_migration_state.mjs`
+- Deployment env checklist: `scripts/appwrite/generate_cutover_env_checklist.mjs`
 - Script usage guide: `scripts/appwrite/README.md`
 - Prompt for migration agent: `docs/v162_appwrite_migration_prompt.md`
 - Step tracker: `docs/v162_appwrite_step_by_step.md`
+- Full setup migration guide: `docs/v163_appwrite_full_setup_migration.md`
 
 Code-level mitigation scaffolding added:
 
@@ -191,3 +225,10 @@ Code-level mitigation scaffolding added:
 - Backend cache backend selector + fallback improvements:
   - `apps/api/vnibb/core/config.py`
   - `apps/api/vnibb/core/cache.py`
+
+Migration reliability reinforcements:
+
+- Default keyset pagination mode in migration runner (safer under concurrent inserts/deletes).
+- Snapshot upper-bound support to freeze batch window for consistent runs.
+- Per-table checkpoint state persisted in `scripts/appwrite/migration_state.json` for resumable backfills.
+- Baseline-aware verification mode to compare against pre-migration snapshot when live source counts drift.

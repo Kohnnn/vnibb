@@ -43,7 +43,35 @@ SUPPORTED_METRICS = (
     "drawdown_recovery",
 )
 DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
-PERIOD_PATTERN = r"^(1M|3M|6M|1Y|3Y|5Y|YTD|ALL)$"
+PERIOD_PATTERN = r"^(1M|3M|6M|1Y|3Y|5Y|10Y|YTD|ALL)$"
+METRIC_ALIASES = {
+    "volume_flow": "volume_delta",
+    "volume-flow": "volume_delta",
+    "rsi_seasonal": "rsi_seasonal",
+    "rsi-seasonal": "rsi_seasonal",
+    "gap_stats": "gap_stats",
+    "gap-analysis": "gap_stats",
+    "gap_analysis": "gap_stats",
+    "bollinger_squeeze": "bollinger",
+    "bollinger-squeeze": "bollinger",
+    "bollinger": "bollinger",
+    "atr": "atr",
+    "atr_regime": "atr",
+    "atr-regime": "atr",
+    "sortino": "sortino",
+    "sortino_monthly": "sortino",
+    "sortino-monthly": "sortino",
+    "calmar": "calmar",
+    "macd_crossovers": "macd_crossovers",
+    "macd-crossover": "macd_crossovers",
+    "macd_crossover": "macd_crossovers",
+    "parkinson_volatility": "parkinson_volatility",
+    "parkinson-volatility": "parkinson_volatility",
+    "ema_respect": "ema_respect",
+    "ema-respect": "ema_respect",
+    "drawdown_recovery": "drawdown_recovery",
+    "drawdown-recovery": "drawdown_recovery",
+}
 MONTH_LABELS = {
     1: "Jan",
     2: "Feb",
@@ -68,6 +96,7 @@ class QuantResponseData(BaseModel):
     period: str
     computed_at: datetime
     metrics: Dict[str, Any]
+    warning: str | None = None
 
 
 def _safe_float(value: Any, decimals: int = 4) -> float | None:
@@ -95,11 +124,165 @@ def _resolve_start_date(period: str, end_date: date) -> date:
         return end_date - timedelta(days=365 * 3)
     if period == "5Y":
         return end_date - timedelta(days=365 * 5)
+    if period == "10Y":
+        return end_date - timedelta(days=365 * 10)
     if period == "YTD":
         return date(end_date.year, 1, 1)
     if period == "ALL":
         return date(2000, 1, 1)
     return end_date - timedelta(days=365 * 5)
+
+
+def _normalize_metric_name(value: str) -> str:
+    normalized = value.strip().lower()
+    return METRIC_ALIASES.get(normalized, normalized.replace("-", "_"))
+
+
+def _get_quant_calculators() -> Dict[str, Callable[[pd.DataFrame], Dict[str, Any]]]:
+    return {
+        "volume_delta": _compute_volume_delta,
+        "rsi_seasonal": _compute_rsi_seasonal,
+        "gap_stats": _compute_gap_stats,
+        "bollinger": _compute_bollinger,
+        "atr": _compute_atr,
+        "sortino": _compute_sortino,
+        "calmar": _compute_calmar,
+        "macd_crossovers": _compute_macd_crossovers,
+        "parkinson_volatility": _compute_parkinson_volatility,
+        "ema_respect": _compute_ema_respect,
+        "drawdown_recovery": _compute_drawdown_recovery,
+    }
+
+
+def _build_period_warning(frame: pd.DataFrame, requested_start_date: date, period: str) -> str | None:
+    if frame.empty:
+        return None
+
+    earliest_value = pd.to_datetime(frame["time"].iloc[0], errors="coerce")
+    if pd.isna(earliest_value):
+        return None
+
+    earliest_date = earliest_value.date()
+    if earliest_date <= requested_start_date:
+        return None
+
+    return f"Data only available from {earliest_date.isoformat()} ({period} requested)."
+
+
+def _format_date_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.isoformat()
+
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.strftime("%Y-%m-%d")
+
+
+async def _load_quant_frame_with_warning(
+    *,
+    db: AsyncSession,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    source: str,
+    period: str,
+) -> tuple[pd.DataFrame, str | None]:
+    frame = await _load_price_frame(
+        db=db,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        source=source,
+    )
+    return frame, _build_period_warning(frame, start_date, period)
+
+
+async def _get_quant_metric_alias_response(
+    *,
+    symbol: str,
+    metric_name: str,
+    period: str,
+    source: str,
+    db: AsyncSession,
+) -> StandardResponse[Dict[str, Any]]:
+    symbol_upper = symbol.upper().strip()
+    if not symbol_upper:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    canonical_metric = _normalize_metric_name(metric_name)
+    calculators = _get_quant_calculators()
+    calculator = calculators.get(canonical_metric)
+    if calculator is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Unsupported quant metric requested",
+                "invalid_metric": metric_name,
+                "supported_metrics": list(SUPPORTED_METRICS),
+            },
+        )
+
+    period_upper = period.upper()
+    end_date = date.today()
+    start_date = _resolve_start_date(period_upper, end_date)
+    frame, warning = await _load_quant_frame_with_warning(
+        db=db,
+        symbol=symbol_upper,
+        start_date=start_date,
+        end_date=end_date,
+        source=source,
+        period=period_upper,
+    )
+
+    min_points_required = 30
+    observed_points = int(len(frame))
+    if frame.empty or observed_points < min_points_required:
+        return StandardResponse(
+            data={
+                "symbol": symbol_upper,
+                "period": period_upper,
+                "metric": canonical_metric,
+                "computed_at": datetime.utcnow(),
+                "warning": warning,
+            },
+            meta=MetaData(count=0),
+            error=(
+                f"Insufficient Data: Expected at least {min_points_required} sessions, "
+                f"got {observed_points}."
+            ),
+        )
+
+    try:
+        metric_payload = calculator(frame.copy())
+    except Exception as exc:
+        logger.warning("Quant metric alias %s failed for %s: %s", canonical_metric, symbol_upper, exc)
+        return StandardResponse(
+            data={
+                "symbol": symbol_upper,
+                "period": period_upper,
+                "metric": canonical_metric,
+                "computed_at": datetime.utcnow(),
+                "warning": warning,
+            },
+            meta=MetaData(count=0),
+            error=str(exc),
+        )
+
+    response_payload: Dict[str, Any] = {
+        "symbol": symbol_upper,
+        "period": period_upper,
+        "metric": canonical_metric,
+        "computed_at": datetime.utcnow(),
+    }
+    if warning:
+        response_payload["warning"] = warning
+    response_payload.update(metric_payload)
+    return StandardResponse(data=response_payload, meta=MetaData(count=1))
 
 
 def _build_month_map(series: pd.Series, decimals: int = 2) -> Dict[str, float | None]:
@@ -912,12 +1095,13 @@ async def get_gamma_exposure_proxy(
 
     end_date = date.today()
     period_upper = period.upper()
-    frame = await _load_price_frame(
+    frame, warning = await _load_quant_frame_with_warning(
         db=db,
         symbol=symbol_upper,
         start_date=_resolve_start_date(period_upper, end_date),
         end_date=end_date,
         source=source,
+        period=period_upper,
     )
 
     if frame.empty or len(frame) < 40:
@@ -927,6 +1111,7 @@ async def get_gamma_exposure_proxy(
                 "period": period_upper,
                 "computed_at": datetime.utcnow(),
                 "bands": [],
+                "data_quality_note": warning,
             },
             meta=MetaData(count=0),
             error="Insufficient historical data for gamma proxy.",
@@ -971,6 +1156,8 @@ async def get_gamma_exposure_proxy(
         "bands": band_rows,
         "data_quality_note": "Proxy derived from volatility regime; listed warrant OI pending.",
     }
+    if warning:
+        payload["data_quality_note"] = f"{payload['data_quality_note']} {warning}".strip()
     return StandardResponse(data=payload, meta=MetaData(count=len(band_rows)))
 
 
@@ -989,12 +1176,13 @@ async def get_momentum_profile(
     period_upper = period.upper()
     end_date = date.today()
     start_date = _resolve_start_date(period_upper, end_date)
-    frame = await _load_price_frame(
+    frame, warning = await _load_quant_frame_with_warning(
         db=db,
         symbol=symbol_upper,
         start_date=start_date,
         end_date=end_date,
         source=source,
+        period=period_upper,
     )
 
     closes = pd.to_numeric(frame.get("close"), errors="coerce").dropna().tolist()
@@ -1147,6 +1335,8 @@ async def get_momentum_profile(
         "sector_percentile": sector_percentile,
         "peer_distribution": peer_distribution,
     }
+    if warning:
+        payload["data_quality_note"] = warning
     return StandardResponse(data=payload, meta=MetaData(count=len(peer_distribution)))
 
 
@@ -1358,31 +1548,39 @@ async def get_smart_money_flow(
     if not symbol_upper:
         raise HTTPException(status_code=400, detail="Symbol is required")
 
-    foreign_result = await db.execute(
-        select(
-            ForeignTrading.trade_date,
-            ForeignTrading.buy_value,
-            ForeignTrading.sell_value,
-            ForeignTrading.net_value,
+    try:
+        foreign_result = await db.execute(
+            select(
+                ForeignTrading.trade_date,
+                ForeignTrading.buy_value,
+                ForeignTrading.sell_value,
+                ForeignTrading.net_value,
+            )
+            .where(ForeignTrading.symbol == symbol_upper)
+            .order_by(ForeignTrading.trade_date.desc())
+            .limit(60)
         )
-        .where(ForeignTrading.symbol == symbol_upper)
-        .order_by(ForeignTrading.trade_date.desc())
-        .limit(60)
-    )
-    block_result = await db.execute(
-        select(
-            BlockTrade.trade_time,
-            BlockTrade.side,
-            BlockTrade.quantity,
-            BlockTrade.value,
-        )
-        .where(BlockTrade.symbol == symbol_upper)
-        .order_by(BlockTrade.trade_time.desc())
-        .limit(60)
-    )
+        foreign_rows = foreign_result.all()
+    except Exception as exc:
+        logger.warning("Smart money foreign flow query failed for %s: %s", symbol_upper, exc)
+        foreign_rows = []
 
-    foreign_rows = foreign_result.all()
-    block_rows = block_result.all()
+    try:
+        block_result = await db.execute(
+            select(
+                BlockTrade.trade_time,
+                BlockTrade.side,
+                BlockTrade.quantity,
+                BlockTrade.value,
+            )
+            .where(BlockTrade.symbol == symbol_upper)
+            .order_by(BlockTrade.trade_time.desc())
+            .limit(60)
+        )
+        block_rows = block_result.all()
+    except Exception as exc:
+        logger.warning("Smart money block trade query failed for %s: %s", symbol_upper, exc)
+        block_rows = []
 
     end_date = date.today()
     start_date = end_date - timedelta(days=200)
@@ -1418,12 +1616,15 @@ async def get_smart_money_flow(
 
     block_events: List[Dict[str, Any]] = []
     for row in block_rows[:25]:
+        block_date = _format_date_value(row[0])
+        if block_date is None:
+            continue
         side_raw = row[1].value if hasattr(row[1], "value") else str(row[1])
         side = side_raw.upper().replace("TRADESIDE.", "")
         event_type = "accumulation" if side.endswith("BUY") else "distribution"
         block_events.append(
             {
-                "date": row[0].strftime("%Y-%m-%d"),
+                "date": block_date,
                 "volume": int(row[2]) if row[2] is not None else None,
                 "value": _safe_float(row[3], 2),
                 "type": event_type,
@@ -1618,6 +1819,166 @@ async def get_relative_rotation(
     return StandardResponse(data=payload, meta=MetaData(count=len(universe_points)))
 
 
+@router.get("/{symbol}/volume-flow", response_model=StandardResponse[Dict[str, Any]])
+async def get_volume_flow_metric(
+    symbol: str,
+    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="volume-flow",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/rsi-seasonal", response_model=StandardResponse[Dict[str, Any]])
+async def get_rsi_seasonal_metric(
+    symbol: str,
+    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="rsi-seasonal",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/bollinger-squeeze", response_model=StandardResponse[Dict[str, Any]])
+async def get_bollinger_squeeze_metric(
+    symbol: str,
+    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="bollinger-squeeze",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/atr-regime", response_model=StandardResponse[Dict[str, Any]])
+async def get_atr_regime_metric(
+    symbol: str,
+    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="atr-regime",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/sortino-monthly", response_model=StandardResponse[Dict[str, Any]])
+async def get_sortino_monthly_metric(
+    symbol: str,
+    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="sortino-monthly",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/macd-crossover", response_model=StandardResponse[Dict[str, Any]])
+async def get_macd_crossover_metric(
+    symbol: str,
+    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="macd-crossover",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/parkinson-volatility", response_model=StandardResponse[Dict[str, Any]])
+async def get_parkinson_volatility_metric(
+    symbol: str,
+    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="parkinson-volatility",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/ema-respect", response_model=StandardResponse[Dict[str, Any]])
+async def get_ema_respect_metric(
+    symbol: str,
+    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="ema-respect",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/drawdown-recovery", response_model=StandardResponse[Dict[str, Any]])
+async def get_drawdown_recovery_metric(
+    symbol: str,
+    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="drawdown-recovery",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/gap-analysis", response_model=StandardResponse[Dict[str, Any]])
+async def get_gap_analysis_metric(
+    symbol: str,
+    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="gap-analysis",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
 @router.get("/{symbol}", response_model=StandardResponse[QuantResponseData])
 async def get_quant_metrics(
     symbol: str,
@@ -1637,7 +1998,7 @@ async def get_quant_metrics(
     if not symbol_upper:
         raise HTTPException(status_code=400, detail="Symbol is required")
 
-    requested_metrics = [item.strip().lower() for item in metrics.split(",") if item.strip()]
+    requested_metrics = [_normalize_metric_name(item) for item in metrics.split(",") if item.strip()]
     if not requested_metrics:
         requested_metrics = list(SUPPORTED_METRICS)
 
@@ -1657,12 +2018,13 @@ async def get_quant_metrics(
     end_date = date.today()
     start_date = _resolve_start_date(period_upper, end_date)
 
-    frame = await _load_price_frame(
+    frame, warning = await _load_quant_frame_with_warning(
         db=db,
         symbol=symbol_upper,
         start_date=start_date,
         end_date=end_date,
         source=source,
+        period=period_upper,
     )
 
     min_points_required = 30
@@ -1674,6 +2036,7 @@ async def get_quant_metrics(
             period=period_upper,
             computed_at=datetime.utcnow(),
             metrics={},
+            warning=warning,
         )
         return StandardResponse(
             data=payload,
@@ -1684,19 +2047,7 @@ async def get_quant_metrics(
             ),
         )
 
-    calculators: Dict[str, Callable[[pd.DataFrame], Dict[str, Any]]] = {
-        "volume_delta": _compute_volume_delta,
-        "rsi_seasonal": _compute_rsi_seasonal,
-        "gap_stats": _compute_gap_stats,
-        "bollinger": _compute_bollinger,
-        "atr": _compute_atr,
-        "sortino": _compute_sortino,
-        "calmar": _compute_calmar,
-        "macd_crossovers": _compute_macd_crossovers,
-        "parkinson_volatility": _compute_parkinson_volatility,
-        "ema_respect": _compute_ema_respect,
-        "drawdown_recovery": _compute_drawdown_recovery,
-    }
+    calculators = _get_quant_calculators()
 
     computed_metrics: Dict[str, Any] = {}
     for metric_name in unique_metrics:
@@ -1714,5 +2065,6 @@ async def get_quant_metrics(
         period=period_upper,
         computed_at=datetime.utcnow(),
         metrics=computed_metrics,
+        warning=warning,
     )
     return StandardResponse(data=payload, meta=MetaData(count=len(computed_metrics)))

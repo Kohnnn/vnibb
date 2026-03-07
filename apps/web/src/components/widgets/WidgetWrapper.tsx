@@ -93,7 +93,7 @@ export function WidgetWrapper({
     syncGroupId,
     widgetGroup: initialWidgetGroup = 'global',
     isEditing = false,
-    showTickerSelector = true,
+    showTickerSelector = false,
     showGroupLabels = true,
     parameters = [],
     multiSelectParams = [],

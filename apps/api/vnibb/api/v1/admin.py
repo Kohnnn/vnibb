@@ -1,6 +1,7 @@
 """Admin API endpoints for database inspection and management."""
 
 import re
+from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.core.database import get_db, engine
 from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
+from vnibb.core.appwrite_client import check_appwrite_connectivity, appwrite_runtime_summary
 from vnibb.core.middleware.logging import get_recent_error_events
 
 router = APIRouter(tags=["Admin"])
@@ -55,6 +57,22 @@ def require_admin_access(
 
     if x_admin_key != configured_key:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@router.get("/providers/status", dependencies=[Depends(require_admin_access)])
+async def get_provider_status() -> Dict[str, Any]:
+    """Return runtime provider configuration and migration connectivity status."""
+    appwrite_health = await check_appwrite_connectivity(timeout_seconds=2.5)
+    return {
+        "environment": settings.environment,
+        "providers": {
+            "data_backend": settings.data_backend,
+            "cache_backend": settings.resolved_cache_backend,
+            "appwrite_configured": settings.is_appwrite_configured,
+        },
+        "appwrite": appwrite_health,
+        "appwrite_runtime": appwrite_runtime_summary(),
+    }
 
 
 def _quote_identifier(table_name: str) -> str:
@@ -416,14 +434,54 @@ async def list_all_tables(db: AsyncSession = Depends(get_db)):
 @router.get("/errors/recent")
 async def get_recent_errors(
     limit: int = Query(default=50, ge=1, le=200),
+    since: Optional[str] = Query(default=None),
     _auth: None = Depends(require_admin_access),
 ):
     """Return recent server-side request errors captured by middleware."""
     errors = get_recent_error_events(limit=limit)
+    since_dt: Optional[datetime] = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid since timestamp: {since}") from exc
+
+    if since_dt is not None:
+        filtered_errors = []
+        for item in errors:
+            raw_timestamp = item.get("timestamp")
+            try:
+                event_time = datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00")).replace(
+                    tzinfo=None
+                )
+            except ValueError:
+                continue
+            if event_time >= since_dt:
+                filtered_errors.append(item)
+        errors = filtered_errors
+
+    endpoint_counts = Counter(item.get("path") or "unknown" for item in errors)
+    grouped = [
+        {
+            "path": path,
+            "count": count,
+        }
+        for path, count in endpoint_counts.most_common()
+    ]
+
+    hydrated_errors = [
+        {
+            **item,
+            "stack_trace": (item.get("stack_trace") or "")[:500] or None,
+        }
+        for item in errors[:limit]
+    ]
     return {
         "timestamp": datetime.utcnow().isoformat(),
-        "count": len(errors),
-        "errors": errors,
+        "since": since_dt.isoformat() if since_dt else None,
+        "count": len(hydrated_errors),
+        "grouped_by_endpoint": grouped,
+        "errors": hydrated_errors,
     }
 
 

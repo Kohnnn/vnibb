@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from vnibb.core.database import get_db
 from vnibb.core.config import settings
+from vnibb.core.appwrite_client import check_appwrite_connectivity
 import redis.asyncio as redis
 from datetime import datetime
 import time
@@ -33,6 +34,11 @@ async def basic_health():
         "status": "ok",
         "db": "connected",
         "cache": "unavailable",
+        "appwrite": "not_configured",
+        "providers": {
+            "data_backend": settings.data_backend,
+            "cache_backend": settings.resolved_cache_backend,
+        },
         "version": getattr(settings, 'app_version', '0.1.0'),
         "timestamp": datetime.utcnow().isoformat()
     }
@@ -58,7 +64,17 @@ async def basic_health():
             health["cache"] = "not_configured"
     except Exception:
         health["cache"] = "unavailable"
-        
+
+    # Appwrite check (optional and bounded)
+    try:
+        appwrite_health = await asyncio.wait_for(
+            check_appwrite_connectivity(timeout_seconds=1.5),
+            timeout=2.0,
+        )
+        health["appwrite"] = appwrite_health.get("status", "error")
+    except Exception:
+        health["appwrite"] = "error"
+
     _BASIC_HEALTH_CACHE["data"] = health
     _BASIC_HEALTH_CACHE["timestamp"] = now
     return health
@@ -114,5 +130,12 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
             health["components"]["redis"] = {"status": "unhealthy", "error": str(e)}
     else:
         health["components"]["redis"] = {"status": "not_configured"}
-    
+
+    # Appwrite check
+    appwrite_health = await check_appwrite_connectivity(timeout_seconds=2.5)
+    health["components"]["appwrite"] = appwrite_health
+
+    if settings.data_backend in {"appwrite", "hybrid"} and appwrite_health.get("status") != "connected":
+        health["status"] = "degraded"
+
     return health

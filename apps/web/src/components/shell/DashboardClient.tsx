@@ -6,6 +6,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Sidebar, Header, TabBar, RightSidebar, MobileNav } from '@/components/layout';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import {
     TickerInfoWidget,
@@ -40,6 +41,7 @@ import { MarketRibbon } from '@/components/ui/MarketRibbon';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
+import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
 import type { DashboardTemplate } from '@/types/dashboard-templates';
 import { Grid3X3, PlusCircle, RefreshCw } from 'lucide-react';
@@ -61,6 +63,7 @@ function DashboardContent() {
         activeTab,
         setActiveTab,
         createDashboard,
+        createTab,
         setActiveDashboard,
         updateSyncGroupSymbol,
         deleteWidget,
@@ -72,6 +75,7 @@ function DashboardContent() {
 
     const { setGlobalSymbol: setContextGlobalSymbol } = useWidgetGroups();
     const { globalSymbol, setGlobalSymbol } = useSymbolLink();
+    const { resolvedTheme, setTheme } = useTheme();
     const { config: unitConfig, setUnit } = useUnit();
 
     const [isEditing, setIsEditing] = useState(false);
@@ -151,6 +155,17 @@ function DashboardContent() {
                 }
             }
 
+            if (
+                (event.metaKey || event.ctrlKey) &&
+                !event.altKey &&
+                !event.shiftKey &&
+                event.key.toLowerCase() === 'l'
+            ) {
+                event.preventDefault();
+                setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
+                return;
+            }
+
             if (!event.metaKey && !event.ctrlKey && !event.altKey) {
                 if (event.key === 'Tab' && activeTab?.widgets?.length) {
                     const focusableWidgets = Array.from(
@@ -172,7 +187,7 @@ function DashboardContent() {
 
         window.addEventListener('keydown', handleKeyboardNavigation);
         return () => window.removeEventListener('keydown', handleKeyboardNavigation);
-    }, [activeDashboard?.tabs, activeTab?.widgets, mounted, setActiveTab]);
+    }, [activeDashboard?.tabs, activeTab?.widgets, mounted, resolvedTheme, setActiveTab, setTheme]);
 
     const handleLayoutChange = useCallback((newLayout: LayoutItem[]) => {
         if (!activeDashboard || !activeTab) return;
@@ -335,18 +350,18 @@ function DashboardContent() {
 
     const handleApplyTemplate = useCallback((template: DashboardTemplate) => {
         if (!activeDashboard || !activeTab || activeDashboard.isEditable === false) return;
-        
-        // Clear existing widgets and add template ones
-        // In a real app we might want to ask confirmation
+
+        const tab = createTab(activeDashboard.id, template.name);
         template.widgets.forEach(w => {
-            addWidget(activeDashboard.id, activeTab.id, {
+            addWidget(activeDashboard.id, tab.id, {
                 type: w.type,
-                tabId: activeTab.id,
+                tabId: tab.id,
                 layout: w.layout,
                 config: w.config || {}
             });
         });
-    }, [activeDashboard, activeTab, addWidget]);
+        setActiveTab(tab.id);
+    }, [activeDashboard, activeTab, addWidget, createTab, setActiveTab]);
 
     const handleCreateWorkspace = useCallback(() => {
         const dashboard = createDashboard({ name: 'Workspace 1' });
@@ -493,6 +508,7 @@ function DashboardContent() {
                                     {activeTab.widgets.map((widget) => {
                                         const widgetType = widget.type;
                                         const WidgetComponent = widgetRegistry[widgetType];
+                                        const widgetTitle = getWidgetDefinition(widgetType)?.name ?? widgetType.replace(/_/g, ' ');
                                         const parameters = getWidgetParameters(widget, (key, value) =>
                                             handleWidgetConfigChange(widget.id, key, value)
                                         );
@@ -506,7 +522,7 @@ function DashboardContent() {
                                             >
                                                 <WidgetWrapper
                                                     id={widget.id}
-                                                    title={widgetType.replace(/_/g, ' ')}
+                                                    title={widgetTitle}
                                                     symbol={globalSymbol}
                                                     tabId={activeTab.id}
                                                     dashboardId={activeDashboard.id}

@@ -64,22 +64,57 @@ Artifacts:
 
 ## Step 5 - Staging Migration Execution (Next)
 
-- [ ] Validate Appwrite credentials and DB access:
+- [x] Validate Appwrite credentials and DB access:
   - `node scripts/appwrite/check_appwrite_connectivity.mjs`
-- [ ] Start MCP server from `.env` (uses `APPWRITE_PROJECT_ID`/`APPWRITE_API_KEY` or aliases `APPWRITE_NAME`/`APPWRITE_SECRET`):
+- [x] Start MCP server from `.env` (uses `APPWRITE_PROJECT_ID`/`APPWRITE_API_KEY` or aliases `APPWRITE_NAME`/`APPWRITE_SECRET`):
   - `node scripts/appwrite/run_mcp_from_env.mjs --databases`
-- [ ] Create Appwrite staging project + database + collections.
-- [ ] Populate `schema-map` with real collection IDs and owner permission fields.
-- [ ] Run migration script in dry-run mode.
-- [ ] Run first live backfill for immutable tables only (`stocks`, `stock_prices`, financial statements, ratios).
+- [x] Run migration script in dry-run mode (filtered pilot):
+  - `MIGRATION_TABLES=stocks,income_statements`
+  - rows read: `34,575`, failures: `0`
+- [x] Create Appwrite database collections from schema map:
+  - created 9 collections in `VniBB (69a9c70d0026c7d08f51)`.
+- [x] Add automated chunk loop runner for very large tables:
+  - `scripts/appwrite/run_backfill_loop.mjs`
+- [x] Reinforce migration engine with keyset pagination + state checkpoints:
+  - `MIGRATION_PAGINATION_MODE=keyset` (default)
+  - `MIGRATION_STATE_FILE=./scripts/appwrite/migration_state.json`
+  - resumeable cursor checkpoints per table
+- [x] Populate text-safe attributes for pilot collections:
+  - `stocks`, `income_statements` longtext attributes created from source columns.
+- [x] Run first live backfill pilot for immutable tables:
+  - `stocks`: `1,738` created, `0` failed.
+  - `income_statements`: migrated in chunks to full source parity.
+- [x] Create/validate attributes for remaining immutable collections (`stock_prices`, `balance_sheets`, `cash_flows`, `financial_ratios`).
+- [~] Run chunked backfills for remaining immutable collections:
+  - `balance_sheets`: backfill complete (`83,060` docs in Appwrite)
+  - `cash_flows`: backfill complete (`46,334` docs in Appwrite)
+  - `financial_ratios`: near-realtime catch-up active (`12,249` docs; source changing during sync)
+  - `stock_prices`: in progress (`163,439 / 802,619` docs; chunked runner ongoing)
 
 ## Step 6 - Data Integrity Verification (Next)
 
-- [ ] Export Supabase baseline counts + sample hashes using:
+- [x] Export Supabase baseline counts + sample hashes using:
   - `node scripts/appwrite/export_supabase_baseline.mjs`
+  - output: `scripts/appwrite/supabase_baseline.json`
 - [ ] Build source-vs-target count checks by table.
+- [x] Build source-vs-target count checks by table (automation script):
+  - `node scripts/appwrite/verify_appwrite_counts.mjs`
+- [x] Added baseline-aware verification mode to reduce false mismatches during live source drift:
+  - `VERIFY_SOURCE_MODE=baseline`
+  - `VERIFY_BASELINE_FILE=./scripts/appwrite/supabase_baseline.json`
+- [x] Build source-vs-target count checks by table (pilot):
+  - `stocks`: source `1738`, target `1738`.
+  - `income_statements`: source `32837`, target `32837`.
+- [x] Added reset/bootstrap scripts for iterative backfill and resumable repair:
+  - `scripts/appwrite/reset_appwrite_collections.mjs`
+  - `scripts/appwrite/ensure_appwrite_attributes_textsafe.mjs`
 - [ ] Add sample checksum validation by symbol/date windows.
 - [ ] Validate no precision drift for money/ratio columns.
+
+Note:
+
+- Source row counts in Supabase are currently volatile (cleanup + live ingestion), so strict parity to *current* source can drift.
+- We preserve migrated historical records in Appwrite to avoid data loss; where source shrinks, Appwrite may intentionally hold a superset.
 
 ## Step 7 - Controlled Cutover (Next)
 

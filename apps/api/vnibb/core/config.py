@@ -100,11 +100,14 @@ class Settings(BaseSettings):
     appwrite_api_key: Optional[str] = None
     appwrite_database_id: Optional[str] = None
     appwrite_bucket_id: Optional[str] = None
+    appwrite_name: Optional[str] = None  # Alias for APPWRITE_PROJECT_ID
+    appwrite_secret: Optional[str] = None  # Alias for APPWRITE_API_KEY
 
     # ==========================================================================
     # Cache Backend Selection
     # ==========================================================================
     cache_backend: str = "auto"  # auto, redis, memory, appwrite
+    data_backend: str = "postgres"  # postgres, appwrite, hybrid
 
     # ==========================================================================
     # Redis Cache
@@ -316,6 +319,16 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid CACHE_BACKEND '{v}'. Must be one of: {valid_backends}")
         return backend
 
+    @field_validator("data_backend")
+    @classmethod
+    def validate_data_backend(cls, v: str) -> str:
+        """Validate selected primary data backend."""
+        valid_backends = {"postgres", "appwrite", "hybrid"}
+        backend = v.lower().strip()
+        if backend not in valid_backends:
+            raise ValueError(f"Invalid DATA_BACKEND '{v}'. Must be one of: {valid_backends}")
+        return backend
+
     @model_validator(mode="after")
     def validate_production_requirements(self) -> "Settings":
         """Validate production-specific requirements."""
@@ -341,8 +354,8 @@ class Settings(BaseSettings):
             if self.cache_backend == "appwrite":
                 required = {
                     "APPWRITE_ENDPOINT": self.appwrite_endpoint,
-                    "APPWRITE_PROJECT_ID": self.appwrite_project_id,
-                    "APPWRITE_API_KEY": self.appwrite_api_key,
+                    "APPWRITE_PROJECT_ID/APPWRITE_NAME": self.resolved_appwrite_project_id,
+                    "APPWRITE_API_KEY/APPWRITE_SECRET": self.resolved_appwrite_api_key,
                     "APPWRITE_DATABASE_ID": self.appwrite_database_id,
                 }
                 missing = [key for key, value in required.items() if not value]
@@ -351,6 +364,12 @@ class Settings(BaseSettings):
                         "CACHE_BACKEND=appwrite but Appwrite credentials are missing: %s",
                         ", ".join(missing),
                     )
+
+            if self.data_backend in {"appwrite", "hybrid"} and not self.is_appwrite_configured:
+                logger.warning(
+                    "DATA_BACKEND=%s selected but Appwrite is not fully configured",
+                    self.data_backend,
+                )
 
             if errors:
                 raise ValueError(
@@ -388,6 +407,28 @@ class Settings(BaseSettings):
         return self.debug and not self.is_production
 
     @property
+    def resolved_appwrite_project_id(self) -> Optional[str]:
+        """Resolve Appwrite project ID from canonical field or alias."""
+        return self.appwrite_project_id or self.appwrite_name
+
+    @property
+    def resolved_appwrite_api_key(self) -> Optional[str]:
+        """Resolve Appwrite API key from canonical field or alias."""
+        return self.appwrite_api_key or self.appwrite_secret
+
+    @property
+    def is_appwrite_configured(self) -> bool:
+        """Check whether Appwrite database connectivity fields are configured."""
+        return all(
+            [
+                self.appwrite_endpoint,
+                self.resolved_appwrite_project_id,
+                self.resolved_appwrite_api_key,
+                self.appwrite_database_id,
+            ]
+        )
+
+    @property
     def resolved_cache_backend(self) -> str:
         """Resolve active cache backend from explicit selection + available config."""
         if self.cache_backend != "auto":
@@ -396,15 +437,7 @@ class Settings(BaseSettings):
         if self.redis_url:
             return "redis"
 
-        appwrite_ready = all(
-            [
-                self.appwrite_endpoint,
-                self.appwrite_project_id,
-                self.appwrite_api_key,
-                self.appwrite_database_id,
-            ]
-        )
-        if appwrite_ready:
+        if self.is_appwrite_configured:
             return "appwrite"
 
         return "memory"
@@ -450,13 +483,20 @@ def _validate_startup_config(settings: Settings) -> None:
     if settings.cache_backend == "appwrite":
         required = {
             "APPWRITE_ENDPOINT": settings.appwrite_endpoint,
-            "APPWRITE_PROJECT_ID": settings.appwrite_project_id,
-            "APPWRITE_API_KEY": settings.appwrite_api_key,
+            "APPWRITE_PROJECT_ID/APPWRITE_NAME": settings.resolved_appwrite_project_id,
+            "APPWRITE_API_KEY/APPWRITE_SECRET": settings.resolved_appwrite_api_key,
             "APPWRITE_DATABASE_ID": settings.appwrite_database_id,
         }
         missing = [key for key, value in required.items() if not value]
         if missing:
             warnings.append("CACHE_BACKEND=appwrite missing vars: " + ", ".join(missing))
+
+    if settings.data_backend in {"appwrite", "hybrid"} and not settings.is_appwrite_configured:
+        warnings.append(
+            "DATA_BACKEND="
+            + settings.data_backend
+            + " but Appwrite config is incomplete"
+        )
 
     # Log warnings
     for warning in warnings:
