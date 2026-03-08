@@ -46,6 +46,14 @@ function required(name, value) {
   }
 }
 
+function presence(name, value, configuredLabel = '<configured>') {
+  return {
+    name,
+    value: value ? configuredLabel : '<missing>',
+    ok: Boolean(value),
+  }
+}
+
 function printBlock(title, rows) {
   console.log(`\n${title}`)
   for (const row of rows) {
@@ -73,7 +81,9 @@ async function main() {
     required('APPWRITE_API_KEY', maskSecret(appwriteApiKey, revealSecrets)),
     required('APPWRITE_DATABASE_ID', appwriteDatabaseId),
     required('CACHE_BACKEND', values.CACHE_BACKEND || 'auto'),
-    required('DATA_BACKEND', values.DATA_BACKEND || 'postgres'),
+    required('DATA_BACKEND', values.DATA_BACKEND || 'appwrite'),
+    required('APPWRITE_POPULATE_MAX_ROWS', values.APPWRITE_POPULATE_MAX_ROWS || '1000'),
+    presence('DATABASE_URL', values.DATABASE_URL || values.DATABASE_URL_SYNC),
   ]
 
   const vercelRows = [
@@ -91,11 +101,15 @@ async function main() {
 
   const missing = zeaburRows.filter(row => row.value === '<missing>' || !row.ok)
   if (missing.length > 0) {
-    console.log('\nResult: INCOMPLETE - fill missing backend vars before cutover')
+    console.log('\nResult: INCOMPLETE - fill missing backend vars before Appwrite-first runtime')
     process.exitCode = 2
   } else {
-    console.log('\nResult: Backend env appears complete for Appwrite cutover')
+    console.log('\nResult: Backend env appears complete for Appwrite-first runtime with Postgres fallback')
   }
+
+  console.log('\nNotes')
+  console.log('- DATA_BACKEND should be appwrite for the new runtime path')
+  console.log('- DATABASE_URL stays configured as the fallback source for Appwrite population and rollback')
 }
 
 main().catch(err => {

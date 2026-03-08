@@ -8,6 +8,7 @@ Goal: Move VNIBB operational setup from Supabase/Upstash to Appwrite with low ri
 
 - Appwrite project connectivity is validated.
 - Appwrite database and core collections are provisioned.
+- Backend sync and seed flows now populate Appwrite primary collections after Postgres writes.
 - Migration tooling supports:
   - resumable keyset pagination
   - snapshot upper-bound freeze
@@ -19,8 +20,8 @@ Important:
 
 - Frontend auth can be switched to Appwrite now.
 - Backend cache fallback logic is Appwrite-aware but does not yet implement a full Appwrite cache adapter.
-- Backend business services still primarily read/write via Postgres models.
-  - This means a strict "zero Supabase dependency" backend cutover requires a data-access layer migration.
+- Backend write flows still land in Postgres first, then populate Appwrite so Appwrite stays primary at runtime.
+- Supabase/Postgres is retained as fallback and rollback source only.
 
 ## 2) Service-by-Service Migration Map
 
@@ -74,11 +75,12 @@ Set:
 - `APPWRITE_API_KEY`
 - `APPWRITE_DATABASE_ID`
 - `CACHE_BACKEND=auto` (recommended during transition)
-- `DATA_BACKEND=hybrid` (recommended first), then `DATA_BACKEND=appwrite` when ready
+- `DATA_BACKEND=appwrite`
+- `APPWRITE_POPULATE_MAX_ROWS=1000` on Zeabur (`2000-3000` only for off-peak catch-up)
 
 Keep for now:
 
-- `DATABASE_URL` / `DATABASE_URL_SYNC` until backend data access is fully migrated.
+- `DATABASE_URL` / `DATABASE_URL_SYNC` as fallback source and rollback path.
 
 ### Vercel (Frontend)
 
@@ -159,13 +161,14 @@ To fully remove Supabase/Postgres dependency from backend runtime:
 Current backend progress:
 
 - Appwrite-aware runtime diagnostics are live.
+- Sync/seed orchestration now mirrors Appwrite primary collections after Postgres syncs.
 - First real Appwrite read paths are now scaffolded in backend:
   - `GET /api/v1/equity/{symbol}/profile`
   - `GET /api/v1/equity/{symbol}/quote`
   - `GET /api/v1/equity/historical`
 - Behavior:
-  - `DATA_BACKEND=hybrid`: current provider/DB flow remains primary, with Appwrite fallback on selected reads.
-  - `DATA_BACKEND=appwrite`: selected reads prefer Appwrite first.
+  - `DATA_BACKEND=appwrite`: selected reads prefer Appwrite first, with Postgres/Supabase fallback.
+  - `DATA_BACKEND=hybrid`: legacy alias that now resolves to the same Appwrite-first behavior when Appwrite is configured.
 
 ## 7) Cutover Gate (Do Not Skip)
 

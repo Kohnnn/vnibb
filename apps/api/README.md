@@ -111,7 +111,8 @@ railway up
 ```env
 DATABASE_URL=postgresql+asyncpg://...
 CACHE_BACKEND=auto  # auto|redis|memory|appwrite
-DATA_BACKEND=postgres  # postgres|appwrite|hybrid
+DATA_BACKEND=appwrite  # appwrite primary; postgres remains fallback. hybrid is a legacy alias.
+APPWRITE_POPULATE_MAX_ROWS=1000
 REDIS_URL=redis://localhost:6379/0
 VNSTOCK_API_KEY=vnstock_xxx
 VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
@@ -124,18 +125,19 @@ GEMINI_API_KEY=your_gemini_api_key
 # Alternative accepted key name:
 # GOOGLE_API_KEY=your_gemini_api_key
 
-# Optional Appwrite migration target
+# Appwrite primary runtime datastore
 # APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
 # APPWRITE_PROJECT_ID=your-appwrite-project-id
 # APPWRITE_API_KEY=your-appwrite-server-api-key
 # APPWRITE_DATABASE_ID=your-appwrite-database-id
-# DATA_BACKEND=hybrid  # Start with hybrid before full appwrite cutover
 # Optional alias names used by MCP helper scripts:
 # APPWRITE_NAME=your-appwrite-project-id
 # APPWRITE_SECRET=your-appwrite-server-api-key
 ```
 
 If neither `GEMINI_API_KEY` nor `GOOGLE_API_KEY` is set, news sentiment falls back to rule-based scoring.
+
+Appwrite is now the expected primary runtime backend. Keep `DATABASE_URL` configured so Postgres/Supabase can act as the fallback source and Appwrite population bridge.
 
 Premium package strategy:
 - Default `Dockerfile` keeps runtime installer disabled (`VNSTOCK_RUNTIME_INSTALL=0`) to avoid cold-start CPU spikes.
