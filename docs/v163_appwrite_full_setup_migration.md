@@ -74,6 +74,7 @@ Set:
 - `APPWRITE_API_KEY`
 - `APPWRITE_DATABASE_ID`
 - `CACHE_BACKEND=auto` (recommended during transition)
+- `DATA_BACKEND=hybrid` (recommended first), then `DATA_BACKEND=appwrite` when ready
 
 Keep for now:
 
@@ -140,6 +141,11 @@ Runtime verification endpoints after deploy:
 - `GET /health/detailed` (includes Appwrite connectivity component)
 - `GET /api/v1/admin/providers/status` with `X-Admin-Key` (provider/cutover diagnostics)
 
+Provider fields now include both requested and effective backend:
+
+- `data_backend_requested`
+- `data_backend` (effective resolved backend)
+
 ## 6) Full Backend Data Cutover (Final Step)
 
 To fully remove Supabase/Postgres dependency from backend runtime:
@@ -149,6 +155,17 @@ To fully remove Supabase/Postgres dependency from backend runtime:
 3. Shadow-read and compare API responses.
 4. Promote Appwrite as primary read path.
 5. Keep Supabase in read-only fallback window.
+
+Current backend progress:
+
+- Appwrite-aware runtime diagnostics are live.
+- First real Appwrite read paths are now scaffolded in backend:
+  - `GET /api/v1/equity/{symbol}/profile`
+  - `GET /api/v1/equity/{symbol}/quote`
+  - `GET /api/v1/equity/historical`
+- Behavior:
+  - `DATA_BACKEND=hybrid`: current provider/DB flow remains primary, with Appwrite fallback on selected reads.
+  - `DATA_BACKEND=appwrite`: selected reads prefer Appwrite first.
 
 ## 7) Cutover Gate (Do Not Skip)
 
