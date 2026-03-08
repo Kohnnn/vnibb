@@ -64,10 +64,10 @@ Tasks:
 
 7. Cutover Plan
 - Phase A: backfill immutable tables
-- Phase B: dual-write
-- Phase C: shadow-read compare
-- Phase D: partial cutover
-- Phase E: full cutover with rollback window
+- Phase B: sync-triggered Appwrite population from Postgres/Supabase source
+- Phase C: Appwrite-first reads with Postgres fallback
+- Phase D: expand Appwrite-first coverage
+- Phase E: rollback window with Supabase retained as failsafe
 
 Deliverables:
 - Production-ready migration script(s)

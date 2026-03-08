@@ -2,8 +2,8 @@
 Full market synchronization orchestrator.
 
 This service replaces legacy vnstock-only placeholders with calls into the
-production DataPipeline, so /sync/full-market writes real data to DB
-(symbols, screener snapshots, profiles, prices, financials, and ratios).
+production DataPipeline, so /sync/full-market writes real data to Postgres
+and mirrors Appwrite primary collections for Appwrite-first runtime reads.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from sqlalchemy import select
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.models.stock import Stock
+from vnibb.services.appwrite_population import populate_appwrite_tables
 from vnibb.services.data_pipeline import data_pipeline
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,28 @@ class FullMarketSync:
     def __init__(self, source: str = settings.vnstock_source):
         self.source = source
 
+    @staticmethod
+    def _stage_appwrite_tables(stage_name: str) -> tuple[tuple[str, ...], bool]:
+        stage_tables = {
+            "symbols": ("stocks",),
+            "prices": ("stock_prices",),
+            "profiles": ("stocks",),
+            "financials": (
+                "income_statements",
+                "balance_sheets",
+                "cash_flows",
+                "financial_ratios",
+            ),
+        }
+        return stage_tables.get(stage_name, ()), stage_name in {"symbols", "profiles"}
+
+    async def _populate_appwrite_for_stage(self, stage_name: str) -> None:
+        tables, full_refresh = self._stage_appwrite_tables(stage_name)
+        if not tables:
+            return
+
+        await populate_appwrite_tables(tables, full_refresh=full_refresh)
+
     async def _get_seeded_symbols(self, max_symbols: int | None = None) -> list[str]:
         async with async_session_maker() as session:
             result = await session.execute(
@@ -68,6 +91,7 @@ class FullMarketSync:
 
         try:
             synced_count = int(await operation())
+            await self._populate_appwrite_for_stage(stage_name)
         except Exception as exc:  # noqa: BLE001
             success = False
             errors.append(str(exc))

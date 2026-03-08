@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     # Cache Backend Selection
     # ==========================================================================
     cache_backend: str = "auto"  # auto, redis, memory, appwrite
-    data_backend: str = "postgres"  # postgres, appwrite, hybrid
+    data_backend: str = "appwrite"  # appwrite primary, postgres fallback, hybrid legacy alias
 
     # ==========================================================================
     # Redis Cache
@@ -436,12 +436,9 @@ class Settings(BaseSettings):
         if requested == "postgres":
             return "postgres"
 
-        if requested == "appwrite":
+        if requested in {"appwrite", "hybrid"}:
             return "appwrite" if self.is_appwrite_configured else "postgres"
 
-        # hybrid mode
-        if self.is_appwrite_configured:
-            return "hybrid"
         return "postgres"
 
     @property

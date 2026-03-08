@@ -5,6 +5,7 @@ Date: 2026-03-06
 ## Goal
 
 Migrate safely from Supabase + Upstash toward Appwrite without losing historical financial/market data.
+Current runtime rule: Appwrite is primary, Supabase/Postgres is fallback-only.
 
 ## Step 1 - Stabilize Current Footprint (Done)
 
@@ -119,6 +120,6 @@ Note:
 ## Step 7 - Controlled Cutover (Next)
 
 - [ ] Enable Appwrite auth provider in staging frontend.
-- [ ] Add backend dual-write for selected collections.
-- [ ] Shadow-read Appwrite on low-risk endpoints.
+- [x] Populate Appwrite primary collections after backend sync/seed runs.
+- [ ] Expand Appwrite-first reads across additional low-risk endpoints.
 - [ ] Promote to production only after parity checks pass.

@@ -2,6 +2,12 @@
 
 This folder contains utilities to migrate VNIBB data from Supabase Postgres to Appwrite.
 
+Runtime model:
+
+- Appwrite is the primary runtime datastore for Appwrite-enabled reads.
+- Supabase/Postgres stays in place as the fallback source and seed source.
+- Backend sync flows can call this migration runner to populate Appwrite after Postgres syncs.
+
 ## Files
 
 - `migrate_supabase_to_appwrite.mjs`: batch migration runner (idempotent upsert behavior).
@@ -49,6 +55,7 @@ MIGRATION_START_CURSOR=
 MIGRATION_MAX_ROWS=0
 MIGRATION_BASELINE_OUT=./scripts/appwrite/supabase_baseline.json
 MIGRATION_BASELINE_SAMPLE_SIZE=500
+APPWRITE_POPULATE_MAX_ROWS=1000
 ```
 
 Alias support is included if your env file uses these names:
@@ -95,6 +102,12 @@ Enable all tools if needed:
 ```bash
 node ./scripts/appwrite/run_mcp_from_env.mjs --all
 ```
+
+Runtime sync/seed helpers that now populate Appwrite automatically:
+
+- `apps/api/vnibb/services/sync_all_data.py`
+- `apps/api/scripts/seed_historical.py`
+- `apps/api/scripts/full_seed.py`
 
 Create collections from schema map:
 

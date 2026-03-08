@@ -7,6 +7,7 @@ Scope: VNIBB production stack migration with zero data-loss posture
 
 - Keep `Zeabur` as backend host.
 - Keep `Vercel` as frontend host.
+- Run Appwrite as the primary runtime datastore.
 - Move from Supabase/Upstash to Appwrite Cloud for:
   - Database
   - Auth
@@ -56,6 +57,7 @@ Important data note:
 - Frontend auth context (`apps/web/src/contexts/AuthContext.tsx`) maps sign in/up/OAuth flows to Appwrite account APIs.
 - Backend cache layer (`apps/api/vnibb/core/cache.py`) gets provider abstraction with Appwrite-backed fallback path.
 - Backend data source adapters move from direct Postgres/Supabase assumptions to Appwrite collection reads where needed.
+- Sync and seed flows now populate Appwrite after Postgres writes so Supabase/Postgres stays fallback-only.
 
 ## Critical Data Protection Rules
 
@@ -138,24 +140,23 @@ Relationship modeling in Appwrite:
 2. Start with immutable historical tables (`stock_prices`, statements, ratios).
 3. Migrate user-facing mutable tables last (`user_dashboards`, `dashboard_widgets`, alerts).
 
-### Phase C - Dual-Write / Shadow Read
+### Phase C - Sync-Triggered Appwrite Population
 
-1. Backend writes to both old and new stores.
-2. Read path remains Supabase primary.
-3. Run parity jobs comparing row/document counts and checksums per symbol/date window.
+1. Backend sync jobs write to Postgres/Supabase.
+2. Appwrite population runs immediately after sync to keep primary collections warm.
+3. Supabase remains the rollback and fallback source.
 
-### Phase D - Controlled Read Cutover
+### Phase D - Appwrite-First Runtime
 
-1. Enable Appwrite read path for low-risk endpoints first (`company_news`, `company_events`, non-critical widgets).
+1. Enable Appwrite read path for selected endpoints first (`company_news`, `company_events`, non-critical widgets).
 2. Gradually migrate market/fundamental endpoints.
 3. Keep Supabase as hot rollback source through full trading cycle.
 
-### Phase E - Final Cutover + Decommission
+### Phase E - Final Cutover + Retention
 
-1. Freeze writes briefly.
-2. Run delta sync.
-3. Flip primary reads and writes to Appwrite.
-4. Keep Supabase read-only retention for rollback window.
+1. Run delta sync / Appwrite population.
+2. Keep primary reads on Appwrite.
+3. Keep Supabase read-only retention for rollback window.
 
 ## Cache Migration (Upstash -> Appwrite Pattern)
 
