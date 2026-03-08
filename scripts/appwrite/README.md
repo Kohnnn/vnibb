@@ -7,6 +7,7 @@ Runtime model:
 - Appwrite is the primary runtime datastore for Appwrite-enabled reads.
 - Supabase/Postgres stays in place as the fallback source and seed source.
 - Backend sync flows can call this migration runner to populate Appwrite after Postgres syncs.
+- Production backend now has a Python HTTP mirror fallback, so Appwrite population can still run on Zeabur even when `node` is unavailable in the container.
 
 ## Files
 
