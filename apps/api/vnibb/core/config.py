@@ -429,6 +429,22 @@ class Settings(BaseSettings):
         )
 
     @property
+    def resolved_data_backend(self) -> str:
+        """Resolve effective data backend from requested mode and config readiness."""
+        requested = self.data_backend
+
+        if requested == "postgres":
+            return "postgres"
+
+        if requested == "appwrite":
+            return "appwrite" if self.is_appwrite_configured else "postgres"
+
+        # hybrid mode
+        if self.is_appwrite_configured:
+            return "hybrid"
+        return "postgres"
+
+    @property
     def resolved_cache_backend(self) -> str:
         """Resolve active cache backend from explicit selection + available config."""
         if self.cache_backend != "auto":

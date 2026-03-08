@@ -388,8 +388,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         f"Starting {settings.app_name} v{settings.app_version} (environment={settings.environment})"
     )
     logger.info(
-        "Runtime providers: data_backend=%s cache_backend=%s appwrite_configured=%s",
+        "Runtime providers: data_backend(requested=%s,resolved=%s) cache_backend=%s appwrite_configured=%s",
         settings.data_backend,
+        settings.resolved_data_backend,
         settings.resolved_cache_backend,
         settings.is_appwrite_configured,
     )

@@ -66,7 +66,8 @@ async def get_provider_status() -> Dict[str, Any]:
     return {
         "environment": settings.environment,
         "providers": {
-            "data_backend": settings.data_backend,
+            "data_backend_requested": settings.data_backend,
+            "data_backend": settings.resolved_data_backend,
             "cache_backend": settings.resolved_cache_backend,
             "appwrite_configured": settings.is_appwrite_configured,
         },

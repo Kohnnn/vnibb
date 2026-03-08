@@ -36,7 +36,8 @@ async def basic_health():
         "cache": "unavailable",
         "appwrite": "not_configured",
         "providers": {
-            "data_backend": settings.data_backend,
+            "data_backend_requested": settings.data_backend,
+            "data_backend": settings.resolved_data_backend,
             "cache_backend": settings.resolved_cache_backend,
         },
         "version": getattr(settings, 'app_version', '0.1.0'),
