@@ -174,6 +174,7 @@ class Settings(BaseSettings):
     llm_model: str = "gemini-2.0-flash"  # gpt-4o-mini, gemini-2.0-flash, claude-3-haiku
     llm_timeout: int = 30
     llm_max_tokens: int = 1024
+    enable_ai_sentiment_analysis: bool = False  # Keep news sentiment paused until runtime is stable
 
     # ==========================================================================
     # Scraper Settings
@@ -506,9 +507,7 @@ def _validate_startup_config(settings: Settings) -> None:
 
     if settings.data_backend in {"appwrite", "hybrid"} and not settings.is_appwrite_configured:
         warnings.append(
-            "DATA_BACKEND="
-            + settings.data_backend
-            + " but Appwrite config is incomplete"
+            "DATA_BACKEND=" + settings.data_backend + " but Appwrite config is incomplete"
         )
 
     # Log warnings

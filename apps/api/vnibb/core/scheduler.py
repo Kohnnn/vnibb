@@ -11,14 +11,54 @@ Jobs:
 - Market open/close - Start/stop real-time streaming
 """
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 # Global scheduler instance
 _scheduler = None
+_job_guards: dict[str, asyncio.Lock] = {}
+
+DAILY_SYNC_TIMEOUT_SECONDS = 2 * 60 * 60
+DAILY_TRADING_TIMEOUT_SECONDS = 2 * 60 * 60
+RS_RATING_TIMEOUT_SECONDS = 15 * 60
+HOURLY_NEWS_TIMEOUT_SECONDS = 20 * 60
+INTRADAY_TIMEOUT_SECONDS = 30 * 60
+
+
+async def _run_guarded_job(
+    job_name: str,
+    runner: Callable[[], Awaitable[object]],
+    timeout_seconds: int,
+) -> None:
+    lock = _job_guards.setdefault(job_name, asyncio.Lock())
+    if lock.locked():
+        logger.warning("Skipping %s because previous run is still active", job_name)
+        return
+
+    async with lock:
+        started_at = datetime.utcnow()
+        try:
+            if timeout_seconds > 0:
+                await asyncio.wait_for(runner(), timeout=timeout_seconds)
+            else:
+                await runner()
+            elapsed = (datetime.utcnow() - started_at).total_seconds()
+            logger.info("%s completed in %.1fs", job_name, elapsed)
+        except TimeoutError:
+            elapsed = (datetime.utcnow() - started_at).total_seconds()
+            logger.error(
+                "%s timed out after %.1fs (limit=%ss)",
+                job_name,
+                elapsed,
+                timeout_seconds,
+            )
+        except Exception as exc:
+            elapsed = (datetime.utcnow() - started_at).total_seconds()
+            logger.warning("%s failed after %.1fs: %s", job_name, elapsed, exc)
 
 
 def get_scheduler():
@@ -38,27 +78,57 @@ def configure_scheduler():
     from apscheduler.triggers.cron import CronTrigger
 
     from vnibb.services.data_pipeline import (
-        run_daily_sync,
         run_daily_trading_sync,
         run_hourly_news_sync,
         run_intraday_sync,
     )
+    from vnibb.services.sync_all_data import run_daily_market_sync
     from vnibb.services.data_quality import run_scheduled_data_quality_check
     from vnibb.services.realtime_pipeline import get_realtime_pipeline
 
     scheduler = get_scheduler()
 
+    async def guarded_daily_market_sync():
+        await _run_guarded_job(
+            "daily_sync",
+            run_daily_market_sync,
+            DAILY_SYNC_TIMEOUT_SECONDS,
+        )
+
+    async def guarded_daily_trading_sync():
+        await _run_guarded_job(
+            "daily_trading_sync",
+            run_daily_trading_sync,
+            DAILY_TRADING_TIMEOUT_SECONDS,
+        )
+
+    async def guarded_hourly_news_sync():
+        await _run_guarded_job(
+            "hourly_news",
+            run_hourly_news_sync,
+            HOURLY_NEWS_TIMEOUT_SECONDS,
+        )
+
+    async def guarded_intraday_sync():
+        await _run_guarded_job(
+            "intraday_sync",
+            run_intraday_sync,
+            INTRADAY_TIMEOUT_SECONDS,
+        )
+
     # =========================================================================
     # Daily Sync - 4:00 PM VNT (9:00 AM UTC)
-    # Full database refresh after market close
+    # Market freshness refresh after market close
     # =========================================================================
     scheduler.add_job(
-        run_daily_sync,
+        guarded_daily_market_sync,
         trigger=CronTrigger(hour=9, minute=0, timezone="UTC"),
         id="daily_sync",
         name="Daily Data Sync",
         replace_existing=True,
         max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
     )
     logger.info("Scheduled: daily_sync at 9:00 UTC (4:00 PM VNT)")
 
@@ -67,12 +137,14 @@ def configure_scheduler():
     # Order flow, foreign trading, block trades, derivatives
     # =========================================================================
     scheduler.add_job(
-        run_daily_trading_sync,
+        guarded_daily_trading_sync,
         trigger=CronTrigger(hour=9, minute=20, timezone="UTC"),
         id="daily_trading_sync",
         name="Daily Trading Flow Sync",
         replace_existing=True,
         max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
     )
     logger.info("Scheduled: daily_trading_sync at 9:20 UTC (4:20 PM VNT)")
 
@@ -95,12 +167,14 @@ def configure_scheduler():
     # Runs after daily sync completes
     # =========================================================================
     async def calculate_rs_ratings_job():
-        from vnibb.services.rs_rating_service import RSRatingService
+        async def _run():
+            from vnibb.services.rs_rating_service import RSRatingService
 
-        logger.info("Starting scheduled RS rating calculation...")
-        service = RSRatingService()
-        await service.calculate_all_rs_ratings()
-        logger.info("Scheduled RS rating calculation complete")
+            logger.info("Starting scheduled RS rating calculation...")
+            service = RSRatingService()
+            await service.calculate_all_rs_ratings()
+
+        await _run_guarded_job("rs_rating_sync", _run, RS_RATING_TIMEOUT_SECONDS)
 
     scheduler.add_job(
         calculate_rs_ratings_job,
@@ -117,12 +191,14 @@ def configure_scheduler():
     # Company and market news updates
     # =========================================================================
     scheduler.add_job(
-        run_hourly_news_sync,
+        guarded_hourly_news_sync,
         trigger=CronTrigger(minute=0, timezone="UTC"),
         id="hourly_news",
         name="Hourly News Sync",
         replace_existing=True,
         max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
     )
     logger.info("Scheduled: hourly_news every hour")
 
@@ -131,7 +207,7 @@ def configure_scheduler():
     # Market hours: 9:00 AM - 3:00 PM VNT (2:00 AM - 8:00 AM UTC)
     # =========================================================================
     scheduler.add_job(
-        run_intraday_sync,
+        guarded_intraday_sync,
         trigger=CronTrigger(
             minute="*/5",
             hour="2-8",
@@ -142,6 +218,8 @@ def configure_scheduler():
         name="Intraday Data Sync",
         replace_existing=True,
         max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
     )
     logger.info("Scheduled: intraday_sync every 5 min during market hours")
 

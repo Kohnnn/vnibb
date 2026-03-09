@@ -11,13 +11,17 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
     authProvider,
+    appwriteClearSessionHint,
     isAppwriteConfigured,
     appwriteCreateOAuth2Url,
     appwriteGetAccount,
+    appwriteRememberSessionHint,
     appwriteSendMagicLink,
     appwriteSignInWithEmail,
     appwriteSignOutCurrentSession,
     appwriteSignUp,
+    appwriteShouldBootstrapSession,
+    isAppwriteUnauthorizedError,
 } from '@/lib/appwrite';
 
 // Feature flags from environment
@@ -166,12 +170,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 return;
             }
 
+            if (!appwriteShouldBootstrapSession()) {
+                setLoading(false);
+                return;
+            }
+
             appwriteGetAccount()
                 .then((account) => {
+                    appwriteRememberSessionHint();
                     setUser(mapAppwriteUser(account));
                     setSession({ provider: 'appwrite', raw: account });
                 })
-                .catch(() => {
+                .catch((error) => {
+                    if (isAppwriteUnauthorizedError(error)) {
+                        appwriteClearSessionHint();
+                    }
                     setUser(null);
                     setSession(null);
                 })
@@ -215,6 +228,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             try {
                 await appwriteSignInWithEmail(email, password);
                 const account = await appwriteGetAccount();
+                appwriteRememberSessionHint();
                 setUser(mapAppwriteUser(account));
                 setSession({ provider: 'appwrite', raw: account });
                 return { error: null };
@@ -245,6 +259,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 await appwriteSignUp(email, password);
                 await appwriteSignInWithEmail(email, password);
                 const account = await appwriteGetAccount();
+                appwriteRememberSessionHint();
                 setUser(mapAppwriteUser(account));
                 setSession({ provider: 'appwrite', raw: account });
                 return { error: null };
@@ -369,6 +384,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (appwriteEnabled) {
             if (!isAppwriteConfigured) {
+                appwriteClearSessionHint();
                 setUser(null);
                 setSession(null);
                 return;
@@ -379,6 +395,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } catch (error) {
                 console.warn('Appwrite sign out failed:', toAuthFailure(error).message);
             } finally {
+                appwriteClearSessionHint();
                 setUser(null);
                 setSession(null);
             }

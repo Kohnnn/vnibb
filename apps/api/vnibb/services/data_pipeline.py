@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from vnibb.core.database import async_session_maker, engine
 from vnibb.core.cache import redis_client, build_cache_key
 from vnibb.core.config import settings
+from vnibb.core.vn_sectors import resolve_sector_name
 from vnibb.models.stock import Stock, StockPrice, StockIndex
 from vnibb.models.company import Company, Shareholder, Officer
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
@@ -91,6 +92,7 @@ DAILY_TRADING_STAGES = [
 RATE_MODE_NORMAL = "normal"
 RATE_MODE_REINFORCEMENT = "reinforcement"
 RATE_MODE_CONTEXT: ContextVar[str] = ContextVar("vnibb_rate_mode", default=RATE_MODE_NORMAL)
+_SYNC_RUN_LOCKS: Dict[str, asyncio.Lock] = {}
 
 
 def get_upsert_stmt(model, index_elements, values):
@@ -283,6 +285,114 @@ class DataPipeline:
             await redis_client.delete(key)
         except Exception:
             return
+
+    async def _acquire_sync_run_guard(
+        self,
+        sync_type: str,
+        ttl_seconds: int,
+    ) -> tuple[bool, str, Optional[str]]:
+        lock_key = build_cache_key("vnibb", "sync", "guard", sync_type)
+
+        if await self._ensure_redis():
+            token = uuid4().hex
+            try:
+                acquired = await redis_client.client.set(lock_key, token, nx=True, ex=ttl_seconds)
+                if acquired:
+                    return True, "redis", token
+                return False, "redis", None
+            except Exception as exc:
+                logger.warning("Redis sync guard failed for %s: %s", sync_type, exc)
+
+        local_lock = _SYNC_RUN_LOCKS.setdefault(sync_type, asyncio.Lock())
+        if local_lock.locked():
+            return False, "local", None
+        await local_lock.acquire()
+        return True, "local", None
+
+    async def _release_sync_run_guard(
+        self,
+        sync_type: str,
+        source: str,
+        token: Optional[str],
+    ) -> None:
+        if source == "redis":
+            if token and await self._ensure_redis():
+                lock_key = build_cache_key("vnibb", "sync", "guard", sync_type)
+                try:
+                    current_token = await redis_client.client.get(lock_key)
+                    if current_token == token:
+                        await redis_client.client.delete(lock_key)
+                except Exception:
+                    return
+            return
+
+        local_lock = _SYNC_RUN_LOCKS.get(sync_type)
+        if local_lock and local_lock.locked():
+            local_lock.release()
+
+    async def _mark_stale_running_sync_records(
+        self,
+        sync_type: str,
+        max_age_hours: int,
+    ) -> int:
+        cutoff = datetime.utcnow() - timedelta(hours=max(1, max_age_hours))
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(SyncStatus).where(
+                    SyncStatus.sync_type == sync_type,
+                    SyncStatus.status == "running",
+                    SyncStatus.started_at < cutoff,
+                )
+            )
+            stale_records = result.scalars().all()
+            if not stale_records:
+                return 0
+
+            now = datetime.utcnow()
+            for record in stale_records:
+                record.status = "failed"
+                record.completed_at = now
+
+                error_payload = record.errors if isinstance(record.errors, dict) else {}
+                error_payload.update(
+                    {
+                        "reason": "stale_timeout",
+                        "stale_after_hours": max_age_hours,
+                        "auto_marked_at": now.isoformat(),
+                    }
+                )
+                record.errors = error_payload
+
+                additional_data = (
+                    record.additional_data if isinstance(record.additional_data, dict) else {}
+                )
+                additional_data["status"] = "failed_stale"
+                additional_data["stale_marked_at"] = now.isoformat()
+                record.additional_data = additional_data
+
+            await session.commit()
+
+        logger.warning(
+            "Marked %s stale '%s' sync records as failed",
+            len(stale_records),
+            sync_type,
+        )
+        return len(stale_records)
+
+    def _is_progress_stale(self, progress: Dict[str, Any], max_age_hours: int) -> bool:
+        updated_at_raw = progress.get("updated_at")
+        if not updated_at_raw:
+            return False
+
+        updated_at = self._parse_datetime_value(updated_at_raw)
+        if not updated_at:
+            return False
+
+        if updated_at.tzinfo is not None:
+            updated_at = updated_at.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        max_age_seconds = max(1, max_age_hours) * 3600
+        return (datetime.utcnow() - updated_at).total_seconds() > max_age_seconds
 
     async def _create_sync_record(self, sync_type: str, job_id: str, days: int) -> int:
         async with async_session_maker() as session:
@@ -723,12 +833,14 @@ class DataPipeline:
                 industry_value = normalize_text(
                     row.get("industryName") or row.get("industry")
                 ) or industry_map.get(symbol)
+                sector_value = resolve_sector_name(symbol=symbol, industry=industry_value)
 
                 values = {
                     "symbol": symbol,
                     "company_name": normalize_text(row.get("organName") or row.get("organ_name")),
                     "exchange": exchange_value or "UNKNOWN",
                     "industry": industry_value,
+                    "sector": sector_value,
                     "is_active": 1,
                     "updated_at": datetime.utcnow(),
                 }
@@ -742,6 +854,7 @@ class DataPipeline:
                             "company_name": values["company_name"],
                             "exchange": values["exchange"],
                             "industry": values["industry"],
+                            "sector": values["sector"],
                         }
                     )
                     if progress is not None:
@@ -777,6 +890,16 @@ class DataPipeline:
                         row.get("comGroupCode")
                         or row.get("exchange")
                         or exchange_map.get(str(row.get("symbol", row.get("ticker", ""))).upper())
+                    ),
+                    "sector": resolve_sector_name(
+                        symbol=str(row.get("symbol", row.get("ticker", ""))).upper(),
+                        industry=(
+                            row.get("industryName")
+                            or row.get("industry")
+                            or industry_map.get(
+                                str(row.get("symbol", row.get("ticker", ""))).upper()
+                            )
+                        ),
                     ),
                 }
                 for _, row in df.iterrows()
@@ -2123,6 +2246,13 @@ class DataPipeline:
                     "updated_at": datetime.utcnow(),
                 }
 
+                if not values.get("sector"):
+                    values["sector"] = resolve_sector_name(
+                        symbol=symbol,
+                        industry=values.get("industry"),
+                        sector_hint=values.get("sector"),
+                    )
+
                 async with async_session_maker() as session:
                     existing_company = await session.scalar(
                         select(Company).where(Company.symbol == symbol)
@@ -2139,6 +2269,13 @@ class DataPipeline:
                         values["industry"] = _normalize_text(existing_stock.industry)
                     if not values.get("sector") and existing_stock is not None:
                         values["sector"] = _normalize_text(existing_stock.sector)
+
+                    if not values.get("sector"):
+                        values["sector"] = resolve_sector_name(
+                            symbol=symbol,
+                            industry=values.get("industry"),
+                            sector_hint=values.get("sector"),
+                        )
 
                     if existing_company is not None:
                         for field_name in (
@@ -5056,50 +5193,69 @@ class DataPipeline:
     ) -> None:
         """Run daily updater for trading flow and derivatives."""
         trade_date = trade_date or self._get_market_date()
-        progress = None
+        stale_hours = 18
+        guard_ttl_seconds = 3 * 60 * 60
 
-        if resume:
-            progress = await self._load_progress(key=DAILY_TRADING_PROGRESS_KEY)
-
-        if progress is None:
-            job_id = job_id or f"daily-trading-{uuid4().hex[:8]}"
-            progress = {
-                "job_id": job_id,
-                "status": "running",
-                "stage": DAILY_TRADING_STAGES[0],
-                "stage_index": 0,
-                "success_count": 0,
-                "error_count": 0,
-                "stage_stats": {},
-                "trade_date": trade_date.isoformat(),
-            }
-        else:
-            progress.setdefault("success_count", 0)
-            progress.setdefault("error_count", 0)
-            progress.setdefault("stage_stats", {})
-            if progress.get("trade_date"):
-                try:
-                    trade_date = date.fromisoformat(progress["trade_date"])
-                except ValueError:
-                    pass
-
-        sync_id = progress.get("sync_id")
-        if not sync_id:
-            sync_id = await self._create_sync_record("daily_trading", progress["job_id"], 1)
-            progress["sync_id"] = sync_id
-            await self._checkpoint(
-                progress,
-                sync_id,
-                key=DAILY_TRADING_PROGRESS_KEY,
-                ttl=DAILY_TRADING_PROGRESS_TTL,
-            )
-
-        start_index = progress.get("stage_index", 0)
+        await self._mark_stale_running_sync_records("daily_trading", max_age_hours=stale_hours)
+        acquired, guard_source, guard_token = await self._acquire_sync_run_guard(
+            "daily_trading",
+            ttl_seconds=guard_ttl_seconds,
+        )
+        if not acquired:
+            logger.warning("Daily trading updates skipped: another run is still active")
+            return
 
         try:
-            for stage in DAILY_TRADING_STAGES[start_index:]:
-                progress["stage"] = stage
-                progress["stage_index"] = DAILY_TRADING_STAGES.index(stage)
+            progress = None
+            if resume:
+                progress = await self._load_progress(key=DAILY_TRADING_PROGRESS_KEY)
+
+            if progress and self._is_progress_stale(progress, max_age_hours=stale_hours):
+                logger.warning(
+                    "Discarding stale daily trading progress for job_id=%s",
+                    progress.get("job_id"),
+                )
+                await self._clear_progress(key=DAILY_TRADING_PROGRESS_KEY)
+                progress = None
+
+            if progress and progress.get("trade_date"):
+                progress_trade_date = self._parse_date_value(progress.get("trade_date"))
+                if progress_trade_date and progress_trade_date < trade_date:
+                    logger.warning(
+                        "Discarding outdated daily trading progress for trade_date=%s "
+                        "(current_trade_date=%s)",
+                        progress_trade_date,
+                        trade_date,
+                    )
+                    await self._clear_progress(key=DAILY_TRADING_PROGRESS_KEY)
+                    progress = None
+
+            if progress is None:
+                job_id = job_id or f"daily-trading-{uuid4().hex[:8]}"
+                progress = {
+                    "job_id": job_id,
+                    "status": "running",
+                    "stage": DAILY_TRADING_STAGES[0],
+                    "stage_index": 0,
+                    "success_count": 0,
+                    "error_count": 0,
+                    "stage_stats": {},
+                    "trade_date": trade_date.isoformat(),
+                }
+            else:
+                progress.setdefault("success_count", 0)
+                progress.setdefault("error_count", 0)
+                progress.setdefault("stage_stats", {})
+                if progress.get("trade_date"):
+                    try:
+                        trade_date = date.fromisoformat(progress["trade_date"])
+                    except ValueError:
+                        pass
+
+            sync_id = progress.get("sync_id")
+            if not sync_id:
+                sync_id = await self._create_sync_record("daily_trading", progress["job_id"], 1)
+                progress["sync_id"] = sync_id
                 await self._checkpoint(
                     progress,
                     sync_id,
@@ -5107,69 +5263,86 @@ class DataPipeline:
                     ttl=DAILY_TRADING_PROGRESS_TTL,
                 )
 
-                if stage == "foreign_trading":
-                    await self.sync_foreign_trading(
-                        trade_date=trade_date,
-                        progress=progress,
-                        sync_id=sync_id,
-                    )
-                elif stage == "intraday_trades":
-                    await self.sync_intraday_trades(
-                        trade_date=trade_date,
-                        progress=progress,
-                        sync_id=sync_id,
-                    )
-                elif stage == "orderbook_snapshots":
-                    await self.sync_orderbook_snapshots(
-                        progress=progress,
-                        sync_id=sync_id,
-                    )
-                elif stage == "block_trades":
-                    await self.sync_block_trades(
-                        trade_date=trade_date,
-                        progress=progress,
-                        sync_id=sync_id,
-                    )
-                elif stage == "derivatives":
-                    await self.sync_derivatives_prices(
-                        trade_date=trade_date,
-                        progress=progress,
-                        sync_id=sync_id,
-                    )
-                elif stage == "warrants":
-                    await self.sync_warrant_prices(
-                        trade_date=trade_date,
-                        progress=progress,
-                        sync_id=sync_id,
+            start_index = progress.get("stage_index", 0)
+
+            try:
+                for stage in DAILY_TRADING_STAGES[start_index:]:
+                    progress["stage"] = stage
+                    progress["stage_index"] = DAILY_TRADING_STAGES.index(stage)
+                    await self._checkpoint(
+                        progress,
+                        sync_id,
+                        key=DAILY_TRADING_PROGRESS_KEY,
+                        ttl=DAILY_TRADING_PROGRESS_TTL,
                     )
 
-            cleanup_results: Dict[str, int] = {}
-            for label, action in (
-                ("intraday_trades", self.cleanup_intraday_trades),
-                ("orderbook_snapshots", self.cleanup_orderbook_snapshots),
-                ("block_trades", self.cleanup_block_trades),
-                ("foreign_trading", self.cleanup_foreign_trading),
-                ("order_flow_daily", self.cleanup_order_flow_daily),
-            ):
-                try:
-                    removed = await action()
-                    if removed:
-                        cleanup_results[label] = removed
-                except Exception as exc:
-                    logger.warning(f"Retention cleanup failed for {label}: {exc}")
+                    if stage == "foreign_trading":
+                        await self.sync_foreign_trading(
+                            trade_date=trade_date,
+                            progress=progress,
+                            sync_id=sync_id,
+                        )
+                    elif stage == "intraday_trades":
+                        await self.sync_intraday_trades(
+                            trade_date=trade_date,
+                            progress=progress,
+                            sync_id=sync_id,
+                        )
+                    elif stage == "orderbook_snapshots":
+                        await self.sync_orderbook_snapshots(
+                            progress=progress,
+                            sync_id=sync_id,
+                        )
+                    elif stage == "block_trades":
+                        await self.sync_block_trades(
+                            trade_date=trade_date,
+                            progress=progress,
+                            sync_id=sync_id,
+                        )
+                    elif stage == "derivatives":
+                        await self.sync_derivatives_prices(
+                            trade_date=trade_date,
+                            progress=progress,
+                            sync_id=sync_id,
+                        )
+                    elif stage == "warrants":
+                        await self.sync_warrant_prices(
+                            trade_date=trade_date,
+                            progress=progress,
+                            sync_id=sync_id,
+                        )
 
-            if cleanup_results:
-                logger.info(f"Retention cleanup results: {cleanup_results}")
+                cleanup_results: Dict[str, int] = {}
+                for label, action in (
+                    ("intraday_trades", self.cleanup_intraday_trades),
+                    ("orderbook_snapshots", self.cleanup_orderbook_snapshots),
+                    ("block_trades", self.cleanup_block_trades),
+                    ("foreign_trading", self.cleanup_foreign_trading),
+                    ("order_flow_daily", self.cleanup_order_flow_daily),
+                ):
+                    try:
+                        removed = await action()
+                        if removed:
+                            cleanup_results[label] = removed
+                    except Exception as exc:
+                        logger.warning(f"Retention cleanup failed for {label}: {exc}")
 
-            progress["status"] = "completed"
-            await self._update_sync_record(sync_id, status="completed", additional_data=progress)
-            await self._clear_progress(key=DAILY_TRADING_PROGRESS_KEY)
-            logger.info("✅ Daily trading updates completed successfully.")
-        except Exception as exc:
-            progress["status"] = "failed"
-            await self._update_sync_record(sync_id, status="failed", additional_data=progress)
-            logger.error(f"Daily trading updates failed: {exc}")
-            raise
+                if cleanup_results:
+                    logger.info(f"Retention cleanup results: {cleanup_results}")
+
+                progress["status"] = "completed"
+                await self._update_sync_record(
+                    sync_id, status="completed", additional_data=progress
+                )
+                await self._clear_progress(key=DAILY_TRADING_PROGRESS_KEY)
+                logger.info("✅ Daily trading updates completed successfully.")
+            except Exception as exc:
+                progress["status"] = "failed"
+                await self._update_sync_record(sync_id, status="failed", additional_data=progress)
+                logger.error(f"Daily trading updates failed: {exc}")
+                raise
+        finally:
+            await self._release_sync_run_guard("daily_trading", guard_source, guard_token)
 
     async def run_reinforcement(
         self,
@@ -5275,113 +5448,138 @@ class DataPipeline:
         """Run complete data seeding pipeline with resume support."""
         logger.info(f"🚀 Starting FULL DATA SEEDING ({days} days history)...")
 
-        progress = None
-        if resume:
-            progress = await self._load_progress()
+        stale_hours = 24
+        guard_ttl_seconds = 6 * 60 * 60
 
-        if progress is None:
-            job_id = job_id or f"full-{uuid4().hex[:8]}"
-            progress = {
-                "job_id": job_id,
-                "status": "running",
-                "stage": STAGE_ORDER[0],
-                "stage_index": 0,
-                "success_count": 0,
-                "error_count": 0,
-                "stage_stats": {},
-                "days": days,
-            }
-        else:
-            progress.setdefault("success_count", 0)
-            progress.setdefault("error_count", 0)
-            progress.setdefault("stage_stats", {})
-
-        if stages is None:
-            stages = STAGE_ORDER
-
-        sync_id = progress.get("sync_id")
-        if not sync_id:
-            sync_id = await self._create_sync_record("full", progress["job_id"], days)
-            progress["sync_id"] = sync_id
-            await self._checkpoint(progress, sync_id)
-
-        start_index = progress.get("stage_index", 0)
+        await self._mark_stale_running_sync_records("full", max_age_hours=stale_hours)
+        acquired, guard_source, guard_token = await self._acquire_sync_run_guard(
+            "full",
+            ttl_seconds=guard_ttl_seconds,
+        )
+        if not acquired:
+            logger.warning("Full seeding skipped: another run is still active")
+            return
 
         previous_cache_state = self.cache_writes_enabled
-        if cache_writes is False:
-            self.cache_writes_enabled = False
-
         try:
-            for stage in stages[start_index:]:
-                progress["stage"] = stage
-                progress["stage_index"] = STAGE_ORDER.index(stage)
+            progress = None
+            if resume:
+                progress = await self._load_progress()
+
+            if progress and self._is_progress_stale(progress, max_age_hours=stale_hours):
+                logger.warning(
+                    "Discarding stale full-seeding progress for job_id=%s",
+                    progress.get("job_id"),
+                )
+                await self._clear_progress()
+                progress = None
+
+            if progress is None:
+                job_id = job_id or f"full-{uuid4().hex[:8]}"
+                progress = {
+                    "job_id": job_id,
+                    "status": "running",
+                    "stage": STAGE_ORDER[0],
+                    "stage_index": 0,
+                    "success_count": 0,
+                    "error_count": 0,
+                    "stage_stats": {},
+                    "days": days,
+                }
+            else:
+                progress.setdefault("success_count", 0)
+                progress.setdefault("error_count", 0)
+                progress.setdefault("stage_stats", {})
+
+            if stages is None:
+                stages = STAGE_ORDER
+
+            sync_id = progress.get("sync_id")
+            if not sync_id:
+                sync_id = await self._create_sync_record("full", progress["job_id"], days)
+                progress["sync_id"] = sync_id
                 await self._checkpoint(progress, sync_id)
 
-                if stage == "stock_list":
-                    try:
-                        await self.sync_stock_list(progress=progress, sync_id=sync_id)
-                    except Exception as e:
-                        logger.warning(f"Stock list sync failed: {e}")
-                elif stage == "screener":
-                    try:
-                        await self.sync_screener_data(progress=progress, sync_id=sync_id)
-                        removed = await self.cleanup_screener_snapshots()
-                        if removed:
-                            logger.info(
-                                f"Pruned {removed} old screener snapshots beyond retention window"
-                            )
-                    except Exception as e:
-                        logger.warning(f"Screener sync failed: {e}")
-                elif stage == "profiles":
-                    try:
-                        await self.sync_company_profiles(progress=progress, sync_id=sync_id)
-                    except Exception as e:
-                        logger.warning(f"Profile sync failed: {e}")
-                elif stage == "prices":
-                    if include_prices:
-                        try:
-                            await self.sync_daily_prices(
-                                days=days,
-                                progress=progress,
-                                sync_id=sync_id,
-                                cache_recent=False,
-                            )
-                            removed = await self.cleanup_price_history()
-                            if removed:
-                                logger.info(
-                                    f"Pruned {removed} old price rows beyond retention window"
-                                )
-                        except Exception as e:
-                            logger.warning(f"Price sync failed: {e}")
-                elif stage == "financials":
-                    try:
-                        await self.sync_financials(
-                            period="year", progress=progress, sync_id=sync_id
-                        )
-                        await self.sync_financials(period="quarter")
-                        await self.sync_financial_ratios(period="year")
-                        await self.sync_financial_ratios(period="quarter")
-                    except Exception as e:
-                        logger.warning(f"Financials sync failed: {e}")
+            start_index = progress.get("stage_index", 0)
+
+            if cache_writes is False:
+                self.cache_writes_enabled = False
 
             try:
-                removed_news = await self.cleanup_company_news()
-                if removed_news:
-                    logger.info(f"Pruned {removed_news} old news rows beyond retention window")
-            except Exception as e:
-                logger.warning(f"News cleanup failed: {e}")
+                for stage in stages[start_index:]:
+                    progress["stage"] = stage
+                    progress["stage_index"] = STAGE_ORDER.index(stage)
+                    await self._checkpoint(progress, sync_id)
 
-            progress["status"] = "completed"
-            await self._update_sync_record(sync_id, status="completed", additional_data=progress)
-            await self._clear_progress()
-            logger.info("✅ Full seeding completed successfully.")
-        except Exception as e:
-            progress["status"] = "failed"
-            await self._update_sync_record(sync_id, status="failed", additional_data=progress)
-            logger.error(f"Full seeding failed: {e}")
-            raise
+                    if stage == "stock_list":
+                        try:
+                            await self.sync_stock_list(progress=progress, sync_id=sync_id)
+                        except Exception as e:
+                            logger.warning(f"Stock list sync failed: {e}")
+                    elif stage == "screener":
+                        try:
+                            await self.sync_screener_data(progress=progress, sync_id=sync_id)
+                            removed = await self.cleanup_screener_snapshots()
+                            if removed:
+                                logger.info(
+                                    f"Pruned {removed} old screener snapshots beyond retention window"
+                                )
+                        except Exception as e:
+                            logger.warning(f"Screener sync failed: {e}")
+                    elif stage == "profiles":
+                        try:
+                            await self.sync_company_profiles(progress=progress, sync_id=sync_id)
+                        except Exception as e:
+                            logger.warning(f"Profile sync failed: {e}")
+                    elif stage == "prices":
+                        if include_prices:
+                            try:
+                                await self.sync_daily_prices(
+                                    days=days,
+                                    progress=progress,
+                                    sync_id=sync_id,
+                                    cache_recent=False,
+                                )
+                                removed = await self.cleanup_price_history()
+                                if removed:
+                                    logger.info(
+                                        f"Pruned {removed} old price rows beyond retention window"
+                                    )
+                            except Exception as e:
+                                logger.warning(f"Price sync failed: {e}")
+                    elif stage == "financials":
+                        try:
+                            await self.sync_financials(
+                                period="year", progress=progress, sync_id=sync_id
+                            )
+                            await self.sync_financials(period="quarter")
+                            await self.sync_financial_ratios(period="year")
+                            await self.sync_financial_ratios(period="quarter")
+                        except Exception as e:
+                            logger.warning(f"Financials sync failed: {e}")
+
+                try:
+                    removed_news = await self.cleanup_company_news()
+                    if removed_news:
+                        logger.info(f"Pruned {removed_news} old news rows beyond retention window")
+                except Exception as e:
+                    logger.warning(f"News cleanup failed: {e}")
+
+                progress["status"] = "completed"
+                await self._update_sync_record(
+                    sync_id, status="completed", additional_data=progress
+                )
+                await self._clear_progress()
+                logger.info("✅ Full seeding completed successfully.")
+            except Exception as e:
+                progress["status"] = "failed"
+                await self._update_sync_record(sync_id, status="failed", additional_data=progress)
+                logger.error(f"Full seeding failed: {e}")
+                raise
+            finally:
+                self.cache_writes_enabled = previous_cache_state
         finally:
-            self.cache_writes_enabled = previous_cache_state
+            await self._release_sync_run_guard("full", guard_source, guard_token)
 
 
 # Standalone functions for scheduler

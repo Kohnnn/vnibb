@@ -2,7 +2,7 @@
 
 import { Clock, RefreshCw, Database, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatTime, formatTimestamp } from '@/lib/format';
+import { formatAbsoluteTimestamp, formatTime } from '@/lib/format';
 
 interface WidgetMetaProps {
   updatedAt?: number | string | Date | null;
@@ -34,7 +34,7 @@ export function WidgetMeta({
   className,
 }: WidgetMetaProps) {
   const updatedDate = toDate(updatedAt);
-  const updatedLabel = updatedDate ? formatTimestamp(updatedDate) : null;
+  const updatedLabel = updatedDate ? formatAbsoluteTimestamp(updatedDate) : null;
   const exactTime = updatedDate ? formatTime(updatedDate, true) : null;
 
   return (

@@ -258,6 +258,8 @@ async def _populate_via_http(
         raise RuntimeError("Appwrite database ID is not configured")
 
     concurrency = max(1, _env_int("APPWRITE_POPULATE_CONCURRENCY", 5))
+    if settings.environment == "production":
+        concurrency = min(concurrency, 4)
     default_max_rows = 0 if full_refresh else _env_int("APPWRITE_POPULATE_MAX_ROWS", 1000)
     coerce_all_to_string = True
 
@@ -274,6 +276,8 @@ async def _populate_via_http(
             batch_size = int(
                 collection_config.get("batchSize") or _env_int("APPWRITE_POPULATE_BATCH_SIZE", 500)
             )
+            if settings.environment == "production":
+                batch_size = min(batch_size, 300)
             document_id_columns = list(collection_config.get("documentIdColumns") or ["id"])
             precision_columns = set(collection_config.get("precisionColumns") or [])
 

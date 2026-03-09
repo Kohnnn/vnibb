@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from vnibb.core.config import settings
 from vnibb.services.news_crawler import news_crawler
+from vnibb.services.sentiment_analyzer import sentiment_analyzer
 from vnibb.providers.vnstock.company_news import (
     VnstockCompanyNewsFetcher,
     CompanyNewsQueryParams,
@@ -447,6 +448,12 @@ async def analyze_sentiment(
     async_mode: bool = Query(default=True, description="Run in background"),
 ) -> CrawlStatus:
     """Trigger sentiment analysis for unprocessed articles."""
+    mode_message = (
+        "AI sentiment analysis is paused; articles will be marked neutral."
+        if sentiment_analyzer.is_paused
+        else "Sentiment analysis started in background"
+    )
+
     if async_mode:
         background_tasks.add_task(
             news_crawler.analyze_unprocessed_articles,
@@ -455,7 +462,7 @@ async def analyze_sentiment(
         )
         return CrawlStatus(
             status="started",
-            message="Sentiment analysis started in background",
+            message=mode_message,
         )
 
     try:
@@ -465,7 +472,11 @@ async def analyze_sentiment(
         )
         return CrawlStatus(
             status="success",
-            message=f"Analyzed {count} articles",
+            message=(
+                f"Marked {count} articles neutral"
+                if sentiment_analyzer.is_paused
+                else f"Analyzed {count} articles"
+            ),
             count=count,
         )
     except Exception as e:

@@ -22,6 +22,8 @@ export interface AppwriteAccount {
     prefs?: Record<string, unknown>;
 }
 
+const APPWRITE_SESSION_HINT_KEY = 'vnibb_appwrite_session_hint';
+
 const APPWRITE_ENDPOINT = (
     process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1'
 ).replace(/\/$/, '');
@@ -46,6 +48,10 @@ function ensureConfigured(): void {
     if (!isAppwriteConfigured) {
         throw createAuthError('Appwrite is not configured');
     }
+}
+
+function canUseBrowserStorage(): boolean {
+    return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 }
 
 function buildHeaders(includeJson: boolean): HeadersInit {
@@ -76,14 +82,26 @@ async function appwriteRequest<T>(
     ensureConfigured();
 
     const url = `${APPWRITE_ENDPOINT}${path}`;
-    const response = await fetch(url, {
-        ...init,
-        credentials: 'include',
-        headers: {
-            ...buildHeaders(includeJsonHeader),
-            ...(init.headers || {}),
-        },
-    });
+    let response: Response;
+
+    try {
+        response = await fetch(url, {
+            ...init,
+            credentials: 'include',
+            headers: {
+                ...buildHeaders(includeJsonHeader),
+                ...(init.headers || {}),
+            },
+        });
+    } catch (error) {
+        throw createAuthError(
+            error instanceof Error
+                ? error.message
+                : 'Unable to reach Appwrite. Check CORS/session configuration.',
+            0,
+            'network_error',
+        );
+    }
 
     if (!response.ok) {
         const errorBody = await parseErrorBody(response);
@@ -103,6 +121,49 @@ async function appwriteRequest<T>(
 
 export async function appwriteGetAccount(): Promise<AppwriteAccount> {
     return appwriteRequest<AppwriteAccount>('/account', { method: 'GET' }, false);
+}
+
+export function appwriteRememberSessionHint(): void {
+    if (!canUseBrowserStorage()) {
+        return;
+    }
+
+    window.localStorage.setItem(APPWRITE_SESSION_HINT_KEY, '1');
+}
+
+export function appwriteClearSessionHint(): void {
+    if (!canUseBrowserStorage()) {
+        return;
+    }
+
+    window.localStorage.removeItem(APPWRITE_SESSION_HINT_KEY);
+}
+
+export function appwriteHasSessionHint(): boolean {
+    if (!canUseBrowserStorage()) {
+        return false;
+    }
+
+    return window.localStorage.getItem(APPWRITE_SESSION_HINT_KEY) === '1';
+}
+
+export function appwriteShouldBootstrapSession(): boolean {
+    if (typeof window === 'undefined') {
+        return false;
+    }
+
+    const pathname = window.location.pathname;
+    return pathname.startsWith('/auth/callback') || appwriteHasSessionHint();
+}
+
+export function isAppwriteUnauthorizedError(error: unknown): boolean {
+    return Boolean(
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        typeof (error as AppwriteAuthError).code === 'number' &&
+        (error as AppwriteAuthError).code === 401,
+    );
 }
 
 export async function appwriteSignInWithEmail(email: string, password: string): Promise<void> {

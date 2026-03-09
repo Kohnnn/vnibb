@@ -23,6 +23,8 @@ from vnibb.services.data_pipeline import data_pipeline
 
 logger = logging.getLogger(__name__)
 
+DAILY_MARKET_HISTORY_DAYS = 21
+
 
 @dataclass
 class SyncResult:
@@ -183,9 +185,27 @@ class FullMarketSync:
 
         return await self._run_stage("financials", _operation)
 
+    async def sync_all_corporate_actions(
+        self,
+        symbols: list[str] | None = None,
+        max_symbols: int | None = None,
+    ) -> SyncResult:
+        """Sync dividend history and company event records."""
+
+        resolved_symbols = symbols or await self._get_seeded_symbols(max_symbols=max_symbols)
+
+        async def _operation() -> int:
+            total = 0
+            total += await data_pipeline.sync_dividends(symbols=resolved_symbols)
+            total += await data_pipeline.sync_company_events(symbols=resolved_symbols)
+            return total
+
+        return await self._run_stage("corporate_actions", _operation)
+
     async def run_full_sync(
         self,
         include_historical: bool = False,
+        include_corporate_actions: bool = True,
         max_symbols: int | None = None,
         history_days: int | None = None,
     ) -> dict[str, SyncResult]:
@@ -197,12 +217,16 @@ class FullMarketSync:
         2) Screener + prices
         3) Profiles
         4) Financials + ratios
+        5) Dividends + company events
         """
 
         logger.info(
-            "Starting full market sync (max_symbols=%s, include_historical=%s, history_days=%s)",
+            "Starting full market sync "
+            "(max_symbols=%s, include_historical=%s, "
+            "include_corporate_actions=%s, history_days=%s)",
             max_symbols,
             include_historical,
+            include_corporate_actions,
             history_days,
         )
 
@@ -220,6 +244,8 @@ class FullMarketSync:
         )
         results["profiles"] = await self.sync_all_profiles(symbols=symbols)
         results["financials"] = await self.sync_all_financials(symbols=symbols)
+        if include_corporate_actions:
+            results["corporate_actions"] = await self.sync_all_corporate_actions(symbols=symbols)
 
         total_synced = sum(result.synced_count for result in results.values())
         total_errors = sum(result.error_count for result in results.values())
@@ -245,8 +271,80 @@ async def run_profile_sync() -> SyncResult:
     return await sync.sync_all_profiles()
 
 
-async def run_full_sync(include_historical: bool = False) -> dict[str, SyncResult]:
+async def run_daily_market_sync(
+    history_days: int = DAILY_MARKET_HISTORY_DAYS,
+    include_corporate_actions: bool = True,
+) -> dict[str, SyncResult]:
+    """Run the post-close daily market refresh for all active symbols."""
+
+    async def _run_direct_stage(
+        stage_name: str,
+        operation: Callable[[], Awaitable[int]],
+    ) -> SyncResult:
+        start = time.monotonic()
+        errors: list[str] = []
+        synced_count = 0
+        success = True
+
+        try:
+            synced_count = int(await operation())
+        except Exception as exc:  # noqa: BLE001
+            success = False
+            errors.append(str(exc))
+            logger.exception("%s sync failed: %s", stage_name, exc)
+
+        duration_seconds = time.monotonic() - start
+        return SyncResult(
+            success=success,
+            synced_count=synced_count,
+            error_count=len(errors),
+            duration_seconds=duration_seconds,
+            errors=errors,
+        )
+
+    sync = FullMarketSync()
+    results: dict[str, SyncResult] = {}
+
+    symbols = await sync._get_seeded_symbols()
+    if not symbols:
+        results["symbols"] = await _run_direct_stage("symbols", data_pipeline.sync_stock_list)
+        symbols = await sync._get_seeded_symbols()
+
+    async def _sync_prices() -> int:
+        total = await data_pipeline.sync_screener_data(symbols=symbols)
+        total += await data_pipeline.sync_daily_prices(
+            symbols=symbols,
+            days=history_days,
+            fill_missing_gaps=True,
+            cache_recent=False,
+        )
+        return total
+
+    results["prices"] = await _run_direct_stage("prices", _sync_prices)
+
+    if include_corporate_actions:
+
+        async def _sync_corporate_actions() -> int:
+            total = await data_pipeline.sync_dividends(symbols=symbols)
+            total += await data_pipeline.sync_company_events(symbols=symbols)
+            return total
+
+        results["corporate_actions"] = await _run_direct_stage(
+            "corporate_actions",
+            _sync_corporate_actions,
+        )
+
+    return results
+
+
+async def run_full_sync(
+    include_historical: bool = False,
+    include_corporate_actions: bool = True,
+) -> dict[str, SyncResult]:
     """Run full market sync with default settings."""
 
     sync = FullMarketSync()
-    return await sync.run_full_sync(include_historical=include_historical)
+    return await sync.run_full_sync(
+        include_historical=include_historical,
+        include_corporate_actions=include_corporate_actions,
+    )

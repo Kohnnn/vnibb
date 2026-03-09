@@ -6,11 +6,11 @@ Supports multiple symbol subscriptions per connection.
 Auto start/stop during market hours (9 AM - 3 PM VNT).
 """
 
-from datetime import datetime
+import asyncio
 import json
 import logging
-import asyncio
 import re
+from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -21,6 +21,10 @@ from vnibb.services.websocket_service import manager, PriceUpdate, VN_TZ
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ws", tags=["WebSocket"])
+
+ACTIVE_MARKET_SLEEP_SECONDS = 5
+IDLE_SLEEP_SECONDS = 30
+PER_SYMBOL_DELAY_SECONDS = 0.1
 
 
 def _is_allowed_ws_origin(origin: str) -> bool:
@@ -75,12 +79,27 @@ async def fetch_and_broadcast_prices():
     """
     while True:
         try:
+            connection_count = manager.active_connection_count()
+            subscription_count = manager.total_subscription_count()
+            if connection_count == 0 or subscription_count == 0:
+                await asyncio.sleep(IDLE_SLEEP_SECONDS)
+                continue
+
             symbols = manager.get_all_subscribed_symbols()
-            # Always include major indices in broadcast
-            major_indices = {"VNINDEX", "VN30", "HNXINDEX", "UPCOMINDEX", "VN-INDEX", "HNX-INDEX"}
-            symbols.update(major_indices)
 
             market_open = is_market_open()
+
+            if market_open:
+                # Keep major indices updated only when clients are actively subscribed.
+                major_indices = {
+                    "VNINDEX",
+                    "VN30",
+                    "HNXINDEX",
+                    "UPCOMINDEX",
+                    "VN-INDEX",
+                    "HNX-INDEX",
+                }
+                symbols.update(major_indices)
 
             if symbols and market_open:
                 # Fetch current prices for subscribed symbols
@@ -108,10 +127,10 @@ async def fetch_and_broadcast_prices():
                     except BaseException as e:
                         logger.debug(f"Price fetch failed for {symbol}: {e}")
 
-                    await asyncio.sleep(0.1)  # Rate limiting between symbols
+                    await asyncio.sleep(PER_SYMBOL_DELAY_SECONDS)
 
             # Update every 5 seconds during market hours, 30 seconds otherwise
-            sleep_time = 5 if market_open else 30
+            sleep_time = ACTIVE_MARKET_SLEEP_SECONDS if market_open else IDLE_SLEEP_SECONDS
             await asyncio.sleep(sleep_time)
 
         except BaseException as e:
@@ -156,7 +175,7 @@ async def websocket_prices(websocket: WebSocket):
             message = json.loads(data)
 
             action = message.get("action")
-            symbols = set(s.upper() for s in message.get("symbols", []))
+            symbols = {s.upper() for s in message.get("symbols", [])}
 
             if action == "subscribe":
                 manager.subscribe(websocket, symbols)

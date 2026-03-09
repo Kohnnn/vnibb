@@ -113,6 +113,7 @@ DATABASE_URL=postgresql+asyncpg://...
 CACHE_BACKEND=auto  # auto|redis|memory|appwrite
 DATA_BACKEND=appwrite  # appwrite primary; postgres remains fallback. hybrid is a legacy alias.
 APPWRITE_POPULATE_MAX_ROWS=1000
+APPWRITE_POPULATE_FORCE_HTTP=1  # recommended on Zeabur
 REDIS_URL=redis://localhost:6379/0
 VNSTOCK_API_KEY=vnstock_xxx
 VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
@@ -122,6 +123,7 @@ CORS_ORIGINS=["https://vnibb.vercel.app"]
 CORS_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$|^https://[a-z0-9-]+\\.vercel\\.app$
 ENVIRONMENT=production
 GEMINI_API_KEY=your_gemini_api_key
+ENABLE_AI_SENTIMENT_ANALYSIS=0  # keep market news sentiment paused for stability-first deploys
 # Alternative accepted key name:
 # GOOGLE_API_KEY=your_gemini_api_key
 
@@ -136,6 +138,8 @@ GEMINI_API_KEY=your_gemini_api_key
 ```
 
 If neither `GEMINI_API_KEY` nor `GOOGLE_API_KEY` is set, news sentiment falls back to rule-based scoring.
+
+Set `ENABLE_AI_SENTIMENT_ANALYSIS=0` to pause news sentiment processing entirely; crawled articles will be marked neutral so the news feed still works without AI load.
 
 Appwrite is now the expected primary runtime backend. Keep `DATABASE_URL` configured so Postgres/Supabase can act as the fallback source and Appwrite population bridge.
 

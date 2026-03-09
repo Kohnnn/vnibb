@@ -95,6 +95,7 @@ class QuantResponseData(BaseModel):
     symbol: str
     period: str
     computed_at: datetime
+    last_data_date: datetime | None = None
     metrics: Dict[str, Any]
     warning: str | None = None
 
@@ -154,7 +155,9 @@ def _get_quant_calculators() -> Dict[str, Callable[[pd.DataFrame], Dict[str, Any
     }
 
 
-def _build_period_warning(frame: pd.DataFrame, requested_start_date: date, period: str) -> str | None:
+def _build_period_warning(
+    frame: pd.DataFrame, requested_start_date: date, period: str
+) -> str | None:
     if frame.empty:
         return None
 
@@ -181,6 +184,20 @@ def _format_date_value(value: Any) -> str | None:
     if pd.isna(parsed):
         return None
     return parsed.strftime("%Y-%m-%d")
+
+
+def _resolve_frame_last_timestamp(frame: pd.DataFrame) -> datetime | None:
+    if frame.empty or "time" not in frame.columns:
+        return None
+
+    parsed = pd.to_datetime(frame["time"], errors="coerce").dropna()
+    if parsed.empty:
+        return None
+
+    latest = parsed.max()
+    if pd.isna(latest):
+        return None
+    return latest.to_pydatetime()
 
 
 async def _load_quant_frame_with_warning(
@@ -238,6 +255,7 @@ async def _get_quant_metric_alias_response(
         source=source,
         period=period_upper,
     )
+    last_data_timestamp = _resolve_frame_last_timestamp(frame)
 
     min_points_required = 30
     observed_points = int(len(frame))
@@ -247,10 +265,16 @@ async def _get_quant_metric_alias_response(
                 "symbol": symbol_upper,
                 "period": period_upper,
                 "metric": canonical_metric,
-                "computed_at": datetime.utcnow(),
+                "computed_at": last_data_timestamp or datetime.utcnow(),
+                "last_data_date": last_data_timestamp,
                 "warning": warning,
             },
-            meta=MetaData(count=0),
+            meta=MetaData(
+                count=0,
+                symbol=symbol_upper,
+                data_points=observed_points,
+                last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            ),
             error=(
                 f"Insufficient Data: Expected at least {min_points_required} sessions, "
                 f"got {observed_points}."
@@ -260,16 +284,24 @@ async def _get_quant_metric_alias_response(
     try:
         metric_payload = calculator(frame.copy())
     except Exception as exc:
-        logger.warning("Quant metric alias %s failed for %s: %s", canonical_metric, symbol_upper, exc)
+        logger.warning(
+            "Quant metric alias %s failed for %s: %s", canonical_metric, symbol_upper, exc
+        )
         return StandardResponse(
             data={
                 "symbol": symbol_upper,
                 "period": period_upper,
                 "metric": canonical_metric,
-                "computed_at": datetime.utcnow(),
+                "computed_at": last_data_timestamp or datetime.utcnow(),
+                "last_data_date": last_data_timestamp,
                 "warning": warning,
             },
-            meta=MetaData(count=0),
+            meta=MetaData(
+                count=0,
+                symbol=symbol_upper,
+                data_points=observed_points,
+                last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            ),
             error=str(exc),
         )
 
@@ -277,12 +309,21 @@ async def _get_quant_metric_alias_response(
         "symbol": symbol_upper,
         "period": period_upper,
         "metric": canonical_metric,
-        "computed_at": datetime.utcnow(),
+        "computed_at": last_data_timestamp or datetime.utcnow(),
+        "last_data_date": last_data_timestamp,
     }
     if warning:
         response_payload["warning"] = warning
     response_payload.update(metric_payload)
-    return StandardResponse(data=response_payload, meta=MetaData(count=1))
+    return StandardResponse(
+        data=response_payload,
+        meta=MetaData(
+            count=1,
+            symbol=symbol_upper,
+            data_points=observed_points,
+            last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+        ),
+    )
 
 
 def _build_month_map(series: pd.Series, decimals: int = 2) -> Dict[str, float | None]:
@@ -1998,7 +2039,9 @@ async def get_quant_metrics(
     if not symbol_upper:
         raise HTTPException(status_code=400, detail="Symbol is required")
 
-    requested_metrics = [_normalize_metric_name(item) for item in metrics.split(",") if item.strip()]
+    requested_metrics = [
+        _normalize_metric_name(item) for item in metrics.split(",") if item.strip()
+    ]
     if not requested_metrics:
         requested_metrics = list(SUPPORTED_METRICS)
 
@@ -2026,6 +2069,7 @@ async def get_quant_metrics(
         source=source,
         period=period_upper,
     )
+    last_data_timestamp = _resolve_frame_last_timestamp(frame)
 
     min_points_required = 30
     observed_points = int(len(frame))
@@ -2034,13 +2078,19 @@ async def get_quant_metrics(
         payload = QuantResponseData(
             symbol=symbol_upper,
             period=period_upper,
-            computed_at=datetime.utcnow(),
+            computed_at=last_data_timestamp or datetime.utcnow(),
+            last_data_date=last_data_timestamp,
             metrics={},
             warning=warning,
         )
         return StandardResponse(
             data=payload,
-            meta=MetaData(count=0),
+            meta=MetaData(
+                count=0,
+                symbol=symbol_upper,
+                data_points=observed_points,
+                last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+            ),
             error=(
                 f"Insufficient Data: Expected at least {min_points_required} sessions, "
                 f"got {observed_points}."
@@ -2063,8 +2113,17 @@ async def get_quant_metrics(
     payload = QuantResponseData(
         symbol=symbol_upper,
         period=period_upper,
-        computed_at=datetime.utcnow(),
+        computed_at=last_data_timestamp or datetime.utcnow(),
+        last_data_date=last_data_timestamp,
         metrics=computed_metrics,
         warning=warning,
     )
-    return StandardResponse(data=payload, meta=MetaData(count=len(computed_metrics)))
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(
+            count=len(computed_metrics),
+            symbol=symbol_upper,
+            data_points=observed_points,
+            last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+        ),
+    )

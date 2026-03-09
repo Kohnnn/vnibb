@@ -57,6 +57,7 @@ MIGRATION_MAX_ROWS=0
 MIGRATION_BASELINE_OUT=./scripts/appwrite/supabase_baseline.json
 MIGRATION_BASELINE_SAMPLE_SIZE=500
 APPWRITE_POPULATE_MAX_ROWS=1000
+APPWRITE_POPULATE_FORCE_HTTP=1
 ```
 
 Alias support is included if your env file uses these names:
@@ -109,6 +110,8 @@ Runtime sync/seed helpers that now populate Appwrite automatically:
 - `apps/api/vnibb/services/sync_all_data.py`
 - `apps/api/scripts/seed_historical.py`
 - `apps/api/scripts/full_seed.py`
+
+For Zeabur-style Python containers, set `APPWRITE_POPULATE_FORCE_HTTP=1` to use the built-in HTTP mirror fallback instead of relying on `node` in the runtime image.
 
 Create collections from schema map:
 
