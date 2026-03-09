@@ -5,6 +5,8 @@ Master data for VN market sector groups, mapping ICB industry codes
 to Vietnamese sector categories for local market analysis.
 """
 
+import re
+import unicodedata
 from typing import Dict, List, Optional
 from pydantic import BaseModel
 
@@ -212,6 +214,139 @@ VN_SECTORS: Dict[str, SectorConfig] = {
         symbols=["BWE", "DNP", "BMP", "NTP", "AAA", "TDM", "TNG"],
     ),
 }
+
+SECTOR_CLASSIFICATION_IDS: List[str] = [
+    sector_id for sector_id in VN_SECTORS.keys() if sector_id not in {"vn30"}
+]
+
+INDUSTRY_TO_SECTOR_ID: dict[str, str] = {
+    "ngan hang": "banking",
+    "chung khoan": "securities",
+    "bat dong san": "real_estate",
+    "vat lieu xay dung": "construction_materials",
+    "xay dung va vat lieu": "construction_materials",
+    "ban le": "retail",
+    "ban buon": "retail",
+    "thuc pham do uong": "food",
+    "san xuat thuc pham": "food",
+    "bia va do uong": "food",
+    "cong nghe va thong tin": "technology",
+    "truyen thong": "technology",
+    "vien thong co dinh": "technology",
+    "vien thong di dong": "technology",
+    "bao hiem": "insurance",
+    "bao hiem phi nhan tho": "insurance",
+    "sx nhua hoa chat": "chemicals_fertilizer",
+    "hoa chat": "chemicals_fertilizer",
+    "thiet bi dien": "power_energy",
+    "san xuat phan phoi dien": "power_energy",
+    "dien tu thiet bi dien": "power_energy",
+    "sx thiet bi may moc": "power_energy",
+    "tien ich": "power_energy",
+    "van tai kho bai": "port_logistics",
+    "van tai": "port_logistics",
+    "che bien thuy san": "seafood",
+    "xay dung": "public_investment",
+    "tu van ho tro kinh doanh": "public_investment",
+    "sx phu tro": "construction_materials",
+    "khai khoang": "oil_gas",
+    "thiet bi dich vu va phan phoi dau khi": "oil_gas",
+    "dich vu luu tru an uong giai tri": "aviation_tourism",
+    "du lich giai tri": "aviation_tourism",
+    "sx hang gia dung": "textile",
+    "hang ca nhan": "textile",
+    "det may": "textile",
+    "kim loai": "steel",
+    "cong nghiep nang": "steel",
+    "lam nghiep va giay": "sugar_wood_paper",
+    "duong": "sugar_wood_paper",
+    "go": "sugar_wood_paper",
+    "o to va phu tung": "auto_parts",
+    "duoc pham": "pharma_healthcare",
+    "cham soc suc khoe": "pharma_healthcare",
+    "thiet bi va dich vu y te": "pharma_healthcare",
+    "tai chinh khac": "securities",
+    "nuoc khi dot": "water_plastic",
+}
+
+
+def normalize_sector_lookup_text(value: str | None) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+
+    normalized = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def map_industry_to_sector_id(value: str | None) -> Optional[str]:
+    normalized = normalize_sector_lookup_text(value)
+    if not normalized:
+        return None
+
+    direct = INDUSTRY_TO_SECTOR_ID.get(normalized)
+    if direct:
+        return direct
+
+    for industry_key, sector_id in INDUSTRY_TO_SECTOR_ID.items():
+        if industry_key in normalized or normalized in industry_key:
+            return sector_id
+
+    return None
+
+
+def resolve_sector_name(
+    symbol: str | None = None,
+    industry: str | None = None,
+    sector_hint: str | None = None,
+    prefer_english: bool = False,
+) -> Optional[str]:
+    for candidate in (sector_hint, industry):
+        sector_id = map_industry_to_sector_id(candidate)
+        if sector_id is None:
+            continue
+        sector = VN_SECTORS.get(sector_id)
+        if sector:
+            return sector.name_en if prefer_english else sector.name
+
+    symbol_upper = str(symbol or "").strip().upper()
+    if symbol_upper:
+        for sector_id in SECTOR_CLASSIFICATION_IDS:
+            sector = VN_SECTORS.get(sector_id)
+            if not sector:
+                continue
+            manual_symbols = {item.upper() for item in sector.symbols if item}
+            if symbol_upper in manual_symbols:
+                return sector.name_en if prefer_english else sector.name
+
+    for candidate in (industry, sector_hint):
+        normalized_candidate = normalize_sector_lookup_text(candidate)
+        if not normalized_candidate:
+            continue
+        candidate_words = normalized_candidate.split()
+        for sector_id in SECTOR_CLASSIFICATION_IDS:
+            sector = VN_SECTORS.get(sector_id)
+            if not sector:
+                continue
+            for keyword in sector.keywords:
+                normalized_keyword = normalize_sector_lookup_text(keyword)
+                if not normalized_keyword:
+                    continue
+                keyword_words = normalized_keyword.split()
+                if len(keyword_words) == 1:
+                    keyword_match = any(
+                        word == normalized_keyword or word.startswith(normalized_keyword)
+                        for word in candidate_words
+                    )
+                else:
+                    keyword_match = normalized_keyword in normalized_candidate
+                if keyword_match:
+                    return sector.name_en if prefer_english else sector.name
+
+    cleaned_hint = str(sector_hint or "").strip()
+    return cleaned_hint or None
 
 
 def get_all_sectors() -> Dict[str, SectorConfig]:

@@ -11,8 +11,10 @@ import { useRouter } from 'next/navigation';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
     authProvider,
+    appwriteClearSessionHint,
     appwriteCreateSessionFromToken,
     appwriteGetAccount,
+    appwriteRememberSessionHint,
     isAppwriteConfigured,
 } from '@/lib/appwrite';
 
@@ -40,8 +42,10 @@ export default function AuthCallbackPage() {
 
                     // OAuth flow should already establish the session cookie.
                     await appwriteGetAccount();
+                    appwriteRememberSessionHint();
                     router.push('/dashboard');
                 } catch (error) {
+                    appwriteClearSessionHint();
                     console.error('Error during Appwrite callback:', error);
                     router.push('/login?error=callback_failed');
                 }

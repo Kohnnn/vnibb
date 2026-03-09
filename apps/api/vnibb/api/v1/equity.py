@@ -445,7 +445,11 @@ async def _load_quote_from_appwrite(symbol: str) -> Optional[StockQuoteData]:
         return None
 
     change = latest_close - prev_close if prev_close is not None else None
-    change_pct = ((change / prev_close) * 100) if change is not None and prev_close not in (None, 0) else None
+    change_pct = (
+        ((change / prev_close) * 100)
+        if change is not None and prev_close not in (None, 0)
+        else None
+    )
 
     return StockQuoteData(
         symbol=str(latest_doc.get("symbol") or symbol).upper(),
@@ -507,6 +511,33 @@ def _price_to_vnd_units(price: Any, dps_hint: Any = None) -> Optional[float]:
         return numeric * 1000.0
 
     return numeric
+
+
+def _serialize_meta_datetime(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time()).isoformat()
+
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+
+    for parser in (
+        lambda raw: datetime.fromisoformat(raw),
+        lambda raw: datetime.strptime(raw, "%Y-%m-%d %H:%M:%S"),
+        lambda raw: datetime.strptime(raw, "%Y-%m-%d"),
+    ):
+        try:
+            return parser(text).isoformat()
+        except ValueError:
+            continue
+
+    return None
 
 
 def _normalize_dividend_yield_percent(value: Any) -> Optional[float]:
@@ -1232,8 +1263,12 @@ async def _enrich_missing_ratio_metrics(
             BalanceSheet.fiscal_year,
             BalanceSheet.fiscal_quarter,
             BalanceSheet.total_assets,
+            BalanceSheet.current_assets,
+            BalanceSheet.cash_and_equivalents,
             BalanceSheet.total_liabilities,
+            BalanceSheet.current_liabilities,
             BalanceSheet.total_equity,
+            BalanceSheet.book_value_per_share,
             BalanceSheet.inventory,
             BalanceSheet.accounts_receivable,
         )
@@ -1324,8 +1359,12 @@ async def _enrich_missing_ratio_metrics(
         year,
         quarter,
         total_assets,
+        current_assets,
+        cash_and_equivalents,
         total_liabilities,
+        current_liabilities,
         total_equity,
+        book_value_per_share,
         inventory,
         receivables,
     ) in balance_rows:
@@ -1333,8 +1372,12 @@ async def _enrich_missing_ratio_metrics(
             continue
         balance_lookup[(int(year), int(quarter or 0))] = {
             "total_assets": _coerce_optional_float(total_assets),
+            "current_assets": _coerce_optional_float(current_assets),
+            "cash_and_equivalents": _coerce_optional_float(cash_and_equivalents),
             "total_liabilities": _coerce_optional_float(total_liabilities),
+            "current_liabilities": _coerce_optional_float(current_liabilities),
             "total_equity": _coerce_optional_float(total_equity),
+            "book_value_per_share": _coerce_optional_float(book_value_per_share),
             "inventory": _coerce_optional_float(inventory),
             "accounts_receivable": _coerce_optional_float(receivables),
         }
@@ -1414,11 +1457,23 @@ async def _enrich_missing_ratio_metrics(
         total_assets = (
             None if balance is None else _coerce_optional_float(balance.get("total_assets"))
         )
+        current_assets = (
+            None if balance is None else _coerce_optional_float(balance.get("current_assets"))
+        )
+        cash_and_equivalents = (
+            None if balance is None else _coerce_optional_float(balance.get("cash_and_equivalents"))
+        )
         total_liabilities = (
             None if balance is None else _coerce_optional_float(balance.get("total_liabilities"))
         )
+        current_liabilities = (
+            None if balance is None else _coerce_optional_float(balance.get("current_liabilities"))
+        )
         total_equity = (
             None if balance is None else _coerce_optional_float(balance.get("total_equity"))
+        )
+        book_value_per_share = (
+            None if balance is None else _coerce_optional_float(balance.get("book_value_per_share"))
         )
         inventory = None if balance is None else _coerce_optional_float(balance.get("inventory"))
         receivables = (
@@ -1454,6 +1509,42 @@ async def _enrich_missing_ratio_metrics(
 
         turnover_base = cost_of_revenue if cost_of_revenue not in (None, 0) else revenue
 
+        if item.roe is None and net_income is not None and total_equity not in (None, 0):
+            item.roe = (net_income / total_equity) * 100
+        if item.roa is None and net_income is not None and total_assets not in (None, 0):
+            item.roa = (net_income / total_assets) * 100
+        if (
+            item.current_ratio is None
+            and current_assets not in (None, 0)
+            and current_liabilities not in (None, 0)
+        ):
+            item.current_ratio = current_assets / current_liabilities
+        if item.quick_ratio is None and current_liabilities not in (None, 0):
+            quick_assets = current_assets
+            if quick_assets is not None and inventory is not None:
+                quick_assets = quick_assets - inventory
+            if quick_assets not in (None, 0):
+                item.quick_ratio = quick_assets / current_liabilities
+        if (
+            item.cash_ratio is None
+            and cash_and_equivalents not in (None, 0)
+            and current_liabilities not in (None, 0)
+        ):
+            item.cash_ratio = cash_and_equivalents / current_liabilities
+        if item.eps is None and net_income is not None and outstanding_shares not in (None, 0):
+            item.eps = net_income / outstanding_shares
+        if item.bvps is None:
+            if book_value_per_share not in (None, 0):
+                item.bvps = book_value_per_share
+            elif total_equity is not None and outstanding_shares not in (None, 0):
+                item.bvps = total_equity / outstanding_shares
+        price_vnd = _price_to_vnd_units(latest_price, dps_hint=item.dps or item.eps)
+        if item.pe is None and price_vnd not in (None, 0) and item.eps not in (None, 0):
+            item.pe = price_vnd / item.eps
+        if item.pb is None and price_vnd not in (None, 0) and item.bvps not in (None, 0):
+            item.pb = price_vnd / item.bvps
+        if item.ps is None and market_cap not in (None, 0) and revenue not in (None, 0):
+            item.ps = market_cap / revenue
         if (
             item.operating_margin is None
             and revenue not in (None, 0)
@@ -1611,10 +1702,10 @@ async def get_historical_prices(
 ):
     symbol_upper = symbol.upper()
     cache_manager = CacheManager(db=db)
-    use_appwrite_data = (
-        settings.is_appwrite_configured
-        and settings.resolved_data_backend in {"appwrite", "hybrid"}
-    )
+    use_appwrite_data = settings.is_appwrite_configured and settings.resolved_data_backend in {
+        "appwrite",
+        "hybrid",
+    }
     cache_result = await cache_manager.get_historical_prices(
         symbol=symbol_upper,
         start_date=start_date,
@@ -1756,10 +1847,10 @@ async def get_quote(
             error="Invalid symbol format. Expected a 3-character ticker.",
         )
 
-    use_appwrite_data = (
-        settings.is_appwrite_configured
-        and settings.resolved_data_backend in {"appwrite", "hybrid"}
-    )
+    use_appwrite_data = settings.is_appwrite_configured and settings.resolved_data_backend in {
+        "appwrite",
+        "hybrid",
+    }
 
     async def _get_db_quote() -> Optional[StockQuoteData]:
         try:
@@ -1823,14 +1914,14 @@ async def get_quote(
         return None
 
     if not refresh:
+        cached_quote = await _get_db_quote()
+        if cached_quote:
+            return StandardResponse(data=cached_quote, meta=MetaData(count=1))
+
         if settings.resolved_data_backend == "appwrite" and use_appwrite_data:
             appwrite_quote = await _load_quote_from_appwrite(symbol_upper)
             if appwrite_quote:
                 return StandardResponse(data=appwrite_quote, meta=MetaData(count=1))
-
-        cached_quote = await _get_db_quote()
-        if cached_quote:
-            return StandardResponse(data=cached_quote, meta=MetaData(count=1))
 
     try:
         data, _ = await asyncio.wait_for(
@@ -1871,13 +1962,13 @@ async def get_profile(
     symbol: str = Path(..., min_length=1, max_length=10, pattern=r"^[A-Za-z0-9._-]+$"),
     refresh: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
-): 
+):
     symbol_upper = symbol.upper()
     cache_manager = CacheManager(db=db)
-    use_appwrite_data = (
-        settings.is_appwrite_configured
-        and settings.resolved_data_backend in {"appwrite", "hybrid"}
-    )
+    use_appwrite_data = settings.is_appwrite_configured and settings.resolved_data_backend in {
+        "appwrite",
+        "hybrid",
+    }
     try:
         if not refresh:
             cache_result = await cache_manager.get_profile_data(symbol_upper)
@@ -2539,6 +2630,7 @@ async def get_rating(symbol: str):
         return StandardResponse(data=None, error=str(e))
 
 
+@router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @cached(ttl=86400, key_prefix="ratios_v2")
 async def get_financial_ratios(
@@ -2548,6 +2640,18 @@ async def get_financial_ratios(
 ):
     symbol_upper = symbol.upper()
     normalized_period = "year" if period in {"year", "FY"} else "quarter"
+    latest_price_time = (
+        await db.execute(
+            select(func.max(StockPrice.time)).where(
+                StockPrice.symbol == symbol_upper,
+                StockPrice.interval == "1D",
+            )
+        )
+    ).scalar_one_or_none()
+    meta_kwargs = {
+        "symbol": symbol_upper,
+        "last_data_date": _serialize_meta_datetime(latest_price_time),
+    }
     try:
         stmt = (
             select(FinancialRatio)
@@ -2577,7 +2681,14 @@ async def get_financial_ratios(
             data = _dedupe_ratio_rows(data)
             usable_data = [item for item in data if _ratio_has_metric_value(item)]
             if usable_data:
-                return StandardResponse(data=usable_data, meta=MetaData(count=len(usable_data)))
+                return StandardResponse(
+                    data=usable_data,
+                    meta=MetaData(
+                        count=len(usable_data),
+                        data_points=len(usable_data),
+                        **meta_kwargs,
+                    ),
+                )
 
             logger.warning(
                 "Ratio DB rows for %s are empty placeholders; falling back to provider",
@@ -2612,7 +2723,14 @@ async def get_financial_ratios(
                 endpoint="equity.ratios",
                 domains=["ratios"],
             )
-        return StandardResponse(data=payload, meta=MetaData(count=len(payload)))
+        return StandardResponse(
+            data=payload,
+            meta=MetaData(
+                count=len(payload),
+                data_points=len(payload),
+                **meta_kwargs,
+            ),
+        )
     except Exception as e:
         await _schedule_critical_reinforcement(
             symbol=symbol_upper,

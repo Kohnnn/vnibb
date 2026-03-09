@@ -118,6 +118,23 @@ export function formatTimestamp(
   return `${yyyy}-${mm}-${dd} ${hhmm}`;
 }
 
+export function formatAbsoluteTimestamp(
+  date: Date | string | number | null | undefined
+): string {
+  if (date === null || date === undefined) return '-'
+
+  const parsed = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(parsed.getTime())) return '-'
+
+  const yyyy = parsed.getFullYear()
+  const mm = String(parsed.getMonth() + 1).padStart(2, '0')
+  const dd = String(parsed.getDate()).padStart(2, '0')
+  const hh = String(parsed.getHours()).padStart(2, '0')
+  const min = String(parsed.getMinutes()).padStart(2, '0')
+
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`
+}
+
 /**
  * Format date to localized string
  */

@@ -877,9 +877,9 @@ async def sync_all(
     background_tasks: BackgroundTasks,
 ) -> SyncResponse:
     """Run full data sync in background."""
-    from vnibb.services.data_pipeline import run_daily_sync
+    from vnibb.services.sync_all_data import run_daily_market_sync
 
-    background_tasks.add_task(run_daily_sync)
+    background_tasks.add_task(run_daily_market_sync)
     return SyncResponse(
         status="started",
         message="Full sync started in background",
@@ -915,6 +915,10 @@ async def sync_full_market(
     include_historical: bool = Query(
         default=True, description="Whether to sync historical price data"
     ),
+    include_corporate_actions: bool = Query(
+        default=True,
+        description="Whether to sync dividend history and company event records",
+    ),
     history_days: Optional[int] = Query(
         default=None,
         ge=1,
@@ -931,6 +935,7 @@ async def sync_full_market(
     - Current prices from screener
     - Company profiles (batched)
     - Optional: Historical data
+    - Optional: Dividends and company events
     """
     from vnibb.services.sync_all_data import FullMarketSync
 
@@ -940,6 +945,7 @@ async def sync_full_market(
             sync = FullMarketSync()
             await sync.run_full_sync(
                 include_historical=include_historical,
+                include_corporate_actions=include_corporate_actions,
                 max_symbols=max_symbols,
                 history_days=history_days,
             )
@@ -957,6 +963,7 @@ async def sync_full_market(
         sync = FullMarketSync()
         results = await sync.run_full_sync(
             include_historical=include_historical,
+            include_corporate_actions=include_corporate_actions,
             max_symbols=max_symbols,
             history_days=history_days,
         )

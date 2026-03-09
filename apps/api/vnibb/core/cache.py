@@ -5,9 +5,9 @@ Provides async Redis connection pool and common caching patterns
 for VNIBB data providers and API responses.
 """
 
+import asyncio
 import json
 import logging
-import asyncio
 from datetime import datetime, timedelta
 
 from typing import Any, Optional, TypeVar, Union, Dict, List
@@ -62,6 +62,23 @@ CACHE_PREFIX_SHORT = {
 _memory_cache: Dict[str, tuple[Any, datetime]] = {}
 _memory_cache_lock = asyncio.Lock()
 _warned_appwrite_cache_fallback = False
+_MEMORY_CACHE_MAX_ENTRIES = 4000
+
+
+async def _prune_memory_cache_locked(now: datetime) -> None:
+    expired_keys = [key for key, (_, expiry) in _memory_cache.items() if expiry <= now]
+    for key in expired_keys:
+        _memory_cache.pop(key, None)
+
+    if len(_memory_cache) <= _MEMORY_CACHE_MAX_ENTRIES:
+        return
+
+    target_size = int(_MEMORY_CACHE_MAX_ENTRIES * 0.9)
+    while len(_memory_cache) > target_size:
+        oldest_key = next(iter(_memory_cache), None)
+        if oldest_key is None:
+            break
+        _memory_cache.pop(oldest_key, None)
 
 
 def _redis_cache_enabled() -> bool:
@@ -99,11 +116,13 @@ def cached(
     """
     import functools
     import hashlib
-    import inspect
 
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
+            if settings.environment == "test":
+                return await func(*args, **kwargs)
+
             redis_enabled = _redis_cache_enabled()
 
             effective_ttl = (
@@ -154,16 +173,24 @@ def cached(
             cache_key = f"v:{short_prefix}:{hashlib.md5(key_string.encode()).hexdigest()}"
 
             # Helper for memory fallback
-            def get_mem_cache():
-                if cache_key in _memory_cache:
-                    data, expiry = _memory_cache[cache_key]
-                    if datetime.now() < expiry:
+            async def get_mem_cache():
+                now = datetime.now()
+                async with _memory_cache_lock:
+                    cached_entry = _memory_cache.get(cache_key)
+                    if not cached_entry:
+                        return None
+                    data, expiry = cached_entry
+                    if now < expiry:
                         return data
-                return None
+                    _memory_cache.pop(cache_key, None)
+                    return None
 
-            def set_mem_cache(data):
+            async def set_mem_cache(data):
                 expiry = datetime.now() + timedelta(seconds=effective_ttl)
-                _memory_cache[cache_key] = (data, expiry)
+                async with _memory_cache_lock:
+                    _memory_cache.pop(cache_key, None)
+                    _memory_cache[cache_key] = (data, expiry)
+                    await _prune_memory_cache_locked(datetime.now())
 
             try:
                 # Try Redis first
@@ -177,7 +204,7 @@ def cached(
                         logger.warning(f"Redis error, falling back to memory: {redis_err}")
 
                 # Check memory fallback
-                mem_data = get_mem_cache()
+                mem_data = await get_mem_cache()
                 if mem_data is not None:
                     logger.info(f"Cache HIT (Memory) for {func.__name__}: {cache_key}")
                     return mem_data
@@ -194,7 +221,7 @@ def cached(
                         logger.warning(f"Failed to set Redis cache: {redis_err}")
 
                 # Store in memory anyway as second layer
-                set_mem_cache(result)
+                await set_mem_cache(result)
 
                 return result
             except Exception as e:

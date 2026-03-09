@@ -12,6 +12,8 @@ import re
 from datetime import datetime, timedelta
 from typing import Any
 
+from vnibb.core.config import settings
+
 try:
     from google import genai
     from google.genai import types
@@ -32,15 +34,38 @@ class SentimentAnalyzer:
 
     # Vietnamese sentiment keywords for fallback
     BULLISH_KEYWORDS = [
-        "tăng trưởng", "lợi nhuận", "tích cực", "khả quan", "tăng",
-        "đột phá", "thành công", "mở rộng", "phát triển", "cải thiện",
-        "vượt kế hoạch", "kỷ lục", "tăng mạnh", "tăng cao"
+        "tăng trưởng",
+        "lợi nhuận",
+        "tích cực",
+        "khả quan",
+        "tăng",
+        "đột phá",
+        "thành công",
+        "mở rộng",
+        "phát triển",
+        "cải thiện",
+        "vượt kế hoạch",
+        "kỷ lục",
+        "tăng mạnh",
+        "tăng cao",
     ]
 
     BEARISH_KEYWORDS = [
-        "giảm", "lỗ", "sụt giảm", "tiêu cực", "khó khăn", "rủi ro",
-        "thất bại", "suy giảm", "đình trệ", "khủng hoảng", "sa thải",
-        "phá sản", "nợ xấu", "giảm mạnh", "lỗ nặng"
+        "giảm",
+        "lỗ",
+        "sụt giảm",
+        "tiêu cực",
+        "khó khăn",
+        "rủi ro",
+        "thất bại",
+        "suy giảm",
+        "đình trệ",
+        "khủng hoảng",
+        "sa thải",
+        "phá sản",
+        "nợ xấu",
+        "giảm mạnh",
+        "lỗ nặng",
     ]
 
     SENTIMENT_PROMPT = """Phân tích bài báo tài chính tiếng Việt sau đây và trả về kết quả theo định dạng JSON chính xác:
@@ -73,6 +98,10 @@ Trả về CHÍNH XÁC theo định dạng JSON sau (không thêm markdown hay t
         self._cache = {}  # Simple in-memory cache
         self._cache_ttl = timedelta(hours=24)
 
+        if not settings.enable_ai_sentiment_analysis:
+            logger.info("AI sentiment analysis is paused. Using neutral-only processing.")
+            return
+
         if self.api_key and HAS_GEMINI:
             try:
                 self.client = genai.Client(api_key=self.api_key)
@@ -90,6 +119,25 @@ Trả về CHÍNH XÁC theo định dạng JSON sau (không thêm markdown hay t
     def is_available(self) -> bool:
         """Check if AI sentiment analysis is available."""
         return self._initialized and self.client is not None
+
+    @property
+    def is_paused(self) -> bool:
+        return not settings.enable_ai_sentiment_analysis
+
+    def paused_result(
+        self,
+        title: str,
+        content: str | None = None,
+        summary: str | None = None,
+    ) -> dict[str, Any]:
+        text = summary or content or title
+        return {
+            "sentiment": "neutral",
+            "confidence": 0,
+            "symbols": re.findall(r"\b([A-Z]{3})\b", f"{title} {text[:500]}")[:5],
+            "sectors": [],
+            "ai_summary": (summary or title)[:200],
+        }
 
     async def analyze_article(
         self,
@@ -119,6 +167,11 @@ Trả về CHÍNH XÁC theo định dạng JSON sau (không thêm markdown hay t
         # Prepare text for analysis
         text_to_analyze = content or summary or title
 
+        if self.is_paused:
+            result = self.paused_result(title, content, summary)
+            self._cache[cache_key] = (result, datetime.utcnow())
+            return result
+
         if self.is_available:
             result = await self._analyze_with_ai(title, text_to_analyze)
         else:
@@ -135,10 +188,7 @@ Trả về CHÍNH XÁC theo định dạng JSON sau (không thêm markdown hay t
             # Truncate content to avoid token limits (max ~2000 chars)
             content_truncated = content[:2000] if len(content) > 2000 else content
 
-            prompt = self.SENTIMENT_PROMPT.format(
-                title=title,
-                content=content_truncated
-            )
+            prompt = self.SENTIMENT_PROMPT.format(title=title, content=content_truncated)
 
             # Generate response
             response = await self.client.aio.models.generate_content(
@@ -156,10 +206,11 @@ Trả về CHÍNH XÁC theo định dạng JSON sau (không thêm markdown hay t
             result_text = response.text.strip()
 
             # Remove markdown code blocks if present
-            result_text = re.sub(r'```json\s*', '', result_text)
-            result_text = re.sub(r'```\s*', '', result_text)
+            result_text = re.sub(r"```json\s*", "", result_text)
+            result_text = re.sub(r"```\s*", "", result_text)
 
             import json
+
             result = json.loads(result_text)
 
             # Validate and normalize
@@ -210,7 +261,7 @@ Trả về CHÍNH XÁC theo định dạng JSON sau (không thêm markdown hay t
             confidence = 60
 
         # Extract symbols (basic regex for Vietnamese stock codes)
-        symbols = re.findall(r'\b([A-Z]{3})\b', title + " " + content[:500])
+        symbols = re.findall(r"\b([A-Z]{3})\b", title + " " + content[:500])
         symbols = list(set(symbols))[:5]  # Unique, max 5
 
         return {
@@ -222,9 +273,7 @@ Trả về CHÍNH XÁC theo định dạng JSON sau (không thêm markdown hay t
         }
 
     async def analyze_batch(
-        self,
-        articles: list[dict[str, Any]],
-        max_concurrent: int = 5
+        self, articles: list[dict[str, Any]], max_concurrent: int = 5
     ) -> list[dict[str, Any]]:
         """
         Analyze multiple articles in batch with concurrency control.
@@ -241,7 +290,7 @@ Trả về CHÍNH XÁC theo định dạng JSON sau (không thêm markdown hay t
                 return await self.analyze_article(
                     title=article.get("title", ""),
                     content=article.get("content"),
-                    summary=article.get("summary")
+                    summary=article.get("summary"),
                 )
 
         tasks = [analyze_with_semaphore(article) for article in articles]
@@ -253,19 +302,17 @@ Trả về CHÍNH XÁC theo định dạng JSON sau (không thêm markdown hay t
             if isinstance(result, Exception):
                 logger.error(f"Batch analysis failed for article {i}: {result}")
                 # Use fallback
-                processed_results.append(self._analyze_with_rules(
-                    articles[i].get("title", ""),
-                    articles[i].get("content", "")
-                ))
+                processed_results.append(
+                    self._analyze_with_rules(
+                        articles[i].get("title", ""), articles[i].get("content", "")
+                    )
+                )
             else:
                 processed_results.append(result)
 
         return processed_results
 
-    def calculate_market_sentiment(
-        self,
-        articles: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def calculate_market_sentiment(self, articles: list[dict[str, Any]]) -> dict[str, Any]:
         """
         Calculate aggregate market sentiment from multiple articles.
         Args:
