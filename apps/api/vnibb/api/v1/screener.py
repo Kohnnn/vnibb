@@ -10,12 +10,10 @@ Provides endpoints for:
 import logging
 import asyncio
 import math
-from datetime import datetime
 from typing import Any, List, Optional, Callable, Awaitable
 
-from fastapi import APIRouter, HTTPException, Query, Request, Depends
-from pydantic import BaseModel
-from sqlalchemy import select
+from fastapi import APIRouter, Query, Request, Depends
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import pandas as pd
 
@@ -33,7 +31,6 @@ from vnibb.providers.vnstock.equity_screener import (
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError, ProviderRateLimitError
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.screener_filter_service import ScreenerFilterService
-from vnibb.core.cache import cached
 from vnibb.api.v1.schemas import StandardResponse, MetaData
 from vnibb.core.retry import vnstock_cb
 
@@ -607,11 +604,31 @@ async def _enrich_screener_metrics(
 
     normalized_price_series_by_symbol: dict[str, list[tuple[Any, float]]] = {}
     if price_symbols:
+        ranked_prices = (
+            select(
+                StockPrice.symbol.label("symbol"),
+                StockPrice.time.label("price_time"),
+                StockPrice.close.label("close"),
+                func.row_number()
+                .over(
+                    partition_by=StockPrice.symbol,
+                    order_by=StockPrice.time.desc(),
+                )
+                .label("row_num"),
+            )
+            .where(StockPrice.symbol.in_(price_symbols), StockPrice.interval == "1D")
+            .subquery()
+        )
+
         price_rows = (
             await db.execute(
-                select(StockPrice.symbol, StockPrice.time, StockPrice.close)
-                .where(StockPrice.symbol.in_(price_symbols), StockPrice.interval == "1D")
-                .order_by(StockPrice.symbol.asc(), StockPrice.time.desc())
+                select(
+                    ranked_prices.c.symbol,
+                    ranked_prices.c.price_time,
+                    ranked_prices.c.close,
+                )
+                .where(ranked_prices.c.row_num <= 260)
+                .order_by(ranked_prices.c.symbol.asc(), ranked_prices.c.price_time.desc())
             )
         ).all()
 
@@ -898,6 +915,28 @@ def apply_advanced_filters(
     if not data:
         return []
 
+    range_filter_keys = (
+        "pe_min",
+        "pe_max",
+        "pb_min",
+        "pb_max",
+        "ps_min",
+        "ps_max",
+        "roe_min",
+        "roa_min",
+        "debt_to_equity_max",
+        "market_cap_min",
+        "market_cap_max",
+        "volume_min",
+    )
+    if (
+        not filters
+        and not sort
+        and kwargs.get("sort_by") is None
+        and all(kwargs.get(key) is None for key in range_filter_keys)
+    ):
+        return data
+
     df = pd.DataFrame([d.model_dump() for d in data])
 
     if filters:
@@ -931,6 +970,151 @@ def fill_market_cap(rows: List[ScreenerData]) -> List[ScreenerData]:
             multiplier = 1 if row.shares_outstanding >= 1_000_000 else 1_000_000
             row.market_cap = row.price * row.shares_outstanding * multiplier
     return rows
+
+
+def _has_advanced_screener_filters(
+    *,
+    filters: Optional[str],
+    sort: Optional[str],
+    pe_min: Optional[float],
+    pe_max: Optional[float],
+    pb_min: Optional[float],
+    pb_max: Optional[float],
+    ps_min: Optional[float],
+    ps_max: Optional[float],
+    roe_min: Optional[float],
+    roa_min: Optional[float],
+    debt_to_equity_max: Optional[float],
+    market_cap_min: Optional[float],
+    market_cap_max: Optional[float],
+    volume_min: Optional[int],
+    sort_by: Optional[str],
+) -> bool:
+    return any(
+        value is not None
+        for value in (
+            filters,
+            sort,
+            pe_min,
+            pe_max,
+            pb_min,
+            pb_max,
+            ps_min,
+            ps_max,
+            roe_min,
+            roa_min,
+            debt_to_equity_max,
+            market_cap_min,
+            market_cap_max,
+            volume_min,
+            sort_by,
+        )
+    )
+
+
+def _apply_exchange_and_industry_filters(
+    rows: List[ScreenerData],
+    exchange: str,
+    industry: Optional[str],
+) -> List[ScreenerData]:
+    filtered = rows
+    normalized_exchange = exchange.upper()
+    if normalized_exchange != "ALL":
+        filtered = [
+            row for row in filtered if (row.exchange or "").strip().upper() == normalized_exchange
+        ]
+
+    if industry:
+        normalized_industry = industry.strip().lower()
+        filtered = [
+            row
+            for row in filtered
+            if (row.industry_name or "").strip().lower() == normalized_industry
+        ]
+
+    return filtered
+
+
+async def _prepare_cached_screener_rows(
+    snapshots: List[object],
+    db: AsyncSession,
+    *,
+    limit: int,
+    exchange: str,
+    industry: Optional[str],
+    filters: Optional[str],
+    sort: Optional[str],
+    pe_min: Optional[float],
+    pe_max: Optional[float],
+    pb_min: Optional[float],
+    pb_max: Optional[float],
+    ps_min: Optional[float],
+    ps_max: Optional[float],
+    roe_min: Optional[float],
+    roa_min: Optional[float],
+    debt_to_equity_max: Optional[float],
+    market_cap_min: Optional[float],
+    market_cap_max: Optional[float],
+    volume_min: Optional[int],
+    sort_by: Optional[str],
+    sort_order: str,
+) -> List[ScreenerData]:
+    data = [_to_screener_data_row(snapshot) for snapshot in snapshots]
+
+    has_advanced_filters = _has_advanced_screener_filters(
+        filters=filters,
+        sort=sort,
+        pe_min=pe_min,
+        pe_max=pe_max,
+        pb_min=pb_min,
+        pb_max=pb_max,
+        ps_min=ps_min,
+        ps_max=ps_max,
+        roe_min=roe_min,
+        roa_min=roa_min,
+        debt_to_equity_max=debt_to_equity_max,
+        market_cap_min=market_cap_min,
+        market_cap_max=market_cap_max,
+        volume_min=volume_min,
+        sort_by=sort_by,
+    )
+
+    can_early_limit = (
+        not has_advanced_filters
+        and exchange.upper() == "ALL"
+        and not industry
+        and len(data) > limit
+    )
+    if can_early_limit:
+        data = data[:limit]
+
+    data = await _hydrate_screener_rows(data, db)
+    data = fill_market_cap(data)
+    data = await _enrich_screener_metrics(data, db)
+    data = _apply_exchange_and_industry_filters(data, exchange=exchange, industry=industry)
+
+    if has_advanced_filters:
+        data = apply_advanced_filters(
+            data,
+            filters=filters,
+            sort=sort,
+            pe_min=pe_min,
+            pe_max=pe_max,
+            pb_min=pb_min,
+            pb_max=pb_max,
+            ps_min=ps_min,
+            ps_max=ps_max,
+            roe_min=roe_min,
+            roa_min=roa_min,
+            debt_to_equity_max=debt_to_equity_max,
+            market_cap_min=market_cap_min,
+            market_cap_max=market_cap_max,
+            volume_min=volume_min,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+
+    return data[:limit]
 
 
 async def _refresh_screener_cache(params: StockScreenerParams) -> None:
@@ -1000,7 +1184,6 @@ async def get_screener(
     db: AsyncSession = Depends(get_db),
 ) -> StandardResponse[List[ScreenerData]]:
     cache_manager = CacheManager(db)
-    now = datetime.now()
 
     if use_cache and not refresh:
         try:
@@ -1008,12 +1191,12 @@ async def get_screener(
                 symbol=symbol, source=source, allow_stale=True
             )
             if cache_result.hit and cache_result.data:
-                data = [_to_screener_data_row(s) for s in cache_result.data]
-                data = await _hydrate_screener_rows(data, db)
-                data = fill_market_cap(data)
-                data = await _enrich_screener_metrics(data, db)
-                data = apply_advanced_filters(
-                    data,
+                data = await _prepare_cached_screener_rows(
+                    cache_result.data,
+                    db,
+                    limit=limit,
+                    exchange=exchange,
+                    industry=industry,
                     filters=filters,
                     sort=sort,
                     pe_min=pe_min,
@@ -1030,7 +1213,7 @@ async def get_screener(
                     volume_min=volume_min,
                     sort_by=sort_by,
                     sort_order=sort_order,
-                )[:limit]
+                )
                 if cache_result.is_stale and not refresh:
                     refresh_key = f"screener:{source}:full"
                     refresh_params = StockScreenerParams(
@@ -1051,12 +1234,12 @@ async def get_screener(
                     symbol=symbol, source=None, allow_stale=True
                 )
                 if fallback_cache.hit and fallback_cache.data:
-                    data = [_to_screener_data_row(s) for s in fallback_cache.data]
-                    data = await _hydrate_screener_rows(data, db)
-                    data = fill_market_cap(data)
-                    data = await _enrich_screener_metrics(data, db)
-                    data = apply_advanced_filters(
-                        data,
+                    data = await _prepare_cached_screener_rows(
+                        fallback_cache.data,
+                        db,
+                        limit=limit,
+                        exchange=exchange,
+                        industry=industry,
                         filters=filters,
                         sort=sort,
                         pe_min=pe_min,
@@ -1073,7 +1256,7 @@ async def get_screener(
                         volume_min=volume_min,
                         sort_by=sort_by,
                         sort_order=sort_order,
-                    )[:limit]
+                    )
                     return StandardResponse(data=data, meta=MetaData(count=len(data)))
         except Exception as e:
             logger.warning(f"Cache lookup failed: {e}")
@@ -1120,12 +1303,12 @@ async def get_screener(
                 symbol=symbol, source=source, allow_stale=True
             )
             if cache_result.hit and cache_result.data:
-                data = [_to_screener_data_row(s) for s in cache_result.data]
-                data = await _hydrate_screener_rows(data, db)
-                data = fill_market_cap(data)
-                data = await _enrich_screener_metrics(data, db)
-                data = apply_advanced_filters(
-                    data,
+                data = await _prepare_cached_screener_rows(
+                    cache_result.data,
+                    db,
+                    limit=limit,
+                    exchange=exchange,
+                    industry=industry,
                     filters=filters,
                     sort=sort,
                     pe_min=pe_min,
@@ -1142,7 +1325,7 @@ async def get_screener(
                     volume_min=volume_min,
                     sort_by=sort_by,
                     sort_order=sort_order,
-                )[:limit]
+                )
                 return StandardResponse(data=data, meta=MetaData(count=len(data)))
 
         # Final fallback: return empty results with user-friendly message
