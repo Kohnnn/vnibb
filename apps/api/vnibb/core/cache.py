@@ -8,6 +8,7 @@ for VNIBB data providers and API responses.
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 
 from typing import Any, Optional, TypeVar, Union, Dict, List
@@ -62,7 +63,21 @@ CACHE_PREFIX_SHORT = {
 _memory_cache: Dict[str, tuple[Any, datetime]] = {}
 _memory_cache_lock = asyncio.Lock()
 _warned_appwrite_cache_fallback = False
-_MEMORY_CACHE_MAX_ENTRIES = 4000
+
+
+def _env_int(name: str, default: int, minimum: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return max(minimum, int(raw))
+    except ValueError:
+        logger.warning("Invalid %s=%s. Falling back to %s", name, raw, default)
+        return default
+
+
+_MEMORY_CACHE_MAX_ENTRIES = _env_int("MEMORY_CACHE_MAX_ENTRIES", 500, 50)
+_MEMORY_CACHE_MAX_ENTRY_BYTES = _env_int("MEMORY_CACHE_MAX_ENTRY_BYTES", 262_144, 4_096)
 
 
 async def _prune_memory_cache_locked(now: datetime) -> None:
@@ -124,6 +139,7 @@ def cached(
                 return await func(*args, **kwargs)
 
             redis_enabled = _redis_cache_enabled()
+            redis_available = redis_enabled
 
             effective_ttl = (
                 ttl if ttl is not None else CACHE_TTLS.get(key_prefix, settings.redis_cache_ttl)
@@ -186,6 +202,20 @@ def cached(
                     return None
 
             async def set_mem_cache(data):
+                try:
+                    payload_size = len(json.dumps(data, default=str))
+                except (TypeError, ValueError):
+                    payload_size = 0
+
+                if payload_size > _MEMORY_CACHE_MAX_ENTRY_BYTES:
+                    logger.debug(
+                        "Skipping in-memory cache for %s (%s bytes > %s bytes)",
+                        func.__name__,
+                        payload_size,
+                        _MEMORY_CACHE_MAX_ENTRY_BYTES,
+                    )
+                    return
+
                 expiry = datetime.now() + timedelta(seconds=effective_ttl)
                 async with _memory_cache_lock:
                     _memory_cache.pop(cache_key, None)
@@ -193,7 +223,6 @@ def cached(
                     await _prune_memory_cache_locked(datetime.now())
 
             try:
-                # Try Redis first
                 if redis_enabled:
                     try:
                         cached_data = await redis_client.get_json(cache_key)
@@ -201,27 +230,30 @@ def cached(
                             logger.info(f"Cache HIT (Redis) for {func.__name__}: {cache_key}")
                             return cached_data
                     except Exception as redis_err:
+                        redis_available = False
                         logger.warning(f"Redis error, falling back to memory: {redis_err}")
 
-                # Check memory fallback
-                mem_data = await get_mem_cache()
-                if mem_data is not None:
-                    logger.info(f"Cache HIT (Memory) for {func.__name__}: {cache_key}")
-                    return mem_data
+                if not redis_available:
+                    mem_data = await get_mem_cache()
+                    if mem_data is not None:
+                        logger.info(f"Cache HIT (Memory) for {func.__name__}: {cache_key}")
+                        return mem_data
 
-                # Cache miss
                 logger.info(f"Cache MISS for {func.__name__}: {cache_key}")
                 result = await func(*args, **kwargs)
 
-                # Store in Redis
-                if redis_enabled:
+                stored_in_redis = False
+                if redis_available:
                     try:
-                        await redis_client.set_json(cache_key, result, ttl=effective_ttl)
+                        stored_in_redis = await redis_client.set_json(
+                            cache_key, result, ttl=effective_ttl
+                        )
                     except Exception as redis_err:
                         logger.warning(f"Failed to set Redis cache: {redis_err}")
+                        stored_in_redis = False
 
-                # Store in memory anyway as second layer
-                await set_mem_cache(result)
+                if not stored_in_redis:
+                    await set_mem_cache(result)
 
                 return result
             except Exception as e:
