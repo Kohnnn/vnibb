@@ -138,10 +138,11 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
                         borderRadius: '8px',
                         fontSize: '11px',
                       }}
-                      formatter={(value: unknown, name?: string) => [
-                        `${Number(value).toFixed(3)}${name === 'BB Width %' || name === 'Threshold' ? '%' : ''}`,
-                        name || '',
-                      ]}
+                      formatter={(value, name) => {
+                        const label = typeof name === 'string' ? name : String(name ?? '')
+                        const withPercent = label === 'BB Width %' || label === 'Threshold'
+                        return [`${Number(value).toFixed(3)}${withPercent ? '%' : ''}`, label]
+                      }}
                     />
                     <ReferenceLine y={threshold} stroke="#22c55e" strokeDasharray="4 3" ifOverflow="extendDomain" label={{ value: 'Squeeze Threshold', fill: '#22c55e', fontSize: 10, position: 'insideTopRight' }} />
                     <Line type="monotone" dataKey="bbWidth" name="BB Width %" stroke="#f59e0b" strokeWidth={2} dot={false} />
