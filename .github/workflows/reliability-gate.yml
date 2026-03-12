@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: "15 * * * *"
 
+env:
+  RELIABILITY_BASE_URL: ${{ vars.VNIBB_RELIABILITY_BASE_URL }}
+
 jobs:
   no-502-gate:
     runs-on: ubuntu-latest
@@ -22,19 +25,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e "apps/api[dev]"
 
-      - name: Preflight Zeabur status codes
+      - name: Require configured base URL
+        run: |
+          if [ -z "${RELIABILITY_BASE_URL}" ]; then
+            echo "Set repository variable VNIBB_RELIABILITY_BASE_URL before running this workflow."
+            exit 1
+          fi
+
+      - name: Preflight public status codes
         run: |
           set +e
-          echo "health: $(curl -s -o /dev/null -w '%{http_code}' https://vnibb.zeabur.app/health/)"
-          echo "live: $(curl -s -o /dev/null -w '%{http_code}' https://vnibb.zeabur.app/live)"
-          echo "ready: $(curl -s -o /dev/null -w '%{http_code}' https://vnibb.zeabur.app/ready)"
+          BASE_URL="${RELIABILITY_BASE_URL%/}"
+          echo "health: $(curl -s -o /dev/null -w '%{http_code}' ${BASE_URL}/health/)"
+          echo "live: $(curl -s -o /dev/null -w '%{http_code}' ${BASE_URL}/live)"
+          echo "ready: $(curl -s -o /dev/null -w '%{http_code}' ${BASE_URL}/ready)"
           set -e
 
       - name: Run core endpoint gate
         working-directory: apps/api
         run: |
+          BASE_URL="${RELIABILITY_BASE_URL%/}"
           python scripts/widget_health_matrix.py \
-            --base-url https://vnibb.zeabur.app \
+            --base-url "${BASE_URL}" \
             --repeats 5 \
             --timeout 10 \
             --fail-on-error \

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 CONFIRM_TOKEN = "RUN_PRODUCTION_SYNC"
-DEFAULT_API_BASE = "https://vnibb.zeabur.app/api/v1"
+DEFAULT_API_BASE = os.getenv("VNIBB_API_BASE", "")
 CHECK_SYMBOLS = ("VNM", "VCB", "FPT", "HPG")
 CORE_SCREENER_FIELDS = (
     "revenue_growth",
@@ -194,6 +194,10 @@ def run_api_verification(api_base: str) -> bool:
 def main() -> int:
     args = parse_args()
     api_base = normalize_api_base(args.api_base)
+
+    if not api_base:
+        print("ERROR: --api-base or VNIBB_API_BASE must be provided.")
+        return 1
 
     print("# V85 Production Sync")
     print(f"- API verification base: {api_base}")

@@ -21,10 +21,6 @@ function getRuntimeApiBaseUrl(rawValue: string): string {
         return trimmed
     }
 
-    if (targetIsLocal && !pageIsLocal) {
-        return 'https://vnibb.zeabur.app'
-    }
-
     return targetIsLocal ? trimmed : trimmed.replace(/^http:/, 'https:')
 }
 

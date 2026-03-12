@@ -1,0 +1,63 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: vnibb-api
+    restart: unless-stopped
+    env_file:
+      - ./deployment/env.oracle
+    environment:
+      PORT: ${PORT:-8000}
+      UVICORN_PROXY_HEADERS: ${UVICORN_PROXY_HEADERS:-1}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+    expose:
+      - "8000"
+    volumes:
+      - vnibb_vnstock:/root/.vnstock
+      - vnibb_python_venv:/root/.venv
+      - vnibb_api_logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${PORT:-8000}/health/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: vnibb-caddy
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file:
+      - ./deployment/env.oracle
+    environment:
+      SITE_HOSTNAME: ${SITE_HOSTNAME:-api.example.com}
+      API_UPSTREAM: ${API_UPSTREAM:-api:8000}
+      ACME_EMAIL: ${ACME_EMAIL:-ops@example.com}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deployment/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  redis:
+    image: redis:7-alpine
+    container_name: vnibb-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    profiles: ["local-redis"]
+    volumes:
+      - vnibb_redis:/data
+
+volumes:
+  vnibb_vnstock:
+  vnibb_python_venv:
+  vnibb_api_logs:
+  vnibb_redis:
+  caddy_data:
+  caddy_config:
