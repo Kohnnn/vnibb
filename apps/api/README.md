@@ -4,11 +4,11 @@
 
 **FastAPI Backend for VNIBB Financial Platform**
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/...)
+[![Deploy Target](https://img.shields.io/badge/Deploy-Oracle%20Cloud%20Always%20Free-F80000)](../../docs/oracle_runbook.md)
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green)](https://fastapi.tiangolo.com/)
 
-[API Docs](https://vnibb-api.railway.app/docs) · [Report Bug](https://github.com/Kohnnn/vnibb-api/issues) · [Request Feature](https://github.com/Kohnnn/vnibb-api/issues)
+[Oracle Runbook](../../docs/oracle_runbook.md) · [Report Bug](https://github.com/Kohnnn/vnibb-api/issues) · [Request Feature](https://github.com/Kohnnn/vnibb-api/issues)
 
 </div>
 
@@ -16,7 +16,7 @@
 
 ## 📋 Overview
 
-High-performance REST API providing Vietnamese stock market data. Built with FastAPI, powered by vnstock, deployed on Railway.
+High-performance REST API providing Vietnamese stock market data. Built with FastAPI, powered by vnstock, and prepared for Oracle Cloud Always Free compute hosting behind a stable custom API hostname.
 
 ---
 
@@ -93,18 +93,9 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ## 🌐 Deployment
 
-### Deploy to Railway
+### Deploy to Oracle Cloud
 
-```bash
-# Install Railway CLI
-npm i -g @railway/cli
-
-# Login
-railway login
-
-# Deploy
-railway up
-```
+Follow [docs/oracle_runbook.md](../../docs/oracle_runbook.md) for the Oracle VM deploy, verify, cutover, and rollback sequence.
 
 ### Environment Variables
 
@@ -113,12 +104,11 @@ DATABASE_URL=postgresql+asyncpg://...
 CACHE_BACKEND=auto  # auto|redis|memory|appwrite
 DATA_BACKEND=appwrite  # appwrite primary; postgres remains fallback. hybrid is a legacy alias.
 APPWRITE_POPULATE_MAX_ROWS=1000
-APPWRITE_POPULATE_FORCE_HTTP=1  # recommended on Zeabur
 REDIS_URL=redis://localhost:6379/0
 VNSTOCK_API_KEY=vnstock_xxx
 VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
 VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple  # Optional premium index for vnii bootstrap
-ALEMBIC_STRICT=0  # 1 = fail startup on migration error, 0 = continue startup with warning
+ALEMBIC_STRICT=1  # Recommended for Oracle cutover so failed migrations do not boot a partial runtime
 CORS_ORIGINS=["https://vnibb.vercel.app"]
 CORS_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$|^https://[a-z0-9-]+\\.vercel\\.app$
 ENVIRONMENT=production
@@ -174,7 +164,7 @@ Workspace docs:
 
 ```bash
 # 1) Core endpoint + widget health gate (returns non-zero on failure)
-python scripts/widget_health_matrix.py --base-url https://vnibb.zeabur.app --repeats 5 --timeout 10 --fail-on-error --output-json scripts/v34_widget_health_after.json
+VNIBB_BASE_URL=https://api.example.com python scripts/widget_health_matrix.py --repeats 5 --timeout 10 --fail-on-error --output-json scripts/v34_widget_health_after.json
 
 # 2) Resumable historical backfill (top 200, 5 years) - always timebox this run
 python scripts/backfill_historical_v34.py --years 5 --limit 200 --batch-size 10 --max-runtime-minutes 20 --call-timeout-seconds 90 --hard-timeout-grace-seconds 30 --report-json scripts/v36_price_backfill_run.json

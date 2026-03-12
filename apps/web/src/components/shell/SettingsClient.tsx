@@ -155,7 +155,7 @@ export default function SettingsPage() {
                     value={apiUrl}
                     onChange={(e) => setApiUrl(e.target.value)}
                     className="w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-2 text-sm font-mono text-[var(--text-primary)] outline-none focus:border-blue-500"
-                    placeholder="https://vnibb.zeabur.app"
+                    placeholder="https://api.example.com"
                   />
                   <p className="text-[10px] italic text-[var(--text-muted)]">
                     Overrides the default environment variable. Requires page refresh.

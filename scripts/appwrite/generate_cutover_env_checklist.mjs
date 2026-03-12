@@ -75,7 +75,7 @@ async function main() {
   const appwriteApiKey = values.APPWRITE_API_KEY || values.APPWRITE_SECRET || ''
   const appwriteDatabaseId = values.APPWRITE_DATABASE_ID || ''
 
-  const zeaburRows = [
+  const backendRows = [
     required('APPWRITE_ENDPOINT', appwriteEndpoint),
     required('APPWRITE_PROJECT_ID', appwriteProjectId),
     required('APPWRITE_API_KEY', maskSecret(appwriteApiKey, revealSecrets)),
@@ -96,10 +96,10 @@ async function main() {
   console.log(`Source env: ${path}`)
   console.log(`Secrets visible: ${revealSecrets}`)
 
-  printBlock('Zeabur (backend)', zeaburRows)
+  printBlock('Backend runtime', backendRows)
   printBlock('Vercel (frontend)', vercelRows)
 
-  const missing = zeaburRows.filter(row => row.value === '<missing>' || !row.ok)
+  const missing = backendRows.filter(row => row.value === '<missing>' || !row.ok)
   if (missing.length > 0) {
     console.log('\nResult: INCOMPLETE - fill missing backend vars before Appwrite-first runtime')
     process.exitCode = 2
