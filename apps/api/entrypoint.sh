@@ -163,9 +163,20 @@ esac
 
 echo "Resolved ports: PORT='${PORT:-}' WEB_PORT='${WEB_PORT:-}' APP_PORT='${APP_PORT}'"
 echo "Starting VNIBB API on port ${APP_PORT}..."
+UVICORN_PROXY_HEADERS="${UVICORN_PROXY_HEADERS:-1}"
+FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-*}"
+
+set -- -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port "$APP_PORT"
+proxy_flag=$(printf "%s" "$UVICORN_PROXY_HEADERS" | tr '[:upper:]' '[:lower:]')
+case "$proxy_flag" in
+    1|true|yes|on)
+        set -- "$@" --proxy-headers --forwarded-allow-ips "$FORWARDED_ALLOW_IPS"
+        ;;
+esac
+
 if "$PYTHON_BIN" -c "import uvicorn" >/dev/null 2>&1; then
-    exec "$PYTHON_BIN" -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port "$APP_PORT"
+    exec "$PYTHON_BIN" "$@"
 fi
 
 echo "WARNING: Selected interpreter ($PYTHON_BIN) missing uvicorn. Falling back to system python3."
-exec python3 -m uvicorn vnibb.api.main:app --host 0.0.0.0 --port "$APP_PORT"
+exec python3 "$@"

@@ -6,7 +6,7 @@ This document captures the current VNIBB v1 API surface used by the web app and 
 
 Base URL:
 - Local: `http://localhost:8000/api/v1`
-- Production: `https://vnibb.zeabur.app/api/v1`
+- Production: `https://api.example.com/api/v1`
 
 ## Conventions
 
