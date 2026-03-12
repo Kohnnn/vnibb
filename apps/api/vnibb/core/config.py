@@ -367,9 +367,9 @@ class Settings(BaseSettings):
                     )
 
             if self.data_backend in {"appwrite", "hybrid"} and not self.is_appwrite_configured:
-                logger.warning(
-                    "DATA_BACKEND=%s selected but Appwrite is not fully configured",
-                    self.data_backend,
+                errors.append(
+                    "DATA_BACKEND selects Appwrite, but APPWRITE_ENDPOINT, "
+                    "APPWRITE_PROJECT_ID, APPWRITE_API_KEY, or APPWRITE_DATABASE_ID is missing"
                 )
 
             if errors:
