@@ -2,14 +2,14 @@
 // Prevents silent failures due to missing required environment variables.
 
 const isProdEnv = process.env.NODE_ENV === 'production';
-const defaultApiUrl = isProdEnv ? 'https://vnibb.zeabur.app' : 'http://localhost:8000';
-const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || defaultApiUrl;
+const defaultApiUrl = isProdEnv ? '' : 'http://localhost:8000';
+const defaultWsUrl = isProdEnv ? '' : 'ws://localhost:8000/api/v1/ws/prices';
+const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || defaultApiUrl).trim();
 const shouldForceHttps = isProdEnv
   && rawApiUrl.startsWith('http://')
   && !/localhost|127\.0\.0\.1/.test(rawApiUrl);
 const apiUrl = shouldForceHttps ? rawApiUrl.replace(/^http:/, 'https:') : rawApiUrl;
-const derivedWsUrl = apiUrl.replace(/^http/, 'ws');
-const rawWsUrl = process.env.NEXT_PUBLIC_WS_URL || derivedWsUrl;
+const rawWsUrl = (process.env.NEXT_PUBLIC_WS_URL || defaultWsUrl).trim();
 const shouldForceWss = isProdEnv
   && rawWsUrl.startsWith('ws://')
   && !/localhost|127\.0\.0\.1/.test(rawWsUrl);
@@ -31,12 +31,22 @@ const missing: string[] = [];
 if (!process.env.NEXT_PUBLIC_API_URL) {
   missing.push('NEXT_PUBLIC_API_URL');
 }
+if (!process.env.NEXT_PUBLIC_WS_URL) {
+  missing.push('NEXT_PUBLIC_WS_URL');
+}
 
-if (missing.length > 0 && typeof window !== 'undefined') {
+if (isProdEnv && missing.length > 0) {
+  throw new Error(
+    `Missing required production environment variables: ${missing.join(', ')}. `
+    + `Set explicit Vercel values for the backend API and websocket hosts before building.`
+  );
+}
+
+if (!isProdEnv && missing.length > 0 && typeof window !== 'undefined') {
   console.warn(
     `⚠️ Missing required environment variables:\n` +
     missing.map(v => `  - ${v}`).join('\n') +
-    `\n\nFalling back to default values. Copy .env.local.example to .env.local for custom configuration.`
+    `\n\nFalling back to local defaults. Copy .env.local.example to .env.local for custom configuration.`
   );
 }
 

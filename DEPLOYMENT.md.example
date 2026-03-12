@@ -1,6 +1,7 @@
 # VNIBB Production Deployment Guide
 
-> **Quick Start**: Backend to Zeabur + Frontend to Vercel  
+> **Status**: Legacy Zeabur deployment reference. For the current target architecture, use [docs/oracle_migration_plan.md](./docs/oracle_migration_plan.md) and [docs/oracle_runbook.md](./docs/oracle_runbook.md).  
+> **Quick Start**: Backend to Oracle VM + Frontend to Vercel  
 > **Estimated Time**: 15-20 minutes
 
 > ⚠️ **IMPORTANT**: Copy this file to `DEPLOYMENT.md` and fill in your credentials.  
@@ -124,8 +125,8 @@ Follow the prompts:
 After first deployment, go to **Vercel Dashboard** → Your Project → **Settings** → **Environment Variables**:
 
 ```env
-NEXT_PUBLIC_API_URL=https://YOUR-ZEABUR-URL
-NEXT_PUBLIC_WS_URL=wss://YOUR-ZEABUR-URL/ws
+NEXT_PUBLIC_API_URL=https://api.example.com
+NEXT_PUBLIC_WS_URL=wss://api.example.com/api/v1/ws/prices
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_ANON_KEY
 NEXT_PUBLIC_ENABLE_AI_ANALYSIS=true

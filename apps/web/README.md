@@ -101,7 +101,8 @@ vercel --prod
 ### Environment Variables
 
 ```env
-NEXT_PUBLIC_API_URL=https://your-backend.railway.app
+NEXT_PUBLIC_API_URL=https://api.example.com
+NEXT_PUBLIC_WS_URL=wss://api.example.com/api/v1/ws/prices
 NEXT_PUBLIC_AUTH_PROVIDER=supabase
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
