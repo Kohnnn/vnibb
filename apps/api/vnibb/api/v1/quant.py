@@ -421,6 +421,89 @@ def _compute_rrg_metrics(
     return _safe_float(rs_ratio, decimals=2), _safe_float(rs_momentum, decimals=2)
 
 
+def _normalize_trade_side(value: Any) -> str | None:
+    if value is None:
+        return None
+
+    raw = value.value if hasattr(value, "value") else str(value)
+    normalized = raw.upper().replace("TRADESIDE.", "").strip()
+
+    if normalized.endswith("BUY"):
+        return "BUY"
+    if normalized.endswith("SELL"):
+        return "SELL"
+    return None
+
+
+def _is_missing_column_error(exc: Exception, column_name: str) -> bool:
+    message = str(exc).lower()
+    return column_name.lower() in message and (
+        "does not exist" in message or "undefinedcolumnerror" in message
+    )
+
+
+async def _rollback_after_query_error(db: AsyncSession, context: str) -> None:
+    try:
+        await db.rollback()
+    except Exception as rollback_exc:
+        logger.warning("%s rollback failed: %s", context, rollback_exc)
+
+
+async def _load_block_trade_rows(
+    db: AsyncSession,
+    symbol: str,
+    limit: int = 60,
+) -> list[tuple[Any, str | None, Any, Any]]:
+    stmt = (
+        select(
+            BlockTrade.trade_time,
+            BlockTrade.side,
+            BlockTrade.quantity,
+            BlockTrade.value,
+        )
+        .where(BlockTrade.symbol == symbol)
+        .order_by(BlockTrade.trade_time.desc())
+        .limit(limit)
+    )
+
+    try:
+        result = await db.execute(stmt)
+        return [(row[0], _normalize_trade_side(row[1]), row[2], row[3]) for row in result.all()]
+    except Exception as exc:
+        await _rollback_after_query_error(db, f"Smart money block trade query for {symbol}")
+
+        if not _is_missing_column_error(exc, "block_trades.side"):
+            logger.warning("Smart money block trade query failed for %s: %s", symbol, exc)
+            return []
+
+        logger.warning(
+            "Smart money block trade query fell back to legacy schema for %s: %s",
+            symbol,
+            exc,
+        )
+
+    fallback_stmt = (
+        select(
+            BlockTrade.trade_time,
+            BlockTrade.quantity,
+            BlockTrade.value,
+        )
+        .where(BlockTrade.symbol == symbol)
+        .order_by(BlockTrade.trade_time.desc())
+        .limit(limit)
+    )
+
+    try:
+        result = await db.execute(fallback_stmt)
+        return [(row[0], None, row[1], row[2]) for row in result.all()]
+    except Exception as exc:
+        await _rollback_after_query_error(
+            db, f"Smart money legacy block trade fallback for {symbol}"
+        )
+        logger.warning("Smart money legacy block trade fallback failed for %s: %s", symbol, exc)
+        return []
+
+
 async def _load_price_frame(
     db: AsyncSession,
     symbol: str,
@@ -1603,25 +1686,11 @@ async def get_smart_money_flow(
         )
         foreign_rows = foreign_result.all()
     except Exception as exc:
+        await _rollback_after_query_error(db, f"Smart money foreign flow query for {symbol_upper}")
         logger.warning("Smart money foreign flow query failed for %s: %s", symbol_upper, exc)
         foreign_rows = []
 
-    try:
-        block_result = await db.execute(
-            select(
-                BlockTrade.trade_time,
-                BlockTrade.side,
-                BlockTrade.quantity,
-                BlockTrade.value,
-            )
-            .where(BlockTrade.symbol == symbol_upper)
-            .order_by(BlockTrade.trade_time.desc())
-            .limit(60)
-        )
-        block_rows = block_result.all()
-    except Exception as exc:
-        logger.warning("Smart money block trade query failed for %s: %s", symbol_upper, exc)
-        block_rows = []
+    block_rows = await _load_block_trade_rows(db, symbol_upper, limit=60)
 
     end_date = date.today()
     start_date = end_date - timedelta(days=200)
@@ -1660,16 +1729,20 @@ async def get_smart_money_flow(
         block_date = _format_date_value(row[0])
         if block_date is None:
             continue
-        side_raw = row[1].value if hasattr(row[1], "value") else str(row[1])
-        side = side_raw.upper().replace("TRADESIDE.", "")
-        event_type = "accumulation" if side.endswith("BUY") else "distribution"
+        side = row[1]
+        if side == "BUY":
+            event_type = "accumulation"
+        elif side == "SELL":
+            event_type = "distribution"
+        else:
+            event_type = "unknown"
         block_events.append(
             {
                 "date": block_date,
                 "volume": int(row[2]) if row[2] is not None else None,
                 "value": _safe_float(row[3], 2),
                 "type": event_type,
-                "source": "block_trade_table",
+                "source": "block_trade_table" if side else "block_trade_table_legacy_schema",
             }
         )
 
@@ -1684,25 +1757,11 @@ async def get_smart_money_flow(
         decimals=2,
     )
     block_buy_20d = _safe_float(
-        sum(
-            float(row[3] or 0)
-            for row in block_rows[:20]
-            if (row[1].value if hasattr(row[1], "value") else str(row[1]))
-            .upper()
-            .replace("TRADESIDE.", "")
-            .endswith("BUY")
-        ),
+        sum(float(row[3] or 0) for row in block_rows[:20] if row[1] == "BUY"),
         decimals=2,
     )
     block_sell_20d = _safe_float(
-        sum(
-            float(row[3] or 0)
-            for row in block_rows[:20]
-            if not (row[1].value if hasattr(row[1], "value") else str(row[1]))
-            .upper()
-            .replace("TRADESIDE.", "")
-            .endswith("BUY")
-        ),
+        sum(float(row[3] or 0) for row in block_rows[:20] if row[1] == "SELL"),
         decimals=2,
     )
 

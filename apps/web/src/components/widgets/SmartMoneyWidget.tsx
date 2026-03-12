@@ -118,13 +118,20 @@ export function SmartMoneyWidget({ symbol }: SmartMoneyWidgetProps) {
               blockTrades.slice(0, 4).map((row, index) => (
                 <div key={`${row.date}-${index}`} className="flex items-center justify-between text-[var(--text-secondary)]">
                   <span>
-                    {row.type === 'accumulation' ? 'BUY' : 'SELL'} • {row.date}
+                    {row.type === 'accumulation'
+                      ? 'BUY'
+                      : row.type === 'distribution'
+                        ? 'SELL'
+                        : 'BLOCK'}{' '}
+                    • {row.date}
                   </span>
                   <span
                     className={
                       row.type === 'accumulation'
                         ? 'text-emerald-400 font-mono'
-                        : 'text-red-400 font-mono'
+                        : row.type === 'distribution'
+                          ? 'text-red-400 font-mono'
+                          : 'text-[var(--text-secondary)] font-mono'
                     }
                   >
                     {formatBillions(Number(row.value || 0))}

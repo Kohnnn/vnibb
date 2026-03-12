@@ -111,3 +111,4 @@ docs/sql/financial_ratios_ghost_period_purge.sql
 # Appwrite migration runtime artifacts
 scripts/appwrite/migration_state*.json
 scripts/appwrite/supabase_baseline.json
+apps/api/migrations/versions/20260313_0105_ensure_block_trades_side_column.py
