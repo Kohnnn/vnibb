@@ -218,7 +218,7 @@ def setup_logging(
         "vnstock.common": logging.ERROR,
         "vnstock.common.data": logging.ERROR,
         "vnstock.core": logging.ERROR,
-        "vnstock.core.utils.client": logging.ERROR,
+        "vnstock.core.utils.client": logging.CRITICAL,
         "vnstock.explorer": logging.ERROR,
         "vnstock.explorer.vci.financial": logging.ERROR,
         "vnibb.providers.vnstock": logging.WARNING,
