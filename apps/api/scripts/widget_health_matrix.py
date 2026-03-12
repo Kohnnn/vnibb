@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -214,7 +215,10 @@ def print_markdown(report: dict[str, Any]) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run core widget endpoint health matrix")
-    parser.add_argument("--base-url", default="https://vnibb.zeabur.app")
+    parser.add_argument(
+        "--base-url",
+        default=os.getenv("VNIBB_BASE_URL", "http://localhost:8000"),
+    )
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=8.0)
     parser.add_argument(
