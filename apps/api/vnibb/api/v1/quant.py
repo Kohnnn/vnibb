@@ -442,6 +442,11 @@ def _is_missing_column_error(exc: Exception, column_name: str) -> bool:
     )
 
 
+def _is_failed_transaction_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "current transaction is aborted" in message or "infailedsqltransactionerror" in message
+
+
 async def _rollback_after_query_error(db: AsyncSession, context: str) -> None:
     try:
         await db.rollback()
@@ -528,8 +533,22 @@ async def _load_price_frame(
         )
         .order_by(StockPrice.time.asc())
     )
-    result = await db.execute(stmt)
-    rows = result.all()
+
+    try:
+        result = await db.execute(stmt)
+        rows = result.all()
+    except Exception as exc:
+        await _rollback_after_query_error(db, f"Quant price frame query for {symbol}")
+        if _is_failed_transaction_error(exc):
+            logger.warning(
+                "Quant price frame query hit an aborted transaction for %s; "
+                "falling back to provider data: %s",
+                symbol,
+                exc,
+            )
+        else:
+            logger.warning("Quant price frame query failed for %s: %s", symbol, exc)
+        rows = []
 
     if rows:
         frame = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
