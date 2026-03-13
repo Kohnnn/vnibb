@@ -11,6 +11,8 @@ services:
       PORT: ${PORT:-8000}
       UVICORN_PROXY_HEADERS: ${UVICORN_PROXY_HEADERS:-1}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      INTRADAY_MARKET_TZ: ${INTRADAY_MARKET_TZ:-Asia/Ho_Chi_Minh}
     expose:
       - "8000"
     volumes:
@@ -37,6 +39,7 @@ services:
       SITE_HOSTNAME: ${SITE_HOSTNAME:-api.example.com}
       API_UPSTREAM: ${API_UPSTREAM:-api:8000}
       ACME_EMAIL: ${ACME_EMAIL:-ops@example.com}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
     ports:
       - "80:80"
       - "443:443"
@@ -49,6 +52,8 @@ services:
     image: redis:7-alpine
     container_name: vnibb-redis
     restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
     command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
     profiles: ["local-redis"]
     volumes:

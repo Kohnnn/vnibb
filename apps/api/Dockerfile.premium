@@ -13,6 +13,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ARG DEBIAN_FRONTEND=noninteractive
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -20,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     git \
+    tzdata \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -30,6 +33,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Environment for non-interactive vnstock installation
 ENV VNSTOCK_LANGUAGE=2 \
     VNSTOCK_INTERACTIVE=0 \
+    TZ=Asia/Ho_Chi_Minh \
     PYTHONUNBUFFERED=1
 
 # Create directories
