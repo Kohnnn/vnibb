@@ -5,7 +5,15 @@ echo "ENTRYPOINT STARTED: User $(whoami)"
 
 # 1. Database Migrations
 echo "Running database migrations..."
-ALEMBIC_STRICT="${ALEMBIC_STRICT:-0}"
+if [ -z "${ALEMBIC_STRICT:-}" ]; then
+    runtime_environment=$(printf "%s" "${ENVIRONMENT:-}" | tr '[:upper:]' '[:lower:]')
+    if [ "$runtime_environment" = "production" ]; then
+        ALEMBIC_STRICT=1
+        echo "ALEMBIC_STRICT not set; defaulting to 1 for production startup."
+    else
+        ALEMBIC_STRICT=0
+    fi
+fi
 
 if alembic upgrade head; then
     echo "Database migrations completed."
