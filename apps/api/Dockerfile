@@ -2,6 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+ARG DEBIAN_FRONTEND=noninteractive
+
 # Install system dependencies
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -10,11 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     git \
+    tzdata \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Fix: Ensure installed packages are importable by scripts
 ENV PYTHONPATH=/usr/local/lib/python3.12/site-packages
+ENV TZ=Asia/Ho_Chi_Minh
 
 # Environment for non-interactive vnstock installation
 ENV VNSTOCK_LANGUAGE=2 \
