@@ -1713,13 +1713,18 @@ async def get_smart_money_flow(
 
     end_date = date.today()
     start_date = end_date - timedelta(days=200)
-    price_frame = await _load_price_frame(
-        db=db,
-        symbol=symbol_upper,
-        start_date=start_date,
-        end_date=end_date,
-        source=settings.vnstock_source,
-    )
+    try:
+        price_frame = await _load_price_frame(
+            db=db,
+            symbol=symbol_upper,
+            start_date=start_date,
+            end_date=end_date,
+            source=settings.vnstock_source,
+        )
+    except Exception as exc:
+        await _rollback_after_query_error(db, f"Smart money price frame load for {symbol_upper}")
+        logger.warning("Smart money price frame load failed for %s: %s", symbol_upper, exc)
+        price_frame = pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
 
     synthetic_events: List[Dict[str, Any]] = []
     if not price_frame.empty and len(price_frame) > 40:
