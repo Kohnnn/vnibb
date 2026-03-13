@@ -49,6 +49,14 @@ if missing:
 PY
 }
 
+echo "Checking current premium module availability"
+if VNSTOCK_PREMIUM_REQUIRED_MODULES="$REQUIRED_MODULES" check_modules; then
+  echo "Premium modules already available. Keeping steady-state runtime mode."
+  set_env "VNSTOCK_RUNTIME_INSTALL" "0"
+  docker compose -f "$COMPOSE_FILE" up -d --force-recreate api
+  exit 0
+fi
+
 echo "Configuring VNStock premium bootstrap in $ENV_FILE"
 set_env "VNSTOCK_RUNTIME_INSTALL" "1"
 set_env "VNSTOCK_AUTO_BOOTSTRAP_ON_MISSING" "1"

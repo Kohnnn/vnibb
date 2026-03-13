@@ -4,6 +4,7 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile
     container_name: vnibb-api
+    hostname: vnibb-api
     restart: unless-stopped
     env_file:
       - ./deployment/env.oracle
@@ -29,6 +30,7 @@ services:
   caddy:
     image: caddy:2.8-alpine
     container_name: vnibb-caddy
+    hostname: vnibb-caddy
     restart: unless-stopped
     depends_on:
       api:
