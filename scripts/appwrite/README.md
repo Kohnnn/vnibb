@@ -69,6 +69,35 @@ APPWRITE_SECRET=<api-key>
 
 ## Run
 
+### One-command full Node migration (recommended for Oracle cutover)
+
+From repo root:
+
+```bash
+bash ./scripts/appwrite/run_full_node_migration.sh
+```
+
+Oracle deploys should point script env loading to `deployment/env.oracle`:
+
+```bash
+APPWRITE_ENV_FILE=./deployment/env.oracle \
+MIGRATION_DRY_RUN=false \
+MIGRATION_MAX_ROWS=0 \
+MIGRATION_BATCH_SIZE=300 \
+MIGRATION_CONCURRENCY=4 \
+bash ./scripts/appwrite/run_full_node_migration.sh
+```
+
+Optional table-scoped backfill:
+
+```bash
+APPWRITE_ENV_FILE=./deployment/env.oracle \
+MIGRATION_TABLES=stocks,stock_prices,income_statements,balance_sheets,cash_flows,financial_ratios \
+MIGRATION_DRY_RUN=false \
+MIGRATION_MAX_ROWS=0 \
+bash ./scripts/appwrite/run_full_node_migration.sh
+```
+
 Dry run first:
 
 ```bash
