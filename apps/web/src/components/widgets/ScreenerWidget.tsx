@@ -25,6 +25,7 @@ import { ColumnCustomizer } from './screener/ColumnCustomizer';
 import { SavedScreensDropdown, type SavedScreen } from './screener/SavedScreensDropdown';
 import { PerformanceTable } from './screener/PerformanceTable';
 import { ChartGridCard } from './screener/ChartGridCard';
+import { getLatestTimestampValue } from '@/lib/dataFreshness';
 
 interface ScreenerWidgetProps {
     id: string;
@@ -123,6 +124,11 @@ export function ScreenerWidget({
     const hasData = filteredData.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
+    const sourceUpdatedAt =
+        getLatestTimestampValue([
+            screenerData?.meta?.last_data_date,
+            ...(screenerData?.data ?? []).map((row) => row.updated_at),
+        ]) ?? dataUpdatedAt;
 
     // Handlers
     const handleSort = useCallback((field: string) => {
@@ -354,7 +360,7 @@ export function ScreenerWidget({
                         )}
                     </div>
                     <WidgetMeta
-                        updatedAt={dataUpdatedAt}
+                        updatedAt={sourceUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         sourceLabel={source}

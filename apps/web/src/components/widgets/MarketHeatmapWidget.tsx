@@ -258,7 +258,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                             </div>
                         )}
                         <WidgetMeta
-                            updatedAt={dataUpdatedAt}
+                            updatedAt={data?.updated_at || dataUpdatedAt}
                             isFetching={isFetching && hasData}
                             isCached={isFallback}
                             align="right"

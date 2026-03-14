@@ -88,11 +88,13 @@ class HeatmapResponse(BaseModel):
     size_metric: str
     sectors: List[SectorGroup]
     cached: bool = False
+    updated_at: Optional[str] = None
 
 
 class MarketIndicesResponse(BaseModel):
     count: int
     data: List[dict[str, Any]]
+    updated_at: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -101,6 +103,7 @@ class MarketTopMoversResponse(BaseModel):
     index: str
     count: int
     data: List[dict[str, Any]]
+    updated_at: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -458,6 +461,36 @@ def _normalize_text(value: Any) -> Optional[str]:
     return text or None
 
 
+def _parse_datetime_like(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            return None
+    return None
+
+
+def _serialize_datetime_like(value: Any) -> Optional[str]:
+    parsed = _parse_datetime_like(value)
+    return parsed.isoformat() if parsed else None
+
+
+def _latest_timestamp(values: List[Any]) -> Optional[str]:
+    parsed_values = [parsed for parsed in (_parse_datetime_like(value) for value in values) if parsed]
+    if not parsed_values:
+        return None
+    return max(parsed_values).isoformat()
+
+
 def _normalize_mover_type(value: Optional[str]) -> str:
     if value is None:
         return "gainer"
@@ -570,6 +603,11 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
                 payload.get("valueTraded"),
                 payload.get("trading_value"),
             )
+        ),
+        "updated_at": _first_non_none(
+            payload.get("updated_at"),
+            payload.get("snapshot_date"),
+            payload.get("time"),
         ),
     }
 
@@ -783,12 +821,12 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
 
 async def _load_latest_snapshot_metrics(
     symbols: List[str],
-) -> Dict[str, dict[str, Optional[float]]]:
+) -> Dict[str, dict[str, Any]]:
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
         return {}
 
-    metrics_map: Dict[str, dict[str, Optional[float]]] = {}
+    metrics_map: Dict[str, dict[str, Any]] = {}
 
     try:
         async with async_session_maker() as session:
@@ -797,6 +835,8 @@ async def _load_latest_snapshot_metrics(
                     ScreenerSnapshot.symbol.label("symbol"),
                     ScreenerSnapshot.price.label("price"),
                     ScreenerSnapshot.volume.label("volume"),
+                    ScreenerSnapshot.snapshot_date.label("snapshot_date"),
+                    ScreenerSnapshot.created_at.label("created_at"),
                     ScreenerSnapshot.extended_metrics.label("extended_metrics"),
                     func.row_number()
                     .over(
@@ -818,12 +858,14 @@ async def _load_latest_snapshot_metrics(
                         ranked_snapshots.c.symbol,
                         ranked_snapshots.c.price,
                         ranked_snapshots.c.volume,
+                        ranked_snapshots.c.snapshot_date,
+                        ranked_snapshots.c.created_at,
                         ranked_snapshots.c.extended_metrics,
                     ).where(ranked_snapshots.c.rn == 1)
                 )
             ).all()
 
-            for symbol, price, volume, extended_metrics in rows:
+            for symbol, price, volume, snapshot_date, created_at, extended_metrics in rows:
                 symbol_key = _normalize_symbol(symbol)
                 payload = extended_metrics if isinstance(extended_metrics, dict) else {}
                 metrics_map[symbol_key] = {
@@ -831,6 +873,9 @@ async def _load_latest_snapshot_metrics(
                     "volume": _to_float(volume),
                     "change_pct": _extract_snapshot_change_pct(payload),
                     "value": _extract_snapshot_value_traded(payload),
+                    "updated_at": _serialize_datetime_like(
+                        _first_non_none(payload.get("updated_at"), snapshot_date, created_at)
+                    ),
                 }
     except Exception as exc:
         logger.warning("Failed to load latest snapshot metrics: %s", exc)
@@ -841,7 +886,7 @@ async def _load_latest_snapshot_metrics(
 
 def _apply_snapshot_metrics_to_movers(
     payload: List[dict[str, Any]],
-    metrics_map: Dict[str, dict[str, Optional[float]]],
+    metrics_map: Dict[str, dict[str, Any]],
 ) -> List[dict[str, Any]]:
     if not payload or not metrics_map:
         return payload
@@ -882,6 +927,9 @@ def _apply_snapshot_metrics_to_movers(
             and volume_value not in (None, 0)
         ):
             item["value"] = price_value * volume_value
+
+        if not item.get("updated_at") and metrics.get("updated_at"):
+            item["updated_at"] = metrics["updated_at"]
 
         current_change = _to_float(item.get("price_change"))
         if (
@@ -984,6 +1032,13 @@ async def _build_snapshot_top_movers(
                 "volume": volume,
                 "change_pct": change_pct,
                 "value": value,
+                "updated_at": _serialize_datetime_like(
+                    _first_non_none(
+                        extended_metrics.get("updated_at"),
+                        getattr(item, "updated_at", None),
+                        getattr(item, "snapshot_date", None),
+                    )
+                ),
             }
         )
 
@@ -1036,6 +1091,7 @@ async def _build_snapshot_top_movers(
                 "value": row.get("value"),
                 "avg_volume_20d": None,
                 "volume_spike_pct": None,
+                "updated_at": row.get("updated_at"),
             }
         )
 
@@ -1237,6 +1293,8 @@ async def get_heatmap_data(
                             market_cap=s.market_cap,
                             pe=s.pe,
                             pb=s.pb,
+                            updated_at=getattr(s, "updated_at", None)
+                            or getattr(s, "snapshot_date", None),
                         )
                         for s in cache_result.data
                     ]
@@ -1414,6 +1472,8 @@ async def get_heatmap_data(
 
         total_stocks = sum(len(s.stocks) for s in sectors)
 
+        updated_at = _latest_timestamp([row.get("updated_at") for row in normalized_rows])
+
         return HeatmapResponse(
             count=total_stocks,
             group_by=group_by,
@@ -1421,6 +1481,7 @@ async def get_heatmap_data(
             size_metric=size_metric,
             sectors=sectors,
             cached=cached,
+            updated_at=updated_at,
         )
 
     except ProviderTimeoutError as e:
@@ -1470,12 +1531,37 @@ async def get_market_indices(
         ]
         merged = _merge_market_index_rows(db_rows, provider_rows)
         if merged:
-            return MarketIndicesResponse(count=len(merged[:limit]), data=merged[:limit])
-        return MarketIndicesResponse(count=len(provider_rows[:limit]), data=provider_rows[:limit])
+            rows = merged[:limit]
+            return MarketIndicesResponse(
+                count=len(rows),
+                data=rows,
+                updated_at=_latest_timestamp(
+                    [
+                        _first_non_none(row.get("time"), row.get("updated_at"), row.get("date"))
+                        for row in rows
+                    ]
+                ),
+            )
+        rows = provider_rows[:limit]
+        return MarketIndicesResponse(
+            count=len(rows),
+            data=rows,
+            updated_at=_latest_timestamp(
+                [_first_non_none(row.get("time"), row.get("updated_at"), row.get("date")) for row in rows]
+            ),
+        )
     except Exception as e:
         logger.warning(f"Market indices fetch failed: {e}")
         if db_rows:
-            return MarketIndicesResponse(count=len(db_rows[:limit]), data=db_rows[:limit], error=str(e))
+            rows = db_rows[:limit]
+            return MarketIndicesResponse(
+                count=len(rows),
+                data=rows,
+                updated_at=_latest_timestamp(
+                    [_first_non_none(row.get("time"), row.get("updated_at"), row.get("date")) for row in rows]
+                ),
+                error=str(e),
+            )
         return MarketIndicesResponse(count=0, data=[], error=str(e))
 
 
@@ -1560,6 +1646,9 @@ async def get_market_top_movers(
                     index=index,
                     count=len(payload),
                     data=payload,
+                    updated_at=_latest_timestamp(
+                        [_first_non_none(item.get("updated_at"), item.get("time")) for item in payload]
+                    ),
                     error=(
                         f"Requested '{mover_type}' movers unavailable, returned snapshot-derived "
                         "fallback"
@@ -1567,7 +1656,13 @@ async def get_market_top_movers(
                 )
 
         return MarketTopMoversResponse(
-            type=mover_type, index=index, count=len(payload), data=payload
+            type=mover_type,
+            index=index,
+            count=len(payload),
+            data=payload,
+            updated_at=_latest_timestamp(
+                [_first_non_none(item.get("updated_at"), item.get("time")) for item in payload]
+            ),
         )
     except Exception as e:
         logger.warning(f"Market top movers fetch failed: {e}")

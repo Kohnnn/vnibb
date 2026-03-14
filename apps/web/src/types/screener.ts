@@ -4,6 +4,7 @@ export interface ScreenerData {
     id?: string;
     ticker: string;
     symbol?: string;
+    updated_at?: string | null;
 
     company_name?: string;
     exchange?: string;
@@ -44,9 +45,14 @@ export interface ScreenerData {
 }
 
 export interface ScreenerResponse {
-    count: number;
-    exchange: string | null;
+    count?: number;
+    exchange?: string | null;
     data: ScreenerData[];
+    meta?: {
+        count?: number;
+        last_data_date?: string | null;
+    };
+    error?: string | null;
 }
 
 export interface ScreenerColumn {

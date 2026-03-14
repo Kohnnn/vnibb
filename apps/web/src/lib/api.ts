@@ -860,6 +860,7 @@ export interface TopMoverData {
     value?: number;
     avg_volume_20d?: number;
     volume_spike_pct?: number;
+    updated_at?: string | null;
 }
 
 export interface TopMoversResponse {
@@ -867,6 +868,7 @@ export interface TopMoversResponse {
     index: string;
     count: number;
     data: TopMoverData[];
+    updated_at?: string | null;
 }
 
 export async function getTopGainers(options?: {
@@ -1671,6 +1673,7 @@ export interface HeatmapResponse {
     size_metric: string;
     sectors: SectorGroup[];
     cached: boolean;
+    updated_at?: string | null;
 }
 
 export async function getMarketHeatmap(options?: {

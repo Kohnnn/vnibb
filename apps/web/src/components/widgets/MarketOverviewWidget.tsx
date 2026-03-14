@@ -6,6 +6,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { getLatestTimestampValue } from '@/lib/dataFreshness';
 
 interface MarketOverviewWidgetProps {
   isEditing?: boolean;
@@ -39,6 +40,8 @@ export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
   const indices = data?.data || [];
   const hasData = indices.length > 0;
   const isFallback = Boolean(error && hasData);
+  const sourceUpdatedAt =
+    getLatestTimestampValue([data?.updated_at, ...indices.map((item) => item.time)]) ?? dataUpdatedAt;
 
   return (
     <WidgetContainer
@@ -51,7 +54,7 @@ export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
       <div aria-label="Market overview panel" className="h-full flex flex-col">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={sourceUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note="Indices snapshot"
