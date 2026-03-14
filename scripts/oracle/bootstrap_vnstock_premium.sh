@@ -29,12 +29,16 @@ set_env() {
 }
 
 check_modules() {
-  docker compose -f "$COMPOSE_FILE" exec -T api python - <<'PY'
+  docker compose -f "$COMPOSE_FILE" exec -T -e "VNSTOCK_PREMIUM_REQUIRED_MODULES=$REQUIRED_MODULES" api python - <<'PY'
 import importlib
 import os
 import sys
 
 modules = [m.strip() for m in os.getenv("VNSTOCK_PREMIUM_REQUIRED_MODULES", "").split(",") if m.strip()]
+if not modules:
+    print("No VNSTOCK_PREMIUM_REQUIRED_MODULES configured")
+    sys.exit(1)
+
 missing = []
 for name in modules:
     try:
@@ -50,7 +54,7 @@ PY
 }
 
 echo "Checking current premium module availability"
-if VNSTOCK_PREMIUM_REQUIRED_MODULES="$REQUIRED_MODULES" check_modules; then
+if check_modules; then
   echo "Premium modules already available. Keeping steady-state runtime mode."
   set_env "VNSTOCK_RUNTIME_INSTALL" "0"
   docker compose -f "$COMPOSE_FILE" up -d --force-recreate api
@@ -73,12 +77,12 @@ echo "Waiting for premium modules to become available"
 attempt=1
 while [[ "$attempt" -le "$CHECK_ATTEMPTS" ]]; do
   echo "Check attempt $attempt/$CHECK_ATTEMPTS"
-  if VNSTOCK_PREMIUM_REQUIRED_MODULES="$REQUIRED_MODULES" check_modules; then
+  if check_modules; then
     echo "Premium modules detected. Locking steady-state runtime mode."
     set_env "VNSTOCK_RUNTIME_INSTALL" "0"
     docker compose -f "$COMPOSE_FILE" up -d --force-recreate api
     echo "Final premium status:"
-    VNSTOCK_PREMIUM_REQUIRED_MODULES="$REQUIRED_MODULES" check_modules
+    check_modules
     echo "Bootstrap complete."
     exit 0
   fi
