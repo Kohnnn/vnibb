@@ -24,7 +24,7 @@ class CompanyNews(Base):
     """
     Company news articles and announcements.
     
-    Stores news from TCBS, VNDirect, and other sources.
+    Stores news from configured providers and partner feeds.
     Updated hourly via data pipeline.
     """
     __tablename__ = "company_news"
@@ -37,7 +37,7 @@ class CompanyNews(Base):
     # News content
     title: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    source: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # TCBS, VNDirect, etc.
+    source: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # e.g. VCI, KBS, DNSE, partner feeds
     url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     # Publication

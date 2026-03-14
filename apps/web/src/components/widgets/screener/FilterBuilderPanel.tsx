@@ -1,5 +1,5 @@
 // Filter Builder Panel for Advanced Stock Screener
-// Supports all 84 TCBS metrics with AND/OR logic
+// Supports the legacy 84-column screener dataset with AND/OR logic
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
@@ -40,7 +40,7 @@ interface MetricDefinition {
     multiplier?: number; // For currency fields (e.g., market_cap in billions)
 }
 
-// All 84 TCBS metrics organized by category
+// Legacy 84-column screener metrics organized by category
 const METRIC_GROUPS: { name: string; metrics: MetricDefinition[] }[] = [
     {
         name: 'Identification',

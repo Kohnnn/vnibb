@@ -124,7 +124,7 @@ class Settings(BaseSettings):
     # VNStock Provider
     # ==========================================================================
     vnstock_api_key: Optional[str] = None  # Golden Sponsor API key
-    vnstock_source: str = "KBS"  # KBS (default in vnstock 3.4.0), VCI, DNSE
+    vnstock_source: str = "KBS"  # Allowed in vnstock 3.5.0+: KBS, VCI, DNSE
     vnstock_timeout: int = 30  # Request timeout in seconds
     vnstock_rate_limit_rps: float = 500 / 60  # Global vnstock request budget (500/min)
     vnstock_reinforcement_rps: float = 50 / 60  # Reserved reinforcement budget (50/min)
@@ -329,6 +329,28 @@ class Settings(BaseSettings):
         if backend not in valid_backends:
             raise ValueError(f"Invalid DATA_BACKEND '{v}'. Must be one of: {valid_backends}")
         return backend
+
+    @field_validator("vnstock_source")
+    @classmethod
+    def validate_vnstock_source(cls, v: str) -> str:
+        """Validate and normalize configured vnstock source."""
+        normalized = (v or "KBS").strip().upper()
+        if normalized == "TCBS":
+            logger.warning(
+                "VNSTOCK_SOURCE=TCBS is no longer supported in vnstock 3.5.0+. Using VCI."
+            )
+            return "VCI"
+
+        valid_sources = {"KBS", "VCI", "DNSE"}
+        if normalized not in valid_sources:
+            logger.warning(
+                "Invalid VNSTOCK_SOURCE '%s'. Falling back to KBS. Allowed values: %s",
+                v,
+                ", ".join(sorted(valid_sources)),
+            )
+            return "KBS"
+
+        return normalized
 
     @model_validator(mode="after")
     def validate_production_requirements(self) -> "Settings":

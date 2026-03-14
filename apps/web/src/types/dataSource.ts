@@ -24,7 +24,7 @@ export interface DataSource {
 
 export interface DataSourceState {
     dataSources: DataSource[];
-    vnstockSource: 'KBS' | 'VCI' | 'TCBS' | 'DNSE';
+    vnstockSource: 'KBS' | 'VCI' | 'DNSE';
 }
 
 

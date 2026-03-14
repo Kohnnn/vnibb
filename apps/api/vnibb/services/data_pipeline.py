@@ -4375,7 +4375,7 @@ class DataPipeline:
             symbol = symbols[idx]
             await self._wait_for_rate_limit("intraday")
             try:
-                source = settings.vnstock_source if settings.vnstock_source != "TCBS" else "VCI"
+                source = settings.vnstock_source or "KBS"
 
                 async def _fetch_intraday() -> List[Dict[str, Any]]:
                     def _sync_fetch() -> List[Dict[str, Any]]:

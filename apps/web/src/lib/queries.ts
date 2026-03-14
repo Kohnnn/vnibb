@@ -394,7 +394,7 @@ export function useScreenerData(options?: {
     exchange?: string;
     industry?: string;
     limit?: number;
-    source?: 'VCI' | 'TCBS' | 'DNSE';
+    source?: 'KBS' | 'VCI' | 'DNSE';
     // Dynamic filters (new)
     filters?: string; // JSON encoded FilterGroup
     sort?: string;    // Multi-sort string: "field:order,field2:order2"
@@ -1041,7 +1041,7 @@ export function useQuantMetrics(
     options?: {
         period?: api.QuantPeriod;
         metrics?: api.QuantMetric[];
-        source?: 'KBS' | 'VCI' | 'DNSE' | 'TCBS';
+        source?: 'KBS' | 'VCI' | 'DNSE';
         enabled?: boolean;
     }
 ) {
@@ -1049,10 +1049,9 @@ export function useQuantMetrics(
     const period = options?.period || '5Y';
     const metrics = options?.metrics || ['volume_delta'];
     const source = options?.source || preferredSource;
-    const quantSource: 'KBS' | 'VCI' | 'DNSE' = source === 'TCBS' ? 'VCI' : source;
     return useQuery({
-        queryKey: queryKeys.quant(symbol, period, metrics, quantSource),
-        queryFn: () => api.getQuantMetrics(symbol, { period, metrics, source: quantSource }),
+        queryKey: queryKeys.quant(symbol, period, metrics, source),
+        queryFn: () => api.getQuantMetrics(symbol, { period, metrics, source }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         retry: 2,
@@ -1063,18 +1062,17 @@ export function useGammaExposure(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'DNSE' | 'TCBS';
+        source?: 'KBS' | 'VCI' | 'DNSE';
         enabled?: boolean;
     }
 ) {
     const preferredSource = useVnstockSource();
     const period = options?.period || '3Y';
     const source = options?.source || preferredSource;
-    const quantSource: 'KBS' | 'VCI' | 'DNSE' = source === 'TCBS' ? 'VCI' : source;
 
     return useQuery({
-        queryKey: queryKeys.gammaExposure(symbol, period, quantSource),
-        queryFn: () => api.getGammaExposure(symbol, { period, source: quantSource }),
+        queryKey: queryKeys.gammaExposure(symbol, period, source),
+        queryFn: () => api.getGammaExposure(symbol, { period, source }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         retry: 2,
@@ -1085,18 +1083,17 @@ export function useMomentumProfile(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'DNSE' | 'TCBS';
+        source?: 'KBS' | 'VCI' | 'DNSE';
         enabled?: boolean;
     }
 ) {
     const preferredSource = useVnstockSource();
     const period = options?.period || '3Y';
     const source = options?.source || preferredSource;
-    const quantSource: 'KBS' | 'VCI' | 'DNSE' = source === 'TCBS' ? 'VCI' : source;
 
     return useQuery({
-        queryKey: queryKeys.momentumProfile(symbol, period, quantSource),
-        queryFn: () => api.getMomentumProfile(symbol, { period, source: quantSource }),
+        queryKey: queryKeys.momentumProfile(symbol, period, source),
+        queryFn: () => api.getMomentumProfile(symbol, { period, source }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         retry: 2,

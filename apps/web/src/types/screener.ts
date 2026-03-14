@@ -38,7 +38,7 @@ export interface ScreenerData {
     perf_6m?: number;
     perf_ytd?: number;
     perf_1y?: number;
-    // ... 84 metrics total from TCBS
+    // ... legacy 84-column screener metric set
 
     [key: string]: unknown;
 }

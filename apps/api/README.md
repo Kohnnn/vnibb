@@ -37,7 +37,7 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
 - **Database:** PostgreSQL (Supabase)
 - **ORM:** SQLAlchemy 2.0 (async)
 - **Cache:** Redis (Upstash)
-- **Data:** vnstock 3.4.0
+- **Data:** vnstock 3.5.0+
 
 ---
 
@@ -136,6 +136,11 @@ Appwrite is now the expected primary runtime backend. Keep `DATABASE_URL` config
 Premium package strategy:
 - Default `Dockerfile` keeps runtime installer disabled (`VNSTOCK_RUNTIME_INSTALL=0`) to avoid cold-start CPU spikes.
 - Use `Dockerfile.premium` for prebuilt premium layers when `VNSTOCK_API_KEY` is available at build time.
+
+VNStock 3.5.0+ compatibility notes:
+- `TCBS` source is removed upstream and should not be configured.
+- Use `VNSTOCK_SOURCE=KBS` (recommended), `VCI`, or `DNSE`.
+- OSS screener coverage changed upstream; keep premium modules installed (`vnstock_data`, `vnstock_ta`, `vnstock_pipeline`, `vnstock_news`, `vnii`) for full legacy screener parity.
 
 ---
 

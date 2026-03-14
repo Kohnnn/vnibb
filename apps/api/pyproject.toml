@@ -34,7 +34,7 @@ dependencies = [
     "numpy>=1.24.0",
     
     # Data Providers
-    "vnstock>=3.4.0",  # Vietnam stock data - requires Golden Sponsor API key for 10x rate limits
+    "vnstock>=3.5.0",  # Vietnam stock data (TCBS source removed in v3.5.0)
     "vnai>=2.3.9",     # Required for device fingerprinting in vnstock installer
     # NOTE: `vnii` is not guaranteed on default PyPI in all build environments.
     # It is installed via VNStock premium bootstrap path (installer/extra-index) when needed.

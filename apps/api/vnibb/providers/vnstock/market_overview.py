@@ -95,7 +95,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
         }
 
         source_candidates: list[str] = []
-        for candidate in ("VCI", settings.vnstock_source, "TCBS", "DNSE", "KBS"):
+        for candidate in (settings.vnstock_source, "VCI", "DNSE", "KBS"):
             normalized = (candidate or "").strip().upper()
             if normalized and normalized not in source_candidates:
                 source_candidates.append(normalized)
@@ -214,10 +214,10 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
         results = []
         for row in data:
             try:
-                # Handle different column names from different sources (VCI, TCBS, KBS)
+                # Handle different column names from active sources (KBS, VCI, DNSE)
                 # VCI: close, change, pctChange
-                # TCBS: price, change, percent_change
                 # KBS: close, change, pct_change
+                # DNSE: close, change, change_ratio
                 current_value = _first_non_none(
                     row.get("current_value"),
                     row.get("close"),
