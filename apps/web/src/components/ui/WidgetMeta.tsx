@@ -4,6 +4,18 @@ import { Clock, RefreshCw, Database, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatAbsoluteTimestamp, formatTime } from '@/lib/format';
 
+const fetchingBadgeStyle = {
+  backgroundColor: 'color-mix(in srgb, var(--accent-blue) 12%, transparent)',
+  borderColor: 'color-mix(in srgb, var(--accent-blue) 32%, transparent)',
+  color: 'color-mix(in srgb, var(--accent-blue) 82%, var(--text-primary) 18%)',
+} as const;
+
+const warningBadgeStyle = {
+  backgroundColor: 'color-mix(in srgb, #f59e0b 12%, transparent)',
+  borderColor: 'color-mix(in srgb, #f59e0b 28%, transparent)',
+  color: 'color-mix(in srgb, #b45309 72%, var(--text-primary) 28%)',
+} as const;
+
 interface WidgetMetaProps {
   updatedAt?: number | string | Date | null;
   isFetching?: boolean;
@@ -53,14 +65,20 @@ export function WidgetMeta({
       )}
 
       {isFetching && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 text-blue-300 px-2 py-0.5">
+        <span
+          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5"
+          style={fetchingBadgeStyle}
+        >
           <RefreshCw size={10} className="animate-spin" />
           Refreshing
         </span>
       )}
 
       {(isCached || isStale) && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 text-amber-300 px-2 py-0.5">
+        <span
+          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5"
+          style={warningBadgeStyle}
+        >
           <AlertTriangle size={10} />
           {isStale ? 'Stale data' : 'Cached'}
         </span>

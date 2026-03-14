@@ -93,29 +93,7 @@ export function formatTimestamp(
 ): string {
   if (date === null || date === undefined) return '-';
 
-  const parsed = date instanceof Date ? date : new Date(date);
-  if (Number.isNaN(parsed.getTime())) return '-';
-
-  const now = new Date();
-  const hhmm = parsed.toLocaleTimeString('vi-VN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-
-  const isToday =
-    parsed.getFullYear() === now.getFullYear() &&
-    parsed.getMonth() === now.getMonth() &&
-    parsed.getDate() === now.getDate();
-
-  if (isToday) {
-    return `Today ${hhmm}`;
-  }
-
-  const yyyy = parsed.getFullYear();
-  const mm = String(parsed.getMonth() + 1).padStart(2, '0');
-  const dd = String(parsed.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd} ${hhmm}`;
+  return formatAbsoluteTimestamp(date);
 }
 
 export function formatAbsoluteTimestamp(
