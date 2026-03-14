@@ -1861,39 +1861,6 @@ async def get_quote(
                 .limit(2)
             )
             price_rows = (await db.execute(price_stmt)).scalars().all()
-            if price_rows:
-                latest_row = price_rows[0]
-                previous_row = price_rows[1] if len(price_rows) > 1 else None
-
-                prev_close = (
-                    float(previous_row.close)
-                    if previous_row and previous_row.close is not None
-                    else None
-                )
-                latest_close = float(latest_row.close) if latest_row.close is not None else None
-                change = (
-                    latest_close - prev_close
-                    if latest_close is not None and prev_close is not None
-                    else None
-                )
-                change_pct = (
-                    (change / prev_close) * 100
-                    if change is not None and prev_close not in (None, 0)
-                    else None
-                )
-
-                return StockQuoteData(
-                    symbol=symbol_upper,
-                    price=latest_close,
-                    open=float(latest_row.open) if latest_row.open is not None else None,
-                    high=float(latest_row.high) if latest_row.high is not None else None,
-                    low=float(latest_row.low) if latest_row.low is not None else None,
-                    prev_close=prev_close,
-                    change=change,
-                    change_pct=round(change_pct, 2) if change_pct is not None else None,
-                    volume=int(latest_row.volume) if latest_row.volume is not None else None,
-                    updated_at=datetime.utcnow(),
-                )
 
             snapshot_stmt = (
                 select(ScreenerSnapshot)
@@ -1902,12 +1869,127 @@ async def get_quote(
                 .limit(1)
             )
             snapshot_row = (await db.execute(snapshot_stmt)).scalar_one_or_none()
-            if snapshot_row and snapshot_row.price is not None:
+
+            latest_row = price_rows[0] if price_rows else None
+            previous_row = price_rows[1] if len(price_rows) > 1 else None
+
+            latest_close = float(latest_row.close) if latest_row and latest_row.close is not None else None
+            prev_close = (
+                float(previous_row.close)
+                if previous_row and previous_row.close is not None
+                else None
+            )
+            db_change = (
+                latest_close - prev_close
+                if latest_close is not None and prev_close is not None
+                else None
+            )
+            db_change_pct = (
+                (db_change / prev_close) * 100
+                if db_change is not None and prev_close not in (None, 0)
+                else None
+            )
+
+            latest_price_date = latest_row.time if latest_row else None
+            snapshot_date = snapshot_row.snapshot_date if snapshot_row else None
+            snapshot_is_fresher = bool(
+                snapshot_row
+                and snapshot_row.price is not None
+                and snapshot_date is not None
+                and (latest_price_date is None or snapshot_date > latest_price_date)
+            )
+
+            if snapshot_is_fresher and snapshot_row and snapshot_row.price is not None:
+                snapshot_metrics = (
+                    snapshot_row.extended_metrics
+                    if isinstance(snapshot_row.extended_metrics, dict)
+                    else {}
+                )
+                snapshot_change_pct = _pick_optional_float(
+                    snapshot_metrics.get("change_1d"),
+                    snapshot_metrics.get("price_change_1d_pct"),
+                    snapshot_metrics.get("change_pct"),
+                )
+
+                snapshot_prev_close = None
+                snapshot_change = None
+                if snapshot_change_pct not in (None, -100):
+                    snapshot_prev_close = snapshot_row.price / (1 + (snapshot_change_pct / 100))
+                    snapshot_change = snapshot_row.price - snapshot_prev_close
+
+                snapshot_updated_at = _serialize_meta_datetime(
+                    snapshot_metrics.get("updated_at") if snapshot_metrics else None
+                )
+                parsed_snapshot_updated_at = (
+                    datetime.fromisoformat(snapshot_updated_at)
+                    if snapshot_updated_at
+                    else datetime.combine(snapshot_date, datetime.min.time())
+                )
+
                 return StockQuoteData(
                     symbol=symbol_upper,
                     price=snapshot_row.price,
+                    open=float(latest_row.open) if latest_row and latest_row.open is not None else None,
+                    high=float(latest_row.high) if latest_row and latest_row.high is not None else None,
+                    low=float(latest_row.low) if latest_row and latest_row.low is not None else None,
+                    prev_close=snapshot_prev_close,
+                    change=snapshot_change,
+                    change_pct=round(snapshot_change_pct, 2)
+                    if snapshot_change_pct is not None
+                    else None,
                     volume=int(snapshot_row.volume) if snapshot_row.volume is not None else None,
+                    updated_at=parsed_snapshot_updated_at,
+                )
+
+            if latest_row:
+                return StockQuoteData(
+                    symbol=symbol_upper,
+                    price=latest_close,
+                    open=float(latest_row.open) if latest_row.open is not None else None,
+                    high=float(latest_row.high) if latest_row.high is not None else None,
+                    low=float(latest_row.low) if latest_row.low is not None else None,
+                    prev_close=prev_close,
+                    change=db_change,
+                    change_pct=round(db_change_pct, 2) if db_change_pct is not None else None,
+                    volume=int(latest_row.volume) if latest_row.volume is not None else None,
                     updated_at=datetime.utcnow(),
+                )
+
+            if snapshot_row and snapshot_row.price is not None:
+                snapshot_metrics = (
+                    snapshot_row.extended_metrics
+                    if isinstance(snapshot_row.extended_metrics, dict)
+                    else {}
+                )
+                snapshot_updated_at = _serialize_meta_datetime(
+                    snapshot_metrics.get("updated_at") if snapshot_metrics else None
+                )
+                parsed_snapshot_updated_at = (
+                    datetime.fromisoformat(snapshot_updated_at)
+                    if snapshot_updated_at
+                    else datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
+                )
+                snapshot_change_pct = _pick_optional_float(
+                    snapshot_metrics.get("change_1d"),
+                    snapshot_metrics.get("price_change_1d_pct"),
+                    snapshot_metrics.get("change_pct"),
+                )
+                snapshot_prev_close = None
+                snapshot_change = None
+                if snapshot_change_pct not in (None, -100):
+                    snapshot_prev_close = snapshot_row.price / (1 + (snapshot_change_pct / 100))
+                    snapshot_change = snapshot_row.price - snapshot_prev_close
+
+                return StockQuoteData(
+                    symbol=symbol_upper,
+                    price=snapshot_row.price,
+                    prev_close=snapshot_prev_close,
+                    change=snapshot_change,
+                    change_pct=round(snapshot_change_pct, 2)
+                    if snapshot_change_pct is not None
+                    else None,
+                    volume=int(snapshot_row.volume) if snapshot_row.volume is not None else None,
+                    updated_at=parsed_snapshot_updated_at,
                 )
         except Exception as db_err:
             logger.warning(f"Quote DB fallback failed for {symbol_upper}: {db_err}")

@@ -1,17 +1,19 @@
 'use client';
 
-import { useState, useMemo, useEffect, memo } from 'react';
+import { useState, useMemo, useEffect, useCallback, memo } from 'react';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { widgetCategories, widgetDefinitions } from '@/data/widgetDefinitions';
 import {
-    Search, X, Grid3X3, ChevronRight, Check,
+    Search, X, ChevronRight,
     Box, Star, BarChart3, DollarSign, TrendingUp,
-    Newspaper, PieChart, Info, LayoutGrid, Layers,
+    Newspaper, PieChart, Info, Layers,
     Plus, Clock, Maximize2, Sigma
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WidgetPreview } from './WidgetPreview';
+import { Checkbox } from '@/components/ui/checkbox';
+import type { WidgetType } from '@/types/dashboard';
 
 interface WidgetLibraryProps {
     isOpen: boolean;
@@ -30,11 +32,18 @@ const CATEGORY_ICONS: Record<string, any> = {
     'estimates': Star,
 };
 
+const WIDGET_TYPE_SET = new Set<WidgetType>(widgetDefinitions.map((widget) => widget.type));
+
+function isWidgetType(value: string): value is WidgetType {
+    return WIDGET_TYPE_SET.has(value as WidgetType);
+}
+
 function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
     const { activeDashboard, activeTab, addWidget } = useDashboard();
     const dashboardEditable = (activeDashboard?.isEditable ?? true) !== false;
     const [searchQuery, setSearchQuery] = useState('');
     const [activeCategory, setActiveCategory] = useState<string | null>(null);
+    const [selectedWidgetTypes, setSelectedWidgetTypes] = useState<WidgetType[]>([]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -50,11 +59,25 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isOpen, onClose]);
 
+    useEffect(() => {
+        if (isOpen) return;
+        setSearchQuery('');
+        setActiveCategory(null);
+        setSelectedWidgetTypes([]);
+    }, [isOpen]);
+
     // Persistent recent widgets
-    const [recentWidgetTypes, setRecentWidgetTypes] = useState<string[]>(() => {
+    const [recentWidgetTypes, setRecentWidgetTypes] = useState<WidgetType[]>(() => {
         if (typeof window === 'undefined') return [];
         const saved = localStorage.getItem('vnibb_recent_widgets');
-        return saved ? JSON.parse(saved) : ['price_chart', 'screener', 'unified_financials', 'news_flow'];
+        if (saved) {
+            try {
+                return (JSON.parse(saved) as string[]).filter(isWidgetType);
+            } catch {
+                return ['price_chart', 'screener', 'financials', 'news_feed'];
+            }
+        }
+        return ['price_chart', 'screener', 'financials', 'news_feed'];
     });
 
     const filteredCategories = useMemo(() => {
@@ -70,27 +93,57 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         })).filter(cat => cat.widgets.length > 0);
     }, [searchQuery]);
 
-    const handleAddWidget = (widgetDef: any) => {
+    const handleAddWidgets = useCallback((widgetDefs: any[]) => {
         if (!activeDashboard || !activeTab || !dashboardEditable) return;
 
         let yOffset = activeTab.widgets.reduce((max, w) => Math.max(max, w.layout.y + w.layout.h), 0);
 
-        addWidget(activeDashboard.id, activeTab.id, {
-            type: widgetDef.type,
-            tabId: activeTab.id,
-            layout: {
-                x: 0,
-                y: yOffset,
-                ...widgetDef.defaultLayout
-            },
-            config: widgetDef.defaultConfig
+        widgetDefs.forEach((widgetDef) => {
+            addWidget(activeDashboard.id, activeTab.id, {
+                type: widgetDef.type,
+                tabId: activeTab.id,
+                layout: {
+                    x: 0,
+                    y: yOffset,
+                    ...widgetDef.defaultLayout
+                },
+                config: widgetDef.defaultConfig
+            });
+            yOffset += widgetDef.defaultLayout.h;
         });
 
-        // Update recents
-        const newRecents = [widgetDef.type, ...recentWidgetTypes.filter(t => t !== widgetDef.type)].slice(0, 10);
+        const addedTypes = widgetDefs.map((widgetDef) => widgetDef.type);
+        const newRecents = [
+            ...addedTypes.slice().reverse(),
+            ...recentWidgetTypes.filter((type) => !addedTypes.includes(type))
+        ].slice(0, 10);
         setRecentWidgetTypes(newRecents);
         localStorage.setItem('vnibb_recent_widgets', JSON.stringify(newRecents));
-    };
+    }, [activeDashboard, activeTab, addWidget, dashboardEditable, recentWidgetTypes]);
+
+    const handleAddWidget = useCallback((widgetDef: any) => {
+        handleAddWidgets([widgetDef]);
+    }, [handleAddWidgets]);
+
+    const toggleWidgetSelection = useCallback((widgetType: WidgetType, checked: boolean) => {
+        setSelectedWidgetTypes((current) => {
+            if (checked) {
+                return current.includes(widgetType) ? current : [...current, widgetType];
+            }
+            return current.filter((type) => type !== widgetType);
+        });
+    }, []);
+
+    const handleAddSelected = useCallback(() => {
+        if (!selectedWidgetTypes.length) return;
+        const definitionsByType = new Map(widgetDefinitions.map((widget) => [widget.type, widget]));
+        const selectedDefinitions = selectedWidgetTypes
+            .map((type) => definitionsByType.get(type))
+            .filter((widget): widget is NonNullable<typeof widget> => Boolean(widget));
+
+        handleAddWidgets(selectedDefinitions);
+        setSelectedWidgetTypes([]);
+    }, [handleAddWidgets, selectedWidgetTypes]);
 
     return (
         <AnimatePresence>
@@ -161,8 +214,17 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                     onClick={() => handleAddWidget(widget)}
                                                     className="p-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-blue-500/50 hover:bg-blue-500/5 transition-all text-left group"
                                                 >
-                                                    <div className="text-[10px] font-bold text-[var(--text-secondary)] group-hover:text-blue-400 truncate uppercase tracking-tighter">
-                                                        {widget.name}
+                                                    <div className="mb-1 flex items-start justify-between gap-2">
+                                                        <div className="text-[10px] font-bold text-[var(--text-secondary)] group-hover:text-blue-400 truncate uppercase tracking-tighter">
+                                                            {widget.name}
+                                                        </div>
+                                                        <Checkbox
+                                                            checked={selectedWidgetTypes.includes(widget.type)}
+                                                            onCheckedChange={(checked) => toggleWidgetSelection(widget.type, checked)}
+                                                            onClick={(event) => event.stopPropagation()}
+                                                            aria-label={`Select ${widget.name}`}
+                                                            disabled={!dashboardEditable}
+                                                        />
                                                     </div>
                                                 </button>
                                             );
@@ -202,11 +264,26 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                 {cat.widgets.map((widget) => (
                                                     <div
                                                         key={widget.type}
-                                                        className="p-3 rounded-xl border border-transparent hover:border-[var(--border-default)] hover:bg-[var(--bg-surface)] transition-all group cursor-default"
+                                                        className={cn(
+                                                            "p-3 rounded-xl border transition-all group cursor-default",
+                                                            selectedWidgetTypes.includes(widget.type)
+                                                                ? "border-blue-500/40 bg-blue-500/5"
+                                                                : "border-transparent hover:border-[var(--border-default)] hover:bg-[var(--bg-surface)]"
+                                                        )}
                                                     >
                                                         <div className="flex items-start justify-between mb-1">
-                                                            <div className="text-[11px] font-black text-[var(--text-primary)] group-hover:text-blue-400 transition-colors uppercase tracking-tight">
-                                                                {widget.name}
+                                                            <div className="flex min-w-0 items-start gap-2">
+                                                                <Checkbox
+                                                                    checked={selectedWidgetTypes.includes(widget.type)}
+                                                                    onCheckedChange={(checked) => toggleWidgetSelection(widget.type, checked)}
+                                                                    aria-label={`Select ${widget.name}`}
+                                                                    disabled={!dashboardEditable}
+                                                                />
+                                                                <div className="min-w-0">
+                                                                    <div className="text-[11px] font-black text-[var(--text-primary)] group-hover:text-blue-400 transition-colors uppercase tracking-tight">
+                                                                        {widget.name}
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                             <button
                                                                 onClick={() => handleAddWidget(widget)}
@@ -243,9 +320,34 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
 
                         {/* Footer */}
                         <div className="p-4 border-t border-[var(--border-default)] bg-[var(--bg-secondary)]">
-                            <div className="flex items-center gap-3 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
-                                <Info size={14} className="text-blue-500" />
-                                <span>Click + to add to dashboard</span>
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-3 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
+                                    <Info size={14} className="text-blue-500" />
+                                    <span>
+                                        {selectedWidgetTypes.length > 0
+                                            ? `${selectedWidgetTypes.length} selected`
+                                            : 'Click + or select multiple widgets'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {selectedWidgetTypes.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectedWidgetTypes([])}
+                                            className="rounded-lg border border-[var(--border-default)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                                        >
+                                            Clear
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={handleAddSelected}
+                                        disabled={!dashboardEditable || selectedWidgetTypes.length === 0}
+                                        className="rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Add Selected ({selectedWidgetTypes.length})
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </motion.div>

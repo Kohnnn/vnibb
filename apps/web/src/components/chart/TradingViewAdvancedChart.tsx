@@ -159,42 +159,50 @@ export function TradingViewAdvancedChart({
     >
       <div ref={widgetMountRef} className="absolute inset-0 h-full w-full" />
       {status !== 'ready' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[rgba(0,0,0,0.45)] p-4 text-center text-[11px] text-[var(--text-secondary)]">
-          {status === 'failed' ? (
-            <>
-              <div>TradingView embed failed for this symbol.</div>
-              <div className="text-[10px] text-[var(--text-muted)]">
-                Tried: {candidates.join(', ')}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCandidateIndex(0);
-                    setStatus('loading');
-                  }}
-                  className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:border-[var(--border-default)]"
-                >
-                  <RefreshCw size={10} />
-                  Retry
-                </button>
-                <a
-                  href={tradingViewUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded border border-blue-500/50 px-2 py-1 text-[10px] text-blue-200 hover:border-blue-300"
-                >
-                  <ExternalLink size={10} />
-                  Open in TradingView
-                </a>
-              </div>
-            </>
-          ) : (
-            <>
-              <div>Loading TradingView chart...</div>
-              <div className="text-[10px] text-[var(--text-muted)]">Trying: {tvSymbol}</div>
-            </>
-          )}
+        <div
+          className="absolute inset-0 flex items-center justify-center p-4 backdrop-blur-sm"
+          style={{ backgroundColor: 'color-mix(in srgb, var(--bg-primary) 74%, transparent)' }}
+        >
+          <div className="flex max-w-xs flex-col items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-modal)] px-4 py-3 text-center text-[11px] text-[var(--text-secondary)] shadow-xl">
+            {status === 'failed' ? (
+              <>
+                <div className="font-medium text-[var(--text-primary)]">
+                  TradingView embed failed for this symbol.
+                </div>
+                <div className="text-[10px] text-[var(--text-muted)]">
+                  Tried: {candidates.join(', ')}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCandidateIndex(0);
+                      setStatus('loading');
+                    }}
+                    className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:border-[var(--border-default)]"
+                  >
+                    <RefreshCw size={10} />
+                    Retry
+                  </button>
+                  <a
+                    href={tradingViewUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded border border-blue-500/40 px-2 py-1 text-[10px] text-blue-500 hover:border-blue-500"
+                  >
+                    <ExternalLink size={10} />
+                    Open in TradingView
+                  </a>
+                </div>
+              </>
+            ) : (
+              <>
+                <RefreshCw size={14} className="animate-spin text-blue-500" />
+                <div className="font-medium text-[var(--text-primary)]">Loading TradingView chart…</div>
+                <div className="text-[10px] text-[var(--text-muted)]">Trying: {tvSymbol}</div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

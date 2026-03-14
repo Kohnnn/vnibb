@@ -17,12 +17,13 @@ from collections import defaultdict
 
 import httpx
 from bs4 import BeautifulSoup
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from vnibb.core.config import settings
-from vnibb.core.database import async_session_maker
+from vnibb.core.database import async_session_maker, get_db
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
@@ -38,7 +39,7 @@ from vnibb.core.cache import cached
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.stock import Stock, StockPrice
+from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
 from vnibb.providers.vnstock import get_vnstock
@@ -160,6 +161,24 @@ WORLD_INDEX_POINT_TIMEOUT_SECONDS = 5
 WORLD_INDEX_FALLBACK_TIMEOUT_SECONDS = 5
 HEATMAP_FETCH_TIMEOUT_SECONDS = 20
 TOP_MOVER_TYPES = {"gainer", "loser", "volume", "value"}
+MARKET_INDEX_ORDER = ("VNINDEX", "VN30", "HNX", "UPCOM")
+MARKET_INDEX_ALIASES = {
+    "VNINDEX": "VNINDEX",
+    "VN-INDEX": "VNINDEX",
+    "VN30": "VN30",
+    "HNX": "HNX",
+    "HNXINDEX": "HNX",
+    "HNX-INDEX": "HNX",
+    "UPCOM": "UPCOM",
+    "UPCOMINDEX": "UPCOM",
+    "UPCOM-INDEX": "UPCOM",
+}
+MARKET_INDEX_MIN_EXPECTED_VALUE = {
+    "VNINDEX": 100.0,
+    "VN30": 100.0,
+    "HNX": 10.0,
+    "UPCOM": 10.0,
+}
 TOP_MOVER_TYPE_ALIASES = {
     "gainers": "gainer",
     "losers": "loser",
@@ -255,6 +274,131 @@ def _map_text_to_sector_name(value: Optional[str]) -> Optional[str]:
 
     sector_config = VN_SECTORS.get(sector_id)
     return sector_config.name if sector_config else None
+
+
+def _normalize_market_index_code(value: Any) -> str:
+    normalized = str(value or "").strip().upper().replace(" ", "")
+    if not normalized:
+        return ""
+    return MARKET_INDEX_ALIASES.get(normalized, normalized.replace("-", ""))
+
+
+def _coerce_market_number(value: Any) -> Optional[float]:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_suspicious_market_index_value(index_code: str, value: Optional[float]) -> bool:
+    if value is None:
+        return False
+    min_expected = MARKET_INDEX_MIN_EXPECTED_VALUE.get(index_code)
+    return min_expected is not None and value < min_expected
+
+
+async def _load_latest_market_indices_from_db(db: AsyncSession) -> list[dict[str, Any]]:
+    ranked_indices = (
+        select(
+            StockIndex.index_code.label("index_code"),
+            StockIndex.time.label("time"),
+            StockIndex.open.label("open"),
+            StockIndex.high.label("high"),
+            StockIndex.low.label("low"),
+            StockIndex.close.label("close"),
+            StockIndex.volume.label("volume"),
+            StockIndex.change.label("change"),
+            StockIndex.change_pct.label("change_pct"),
+            func.row_number()
+            .over(partition_by=StockIndex.index_code, order_by=StockIndex.time.desc())
+            .label("row_num"),
+        )
+        .where(StockIndex.index_code.in_(MARKET_INDEX_ORDER))
+        .subquery()
+    )
+
+    rows = (
+        await db.execute(
+            select(
+                ranked_indices.c.index_code,
+                ranked_indices.c.time,
+                ranked_indices.c.open,
+                ranked_indices.c.high,
+                ranked_indices.c.low,
+                ranked_indices.c.close,
+                ranked_indices.c.volume,
+                ranked_indices.c.change,
+                ranked_indices.c.change_pct,
+            )
+            .where(ranked_indices.c.row_num <= 2)
+            .order_by(ranked_indices.c.index_code.asc(), ranked_indices.c.time.desc())
+        )
+    ).all()
+
+    history_by_code: dict[str, list[Any]] = {code: [] for code in MARKET_INDEX_ORDER}
+    for row in rows:
+        code = _normalize_market_index_code(row.index_code)
+        if code:
+            history_by_code.setdefault(code, []).append(row)
+
+    results: list[dict[str, Any]] = []
+    for code in MARKET_INDEX_ORDER:
+        history = history_by_code.get(code) or []
+        if not history:
+            continue
+
+        latest = history[0]
+        previous = history[1] if len(history) > 1 else None
+        current_value = _coerce_market_number(latest.close)
+        if _is_suspicious_market_index_value(code, current_value):
+            continue
+
+        change = _coerce_market_number(latest.change)
+        previous_close = _coerce_market_number(previous.close) if previous else None
+        if change is None and current_value is not None and previous_close is not None:
+            change = current_value - previous_close
+
+        change_pct = _coerce_market_number(latest.change_pct)
+        if change_pct is None and change is not None and previous_close not in (None, 0):
+            change_pct = (change / previous_close) * 100
+
+        results.append(
+            {
+                "index_name": code,
+                "current_value": current_value,
+                "change": change,
+                "change_pct": change_pct,
+                "volume": _coerce_market_number(latest.volume),
+                "high": _coerce_market_number(latest.high),
+                "low": _coerce_market_number(latest.low),
+                "time": latest.time,
+            }
+        )
+
+    return results
+
+
+def _merge_market_index_rows(
+    db_rows: list[dict[str, Any]],
+    provider_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+
+    for row in provider_rows:
+        code = _normalize_market_index_code(row.get("index_name") or row.get("index_code"))
+        current_value = _coerce_market_number(row.get("current_value"))
+        if not code or _is_suspicious_market_index_value(code, current_value):
+            continue
+        merged[code] = {**row, "index_name": code}
+
+    for row in db_rows:
+        code = _normalize_market_index_code(row.get("index_name"))
+        if code:
+            merged[code] = {**row, "index_name": code}
+
+    ordered_codes = [code for code in MARKET_INDEX_ORDER if code in merged]
+    extra_codes = sorted(code for code in merged.keys() if code not in ordered_codes)
+    return [merged[code] for code in [*ordered_codes, *extra_codes]]
 
 
 async def _fetch_rss_content(url: str) -> str:
@@ -1307,19 +1451,31 @@ async def get_heatmap_data(
 @cached(ttl=60, key_prefix="market_indices")
 async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
 ) -> MarketIndicesResponse:
+    db_rows: list[dict[str, Any]] = []
+    try:
+        db_rows = await _load_latest_market_indices_from_db(db)
+    except Exception as db_error:
+        logger.warning(f"Market indices DB fallback failed: {db_error}")
+
     try:
         indices = await asyncio.wait_for(
             VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
             timeout=30,
         )
-        normalized = [
+        provider_rows = [
             item.model_dump(mode="json", by_alias=False) if hasattr(item, "model_dump") else item
             for item in indices
         ]
-        return MarketIndicesResponse(count=len(normalized[:limit]), data=normalized[:limit])
+        merged = _merge_market_index_rows(db_rows, provider_rows)
+        if merged:
+            return MarketIndicesResponse(count=len(merged[:limit]), data=merged[:limit])
+        return MarketIndicesResponse(count=len(provider_rows[:limit]), data=provider_rows[:limit])
     except Exception as e:
         logger.warning(f"Market indices fetch failed: {e}")
+        if db_rows:
+            return MarketIndicesResponse(count=len(db_rows[:limit]), data=db_rows[:limit], error=str(e))
         return MarketIndicesResponse(count=0, data=[], error=str(e))
 
 

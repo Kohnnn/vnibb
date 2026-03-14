@@ -102,7 +102,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 z-[100] bg-[rgba(0,0,0,0.5)]"
+                className="fixed inset-0 z-[100] bg-[rgba(2,6,23,0.72)] backdrop-blur-sm"
                 role="button"
                 tabIndex={0}
                 aria-label="Close manage tabs"
@@ -118,7 +118,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
             {/* Modal */}
             <div className="fixed inset-0 flex items-center justify-center z-[101] p-4">
                 <div
-                    className="bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded-xl shadow-xl w-full max-w-md"
+                    className="bg-[var(--bg-modal)] border border-[var(--border-color)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] w-full max-w-md"
                     onClick={e => e.stopPropagation()}
                 >
                     {/* Header */}

@@ -64,10 +64,10 @@ export function WidgetSettingsModal({
     if (!isOpen || !widget) return null;
 
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(0,0,0,0.5)] p-4 animate-in fade-in duration-200">
-            <div className="w-full max-w-lg bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="w-full max-w-lg bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] flex flex-col overflow-hidden">
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-surface)]">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-modal)]">
                     <h2 className="text-lg font-semibold text-[var(--text-primary)]">
                         Settings: <span className="text-blue-400">{widget.type}</span>
                     </h2>
@@ -138,7 +138,7 @@ export function WidgetSettingsModal({
                 </div>
 
                 {/* Footer */}
-                <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border-default)] bg-[var(--bg-surface)]">
+                <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border-default)] bg-[var(--bg-modal)]">
                     <button
                         onClick={onClose}
                         className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"

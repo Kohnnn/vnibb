@@ -8,6 +8,7 @@ import {
     FileJson,
     FileSpreadsheet,
     Image,
+    Copy,
     Maximize2,
     Minimize2,
     X,
@@ -106,7 +107,7 @@ export function WidgetWrapper({
     onCopilotClick,
     isCollapsed: initialCollapsed = false,
 }: WidgetWrapperProps) {
-    const { updateWidget } = useDashboard();
+    const { state, addWidget, cloneWidget, updateWidget } = useDashboard();
     const { getColorForGroup, getSymbolForGroup, groups, setGroupSymbol } = useWidgetGroups();
     const [isMaximized, setIsMaximized] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(initialCollapsed);
@@ -115,6 +116,15 @@ export function WidgetWrapper({
     const [internalData, setInternalData] = useState<any>(widgetData);
     const [isContentVisible, setIsContentVisible] = useState(false);
     const contentHostRef = useRef<HTMLDivElement | null>(null);
+    const currentDashboard = state.dashboards.find((dashboard) => dashboard.id === dashboardId) || null;
+    const currentTab = currentDashboard?.tabs.find((tab) => tab.id === tabId) || null;
+    const currentWidget = currentTab?.widgets.find((widget) => widget.id === id) || null;
+    const copyTargets = state.dashboards.filter(
+        (dashboard) =>
+            dashboard.id !== dashboardId &&
+            dashboard.isEditable !== false &&
+            dashboard.tabs.length > 0
+    );
 
     // Sync widgetGroup state when prop changes
     useEffect(() => {
@@ -187,6 +197,47 @@ export function WidgetWrapper({
     const handleMaximize = () => {
         setIsMaximized(!isMaximized);
         onMaximize?.();
+    };
+
+    const handleCollapseToggle = () => {
+        const nextCollapsed = !isCollapsed;
+        setIsCollapsed(nextCollapsed);
+
+        if (!currentWidget) return;
+        updateWidget(dashboardId, tabId, id, {
+            config: {
+                ...currentWidget.config,
+                collapsed: nextCollapsed,
+            },
+        });
+    };
+
+    const handleDuplicate = () => {
+        cloneWidget(dashboardId, tabId, id);
+    };
+
+    const handleCopyToDashboard = (targetDashboardId: string) => {
+        const targetDashboard = state.dashboards.find((dashboard) => dashboard.id === targetDashboardId);
+        const targetTab = targetDashboard?.tabs[0];
+
+        if (!currentWidget || !targetTab || !targetDashboard) {
+            return;
+        }
+
+        addWidget(targetDashboard.id, targetTab.id, {
+            type: currentWidget.type,
+            tabId: targetTab.id,
+            syncGroupId: currentWidget.syncGroupId,
+            config: currentWidget.config,
+            layout: {
+                x: currentWidget.layout.x,
+                y: Infinity,
+                w: currentWidget.layout.w,
+                h: currentWidget.layout.h,
+                minW: currentWidget.layout.minW,
+                minH: currentWidget.layout.minH,
+            },
+        });
     };
 
     const handleSyncClick = () => {
@@ -396,6 +447,33 @@ export function WidgetWrapper({
                                         <span>Widget Settings</span>
                                     </DropdownMenuItem>
                                 )}
+                                <DropdownMenuItem onClick={handleDuplicate} className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]">
+                                    <Copy size={14} className="mr-2" />
+                                    <span>Duplicate</span>
+                                </DropdownMenuItem>
+                                {copyTargets.length > 0 && (
+                                    <DropdownMenuSub>
+                                        <DropdownMenuSubTrigger className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]">
+                                            <Move size={14} className="mr-2" />
+                                            <span>Copy to Dashboard</span>
+                                        </DropdownMenuSubTrigger>
+                                        <DropdownMenuSubContent>
+                                            {copyTargets.map((dashboard) => (
+                                                <DropdownMenuItem
+                                                    key={dashboard.id}
+                                                    onClick={() => handleCopyToDashboard(dashboard.id)}
+                                                    className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]"
+                                                >
+                                                    <span>{dashboard.name}</span>
+                                                </DropdownMenuItem>
+                                            ))}
+                                        </DropdownMenuSubContent>
+                                    </DropdownMenuSub>
+                                )}
+                                <DropdownMenuItem onClick={handleCollapseToggle} className="cursor-pointer text-xs text-[var(--text-primary)] focus:bg-[var(--bg-hover)]">
+                                    <Minimize2 size={14} className="mr-2" />
+                                    <span>{isCollapsed ? 'Expand Widget' : 'Minimize'}</span>
+                                </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
                     }

@@ -19,6 +19,10 @@ interface MarketHeatmapWidgetProps {
     onRemove?: () => void;
 }
 
+function clampLabelSize(width: number, height: number): number {
+    return Math.max(10, Math.min(18, Math.min(width / 7.5, height / 2.4)));
+}
+
 // Color scale based on Phase 20 MD
 function getHeatmapColor(change: number): string {
     if (change >= 6.9) return 'rgb(6, 182, 212)'; // cyan-500 (Ceiling)
@@ -75,10 +79,10 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
 
         // Use standard dimensions, SVG will scale
         const layout = treemap<any>()
-            .size([800, 500])
-            .paddingOuter(4)
-            .paddingTop(20)
-            .paddingInner(2)
+            .size([900, 560])
+            .paddingOuter(6)
+            .paddingTop(28)
+            .paddingInner(3)
             .round(true);
 
         return layout(root);
@@ -157,12 +161,16 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                         <WidgetEmpty message="Market data unavailable" icon={<LayoutGrid size={18} />} />
                     ) : (
                         <div ref={heatmapRef} className="w-full h-full p-2">
-                            <svg width="100%" height="100%" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet" className="drop-shadow-2xl">
+                            <svg width="100%" height="100%" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet">
                                 {treemapLayout.leaves().map((node: any, i: number) => {
                                     const width = node.x1 - node.x0;
                                     const height = node.y1 - node.y0;
                                     const changePct = node.data.changePct || 0;
                                     const color = getHeatmapColor(changePct);
+                                    const labelSize = clampLabelSize(width, height);
+                                    const detailSize = Math.max(9, Math.min(12, labelSize - 2));
+                                    const canShowTitle = width > 70 && height > 34;
+                                    const canShowDetail = width > 120 && height > 56;
 
                                     return (
                                         <g key={i} className="group transition-opacity hover:opacity-100">
@@ -172,9 +180,11 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                 width={width}
                                                 height={height}
                                                 fill={color}
-                                                className="cursor-pointer transition-all hover:brightness-110 hover:stroke-[var(--text-primary)] hover:stroke-2"
-                                                stroke="var(--border-default)"
+                                                className="cursor-pointer transition-all hover:brightness-110"
+                                                stroke="rgba(255,255,255,0.18)"
                                                 strokeWidth={1}
+                                                rx={8}
+                                                ry={8}
                                             >
                                                 <title>
                                                     {node.data.name}
@@ -182,15 +192,40 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                     {'\n'}Value: {(node.data.value / 1e9).toFixed(1)}B
                                                 </title>
                                             </rect>
-                                            {width > 40 && height > 20 && (
+                                            {canShowTitle && (
+                                                <>
+                                                    <text
+                                                        x={node.x0 + 10}
+                                                        y={node.y0 + 18}
+                                                        textAnchor="start"
+                                                        className="pointer-events-none select-none font-black"
+                                                        fill="rgba(255,255,255,0.96)"
+                                                        style={{ fontSize: labelSize }}
+                                                    >
+                                                        {node.data.name}
+                                                    </text>
+                                                    <text
+                                                        x={node.x0 + 10}
+                                                        y={node.y0 + 18 + labelSize + 6}
+                                                        textAnchor="start"
+                                                        className="pointer-events-none select-none font-semibold"
+                                                        fill="rgba(255,255,255,0.86)"
+                                                        style={{ fontSize: detailSize }}
+                                                    >
+                                                        {`${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
+                                                    </text>
+                                                </>
+                                            )}
+                                            {canShowDetail && (
                                                 <text
-                                                    x={node.x0 + width / 2}
-                                                    y={node.y0 + height / 2 + 4}
-                                                    textAnchor="middle"
-                                                    className="pointer-events-none select-none fill-[var(--text-primary)] font-black drop-shadow-md"
-                                                    style={{ fontSize: Math.min(width / 6, height / 2, 11) }}
+                                                    x={node.x0 + 10}
+                                                    y={node.y1 - 12}
+                                                    textAnchor="start"
+                                                    className="pointer-events-none select-none font-medium"
+                                                    fill="rgba(255,255,255,0.78)"
+                                                    style={{ fontSize: 10 }}
                                                 >
-                                                    {node.data.name.split('-')[0].substring(0, 8)}
+                                                    {`${node.data.stockCount} stocks • ${(node.data.value / 1e9).toFixed(1)}B`}
                                                 </text>
                                             )}
                                         </g>

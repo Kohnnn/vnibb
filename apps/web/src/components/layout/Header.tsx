@@ -8,12 +8,13 @@ import {
   User,
   X,
   MoreHorizontal,
-  ChevronRight,
   Settings2,
+  TrendingDown,
+  TrendingUp,
 } from 'lucide-react'
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel'
 import { useTheme } from '@/contexts/ThemeContext'
-import { useHistoricalPrices, useStockQuote } from '@/lib/queries'
+import { useHistoricalPrices, useMarketOverview, useStockQuote } from '@/lib/queries'
 import { probeBackendReadiness } from '@/lib/backendHealth'
 import type { UnitDisplay } from '@/lib/units'
 import { cn } from '@/lib/utils'
@@ -34,6 +35,10 @@ const UNIT_OPTIONS: Array<{ value: UnitDisplay; label: string }> = [
 ]
 
 const MARKET_TIMEZONE = 'Asia/Ho_Chi_Minh'
+const HEADER_MARKET_INDICES = [
+  { key: 'VNINDEX', label: 'VN-INDEX' },
+  { key: 'VN30', label: 'VN30' },
+] as const
 
 type ConnectionState = 'checking' | 'online' | 'offline' | 'degraded'
 
@@ -47,6 +52,22 @@ function formatHeaderPercent(value: number | null | undefined): string {
   const normalized = Math.abs(value) > 1 ? value : value * 100
   const sign = normalized > 0 ? '+' : ''
   return `${sign}${normalized.toFixed(2)}%`
+}
+
+function formatHeaderDelta(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '--'
+  const sign = value > 0 ? '+' : ''
+  return `${sign}${value.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
+function normalizeIndexName(value: string | null | undefined): string {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
 }
 
 function getSparklinePoints(values: number[]): string {
@@ -128,6 +149,7 @@ export function Header({
   const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('checking')
 
   const quoteQuery = useStockQuote(currentSymbol, Boolean(currentSymbol))
+  const marketOverviewQuery = useMarketOverview(true)
   const historyQuery = useHistoricalPrices(currentSymbol, {
     interval: '1D',
     enabled: Boolean(currentSymbol),
@@ -148,31 +170,62 @@ export function Header({
     quote?.changePct == null
       ? 'text-[var(--text-muted)]'
       : quoteIsPositive
-        ? 'text-emerald-400'
-        : 'text-rose-400'
+        ? resolvedTheme === 'light'
+          ? 'text-emerald-700'
+          : 'text-emerald-400'
+        : resolvedTheme === 'light'
+          ? 'text-rose-700'
+          : 'text-rose-400'
   const marketStatus = useMemo(() => getVietnamMarketStatus(new Date(marketClock)), [marketClock])
+  const headerMarketIndices = useMemo(() => {
+    const marketIndexLookup = new Map(
+      (marketOverviewQuery.data?.data ?? []).map((item) => [
+        normalizeIndexName(item.index_name),
+        item,
+      ])
+    )
+
+    return HEADER_MARKET_INDICES.map((index) => {
+      const item = marketIndexLookup.get(index.key)
+      return {
+        ...index,
+        value: item?.current_value ?? null,
+        change: item?.change ?? null,
+        changePct: item?.change_pct ?? null,
+      }
+    }).filter((index) => index.value !== null)
+  }, [marketOverviewQuery.data?.data])
 
   const healthBadge = useMemo(() => {
     if (connectionStatus === 'online') {
       return {
         label: 'Healthy',
-        className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
-        dotClassName: 'bg-emerald-400',
+        className: cn(
+          'border-emerald-500/25 bg-emerald-500/10',
+          resolvedTheme === 'light' ? 'text-emerald-700' : 'text-emerald-300'
+        ),
+        dotClassName: resolvedTheme === 'light' ? 'bg-emerald-600' : 'bg-emerald-400',
       }
     }
     if (connectionStatus === 'degraded' || connectionStatus === 'checking') {
       return {
         label: connectionStatus === 'checking' ? 'Checking' : 'Degraded',
-        className: 'border-amber-500/35 bg-amber-500/10 text-amber-200',
-        dotClassName: 'bg-amber-400',
+        className: cn(
+          'border-amber-500/30 bg-amber-500/10',
+          resolvedTheme === 'light' ? 'text-amber-800' : 'text-amber-200'
+        ),
+        dotClassName: resolvedTheme === 'light' ? 'bg-amber-600' : 'bg-amber-400',
       }
     }
     return {
       label: 'Offline',
-      className: 'border-rose-500/35 bg-rose-500/10 text-rose-300',
-      dotClassName: 'bg-rose-400',
+      className: cn(
+        'border-rose-500/30 bg-rose-500/10',
+        resolvedTheme === 'light' ? 'text-rose-700' : 'text-rose-300'
+      ),
+      dotClassName: resolvedTheme === 'light' ? 'bg-rose-600' : 'bg-rose-400',
     }
-  }, [connectionStatus])
+  }, [connectionStatus, resolvedTheme])
 
   const healthTitle = `${marketStatus.label} • Backend ${healthBadge.label}`
 
@@ -247,27 +300,40 @@ export function Header({
   }, [resolvedTheme, setTheme])
 
   return (
-    <header className="sticky top-0 z-40 h-14 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-      <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(260px,420px)_auto] items-center gap-3 px-4">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <div className="hidden items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] xl:flex">
+    <header className="sticky top-0 z-40 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85">
+      <div className="grid h-14 grid-cols-[minmax(0,1fr)_minmax(220px,380px)_auto] items-center gap-3 px-4">
+        <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+          <div className="inline-flex shrink-0 items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+            <span className="h-2 w-2 rounded-full bg-sky-500" />
             <span>VNIBB</span>
-            <ChevronRight size={11} className="text-[var(--text-muted)]" />
-            <span>Equities</span>
-            <ChevronRight size={11} className="text-[var(--text-muted)]" />
-            <span className="text-[var(--text-primary)]">{currentSymbol}</span>
           </div>
 
-          <div className="hidden items-center gap-2 lg:flex">
-            <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1">
-              <span className="text-xs font-semibold text-[var(--text-primary)]">
-                {formatHeaderPrice(quote?.price)}
-              </span>
-              <span className={cn('text-xs font-semibold', quoteChangeClass)}>
-                {formatHeaderPercent(quote?.changePct)}
-              </span>
+          <div className="inline-flex min-w-0 shrink-0 items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1">
+            <span className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
+              Symbol
+            </span>
+            <span className="truncate text-xs font-semibold text-[var(--text-primary)]">
+              {currentSymbol}
+            </span>
+          </div>
+
+          <div className="hidden min-w-0 items-center gap-2 lg:flex">
+            <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
+              <div className="min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
+                  {currentSymbol}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-[var(--text-primary)]">
+                    {formatHeaderPrice(quote?.price)}
+                  </span>
+                  <span className={cn('text-xs font-semibold', quoteChangeClass)}>
+                    {formatHeaderPercent(quote?.changePct)}
+                  </span>
+                </div>
+              </div>
               {sparklinePoints && (
-                <svg viewBox="0 0 100 28" className="h-6 w-20" aria-hidden="true">
+                <svg viewBox="0 0 100 28" className="h-7 w-20 shrink-0" aria-hidden="true">
                   <polyline
                     fill="none"
                     stroke={quoteIsPositive ? '#34d399' : '#f87171'}
@@ -278,75 +344,108 @@ export function Header({
               )}
             </div>
 
-            <div
-              className={cn(
-                'inline-flex items-center rounded-full border px-2 py-1',
-                healthBadge.className
-              )}
-              title={healthTitle}
-              aria-label={healthTitle}
-            >
-              <span
+            <div className="hidden min-w-0 items-center gap-2 xl:flex">
+              {headerMarketIndices.map((index) => {
+                const positive = (index.changePct ?? 0) >= 0
+                const toneClass = positive
+                  ? resolvedTheme === 'light'
+                    ? 'border-emerald-500/20 bg-emerald-500/8 text-emerald-700'
+                    : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                  : resolvedTheme === 'light'
+                    ? 'border-rose-500/20 bg-rose-500/8 text-rose-700'
+                    : 'border-rose-500/20 bg-rose-500/10 text-rose-300'
+
+                return (
+                  <div
+                    key={index.key}
+                    className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5"
+                  >
+                    <div>
+                      <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
+                        {index.label}
+                      </div>
+                      <div className="text-xs font-semibold text-[var(--text-primary)]">
+                        {formatHeaderPrice(index.value)}
+                      </div>
+                    </div>
+                    <div className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold', toneClass)}>
+                      {positive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                      <span>{formatHeaderPercent(index.changePct)}</span>
+                    </div>
+                  </div>
+                )
+              })}
+
+              <div
                 className={cn(
-                  'h-2 w-2 rounded-full',
-                  healthBadge.dotClassName,
-                  marketStatus.isOpen && connectionStatus === 'online' ? 'animate-pulse' : ''
+                  'inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold',
+                  healthBadge.className
                 )}
-              />
-              <span className="sr-only">{healthBadge.label}</span>
+                title={healthTitle}
+                aria-label={healthTitle}
+              >
+                <span
+                  className={cn(
+                    'h-2 w-2 rounded-full',
+                    healthBadge.dotClassName,
+                    marketStatus.isOpen && connectionStatus === 'online' ? 'animate-pulse' : ''
+                  )}
+                />
+                <span>{marketStatus.isOpen ? 'HOSE Open' : 'HOSE Closed'}</span>
+              </div>
             </div>
           </div>
         </div>
 
-          <div className="relative w-full max-w-md justify-self-center">
-            <Search
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-              size={14}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              aria-label="Search symbol"
-              value={searchValue}
-              onChange={(e) => {
-                setSearchValue(e.target.value.toUpperCase())
-                setIsSearching(true)
+        <div className="relative w-full max-w-md justify-self-center">
+          <Search
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
+            size={14}
+          />
+          <input
+            ref={inputRef}
+            type="text"
+            aria-label="Search symbol"
+            value={searchValue}
+            onChange={(e) => {
+              setSearchValue(e.target.value.toUpperCase())
+              setIsSearching(true)
+            }}
+            onFocus={(e) => {
+              setIsSearching(true)
+              const normalizedCurrent = currentSymbol.trim().toUpperCase()
+              const normalizedSearch = searchValue.trim().toUpperCase()
+              if (normalizedSearch === normalizedCurrent) {
+                setSearchValue('')
+              } else {
+                e.target.select()
+              }
+            }}
+            onKeyDown={handleKeyDown}
+            onBlur={() => {
+              setTimeout(() => {
+                if (isSearching) handleSearch()
+              }, 150)
+            }}
+            placeholder="Search symbol (e.g., VNM, FPT)"
+            className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-10 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/10"
+          />
+          {searchValue && searchValue !== currentSymbol && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchValue(currentSymbol)
+                setIsSearching(false)
+                inputRef.current?.focus()
               }}
-              onFocus={(e) => {
-                setIsSearching(true)
-                const normalizedCurrent = currentSymbol.trim().toUpperCase()
-                const normalizedSearch = searchValue.trim().toUpperCase()
-                if (normalizedSearch === normalizedCurrent) {
-                  setSearchValue('')
-                } else {
-                  e.target.select()
-                }
-              }}
-              onKeyDown={handleKeyDown}
-              onBlur={() => {
-                setTimeout(() => {
-                  if (isSearching) handleSearch()
-                }, 150)
-              }}
-              placeholder="Search symbol (e.g., VNM, FPT)"
-              className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] py-1.5 pl-8 pr-10 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all focus:border-blue-500/50 focus:outline-none focus:ring-1 focus:ring-blue-500/20"
-            />
-            {searchValue && searchValue !== currentSymbol && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchValue(currentSymbol)
-                  setIsSearching(false)
-                  inputRef.current?.focus()
-                }}
-                className="absolute right-10 top-1/2 -translate-y-1/2 text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
-                title="Clear search"
-                aria-label="Clear search"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
+              className="absolute right-10 top-1/2 -translate-y-1/2 text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
+              title="Clear search"
+              aria-label="Clear search"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
 
         <div className="flex items-center gap-1 justify-self-end">
           <DropdownMenu>
