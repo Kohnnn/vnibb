@@ -21,9 +21,8 @@ export default function SettingsPage() {
   const [apiUrl, setApiUrl] = useState(env.apiUrl);
 
   const VNSTOCK_SOURCES: { value: VnstockSource; label: string; description: string }[] = [
-    { value: 'KBS', label: 'KBS (Korea)', description: 'Recommended - New default in vnstock 3.4.0' },
+    { value: 'KBS', label: 'KBS (Korea)', description: 'Recommended - default in vnstock 3.5.0+' },
     { value: 'VCI', label: 'VCI (Vietcap)', description: 'Most stable, comprehensive coverage' },
-    { value: 'TCBS', label: 'TCBS', description: 'Premium features (may have upstream issues)' },
     { value: 'DNSE', label: 'DNSE', description: 'Good historical data, minute-level resolution' },
   ];
 

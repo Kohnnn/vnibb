@@ -124,7 +124,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">vnstock Data Source</h4>
                   <div className="grid grid-cols-2 gap-2">
-                    {(['KBS', 'VCI', 'TCBS', 'DNSE'] as VnstockSource[]).map(src => (
+                    {(['KBS', 'VCI', 'DNSE'] as VnstockSource[]).map(src => (
                       <button
                         key={src}
                         onClick={() => setPreferredVnstockSource(src)}
@@ -139,7 +139,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-[var(--text-muted)] mt-2">KBS is the recommended default for vnstock 3.4.0+</p>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-2">KBS is the recommended default for vnstock 3.5.0+</p>
                 </div>
 
                 <div>

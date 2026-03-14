@@ -2,7 +2,7 @@
 
 > **Official Documentation**: [vnstocks.com/docs](https://vnstocks.com/docs)
 > **GitHub**: [github.com/thinh-vu/vnstock](https://github.com/thinh-vu/vnstock)
-> **Version**: 3.4.0+ (KBS default data source)
+> **Version**: 3.5.0+ (KBS default data source, TCBS removed)
 
 Please check context7 mcp for detail documentation about vnstock library.
 
@@ -37,7 +37,7 @@ pip install -U vnstock
 
 ### Basic Import Pattern
 ```python
-from vnstock import Vnstock, Listing, Company, Finance, Screener, Trading
+from vnstock import Vnstock, Listing, Company, Finance, Trading
 ```
 
 ---
@@ -70,20 +70,20 @@ VnStock supports multiple data sources:
 
 | Source | Description | Recommended For |
 |--------|-------------|-----------------|
-| **KBS** | KBS Securities (v3.4.0+ default) | All operations (default) |
+| **KBS** | KBS Securities (v3.5.0+ default) | All operations (default) |
 | **VCI** | VNDirect data | Price history, financial statements, company overview |
-| **TCBS** | TCBS Securities | Not working |
+| **DNSE** | DNSE data source | Price/intraday alternatives and redundancy |
 
-> **v3.4.0 Note**: KBS is now the default data source, replacing VCI. The `Vnstock` class is deprecated as a general interface; use specific classes like `Listing`, `Company`, `Finance` directly.
+> **v3.5.0 Note**: KBS is the default source. `TCBS` was removed upstream, so source selection should be limited to `KBS`, `VCI`, and `DNSE`. The `Vnstock` class remains available but specific classes (`Listing`, `Company`, `Finance`) are preferred.
 
 ```python
-# KBS source (v3.4.0+ default)
+# KBS source (v3.5.0+ default)
 stock = Vnstock().stock(symbol='VCI', source='KBS')
 
 # VCI source (legacy, still works)
 stock = Vnstock().stock(symbol='VCI', source='VCI')
 
-# Using specific classes (recommended in v3.4.0+)
+# Using specific classes (recommended in v3.5.0+)
 from vnstock import Listing, Company, Finance
 listing = Listing(source='KBS')  # or just Listing() for default
 ```
@@ -97,7 +97,7 @@ Get lists of all stocks, indices, and securities.
 ### List All Symbols
 ```python
 from vnstock import Listing
-listing = Listing()  # Uses KBS by default in v3.4.0+
+listing = Listing()  # Uses KBS by default in v3.5.0+
 
 # Get all stock symbols with company names
 df = listing.all_symbols()
@@ -140,8 +140,8 @@ from vnstock import Company
 # Using VCI source
 company = Company(symbol='ACB', source='VCI')
 
-# Using TCBS source (more comprehensive for some data)
-company = Company(symbol='ACB', source='TCBS')
+# Using KBS source (default)
+company = Company(symbol='ACB', source='KBS')
 ```
 
 ### Company Overview
@@ -171,9 +171,9 @@ df = company.subsidiaries()
 # Returns: company information of subsidiaries
 ```
 
-### Dividend History (TCBS Source)
+### Dividend History
 ```python
-company = Company(symbol='VCB', source='TCBS')
+company = Company(symbol='VCB', source='VCI')
 df = company.dividends()
 # Returns: exercise_date, cash_year, cash_dividend_percentage, issue_method
 ```
@@ -190,9 +190,9 @@ df = company.news()
 # Returns: news articles related to the company
 ```
 
-### Insider Trading (TCBS Source)
+### Insider Trading
 ```python
-company = Company(symbol='VCB', source='TCBS')
+company = Company(symbol='VCB', source='VCI')
 df = company.insider_trading()
 # Returns: insider buy/sell transactions
 ```
@@ -295,124 +295,25 @@ df = finance.ratio(
 
 ## Stock Screener API
 
-The most powerful feature - get 84 metrics for all stocks in one API call!
+### Status in vnstock 3.5.0+
 
-### Basic Screener Call
-```python
-from vnstock import Screener
+`Screener().stock()` in the OSS path is no longer a reliable source for the historical 84-column dataset after TCBS removal.
 
-screener_df = Screener().stock(
-    params={"exchangeName": "HOSE,HNX,UPCOM"},
-    limit=1700
-)
-# Returns: ~1,600 stocks with 84 columns
-```
+Recommended paths in VNIBB:
 
-### Available Screener Metrics (84 Columns)
+1. Use VNIBB backend screener endpoints (cached and normalized).
+2. Install premium VNStock modules for full screener parity when needed:
+   - `vnstock_data`
+   - `vnstock_ta`
+   - `vnstock_pipeline`
+   - `vnstock_news`
+   - `vnii`
 
-#### Basic Information
-- `ticker` - Stock symbol
-- `exchange` - Exchange (HSX, HNX, UPCOM)
-- `industry` - Industry classification
+### Runtime guidance
 
-#### Fundamental Metrics
-| Column | Description |
-|--------|-------------|
-| `market_cap` | Market capitalization (billions) |
-| `pe` | Price-to-Earnings ratio |
-| `pb` | Price-to-Book ratio |
-| `ev_ebitda` | Enterprise Value / EBITDA |
-| `eps` | Earnings Per Share |
-| `roe` | Return on Equity (%) |
-| `dividend_yield` | Dividend yield (%) |
-| `gross_margin` | Gross profit margin (%) |
-| `net_margin` | Net profit margin (%) |
-| `doe` | Debt-to-Equity ratio |
-
-#### Growth Metrics
-| Column | Description |
-|--------|-------------|
-| `revenue_growth_1y` | 1-year revenue growth (%) |
-| `revenue_growth_5y` | 5-year revenue growth (%) |
-| `eps_growth_1y` | 1-year EPS growth (%) |
-| `eps_growth_5y` | 5-year EPS growth (%) |
-| `last_quarter_revenue_growth` | Last quarter revenue growth |
-| `last_quarter_profit_growth` | Last quarter profit growth |
-
-#### Technical Indicators
-| Column | Description |
-|--------|-------------|
-| `rsi14` | 14-day RSI |
-| `macd_histogram` | MACD histogram signal |
-| `price_vs_sma5` | Price vs 5-day SMA |
-| `price_vs_sma10` | Price vs 10-day SMA |
-| `price_vs_sma20` | Price vs 20-day SMA |
-| `price_vs_sma50` | Price vs 50-day SMA |
-| `price_vs_sma100` | Price vs 100-day SMA |
-| `bolling_band_signal` | Bollinger Band signal |
-| `dmi_signal` | DMI signal |
-
-#### Volume Analytics
-| Column | Description |
-|--------|-------------|
-| `vol_vs_sma5` | Volume vs 5-day SMA |
-| `vol_vs_sma10` | Volume vs 10-day SMA |
-| `vol_vs_sma20` | Volume vs 20-day SMA |
-| `vol_vs_sma50` | Volume vs 50-day SMA |
-| `avg_trading_value_5d` | 5-day avg trading value |
-| `avg_trading_value_10d` | 10-day avg trading value |
-| `avg_trading_value_20d` | 20-day avg trading value |
-
-#### Price Performance
-| Column | Description |
-|--------|-------------|
-| `price_growth_1w` | 1-week price change (%) |
-| `price_growth_1m` | 1-month price change (%) |
-| `prev_1d_growth_pct` | Previous day change (%) |
-| `prev_1m_growth_pct` | Previous month change (%) |
-| `prev_1y_growth_pct` | Previous year change (%) |
-| `prev_5y_growth_pct` | Previous 5-year change (%) |
-| `pct_away_from_hist_peak` | % from all-time high |
-| `pct_off_hist_bottom` | % from all-time low |
-| `pct_1y_from_peak` | % from 52-week high |
-| `pct_1y_from_bottom` | % from 52-week low |
-
-#### Momentum & Strength
-| Column | Description |
-|--------|-------------|
-| `relative_strength_3d` | 3-day relative strength |
-| `rel_strength_1m` | 1-month relative strength |
-| `rel_strength_3m` | 3-month relative strength |
-| `rel_strength_1y` | 1-year relative strength |
-| `tc_rs` | TCBS relative strength |
-
-#### TCBS Ratings
-| Column | Description |
-|--------|-------------|
-| `stock_rating` | Overall stock rating |
-| `business_operation` | Business operation score |
-| `business_model` | Business model score |
-| `financial_health` | Financial health score |
-| `alpha` | Alpha value |
-| `beta` | Beta value |
-| `tcbs_recommend` | TCBS recommendation |
-| `tcbs_buy_sell_signal` | Buy/Sell signal |
-
-#### Foreign Trading
-| Column | Description |
-|--------|-------------|
-| `foreign_vol_pct` | Foreign trading volume % |
-| `foreign_transaction` | Net foreign transaction |
-| `foreign_buysell_20s` | 20-session foreign trading |
-
-#### Special Signals
-| Column | Description |
-|--------|-------------|
-| `breakout` | Breakout signal |
-| `price_break_out52_week` | 52-week breakout |
-| `price_wash_out52_week` | 52-week washout |
-| `uptrend` | Uptrend indicator |
-| `heating_up` | Heating up signal |
+- Keep `VNSTOCK_SOURCE` on `KBS` (recommended), `VCI`, or `DNSE`.
+- Do not configure `TCBS`; it is removed upstream in vnstock 3.5.0+.
+- For migration/backfill workloads, run the Appwrite migration orchestrator after source sync completion.
 
 ---
 
@@ -493,7 +394,7 @@ df = trading.price_board(symbols_list=['VCB', 'ACB', 'TCB', 'BID'])
 | Company Overview | 20 | 3 seconds |
 | Price History | 30 | 2 seconds |
 | Financial Statements | 15 | 4 seconds |
-| **Screener** | **2** | **30 seconds** |
+| Premium screener backfill | 2 | 30 seconds |
 | Trading Board | 20 | 3 seconds |
 | Intraday Data | 10 | 6 seconds |
 
@@ -541,12 +442,12 @@ class CircuitBreaker:
 
 ## Best Practices
 
-### 1. Use Screener for Bulk Data (MOST EFFICIENT)
+### 1. Use VNIBB cached screener endpoints for bulk data
 ```python
-# ✅ GOOD: One API call for 1,600 stocks
-screener_df = Screener().stock(limit=1700)
+# ✅ GOOD: Consume normalized backend screener payloads
+rows = await fetch_backend_screener(limit=1700)
 
-# ❌ BAD: 1,600 API calls
+# ❌ BAD: 1,600 per-symbol calls
 for symbol in all_symbols:
     stock.quote.history(...)  # Don't do this!
 ```
@@ -592,8 +493,8 @@ VN30_INTERVAL = 5 * 60      # 5 minutes (high priority)
 TOP100_INTERVAL = 15 * 60   # 15 minutes (medium)
 ALL_STOCKS_INTERVAL = 60 * 60  # 1 hour (low priority)
 
-# Screener updates (most efficient)
-SCREENER_INTERVAL = 30 * 60  # 30 minutes
+# Backend screener cache refresh
+SCREENER_CACHE_INTERVAL = 30 * 60  # 30 minutes
 ```
 
 ### 6. Store and Reuse Data
@@ -611,7 +512,7 @@ if last_listing_update.date() < datetime.now().date():
 
 | Data Type | API Method | Efficiency | Update Frequency |
 |-----------|------------|------------|------------------|
-| All Stock Metrics | `Screener().stock()` | ⭐⭐⭐⭐⭐ | Every 30 min |
+| Bulk screener dataset | Backend screener cache / premium pipeline | ⭐⭐⭐⭐ | Every 30 min |
 | Stock Listings | `Listing().all_symbols()` | ⭐⭐⭐⭐⭐ | Daily |
 | Price History | `quote.history()` | ⭐⭐⭐ | Per symbol |
 | Company Overview | `company.overview()` | ⭐⭐⭐ | Weekly |
@@ -632,7 +533,7 @@ if last_listing_update.date() < datetime.now().date():
 │      • listing.all_symbols() → Update stock list               │
 │                                                                 │
 │   ⏰ EVERY 30 MIN (Market Hours):                               │
-│      • Screener().stock() → All 84 metrics for 1,600 stocks    │
+│      • Refresh backend screener cache / premium pipeline        │
 │                                                                 │
 │   ⏰ EVERY 5 MIN (VN30 Only):                                   │
 │      • trading.price_board(VN30_list) → Real-time prices       │
@@ -674,4 +575,4 @@ except Exception as e:
 
 ---
 
-*Documentation generated from vnstocks.com/docs - Last updated: 2026-01-17 - Updated for v3.4.0*
+*Documentation generated from vnstocks.com/docs - Last updated: 2026-03-14 - Updated for v3.5.0+*

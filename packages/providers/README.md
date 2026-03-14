@@ -62,7 +62,7 @@ results = await provider.screen_stocks(
 
 | Provider | Data Source | Status |
 |----------|-------------|--------|
-| `VnstockProvider` | vnstock v3.4.0+ | ✅ Active |
+| `VnstockProvider` | vnstock v3.5.0+ | ✅ Active |
 | `CafeProvider` | cafef.vn | 🔄 Planned |
 | `VNDirectProvider` | vndirect.com.vn | 🔄 Planned |
 

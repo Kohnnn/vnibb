@@ -490,7 +490,7 @@ export interface ScreenerFilterParams {
     exchange?: string;
     industry?: string;
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'TCBS' | 'DNSE';
+    source?: 'KBS' | 'VCI' | 'DNSE';
 
     // Dynamic Filters
     filters?: string; // JSON FilterGroup
@@ -965,7 +965,7 @@ export async function getSectorsCatalog(options?: {
 export async function getSectorTopMovers(options?: {
     type?: 'gainers' | 'losers';
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'TCBS' | 'DNSE';
+    source?: 'KBS' | 'VCI' | 'DNSE';
 
 }): Promise<SectorTopMoversResponse> {
     const params = {
@@ -1006,7 +1006,7 @@ export interface SectorPerformanceResponse {
 }
 
 export async function getSectorPerformance(_options?: {
-    source?: 'KBS' | 'VCI' | 'TCBS' | 'DNSE';
+    source?: 'KBS' | 'VCI' | 'DNSE';
 
 }): Promise<SectorPerformanceResponse> {
     return fetchAPI<SectorPerformanceResponse>('/market/sector-performance');

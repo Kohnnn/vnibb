@@ -16,7 +16,21 @@ import { createDataSource } from '@/types/dataSource';
 const STORAGE_KEY = 'vnibb_data_sources';
 const VNSTOCK_SOURCE_KEY = 'vnibb_vnstock_source';
 
-export type VnstockSource = 'KBS' | 'VCI' | 'TCBS' | 'DNSE';
+export type VnstockSource = 'KBS' | 'VCI' | 'DNSE';
+
+const VNSTOCK_SOURCES: readonly VnstockSource[] = ['KBS', 'VCI', 'DNSE'];
+
+function normalizeVnstockSource(value: string | null): VnstockSource | null {
+    if (!value) {
+        return null;
+    }
+
+    const upperValue = value.toUpperCase();
+    const migratedValue = upperValue === 'TCBS' ? 'VCI' : upperValue;
+    return VNSTOCK_SOURCES.includes(migratedValue as VnstockSource)
+        ? (migratedValue as VnstockSource)
+        : null;
+}
 
 // ============================================================================
 // Actions
@@ -124,8 +138,8 @@ export function DataSourcesProvider({ children }: DataSourcesProviderProps) {
                 const parsed = JSON.parse(saved) as Partial<DataSourceState>;
                 dispatch({ type: 'SET_STATE', payload: { ...initialState, ...parsed, vnstockSource: state.vnstockSource } });
             }
-            const savedVnstockSource = localStorage.getItem(VNSTOCK_SOURCE_KEY) as VnstockSource | null;
-            if (savedVnstockSource && ['KBS', 'VCI', 'TCBS', 'DNSE'].includes(savedVnstockSource)) {
+            const savedVnstockSource = normalizeVnstockSource(localStorage.getItem(VNSTOCK_SOURCE_KEY));
+            if (savedVnstockSource) {
                 dispatch({ type: 'SET_VNSTOCK_SOURCE', payload: savedVnstockSource });
             }
         } catch (error) {

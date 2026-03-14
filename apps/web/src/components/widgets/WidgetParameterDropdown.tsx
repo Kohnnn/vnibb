@@ -128,9 +128,9 @@ export const CHART_TYPE_OPTIONS: ParameterOption[] = [
 ];
 
 export const DATA_SOURCE_OPTIONS: ParameterOption[] = [
-    { value: 'VCI', label: 'VCI', description: 'Recommended' },
-    { value: 'TCBS', label: 'TCBS', description: 'Legacy' },
-    { value: 'SSI', label: 'SSI' },
+    { value: 'KBS', label: 'KBS', description: 'Recommended' },
+    { value: 'VCI', label: 'VCI' },
+    { value: 'DNSE', label: 'DNSE' },
 ];
 
 export const PERIOD_OPTIONS: ParameterOption[] = [

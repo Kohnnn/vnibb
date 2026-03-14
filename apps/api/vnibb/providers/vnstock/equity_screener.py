@@ -108,7 +108,7 @@ class StockScreenerParams(BaseModel):
     )
     source: str = Field(
         default="KBS",
-        description="Data source: KBS (default v3.4.0+), VCI, DNSE, or vnstock (internal)",
+        description="Data source: KBS (default v3.5.0+), VCI, DNSE, or vnstock (internal)",
     )
 
     @field_validator("symbol")
