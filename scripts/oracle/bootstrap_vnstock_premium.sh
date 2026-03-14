@@ -29,7 +29,13 @@ set_env() {
 }
 
 check_modules() {
-  docker compose -f "$COMPOSE_FILE" exec -T -e "VNSTOCK_PREMIUM_REQUIRED_MODULES=$REQUIRED_MODULES" api python - <<'PY'
+  docker compose -f "$COMPOSE_FILE" exec -T -e "VNSTOCK_PREMIUM_REQUIRED_MODULES=$REQUIRED_MODULES" api sh -lc '
+PY_BIN="python"
+if [ -x /root/.venv/bin/python ]; then
+  PY_BIN="/root/.venv/bin/python"
+fi
+echo "Using interpreter: $PY_BIN"
+"$PY_BIN" - <<'"'"'PY'"'"'
 import importlib
 import os
 import sys
@@ -51,6 +57,7 @@ for name in modules:
 if missing:
     sys.exit(1)
 PY
+'
 }
 
 echo "Checking current premium module availability"
