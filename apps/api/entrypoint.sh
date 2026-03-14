@@ -170,6 +170,35 @@ PY
     return 0
 }
 
+sync_premium_modules_from_venv_to_system() {
+    if [ ! -d "$VENV_SITE_PACKAGES" ] || [ ! -d "$SYSTEM_SITE_PACKAGES" ]; then
+        return 1
+    fi
+
+    synced=0
+    old_ifs="$IFS"
+    IFS=','
+    for raw_mod in $VNSTOCK_PREMIUM_REQUIRED_MODULES; do
+        mod=$(printf "%s" "$raw_mod" | tr -d '[:space:]')
+        if [ -z "$mod" ]; then
+            continue
+        fi
+
+        if ls "$VENV_SITE_PACKAGES"/${mod}* >/dev/null 2>&1; then
+            cp -r "$VENV_SITE_PACKAGES"/${mod}* "$SYSTEM_SITE_PACKAGES"/ 2>/dev/null || true
+            synced=1
+        fi
+    done
+    IFS="$old_ifs"
+
+    if [ "$synced" -eq 1 ]; then
+        echo "VNStock Premium: synchronized modules from venv to system site-packages."
+        return 0
+    fi
+
+    return 1
+}
+
 acquire_bootstrap_lock() {
     now_ts=$(epoch_now)
 
@@ -263,6 +292,15 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
 
     # 2b. Check Execution: Now check if it works
     if ! premium_modules_ready; then
+        if sync_premium_modules_from_venv_to_system; then
+            set_python_env
+            if premium_modules_ready; then
+                echo "VNStock Premium: modules restored from venv cache without reinstall."
+            fi
+        fi
+    fi
+
+    if ! premium_modules_ready; then
         INSTALL_PREMIUM_AT_RUNTIME=0
 
         if runtime_install_enabled; then
@@ -316,6 +354,11 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
                 else
                     "$PYTHON_BIN" -m pip install --upgrade --extra-index-url https://vnstocks.com/api/simple vnii >/dev/null 2>&1 || true
                 fi
+
+                # Installer writes premium packages into /root/.venv.
+                # Runtime may execute with system python, so sync premium modules.
+                sync_premium_modules_from_venv_to_system || true
+                set_python_env
 
                 # 2c. Backup Code: Save the newly installed packages to volume
                 echo "VnStock Premium: Backing up packages to persistent volume..."
