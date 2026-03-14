@@ -27,7 +27,6 @@ import {
     FolderX,
     AppWindow,
     MessageSquareText,
-    Search,
     Lock,
 } from 'lucide-react';
 import { useDashboard } from '@/contexts/DashboardContext';
@@ -569,23 +568,6 @@ export function Sidebar({
                         </button>
                     )}
                 </div>
-
-                {/* Global Search */}
-                {!collapsed && (
-                    <div className="px-2 py-1.5 border-b border-[var(--border-color)]">
-                        <button
-                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-[var(--border-strong)] transition-colors text-xs"
-                            onClick={() => {
-                                // Trigger command palette
-                                const event = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true });
-                                document.dispatchEvent(event);
-                            }}
-                        >
-                            <Search size={12} />
-                            <span className="flex-1 text-left">Search</span>
-                        </button>
-                    </div>
-                )}
 
                 {/* Library Section */}
                 {!collapsed && (

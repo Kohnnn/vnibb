@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, AlertCircle, RefreshCw, Database, Server } from 'lucide-react';
+import { formatAbsoluteTimestamp } from '@/lib/format';
 
 interface HealthData {
   status: string;
@@ -119,7 +120,7 @@ export function HealthDashboard() {
           
           {/* Last Updated */}
           <p className="text-right text-xs text-[var(--text-muted)]">
-            Last updated: {new Date(health.timestamp).toLocaleTimeString()}
+            Last updated: {formatAbsoluteTimestamp(health.timestamp)}
           </p>
         </div>
       )}
