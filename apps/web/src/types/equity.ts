@@ -310,9 +310,11 @@ export interface MarketIndexData {
   volume?: number;
   high?: number;
   low?: number;
+  time?: string | null;
 }
 
 export interface MarketOverviewResponse {
   count: number;
   data: MarketIndexData[];
+  updated_at?: string | null;
 }

@@ -10,6 +10,7 @@ Provides endpoints for:
 import logging
 import asyncio
 import math
+from datetime import date, datetime
 from typing import Any, List, Optional, Callable, Awaitable
 
 from fastapi import APIRouter, Query, Request, Depends
@@ -39,6 +40,39 @@ logger = logging.getLogger(__name__)
 
 _REFRESH_LOCK = asyncio.Lock()
 _REFRESH_IN_FLIGHT: set[str] = set()
+
+
+def _coerce_meta_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            return None
+    return None
+
+
+def _latest_screener_timestamp(rows: List[ScreenerData]) -> Optional[str]:
+    timestamps = [
+        parsed
+        for parsed in (_coerce_meta_datetime(getattr(row, "updated_at", None)) for row in rows)
+        if parsed is not None
+    ]
+    if not timestamps:
+        return None
+    return max(timestamps).isoformat()
+
+
+def _build_screener_meta(rows: List[ScreenerData]) -> MetaData:
+    return MetaData(count=len(rows), last_data_date=_latest_screener_timestamp(rows))
 
 
 async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]]) -> None:
@@ -1227,7 +1261,7 @@ async def get_screener(
                         refresh_key,
                         lambda: _refresh_screener_cache(refresh_params),
                     )
-                return StandardResponse(data=data, meta=MetaData(count=len(data)))
+                return StandardResponse(data=data, meta=_build_screener_meta(data))
 
             if source:
                 fallback_cache = await cache_manager.get_screener_data(
@@ -1257,7 +1291,7 @@ async def get_screener(
                         sort_by=sort_by,
                         sort_order=sort_order,
                     )
-                    return StandardResponse(data=data, meta=MetaData(count=len(data)))
+                    return StandardResponse(data=data, meta=_build_screener_meta(data))
         except Exception as e:
             logger.warning(f"Cache lookup failed: {e}")
 
@@ -1295,7 +1329,7 @@ async def get_screener(
         data = await _hydrate_screener_rows(data, db)
 
         await cache_manager.store_screener_data(data=[d.model_dump() for d in data], source=source)
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        return StandardResponse(data=data, meta=_build_screener_meta(data))
 
     except (ProviderTimeoutError, ProviderError, ProviderRateLimitError) as e:
         if use_cache:
@@ -1326,7 +1360,7 @@ async def get_screener(
                     sort_by=sort_by,
                     sort_order=sort_order,
                 )
-                return StandardResponse(data=data, meta=MetaData(count=len(data)))
+                return StandardResponse(data=data, meta=_build_screener_meta(data))
 
         # Final fallback: return empty results with user-friendly message
         # This prevents 502 errors and provides better UX

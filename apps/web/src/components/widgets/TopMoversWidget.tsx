@@ -10,6 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import type { WidgetGroupId } from '@/types/widget';
+import { getLatestTimestampValue } from '@/lib/dataFreshness';
 
 interface TopMoversWidgetProps {
   isEditing?: boolean;
@@ -51,6 +52,11 @@ export function TopMoversWidget({
   const stocks = data?.data || [];
   const hasData = stocks.length > 0;
   const isFallback = Boolean(error && hasData);
+  const sourceUpdatedAt =
+    getLatestTimestampValue([
+      data?.updated_at,
+      ...stocks.map((stock) => (stock as { updated_at?: string | null }).updated_at),
+    ]) ?? dataUpdatedAt;
 
   const handleSymbolSelect = (symbol: string) => {
     onSymbolClick?.(symbol);
@@ -104,7 +110,7 @@ export function TopMoversWidget({
 
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
+            updatedAt={sourceUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
             note={mode === 'gainer' ? 'Top gainers' : 'Top losers'}
