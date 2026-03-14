@@ -5,8 +5,8 @@ COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.oracle.yml}"
 REQUIRED_MODULES="${VNSTOCK_PREMIUM_REQUIRED_MODULES:-vnstock_data,vnstock_ta,vnstock_pipeline,vnstock_news,vnii}"
 
 docker compose -f "$COMPOSE_FILE" exec -T -e "VNSTOCK_PREMIUM_REQUIRED_MODULES=$REQUIRED_MODULES" api sh -lc '
-PY_BIN="python"
-if [ -x /root/.venv/bin/python ]; then
+PY_BIN="python3"
+if [ -x /root/.venv/bin/python ] && PYTHONPATH="" /root/.venv/bin/python -c "import uvicorn" >/dev/null 2>&1; then
   PY_BIN="/root/.venv/bin/python"
 fi
 echo "Using interpreter: $PY_BIN"

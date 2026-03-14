@@ -30,8 +30,8 @@ set_env() {
 
 check_modules() {
   docker compose -f "$COMPOSE_FILE" exec -T -e "VNSTOCK_PREMIUM_REQUIRED_MODULES=$REQUIRED_MODULES" api sh -lc '
-PY_BIN="python"
-if [ -x /root/.venv/bin/python ]; then
+PY_BIN="python3"
+if [ -x /root/.venv/bin/python ] && PYTHONPATH="" /root/.venv/bin/python -c "import uvicorn" >/dev/null 2>&1; then
   PY_BIN="/root/.venv/bin/python"
 fi
 echo "Using interpreter: $PY_BIN"
