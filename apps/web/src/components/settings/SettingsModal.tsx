@@ -41,8 +41,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const decimalOptions = [0, 1, 2, 3];
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(0,0,0,0.6)] animate-in fade-in duration-200">
-      <div className="bg-[var(--bg-surface)] rounded-xl border border-[var(--border-default)] w-full max-w-3xl max-h-[80vh] flex shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-[var(--bg-modal)] rounded-xl border border-[var(--border-default)] w-full max-w-3xl max-h-[80vh] flex shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden">
         {/* Sidebar */}
         <div className="w-48 bg-[var(--bg-secondary)] border-r border-[var(--border-default)] p-4 shrink-0 hidden md:block">
           <h2 className="text-lg font-bold text-[var(--text-primary)] mb-6 flex items-center gap-2">
@@ -69,7 +69,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         {/* Content */}
-        <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-surface)]">
+        <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-modal)]">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)]">
             <h3 className="text-lg font-bold text-[var(--text-primary)]">

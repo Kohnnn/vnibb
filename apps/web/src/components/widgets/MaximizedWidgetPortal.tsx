@@ -73,20 +73,21 @@ export function MaximizedWidgetPortal({
             className={`
                 fixed inset-0 z-50 flex items-center justify-center p-6
                 transition-all duration-200 ease-out
-                ${isAnimating ? 'bg-[rgba(0,0,0,0.8)]' : 'bg-transparent'}
+                backdrop-blur-sm
+                ${isAnimating ? 'bg-[rgba(2,6,23,0.78)] opacity-100' : 'bg-[rgba(2,6,23,0.78)] opacity-0'}
             `}
             onClick={handleBackdropClick}
         >
             <div
                 className={`
-                    w-full h-full bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg 
-                    shadow-2xl flex flex-col overflow-hidden
+                    w-full h-full bg-[var(--bg-modal)] border border-[var(--border-color)] rounded-lg 
+                    shadow-[0_24px_80px_rgba(15,23,42,0.45)] flex flex-col overflow-hidden
                     transition-all duration-200 ease-out
                     ${isAnimating ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}
                 `}
             >
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-primary)]">
+                <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-color)] bg-[var(--bg-modal)]">
                     <span className="text-sm font-medium text-[var(--text-primary)]">{title}</span>
                     <button
                         onClick={onClose}

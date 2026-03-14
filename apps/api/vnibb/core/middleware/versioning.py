@@ -40,7 +40,8 @@ class APIVersionMiddleware(BaseHTTPMiddleware):
         
         # Add API version header
         response.headers["X-API-Version"] = self.api_version
-        
+        response.headers["X-Data-Source"] = settings.resolved_data_backend
+
         # Add request ID if available from request state
         if hasattr(request.state, "request_id"):
             response.headers["X-Request-ID"] = request.state.request_id

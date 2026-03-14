@@ -37,7 +37,6 @@ import {
 import { type WidgetMultiSelectParam } from '@/components/widgets/WidgetWrapper';
 import { WidgetSettingsModal, AppsLibrary, PromptsLibrary, TemplateSelector } from '@/components/modals';
 import { AICopilot } from '@/components/ui/AICopilot';
-import { MarketRibbon } from '@/components/ui/MarketRibbon';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
@@ -472,8 +471,6 @@ function DashboardContent() {
                     marginRight: showAICopilot ? RIGHT_SIDEBAR_WIDTH : 0
                 }}
             >
-                <MarketRibbon />
-
                 <Header
                     currentSymbol={globalSymbol}
                     onSymbolChange={handleSymbolChange}
