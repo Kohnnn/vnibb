@@ -183,7 +183,7 @@ class SectorTopMoversResponse(BaseModel):
 
 
 @router.get("/top-movers", response_model=SectorTopMoversResponse)
-@cached(ttl=60, key_prefix="sector_top_movers")
+@cached(ttl=120, key_prefix="sector_top_movers")
 async def get_sector_top_movers(
     type: Literal["gainers", "losers"] = Query(default="gainers"),
     limit: int = Query(5, ge=1, le=10),

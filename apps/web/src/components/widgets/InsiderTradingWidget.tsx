@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { TrendingUp, TrendingDown, RefreshCw, AlertCircle } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { getInsiderDeals, getInsiderSentiment } from '@/lib/api';
+import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -45,7 +46,7 @@ function getSentimentLabel(score: number): string {
   return 'Very Bearish';
 }
 
-export function InsiderTradingWidget({ symbol = 'VNM' }: InsiderTradingWidgetProps) {
+export function InsiderTradingWidget({ symbol = DEFAULT_TICKER }: InsiderTradingWidgetProps) {
   const [filter, setFilter] = useState<'all' | 'buy' | 'sell'>('all');
 
   const {

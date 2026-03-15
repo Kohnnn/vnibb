@@ -64,8 +64,9 @@ export function DashboardGrid({
         const updateWidth = () => {
             if (containerRef.current) {
                 const newWidth = containerRef.current.offsetWidth;
-                // Only update if width actually changed and not currently transitioning
-                setWidth(newWidth);
+                if (newWidth > 0) {
+                    setWidth((currentWidth) => (currentWidth === newWidth ? currentWidth : newWidth));
+                }
             }
         };
 

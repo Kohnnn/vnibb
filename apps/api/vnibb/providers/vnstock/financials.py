@@ -181,7 +181,9 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 statement_type = query["statement_type"]
                 period = query["period"]
                 candidate_sources: list[str] = []
-                for source in [settings.vnstock_source, "KBS", "VCI"]:
+                # VCI exposes richer statement labels/units on vnstock 3.4.x,
+                # so prefer it first and fall back to the configured source/KBS when needed.
+                for source in ["VCI", settings.vnstock_source, "KBS"]:
                     if source and source not in candidate_sources:
                         candidate_sources.append(source)
 
@@ -257,7 +259,12 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                                     source,
                                     lang,
                                 )
-                            return _normalize_financial_frame(df, query["limit"], statement_type)
+                            return _normalize_financial_frame(
+                                df,
+                                query["limit"],
+                                statement_type,
+                                source,
+                            )
 
                 logger.warning(f"No {statement_type} data for {query['symbol']}")
                 return []
@@ -271,7 +278,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 ) from e
 
         def _normalize_financial_frame(
-            df: Any, limit: int, statement_type: str
+            df: Any, limit: int, statement_type: str, source: str
         ) -> list[dict[str, Any]]:
             def _column_is_period(col: Any) -> bool:
                 col_str = str(col).strip().upper()
@@ -305,6 +312,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             # Add metadata
             for record in records:
                 record["_statement_type"] = statement_type
+                record["_source"] = source
 
             return records
 
@@ -376,6 +384,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             cleaned = (
                 cleaned.replace("&", " and ")
                 .replace("%", " pct ")
+                .replace(".", "_")
                 .replace("/", "_")
                 .replace("-", "_")
                 .replace(" ", "_")
@@ -385,6 +394,11 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             )
             cleaned = re.sub(r"[^a-z0-9_]", "", cleaned)
             cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+            while True:
+                stripped = re.sub(r"^(?:n(?:_\d+)+|[ivxlcdm]+|[a-z])_", "", cleaned)
+                if stripped == cleaned:
+                    break
+                cleaned = stripped
             return cleaned
 
         def _metric_mapping(statement: str) -> dict[str, str]:
@@ -397,6 +411,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "revenue_from_sales": "revenue",
                     "revenue_from_sales_and_services": "revenue",
                     "net_sales": "revenue",
+                    "revenue_from_securities_business_01_11": "revenue",
                     "interest_income_and_similar_income": "revenue",
                     "interest_and_similar_income": "revenue",
                     "net_interest_income": "revenue",
@@ -439,9 +454,11 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "eps_basis": "eps",
                     "diluted_eps": "eps_diluted",
                     "eps_diluted": "eps_diluted",
+                    "diluted_earning_per_share": "eps_diluted",
                     "cost_of_goods_sold": "cost_of_revenue",
                     "cost_of_sales": "cost_of_revenue",
                     "cost_of_revenue": "cost_of_revenue",
+                    "operating_expenses_21_33": "cost_of_revenue",
                     "income_before_tax": "pre_tax_profit",
                     "profit_before_tax": "pre_tax_profit",
                     "pretax_income": "pre_tax_profit",
@@ -452,17 +469,22 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "corporate_income_tax": "tax_expense",
                     "thue_tndn": "tax_expense",
                     "interest_expense": "interest_expense",
+                    "interest_expenses": "interest_expense",
                     "interest_cost": "interest_expense",
                     "interest_and_similar_expenses": "interest_expense",
+                    "borrowing_costs": "interest_expense",
+                    "interest_expenses_losses_from_loans_and_receivables": "interest_expense",
                     "depreciation": "depreciation",
                     "depreciation_and_amortization": "depreciation",
                     "selling_general_admin": "selling_general_admin",
                     "selling_expenses": "selling_general_admin",
                     "selling_and_admin_expenses": "selling_general_admin",
+                    "general_and_administrative_expenses": "selling_general_admin",
                     "research_and_development": "research_development",
                     "research_development": "research_development",
                     "rd_expense": "research_development",
                     "other_income": "other_income",
+                    "other_profit": "other_income",
                     # VCI wide-frame English aliases
                     "revenue_bn_vnd": "revenue",
                     "sales": "revenue",
@@ -474,8 +496,11 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "net_other_income_expenses": "other_income",
                     "business_income_tax_current": "tax_expense",
                     "business_income_tax_deferred": "tax_expense",
+                    "current_corporate_income_tax_expenses": "tax_expense",
+                    "deferred_income_tax_expenses": "tax_expense",
                     "net_profit_for_the_year": "net_income",
                     "attributable_to_parent_company": "net_income",
+                    "profit_after_tax_for_shareholders_of_the_parents_company": "net_income",
                     "attribute_to_parent_company_bn_vnd": "net_income",
                     # VCI wide-frame Vietnamese aliases
                     "doanh_thu_dong": "revenue",
@@ -526,6 +551,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "owner_equity": "total_equity",
                     "owners_equity": "total_equity",
                     "equity_total": "total_equity",
+                    "total_owners_equity_and_liabilities": "total_assets",
                     "cash_and_equivalents": "cash_and_equivalents",
                     "cash_and_cash_equivalents": "cash_and_equivalents",
                     "cash": "cash_and_equivalents",
@@ -533,21 +559,26 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "inventory": "inventory",
                     "inventories": "inventory",
                     "current_assets": "current_assets",
+                    "short_term_assets": "current_assets",
                     "fixed_assets": "fixed_assets",
                     "property_plant_and_equipment": "fixed_assets",
                     "current_liabilities": "current_liabilities",
                     "long_term_liabilities": "long_term_liabilities",
                     "non_current_liabilities": "long_term_liabilities",
                     "retained_earnings": "retained_earnings",
+                    "undistributed_earnings_after_tax": "retained_earnings",
                     "short_term_debt": "short_term_debt",
                     "short_term_borrowings": "short_term_debt",
                     "long_term_debt": "long_term_debt",
                     "long_term_borrowings": "long_term_debt",
                     "accounts_receivable": "accounts_receivable",
+                    "trade_accounts_receivable": "accounts_receivable",
                     "loans_and_advances_to_customers": "accounts_receivable",
                     "loans_and_advances_to_customers_net": "accounts_receivable",
                     "receivables": "accounts_receivable",
                     "accounts_payable": "accounts_payable",
+                    "trade_accounts_payable": "accounts_payable",
+                    "long_term_trade_payables": "accounts_payable",
                     "payables": "accounts_payable",
                     "customer_deposits": "customer_deposits",
                     "deposits_from_customers": "customer_deposits",
@@ -632,7 +663,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 "free_cash_flow": "free_cash_flow",
                 "freecashflow": "free_cash_flow",
                 "free_cashflow": "free_cash_flow",
-                "net_cash_flows_during_the_period": "free_cash_flow",
+                "net_cash_flows_during_the_period": "net_change_in_cash",
                 "net_change_in_cash": "net_change_in_cash",
                 "net_cash_change": "net_change_in_cash",
                 "capital_expenditure": "capex",
@@ -641,14 +672,21 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 "stock_repurchased": "stock_repurchased",
                 "debt_repayment": "debt_repayment",
                 # VCI wide-frame English aliases
+                "net_cash_flows_from_securities_trading_activities": "operating_cash_flow",
                 "net_cash_inflows_outflows_from_operating_activities": "operating_cash_flow",
                 "cash_flows_from_financial_activities": "financing_cash_flow",
                 "net_increase_decrease_in_cash_and_cash_equivalents": "net_change_in_cash",
                 "purchase_of_fixed_assets": "capex",
                 "payments_for_purchase_of_fixed_assets": "capex",
+                "payment_for_fixed_assets_constructions_and_other_long_term_assets": "capex",
                 "payments_of_dividends": "dividends_paid",
+                "dividends_paid_profits_distributed_to_owners": "dividends_paid",
                 "repayment_of_borrowings": "debt_repayment",
                 "principal_payments_of_borrowings": "debt_repayment",
+                "principal_repayments": "debt_repayment",
+                "principal_repayments_to_settlement_assistance_fund": "debt_repayment",
+                "principal_repayments_to_financial_assets": "debt_repayment",
+                "other_principal_repayments": "debt_repayment",
                 "depreciation_and_amortisation": "depreciation",
                 # VCI wide-frame Vietnamese aliases
                 "luu_chuyen_tien_te_rong_tu_cac_hoat_dong_sxkd": "operating_cash_flow",
@@ -701,11 +739,14 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 metric_key = mapping.get(item_key)
                 if not metric_key:
                     continue
+                row_source = str(row.get("_source") or "").upper()
                 for period in period_cols:
                     raw_key = row_keys.get(period.upper())
                     value = row.get(raw_key) if raw_key is not None else None
                     numeric = _coerce_number(value)
                     if numeric is not None:
+                        if row_source == "KBS" and metric_key not in {"eps", "eps_diluted"}:
+                            numeric *= 1000
                         period_values[period][metric_key] = numeric
 
             # Keep latest periods by limit

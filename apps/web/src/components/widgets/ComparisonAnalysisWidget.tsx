@@ -28,6 +28,7 @@ import {
   getPeerCompanies,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { DEFAULT_TICKER } from '@/lib/defaultTicker'
 import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units'
 import type { FinancialRatioData } from '@/types/equity'
 
@@ -138,7 +139,7 @@ function normalizePerformanceData(payload: unknown): Array<Record<string, string
 function ComparisonAnalysisWidgetComponent({
   id,
   symbol,
-  initialSymbols = ['VNM', 'FPT'],
+  initialSymbols = [DEFAULT_TICKER, 'FPT'],
   onRemove,
 }: ComparisonAnalysisWidgetProps) {
   const [symbols, setSymbols] = useState<string[]>(() => {

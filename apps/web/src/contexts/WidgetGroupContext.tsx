@@ -1,20 +1,8 @@
 'use client';
 
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
+import { DEFAULT_TICKER, normalizeTickerSymbol, readStoredTicker, writeStoredTicker } from '@/lib/defaultTicker';
 import { WidgetGroupId, WidgetGroupConfig, DEFAULT_GROUPS } from '@/types/widget';
-
-const TICKER_PATTERN = /^[A-Z0-9]{3}$/;
-
-function normalizeTickerSymbol(rawSymbol: string): string | null {
-  const raw = String(rawSymbol || '').toUpperCase().trim();
-  if (!raw) return null;
-
-  const tokens = raw.split(/[^A-Z0-9]+/).filter(Boolean);
-  const candidate = tokens[0] || raw;
-
-  if (!TICKER_PATTERN.test(candidate)) return null;
-  return candidate;
-}
 
 interface WidgetGroupContextValue {
   groups: Record<WidgetGroupId, WidgetGroupConfig>;
@@ -31,7 +19,7 @@ const STORAGE_KEY = 'vnibb-widget-groups-v1';
 
 export function WidgetGroupProvider({ children }: { children: ReactNode }) {
   const [groups, setGroups] = useState<Record<WidgetGroupId, WidgetGroupConfig>>(DEFAULT_GROUPS);
-  const [globalSymbol, setGlobalSymbolState] = useState('VNM');
+  const [globalSymbol, setGlobalSymbolState] = useState(DEFAULT_TICKER);
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Load from localStorage on mount
@@ -39,11 +27,7 @@ export function WidgetGroupProvider({ children }: { children: ReactNode }) {
     const savedGroups = localStorage.getItem(STORAGE_KEY);
     if (savedGroups) setGroups(JSON.parse(savedGroups));
     
-    const savedSymbol = localStorage.getItem('vnibb-global-symbol');
-    if (savedSymbol) {
-      const normalized = normalizeTickerSymbol(savedSymbol);
-      if (normalized) setGlobalSymbolState(normalized);
-    }
+    setGlobalSymbolState(readStoredTicker());
     
     setIsLoaded(true);
   }, []);
@@ -57,7 +41,7 @@ export function WidgetGroupProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('vnibb-global-symbol', globalSymbol);
+      writeStoredTicker(globalSymbol);
     }
   }, [globalSymbol, isLoaded]);
 

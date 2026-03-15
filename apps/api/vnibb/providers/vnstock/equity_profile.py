@@ -108,19 +108,48 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
         loop = asyncio.get_event_loop()
         
         def _fetch_sync() -> List[dict[str, Any]]:
+            def _is_present(value: Any) -> bool:
+                if value is None:
+                    return False
+                if isinstance(value, float):
+                    return value == value
+                if isinstance(value, str):
+                    return value.strip().lower() not in {"", "nan", "null", "none"}
+                return True
+
             try:
                 from vnstock import Listing, Vnstock
-                
-                stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
-                
-                # Get company overview
-                overview = stock.company.overview()
-                
-                if overview is None or overview.empty:
+
+                record: dict[str, Any] = {}
+                candidate_sources: list[str] = []
+                for source in ["VCI", settings.vnstock_source, "KBS"]:
+                    if source and source not in candidate_sources:
+                        candidate_sources.append(source)
+
+                for source in candidate_sources:
+                    try:
+                        stock = Vnstock().stock(symbol=query["symbol"], source=source)
+                        overview = stock.company.overview()
+                    except Exception as source_error:
+                        logger.debug(
+                            "vnstock profile fetch failed for %s source=%s: %s",
+                            query["symbol"],
+                            source,
+                            source_error,
+                        )
+                        continue
+
+                    if overview is None or overview.empty:
+                        continue
+
+                    source_record = overview.to_dict("records")[0]
+                    for key, value in source_record.items():
+                        if _is_present(value) and not _is_present(record.get(key)):
+                            record[key] = value
+
+                if not record:
                     logger.warning(f"No profile data for {query['symbol']}")
                     return []
-                
-                record = overview.to_dict("records")[0]
                 
                 # Get company name from Listing (overview doesn't include it)
                 try:
@@ -173,31 +202,86 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
         - charter_capital: charter capital (VND)
         """
         results: List[EquityProfileData] = []
+
+        def _coerce_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return None
+            if number != number:
+                return None
+            return number
+
+        def _pick_first(*values: Any) -> Optional[Any]:
+            for value in values:
+                if value is None:
+                    continue
+                if isinstance(value, str) and not value.strip():
+                    continue
+                return value
+            return None
+
+        def _scale_shares(value: Any) -> Optional[float]:
+            number = _coerce_float(value)
+            if number is None:
+                return None
+            if number < 1_000_000:
+                return number * 1_000_000
+            return number
+
+        def _scale_capital(value: Any) -> Optional[float]:
+            number = _coerce_float(value)
+            if number is None:
+                return None
+            if number < 1_000_000_000:
+                return number * 1_000_000_000
+            return number
         
         for row in data:
             try:
+                outstanding_shares = _pick_first(
+                    _coerce_float(row.get("issue_share")),
+                    _coerce_float(row.get("financial_ratio_issue_share")),
+                    _scale_shares(row.get("outstanding_shares")),
+                    _scale_shares(row.get("listed_volume")),
+                )
+                listed_shares = _pick_first(
+                    _coerce_float(row.get("issue_share")),
+                    _scale_shares(row.get("listed_volume")),
+                    outstanding_shares,
+                )
                 profile = EquityProfileData(
                     symbol=params.symbol.upper(),
                     # Company name from Listing().all_symbols()
                     company_name=row.get("organ_name"),
                     short_name=None,  # Not available in VCI overview
-                    exchange=None,  # Not directly in overview, could infer from symbol
+                    exchange=row.get("exchange"),
                     # Industry classification from ICB levels
-                    industry=row.get("icb_name3") or row.get("icb_name4"),
-                    sector=row.get("icb_name2"),
-                    established_date=None,  # Not in VCI overview
-                    listing_date=None,  # Not in VCI overview
-                    website=None,  # Not in VCI overview
+                    industry=row.get("icb_name3") or row.get("icb_name4") or row.get("company_type"),
+                    sector=row.get("icb_name2") or row.get("company_type") or row.get("icb_name3"),
+                    established_date=_pick_first(row.get("founded_date"), row.get("established_date")),
+                    listing_date=row.get("listing_date"),
+                    website=row.get("website"),
                     # Business description
-                    description=row.get("company_profile"),
+                    description=_pick_first(
+                        row.get("company_profile"),
+                        row.get("business_model"),
+                        row.get("description"),
+                        row.get("history"),
+                    ),
                     # Share data
-                    outstanding_shares=row.get("issue_share") or row.get("financial_ratio_issue_share"),
-                    listed_shares=row.get("issue_share"),
+                    outstanding_shares=outstanding_shares,
+                    listed_shares=listed_shares,
                     # Charter capital as proxy (actual market cap needs price calculation)
-                    market_cap=row.get("charter_capital"),
-                    address=None,  # Not in VCI overview
-                    phone=None,  # Not in VCI overview
-                    email=None,  # Not in VCI overview
+                    market_cap=_pick_first(
+                        _coerce_float(row.get("market_cap")),
+                        _scale_capital(row.get("charter_capital")),
+                    ),
+                    address=row.get("address"),
+                    phone=row.get("phone"),
+                    email=row.get("email"),
                     updated_at=datetime.utcnow(),
                 )
                 results.append(profile)
