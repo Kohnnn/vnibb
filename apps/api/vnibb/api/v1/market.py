@@ -485,7 +485,9 @@ def _serialize_datetime_like(value: Any) -> Optional[str]:
 
 
 def _latest_timestamp(values: List[Any]) -> Optional[str]:
-    parsed_values = [parsed for parsed in (_parse_datetime_like(value) for value in values) if parsed]
+    parsed_values = [
+        parsed for parsed in (_parse_datetime_like(value) for value in values) if parsed
+    ]
     if not parsed_values:
         return None
     return max(parsed_values).isoformat()
@@ -1509,7 +1511,7 @@ async def get_heatmap_data(
 
 
 @router.get("/indices", response_model=MarketIndicesResponse)
-@cached(ttl=60, key_prefix="market_indices")
+@cached(ttl=180, key_prefix="market_indices")
 async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
@@ -1547,7 +1549,10 @@ async def get_market_indices(
             count=len(rows),
             data=rows,
             updated_at=_latest_timestamp(
-                [_first_non_none(row.get("time"), row.get("updated_at"), row.get("date")) for row in rows]
+                [
+                    _first_non_none(row.get("time"), row.get("updated_at"), row.get("date"))
+                    for row in rows
+                ]
             ),
         )
     except Exception as e:
@@ -1558,7 +1563,10 @@ async def get_market_indices(
                 count=len(rows),
                 data=rows,
                 updated_at=_latest_timestamp(
-                    [_first_non_none(row.get("time"), row.get("updated_at"), row.get("date")) for row in rows]
+                    [
+                        _first_non_none(row.get("time"), row.get("updated_at"), row.get("date"))
+                        for row in rows
+                    ]
                 ),
                 error=str(e),
             )
@@ -1566,6 +1574,7 @@ async def get_market_indices(
 
 
 @router.get("/top-movers", response_model=MarketTopMoversResponse)
+@cached(ttl=120, key_prefix="market_top_movers")
 async def get_market_top_movers(
     type: str = Query(default="gainer", pattern=r"^(gainer|loser|volume|value|gainers|losers)$"),
     mode: Optional[str] = Query(
@@ -1647,7 +1656,10 @@ async def get_market_top_movers(
                     count=len(payload),
                     data=payload,
                     updated_at=_latest_timestamp(
-                        [_first_non_none(item.get("updated_at"), item.get("time")) for item in payload]
+                        [
+                            _first_non_none(item.get("updated_at"), item.get("time"))
+                            for item in payload
+                        ]
                     ),
                     error=(
                         f"Requested '{mover_type}' movers unavailable, returned snapshot-derived "

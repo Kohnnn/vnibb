@@ -24,6 +24,7 @@ import type {
     generateId,
 } from '@/types/dashboard';
 import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
+import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
 import { useDashboardSync } from '@/lib/useDashboardSync';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
@@ -835,7 +836,7 @@ const createMainSystemDashboard = (): Dashboard => {
         showGroupLabels: true,
         tabs: createMainDashboardTabs(),
         syncGroups: [
-            { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: 'VNM' },
+            { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: DEFAULT_TICKER },
         ],
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -1539,6 +1540,17 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             dashboards = cleanedSidebar.dashboards;
             folders = cleanedSidebar.folders;
             dashboards = ensureMainDashboardPresent(dashboards);
+            const preferredSymbol = readStoredTicker();
+            dashboards = dashboards.map((dashboard) => ({
+                ...dashboard,
+                syncGroups: dashboard.syncGroups.map((group) => ({
+                    ...group,
+                    currentSymbol:
+                        !group.currentSymbol || group.currentSymbol === 'VNM'
+                            ? preferredSymbol
+                            : group.currentSymbol,
+                })),
+            }));
 
             if (dashboards.length === 0) {
                 dashboards = [createMainSystemDashboard()];
@@ -1616,7 +1628,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             showGroupLabels: true,
             tabs: [createDefaultTab('Overview 1', 0)],
             syncGroups: [
-                { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: 'VNM' },
+                { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: DEFAULT_TICKER },
             ],
             createdAt: now,
             updatedAt: now,

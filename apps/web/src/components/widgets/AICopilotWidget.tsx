@@ -7,6 +7,7 @@ import { Send, Sparkles, Loader2, X, Download, Copy, Check } from 'lucide-react'
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { API_BASE_URL } from '@/lib/api';
+import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface WidgetContext {
@@ -202,7 +203,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
     };
 
     const handleQuickPrompt = (prompt: PromptTemplate) => {
-        const symbol = context?.symbol || 'VNM';
+        const symbol = context?.symbol || DEFAULT_TICKER;
         const message = prompt.template.replace('{symbol}', symbol);
         sendMessage(message);
     };

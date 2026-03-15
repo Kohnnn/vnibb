@@ -1,11 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { X, Settings as SettingsIcon, Database, Bell, Palette, Server } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, Settings as SettingsIcon, Database, Bell, Palette } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useUnit } from '@/contexts/UnitContext';
+import { useSymbolLink } from '@/contexts/SymbolLinkContext';
+import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
+import { DEFAULT_TICKER, normalizeTickerSymbol } from '@/lib/defaultTicker';
 import { formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
 
 interface SettingsModalProps {
@@ -17,11 +20,35 @@ type SettingTab = 'general' | 'data' | 'notifications' | 'appearance';
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingTab>('general');
+  const [defaultTickerInput, setDefaultTickerInput] = useState(DEFAULT_TICKER);
+  const [defaultTickerError, setDefaultTickerError] = useState<string | null>(null);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const { resolvedTheme, setTheme } = useTheme();
   const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
+  const { globalSymbol, setGlobalSymbol } = useSymbolLink();
+  const { setGlobalSymbol: setWidgetGroupGlobalSymbol } = useWidgetGroups();
+
+  useEffect(() => {
+    if (isOpen) {
+      setDefaultTickerInput(globalSymbol || DEFAULT_TICKER);
+      setDefaultTickerError(null);
+    }
+  }, [globalSymbol, isOpen]);
   
   if (!isOpen) return null;
+
+  const applyDefaultTicker = () => {
+    const normalized = normalizeTickerSymbol(defaultTickerInput);
+    if (!normalized) {
+      setDefaultTickerError('Enter a valid 3-character ticker, for example VCI or FPT.');
+      return;
+    }
+
+    setGlobalSymbol(normalized);
+    setWidgetGroupGlobalSymbol(normalized);
+    setDefaultTickerInput(normalized);
+    setDefaultTickerError(null);
+  };
 
   const tabs = [
     { id: 'general' as const, label: 'General', icon: SettingsIcon },
@@ -94,12 +121,37 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   >
                     Default Ticker
                   </label>
-                  <input 
+                  <input
                     id="settings-default-ticker"
-                    type="text" 
-                    defaultValue="VNM"
+                    type="text"
+                    value={defaultTickerInput}
+                    onChange={(event) => {
+                      setDefaultTickerInput(event.target.value.toUpperCase());
+                      if (defaultTickerError) setDefaultTickerError(null);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        applyDefaultTicker();
+                      }
+                    }}
                     className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:border-blue-500 outline-none"
                   />
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <p className="text-[10px] text-[var(--text-muted)]">
+                      Saved locally on this device. New dashboards now start on {DEFAULT_TICKER}.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={applyDefaultTicker}
+                      className="rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-1.5 text-[11px] font-bold text-blue-300 transition-colors hover:bg-blue-600/25"
+                    >
+                      Save Default
+                    </button>
+                  </div>
+                  {defaultTickerError && (
+                    <p className="mt-2 text-[11px] text-amber-300">{defaultTickerError}</p>
+                  )}
                 </div>
                 <div>
                   <label

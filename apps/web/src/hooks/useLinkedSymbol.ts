@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
+import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 
 interface UseLinkedSymbolOptions {
   widgetId: string;
@@ -9,7 +10,7 @@ interface UseLinkedSymbolOptions {
 
 export function useLinkedSymbol({
   widgetId,
-  defaultSymbol = 'VNM',
+  defaultSymbol = DEFAULT_TICKER,
   autoLink = true,
 }: UseLinkedSymbolOptions) {
   const { globalSymbol, isWidgetLinked, toggleWidgetLink } = useSymbolLink();

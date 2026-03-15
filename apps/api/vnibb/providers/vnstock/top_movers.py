@@ -24,6 +24,21 @@ logger = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=10)
 
 
+def _build_source_candidates(preferred_source: str | None) -> list[str]:
+    preferred = (preferred_source or "").strip().upper()
+    if preferred == "KBS":
+        ordered = ("VCI", "DNSE", "KBS")
+    else:
+        ordered = (preferred, "VCI", "DNSE", "KBS")
+
+    candidates: list[str] = []
+    for source in ordered:
+        normalized = (source or "").strip().upper()
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+    return candidates
+
+
 # =============================================================================
 
 # DATA MODELS
@@ -294,63 +309,82 @@ class VnstockTopMoversFetcher:
             def _fetch() -> List[dict]:
                 from vnstock import Listing, Trading
 
-                source = settings.vnstock_source
-                listing = Listing(source=source)
-
-                trading = Trading(source=source)
-
-                # Get symbols for the index group
                 group = INDEX_TO_GROUP.get(index, "VN100")
-                symbols = []
+                last_error: BaseException | None = None
 
-                # Try to get symbols by group first
-                try:
-                    symbols_result = listing.symbols_by_group(group=group)
-                    # symbols_by_group returns a Series directly, not a DataFrame
-                    if symbols_result is not None and len(symbols_result) > 0:
-                        symbols = symbols_result.tolist()
-                        logger.info(f"Got {len(symbols)} symbols for group {group}")
-                except BaseException as e:
-                    logger.warning(f"Failed to get symbols for group {group}: {e}")
+                for source in _build_source_candidates(settings.vnstock_source):
+                    listing = Listing(source=source)
+                    trading = Trading(source=source)
+                    symbols = []
 
-                # Fallback: get all symbols and filter by exchange
-                if not symbols:
-                    logger.info(f"Falling back to all_symbols for {index}")
+                    # Try to get symbols by group first
                     try:
-                        all_df = listing.all_symbols()
-                        if all_df is not None and not all_df.empty:
-                            if "exchange" in all_df.columns:
-                                if index == "HNX":
-                                    all_df = all_df[all_df["exchange"] == "HNX"]
-                                else:
-                                    all_df = all_df[all_df["exchange"] == "HOSE"]
-                            symbols = all_df["symbol"].head(100).tolist()
-                            logger.info(f"Got {len(symbols)} symbols from fallback")
-                    except BaseException as e:
-                        logger.error(f"Failed to get all_symbols: {e}")
-                        return []
+                        symbols_result = listing.symbols_by_group(group=group)
+                        # symbols_by_group returns a Series directly, not a DataFrame
+                        if symbols_result is not None and len(symbols_result) > 0:
+                            symbols = symbols_result.tolist()
+                            logger.info(
+                                "Got %s symbols for group %s (source=%s)",
+                                len(symbols),
+                                group,
+                                source,
+                            )
+                    except BaseException as exc:
+                        last_error = exc
+                        logger.warning(
+                            "Failed to get symbols for group %s (source=%s): %s", group, source, exc
+                        )
 
-                if not symbols:
-                    logger.warning("No symbols found for top movers")
-                    return []
+                    # Fallback: get all symbols and filter by exchange
+                    if not symbols:
+                        logger.info("Falling back to all_symbols for %s (source=%s)", index, source)
+                        try:
+                            all_df = listing.all_symbols()
+                            if all_df is not None and not all_df.empty:
+                                if "exchange" in all_df.columns:
+                                    if index == "HNX":
+                                        all_df = all_df[all_df["exchange"] == "HNX"]
+                                    else:
+                                        all_df = all_df[all_df["exchange"] == "HOSE"]
+                                symbols = all_df["symbol"].head(100).tolist()
+                                logger.info(
+                                    "Got %s symbols from fallback (source=%s)", len(symbols), source
+                                )
+                        except BaseException as exc:
+                            last_error = exc
+                            logger.warning("Failed to get all_symbols (source=%s): %s", source, exc)
+                            continue
 
-                # Fetch price board for all symbols
-                try:
-                    df = trading.price_board(symbols_list=symbols)
-                    if df is None or df.empty:
-                        logger.warning("Price board returned empty DataFrame")
-                        return []
+                    if not symbols:
+                        logger.warning("No symbols found for top movers (source=%s)", source)
+                        continue
 
-                    # Flatten MultiIndex columns
-                    df = _flatten_multiindex_df(df)
+                    # Fetch price board for all symbols
+                    try:
+                        df = trading.price_board(symbols_list=symbols)
+                        if df is None or df.empty:
+                            logger.warning(
+                                "Price board returned empty DataFrame (source=%s)", source
+                            )
+                            continue
 
-                    records = df.to_dict(orient="records")
-                    logger.info(f"Got {len(records)} records from price_board")
-                    return records
+                        # Flatten MultiIndex columns
+                        df = _flatten_multiindex_df(df)
 
-                except BaseException as e:
-                    logger.error(f"Price board fetch failed: {e}")
-                    return []
+                        records = df.to_dict(orient="records")
+                        logger.info(
+                            "Got %s records from price_board (source=%s)", len(records), source
+                        )
+                        if records:
+                            return records
+                    except BaseException as exc:
+                        last_error = exc
+                        logger.warning("Price board fetch failed (source=%s): %s", source, exc)
+                        continue
+
+                if last_error is not None:
+                    logger.error("Top movers upstream failed across all sources: %s", last_error)
+                return []
 
             loop = asyncio.get_event_loop()
             # Add a 15 second timeout to the top movers fetch
@@ -436,68 +470,107 @@ class VnstockTopMoversFetcher:
             def _fetch() -> Tuple[List[dict], dict]:
                 from vnstock import Listing, Trading
 
-                listing = Listing(source=source)
-                trading = Trading(source=source)
+                last_error: BaseException | None = None
+                for candidate_source in _build_source_candidates(source):
+                    listing = Listing(source=candidate_source)
+                    trading = Trading(source=candidate_source)
 
-                # Get all symbols with their industries using symbols_by_industries
-                industry_map = {}
-                try:
-                    industry_df = listing.symbols_by_industries()
-                    if industry_df is not None and not industry_df.empty:
-                        for _, row in industry_df.iterrows():
-                            symbol = row.get("symbol", "")
-                            # Use icb_name3 (industry level 3) as primary, fallback to icb_name2
-                            industry = (
-                                row.get("icb_name3")
-                                or row.get("icb_name2")
-                                or row.get("icb_name4")
-                                or "Unknown"
-                            )
-                            if symbol:
-                                industry_map[symbol] = industry
-                        logger.info(f"Got industry mapping for {len(industry_map)} symbols")
-                except BaseException as e:
-                    logger.warning(f"Failed to get industry mapping: {e}")
-
-                # Get VN100 symbols for broader coverage
-                symbols = []
-                try:
-                    vn100_result = listing.symbols_by_group("VN100")
-                    # symbols_by_group returns a Series directly
-                    if vn100_result is not None and len(vn100_result) > 0:
-                        symbols = vn100_result.tolist()
-                        logger.info(f"Got {len(symbols)} VN100 symbols")
-                except BaseException as e:
-                    logger.warning(f"Failed to get VN100 symbols: {e}")
-
-                if not symbols:
-                    # Fallback to all_symbols if VN100 fails
+                    # Get all symbols with their industries using symbols_by_industries
+                    industry_map = {}
                     try:
-                        all_df = listing.all_symbols()
-                        if all_df is not None and not all_df.empty:
-                            symbols = all_df["symbol"].head(100).tolist()
-                            logger.info(f"Using {len(symbols)} symbols from all_symbols fallback")
-                    except BaseException as e:
-                        logger.error(f"Failed to get all_symbols fallback: {e}")
+                        industry_df = listing.symbols_by_industries()
+                        if industry_df is not None and not industry_df.empty:
+                            for _, row in industry_df.iterrows():
+                                symbol = row.get("symbol", "")
+                                # Use icb_name3 (industry level 3) as primary, fallback to icb_name2
+                                industry = (
+                                    row.get("icb_name3")
+                                    or row.get("icb_name2")
+                                    or row.get("icb_name4")
+                                    or "Unknown"
+                                )
+                                if symbol:
+                                    industry_map[symbol] = industry
+                            logger.info(
+                                "Got industry mapping for %s symbols (source=%s)",
+                                len(industry_map),
+                                candidate_source,
+                            )
+                    except BaseException as exc:
+                        last_error = exc
+                        logger.warning(
+                            "Failed to get industry mapping (source=%s): %s", candidate_source, exc
+                        )
 
-                if not symbols:
-                    return [], industry_map
+                    # Get VN100 symbols for broader coverage
+                    symbols = []
+                    try:
+                        vn100_result = listing.symbols_by_group("VN100")
+                        # symbols_by_group returns a Series directly
+                        if vn100_result is not None and len(vn100_result) > 0:
+                            symbols = vn100_result.tolist()
+                            logger.info(
+                                "Got %s VN100 symbols (source=%s)", len(symbols), candidate_source
+                            )
+                    except BaseException as exc:
+                        last_error = exc
+                        logger.warning(
+                            "Failed to get VN100 symbols (source=%s): %s", candidate_source, exc
+                        )
 
-                # Fetch price board
-                try:
-                    df = trading.price_board(symbols_list=symbols)
-                    if df is None or df.empty:
-                        logger.warning("Price board returned empty")
-                        return [], industry_map
+                    if not symbols:
+                        # Fallback to all_symbols if VN100 fails
+                        try:
+                            all_df = listing.all_symbols()
+                            if all_df is not None and not all_df.empty:
+                                symbols = all_df["symbol"].head(100).tolist()
+                                logger.info(
+                                    "Using %s symbols from all_symbols fallback (source=%s)",
+                                    len(symbols),
+                                    candidate_source,
+                                )
+                        except BaseException as exc:
+                            last_error = exc
+                            logger.warning(
+                                "Failed to get all_symbols fallback (source=%s): %s",
+                                candidate_source,
+                                exc,
+                            )
+                            continue
 
-                    df = _flatten_multiindex_df(df)
-                    records = df.to_dict(orient="records")
-                    logger.info(f"Got {len(records)} records for sector movers")
-                except BaseException as e:
-                    logger.error(f"Price board fetch failed: {e}")
-                    return [], industry_map
+                    if not symbols:
+                        continue
 
-                return records, industry_map
+                    # Fetch price board
+                    try:
+                        df = trading.price_board(symbols_list=symbols)
+                        if df is None or df.empty:
+                            logger.warning(
+                                "Price board returned empty (source=%s)", candidate_source
+                            )
+                            continue
+
+                        df = _flatten_multiindex_df(df)
+                        records = df.to_dict(orient="records")
+                        logger.info(
+                            "Got %s records for sector movers (source=%s)",
+                            len(records),
+                            candidate_source,
+                        )
+                        if records:
+                            return records, industry_map
+                    except BaseException as exc:
+                        last_error = exc
+                        logger.warning(
+                            "Price board fetch failed (source=%s): %s", candidate_source, exc
+                        )
+                        continue
+
+                if last_error is not None:
+                    logger.error(
+                        "Sector top movers upstream failed across all sources: %s", last_error
+                    )
+                return [], {}
 
             loop = asyncio.get_event_loop()
             # Add a 20 second timeout to the sector top movers fetch

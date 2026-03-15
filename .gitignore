@@ -114,3 +114,4 @@ scripts/appwrite/supabase_baseline.json
 apps/api/migrations/versions/20260313_0105_ensure_block_trades_side_column.py
 apps/api/scripts/production_endpoint_probe.py
 apps/api/scripts/production_endpoint_probe.latest.json
+apps/api/tests/test_api/test_equity_profile_transform.py

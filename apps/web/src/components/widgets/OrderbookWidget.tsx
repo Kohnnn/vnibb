@@ -5,6 +5,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { usePriceDepth } from '@/lib/queries';
 
 interface OrderbookWidgetProps {
@@ -12,7 +13,7 @@ interface OrderbookWidgetProps {
   widgetId?: string;
 }
 
-function OrderbookWidgetComponent({ symbol = 'VNM', widgetId }: OrderbookWidgetProps) {
+function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId }: OrderbookWidgetProps) {
   const {
     data: orderbook,
     isLoading,

@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useUnit } from '@/contexts/UnitContext';
+import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
@@ -56,7 +57,7 @@ function getYoYChange(current: number | null | undefined, previous: number | nul
     return ((current - previous) / Math.abs(previous)) * 100;
 }
 
-export function FinancialStatementsWidget({ symbol = 'VNM' }: FinancialStatementsWidgetProps) {
+export function FinancialStatementsWidget({ symbol = DEFAULT_TICKER }: FinancialStatementsWidgetProps) {
     const [statementType, setStatementType] = useState<StatementType>('income');
     const [period, setPeriod] = useState<Period>('FY');
     const { config: unitConfig } = useUnit();

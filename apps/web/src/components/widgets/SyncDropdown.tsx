@@ -6,6 +6,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Check, Plus, Search, ChevronRight, X } from 'lucide-react';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
+import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 
 interface SyncDropdownProps {
     isOpen: boolean;
@@ -40,7 +41,7 @@ export function SyncDropdown({
     }, [isOpen]);
 
     const handleCreateGroup = () => {
-        const symbol = currentSymbol || 'VNM';
+        const symbol = currentSymbol || DEFAULT_TICKER;
         const newGroup = createSyncGroup(dashboardId, symbol);
         onGroupChange(newGroup.id);
         onClose();

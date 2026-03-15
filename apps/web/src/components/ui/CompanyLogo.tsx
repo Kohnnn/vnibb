@@ -31,7 +31,6 @@ export function CompanyLogo({ symbol, name, website, size = 20, className }: Com
   const sources = useMemo(() => {
     if (!domain) return [];
     return [
-      `https://logo.clearbit.com/${domain}`,
       `https://api.faviconkit.com/${domain}/${Math.max(size, 16)}`,
       `https://www.google.com/s2/favicons?domain=${domain}&sz=${Math.max(size * 2, 32)}`,
     ];
