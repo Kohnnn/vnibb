@@ -28,13 +28,13 @@ missing = []
 for name in modules:
     try:
         module = importlib.import_module(name)
-        print(f"{name}: OK version={getattr(module, '__version__', 'n/a')}")
+        print(f"{name}: OK version={getattr(module, \"__version__\", \"n/a\")}")
     except Exception as exc:
         print(f"{name}: MISSING ({type(exc).__name__}: {exc})")
         missing.append(name)
 
 if missing:
-    print(f"Missing premium modules: {', '.join(missing)}")
+    print(f"Missing premium modules: {\", \".join(missing)}")
     sys.exit(1)
 
 print("All required premium modules are available")
