@@ -6,6 +6,7 @@ Fetches market indices and overview data for Vietnam stock market.
 
 import asyncio
 import logging
+from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
@@ -23,6 +24,13 @@ logger = logging.getLogger(__name__)
 # This avoids the blocking behavior of 'with ThreadPoolExecutor' on timeout
 _executor = ThreadPoolExecutor(max_workers=10)
 
+MARKET_INDEX_MIN_EXPECTED_VALUE: dict[str, float] = {
+    "VNINDEX": 100.0,
+    "VN30": 100.0,
+    "HNX": 10.0,
+    "UPCOM": 10.0,
+}
+
 
 def _first_non_none(*values: Any) -> Any:
     for value in values:
@@ -38,6 +46,12 @@ def _coerce_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _is_suspicious_index_value(index_name: str, value: Any) -> bool:
+    numeric = _coerce_float(value)
+    minimum = MARKET_INDEX_MIN_EXPECTED_VALUE.get(index_name)
+    return numeric is not None and minimum is not None and numeric < minimum
 
 
 class MarketOverviewQueryParams(BaseModel):
@@ -94,8 +108,10 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
             "UPCOM": ["UPCOM", "UPCOMINDEX", "UPCOM-INDEX"],
         }
 
+        # Market indices still come back in compact KBS units on vnstock 3.4.x,
+        # so prefer VCI for full-point index history even when the app default is KBS.
         source_candidates: list[str] = []
-        for candidate in (settings.vnstock_source, "VCI", "DNSE", "KBS"):
+        for candidate in ("VCI", settings.vnstock_source, "KBS"):
             normalized = (candidate or "").strip().upper()
             if normalized and normalized not in source_candidates:
                 source_candidates.append(normalized)
@@ -104,7 +120,6 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
             """Fetch a single market index with timeout handling."""
             try:
                 stock_manager = get_vnstock()
-                from datetime import datetime, timedelta
 
                 end_date = datetime.now()
                 start_date = end_date - timedelta(days=5)
@@ -128,6 +143,16 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                             df = df.sort_values("date")
 
                         latest = df.iloc[-1].to_dict()
+                        if _is_suspicious_index_value(index_name, latest.get("close")):
+                            logger.info(
+                                "Skipping compact market-index payload for %s from source=%s symbol=%s close=%s",
+                                index_name,
+                                source,
+                                symbol,
+                                latest.get("close"),
+                            )
+                            continue
+
                         prev_close = None
                         if len(df.index) > 1:
                             prev_close = df.iloc[-2].get("close")
@@ -255,6 +280,15 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                 change_pct_num = _coerce_float(change_pct)
                 previous_close_num = _coerce_float(previous_close)
                 open_price_num = _coerce_float(open_price)
+                index_name = _first_non_none(row.get("index_name"), row.get("symbol"), "Unknown")
+
+                if _is_suspicious_index_value(index_name, current_value_num):
+                    logger.info(
+                        "Dropping compact market-index row during transform for %s current_value=%s",
+                        index_name,
+                        current_value_num,
+                    )
+                    continue
 
                 if (
                     change_num is None
@@ -295,9 +329,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
 
                 results.append(
                     MarketIndexData(
-                        index_name=_first_non_none(
-                            row.get("index_name"), row.get("symbol"), "Unknown"
-                        ),
+                        index_name=index_name,
                         current_value=current_value_num,
                         change=change_num,
                         change_pct=change_pct_num,

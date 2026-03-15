@@ -762,6 +762,31 @@ async def test_market_indices_prefer_db_rows_over_scaled_provider_payload(client
     assert payload["data"][1]["current_value"] == pytest.approx(2029.81)
 
 
+def test_market_overview_rejects_compact_index_payloads():
+    from vnibb.providers.vnstock.market_overview import (
+        MarketOverviewQueryParams,
+        VnstockMarketOverviewFetcher,
+    )
+
+    rows = VnstockMarketOverviewFetcher.transform_data(
+        MarketOverviewQueryParams(),
+        [
+            {"index_name": "VNINDEX", "close": 1.7, "change": -0.01, "time": "2026-03-15T07:00:00"},
+            {
+                "index_name": "VN30",
+                "close": 1853.6,
+                "change": -6.2,
+                "change_pct": -0.33,
+                "time": "2026-03-15T00:00:00",
+            },
+        ],
+    )
+
+    assert len(rows) == 1
+    assert rows[0].index_name == "VN30"
+    assert rows[0].current_value == pytest.approx(1853.6)
+
+
 @pytest.mark.asyncio
 async def test_market_top_movers_smoke_returns_data(client, monkeypatch):
     async def fake_top_movers_fetch(*, type: str, index: str, limit: int):
