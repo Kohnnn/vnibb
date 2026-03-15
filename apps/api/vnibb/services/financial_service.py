@@ -4,6 +4,7 @@ import asyncio
 import re
 from datetime import datetime
 
+from vnibb.core.config import settings
 from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     FinancialStatementData,
@@ -19,6 +20,16 @@ QUARTER_PATTERN = re.compile(r"Q([1-4])")
 
 def _is_control_flow_exception(exc: BaseException) -> bool:
     return isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, GeneratorExit))
+
+
+def _provider_timeout_budget(reserve_seconds: int = 5) -> float:
+    vnstock_timeout = max(1, int(getattr(settings, "vnstock_timeout", 30) or 30))
+    request_timeout = int(getattr(settings, "api_request_timeout_seconds", 0) or 0)
+    if request_timeout <= 0:
+        return float(vnstock_timeout)
+
+    reserve = reserve_seconds if request_timeout > reserve_seconds + 1 else 1
+    return float(max(1, min(vnstock_timeout, request_timeout - reserve)))
 
 
 def _extract_period_year(period: str | None) -> int | None:
@@ -217,7 +228,10 @@ async def get_financials_with_ttm(
     )
 
     try:
-        data = await VnstockFinancialsFetcher.fetch(params)
+        data = await asyncio.wait_for(
+            VnstockFinancialsFetcher.fetch(params),
+            timeout=_provider_timeout_budget(),
+        )
     except BaseException as exc:
         if _is_control_flow_exception(exc):
             raise
@@ -270,7 +284,10 @@ async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialState
     )
 
     try:
-        quarters = await VnstockFinancialsFetcher.fetch(params)
+        quarters = await asyncio.wait_for(
+            VnstockFinancialsFetcher.fetch(params),
+            timeout=_provider_timeout_budget(),
+        )
     except BaseException as exc:
         if _is_control_flow_exception(exc):
             raise

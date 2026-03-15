@@ -34,7 +34,7 @@ from vnibb.providers.vnstock.equity_profile import (
     EquityProfileData,
 )
 from vnibb.models.stock import Stock, StockPrice
-from vnibb.models.company import Company
+from vnibb.models.company import Company, Shareholder
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.trading import FinancialRatio
 from vnibb.providers.vnstock.financials import (
@@ -48,7 +48,11 @@ from vnibb.providers.vnstock.company_events import (
     VnstockCompanyEventsFetcher,
     CompanyEventsQueryParams,
 )
-from vnibb.providers.vnstock.shareholders import VnstockShareholdersFetcher, ShareholdersQueryParams
+from vnibb.providers.vnstock.shareholders import (
+    VnstockShareholdersFetcher,
+    ShareholdersQueryParams,
+    ShareholderData,
+)
 from vnibb.providers.vnstock.officers import VnstockOfficersFetcher, OfficersQueryParams
 from vnibb.providers.vnstock.intraday import VnstockIntradayFetcher, IntradayQueryParams
 from vnibb.providers.vnstock.financial_ratios import (
@@ -451,6 +455,13 @@ async def _load_quote_from_appwrite(symbol: str) -> Optional[StockQuoteData]:
         else None
     )
 
+    document_timestamp = _coerce_meta_datetime(
+        latest_doc.get("updated_at")
+        or latest_doc.get("$updatedAt")
+        or latest_doc.get("time")
+        or latest_doc.get("$createdAt")
+    )
+
     return StockQuoteData(
         symbol=str(latest_doc.get("symbol") or symbol).upper(),
         price=latest_close,
@@ -462,7 +473,7 @@ async def _load_quote_from_appwrite(symbol: str) -> Optional[StockQuoteData]:
         change_pct=round(change_pct, 2) if change_pct is not None else None,
         volume=_appwrite_optional_int(latest_doc.get("volume")),
         value=_coerce_optional_float(latest_doc.get("value")),
-        updated_at=datetime.utcnow(),
+        updated_at=document_timestamp,
     )
 
 
@@ -538,6 +549,153 @@ def _serialize_meta_datetime(value: Any) -> Optional[str]:
             continue
 
     return None
+
+
+def _coerce_meta_datetime(value: Any) -> Optional[datetime]:
+    serialized = _serialize_meta_datetime(value)
+    if not serialized:
+        return None
+    try:
+        return datetime.fromisoformat(serialized)
+    except ValueError:
+        return None
+
+
+def _provider_timeout_budget(reserve_seconds: int = 5) -> float:
+    vnstock_timeout = max(1, int(getattr(settings, "vnstock_timeout", 30) or 30))
+    request_timeout = int(getattr(settings, "api_request_timeout_seconds", 0) or 0)
+    if request_timeout <= 0:
+        return float(vnstock_timeout)
+
+    reserve = reserve_seconds if request_timeout > reserve_seconds + 1 else 1
+    return float(max(1, min(vnstock_timeout, request_timeout - reserve)))
+
+
+def _build_quote_from_screener_snapshot(
+    snapshot_row: ScreenerSnapshot,
+    latest_row: Optional[StockPrice] = None,
+) -> Optional[StockQuoteData]:
+    if snapshot_row.price is None:
+        return None
+
+    snapshot_metrics = (
+        snapshot_row.extended_metrics if isinstance(snapshot_row.extended_metrics, dict) else {}
+    )
+    snapshot_change_pct = _pick_optional_float(
+        snapshot_metrics.get("change_1d"),
+        snapshot_metrics.get("price_change_1d_pct"),
+        snapshot_metrics.get("change_pct"),
+    )
+
+    snapshot_prev_close = None
+    snapshot_change = None
+    if snapshot_change_pct not in (None, -100):
+        snapshot_prev_close = snapshot_row.price / (1 + (snapshot_change_pct / 100))
+        snapshot_change = snapshot_row.price - snapshot_prev_close
+
+    snapshot_updated_at = (
+        _coerce_meta_datetime(snapshot_metrics.get("updated_at"))
+        or getattr(snapshot_row, "created_at", None)
+        or datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
+    )
+
+    return StockQuoteData(
+        symbol=str(snapshot_row.symbol or "").upper(),
+        price=snapshot_row.price,
+        open=float(latest_row.open) if latest_row and latest_row.open is not None else None,
+        high=float(latest_row.high) if latest_row and latest_row.high is not None else None,
+        low=float(latest_row.low) if latest_row and latest_row.low is not None else None,
+        prev_close=snapshot_prev_close,
+        change=snapshot_change,
+        change_pct=round(snapshot_change_pct, 2) if snapshot_change_pct is not None else None,
+        volume=int(snapshot_row.volume) if snapshot_row.volume is not None else None,
+        updated_at=snapshot_updated_at,
+    )
+
+
+async def _load_latest_screener_snapshot_quote(
+    db: AsyncSession,
+    symbol: str,
+) -> Optional[StockQuoteData]:
+    snapshot_stmt = (
+        select(ScreenerSnapshot)
+        .where(ScreenerSnapshot.symbol == symbol)
+        .order_by(ScreenerSnapshot.snapshot_date.desc(), ScreenerSnapshot.created_at.desc())
+        .limit(1)
+    )
+    snapshot_row = (await db.execute(snapshot_stmt)).scalar_one_or_none()
+    if not snapshot_row:
+        return None
+
+    latest_row = (
+        await db.execute(
+            select(StockPrice)
+            .where(StockPrice.symbol == symbol)
+            .order_by(StockPrice.time.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return _build_quote_from_screener_snapshot(snapshot_row, latest_row)
+
+
+def _quote_effective_timestamp(quote: Optional[StockQuoteData]) -> Optional[datetime]:
+    if quote is None:
+        return None
+    return _coerce_meta_datetime(getattr(quote, "updated_at", None))
+
+
+def _should_prefer_screener_quote(
+    primary_quote: Optional[StockQuoteData],
+    screener_quote: Optional[StockQuoteData],
+) -> bool:
+    if screener_quote is None:
+        return False
+    if primary_quote is None:
+        return True
+
+    primary_timestamp = _quote_effective_timestamp(primary_quote)
+    screener_timestamp = _quote_effective_timestamp(screener_quote)
+    if screener_timestamp is None:
+        return False
+    if primary_timestamp is None:
+        return True
+
+    if primary_timestamp.date() < screener_timestamp.date():
+        return True
+
+    return screener_timestamp > primary_timestamp
+
+
+async def _load_shareholders_fallback(
+    db: AsyncSession,
+    symbol: str,
+    limit: int = 20,
+) -> List[ShareholderData]:
+    rows = (
+        await db.execute(
+            select(Shareholder)
+            .where(Shareholder.symbol == symbol)
+            .order_by(
+                Shareholder.as_of_date.desc(),
+                Shareholder.updated_at.desc(),
+                Shareholder.ownership_pct.desc(),
+                Shareholder.shares_held.desc(),
+                Shareholder.name.asc(),
+            )
+            .limit(limit)
+        )
+    ).scalars().all()
+
+    return [
+        ShareholderData(
+            symbol=row.symbol,
+            shareholder_name=row.name,
+            shares_owned=row.shares_held,
+            ownership_pct=row.ownership_pct,
+            shareholder_type=row.shareholder_type,
+        )
+        for row in rows
+    ]
 
 
 def _normalize_dividend_yield_percent(value: Any) -> Optional[float]:
@@ -1900,46 +2058,7 @@ async def get_quote(
             )
 
             if snapshot_is_fresher and snapshot_row and snapshot_row.price is not None:
-                snapshot_metrics = (
-                    snapshot_row.extended_metrics
-                    if isinstance(snapshot_row.extended_metrics, dict)
-                    else {}
-                )
-                snapshot_change_pct = _pick_optional_float(
-                    snapshot_metrics.get("change_1d"),
-                    snapshot_metrics.get("price_change_1d_pct"),
-                    snapshot_metrics.get("change_pct"),
-                )
-
-                snapshot_prev_close = None
-                snapshot_change = None
-                if snapshot_change_pct not in (None, -100):
-                    snapshot_prev_close = snapshot_row.price / (1 + (snapshot_change_pct / 100))
-                    snapshot_change = snapshot_row.price - snapshot_prev_close
-
-                snapshot_updated_at = _serialize_meta_datetime(
-                    snapshot_metrics.get("updated_at") if snapshot_metrics else None
-                )
-                parsed_snapshot_updated_at = (
-                    datetime.fromisoformat(snapshot_updated_at)
-                    if snapshot_updated_at
-                    else datetime.combine(snapshot_date, datetime.min.time())
-                )
-
-                return StockQuoteData(
-                    symbol=symbol_upper,
-                    price=snapshot_row.price,
-                    open=float(latest_row.open) if latest_row and latest_row.open is not None else None,
-                    high=float(latest_row.high) if latest_row and latest_row.high is not None else None,
-                    low=float(latest_row.low) if latest_row and latest_row.low is not None else None,
-                    prev_close=snapshot_prev_close,
-                    change=snapshot_change,
-                    change_pct=round(snapshot_change_pct, 2)
-                    if snapshot_change_pct is not None
-                    else None,
-                    volume=int(snapshot_row.volume) if snapshot_row.volume is not None else None,
-                    updated_at=parsed_snapshot_updated_at,
-                )
+                return _build_quote_from_screener_snapshot(snapshot_row, latest_row)
 
             if latest_row:
                 return StockQuoteData(
@@ -1956,44 +2075,18 @@ async def get_quote(
                 )
 
             if snapshot_row and snapshot_row.price is not None:
-                snapshot_metrics = (
-                    snapshot_row.extended_metrics
-                    if isinstance(snapshot_row.extended_metrics, dict)
-                    else {}
-                )
-                snapshot_updated_at = _serialize_meta_datetime(
-                    snapshot_metrics.get("updated_at") if snapshot_metrics else None
-                )
-                parsed_snapshot_updated_at = (
-                    datetime.fromisoformat(snapshot_updated_at)
-                    if snapshot_updated_at
-                    else datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
-                )
-                snapshot_change_pct = _pick_optional_float(
-                    snapshot_metrics.get("change_1d"),
-                    snapshot_metrics.get("price_change_1d_pct"),
-                    snapshot_metrics.get("change_pct"),
-                )
-                snapshot_prev_close = None
-                snapshot_change = None
-                if snapshot_change_pct not in (None, -100):
-                    snapshot_prev_close = snapshot_row.price / (1 + (snapshot_change_pct / 100))
-                    snapshot_change = snapshot_row.price - snapshot_prev_close
-
-                return StockQuoteData(
-                    symbol=symbol_upper,
-                    price=snapshot_row.price,
-                    prev_close=snapshot_prev_close,
-                    change=snapshot_change,
-                    change_pct=round(snapshot_change_pct, 2)
-                    if snapshot_change_pct is not None
-                    else None,
-                    volume=int(snapshot_row.volume) if snapshot_row.volume is not None else None,
-                    updated_at=parsed_snapshot_updated_at,
-                )
+                return _build_quote_from_screener_snapshot(snapshot_row)
         except Exception as db_err:
             logger.warning(f"Quote DB fallback failed for {symbol_upper}: {db_err}")
         return None
+
+    screener_snapshot_quote: Optional[StockQuoteData] = None
+
+    async def _get_screener_snapshot_quote() -> Optional[StockQuoteData]:
+        nonlocal screener_snapshot_quote
+        if screener_snapshot_quote is None:
+            screener_snapshot_quote = await _load_latest_screener_snapshot_quote(db, symbol_upper)
+        return screener_snapshot_quote
 
     if not refresh:
         cached_quote = await _get_db_quote()
@@ -2003,6 +2096,9 @@ async def get_quote(
         if settings.resolved_data_backend == "appwrite" and use_appwrite_data:
             appwrite_quote = await _load_quote_from_appwrite(symbol_upper)
             if appwrite_quote:
+                screener_quote = await _get_screener_snapshot_quote()
+                if _should_prefer_screener_quote(appwrite_quote, screener_quote):
+                    return StandardResponse(data=screener_quote, meta=MetaData(count=1))
                 return StandardResponse(data=appwrite_quote, meta=MetaData(count=1))
 
     try:
@@ -2010,11 +2106,17 @@ async def get_quote(
             VnstockStockQuoteFetcher.fetch(symbol=symbol_upper, source=source),
             timeout=10,
         )
+        screener_quote = await _get_screener_snapshot_quote()
+        if _should_prefer_screener_quote(data, screener_quote):
+            data = screener_quote
         return StandardResponse(data=data, meta=MetaData(count=1))
     except Exception as e:
         if use_appwrite_data:
             appwrite_quote = await _load_quote_from_appwrite(symbol_upper)
             if appwrite_quote:
+                screener_quote = await _get_screener_snapshot_quote()
+                if _should_prefer_screener_quote(appwrite_quote, screener_quote):
+                    return StandardResponse(data=screener_quote, meta=MetaData(count=1), error=str(e))
                 return StandardResponse(data=appwrite_quote, meta=MetaData(count=1), error=str(e))
 
         fallback = await _get_db_quote()
@@ -2518,11 +2620,17 @@ async def get_analyst_estimates(symbol: str):
 
 
 @router.get("/{symbol}/shareholders", response_model=StandardResponse[List[Any]])
-async def get_shareholders(symbol: str):
+async def get_shareholders(symbol: str, db: AsyncSession = Depends(get_db)):
     symbol_upper = symbol.upper()
     try:
-        data = await VnstockShareholdersFetcher.fetch(ShareholdersQueryParams(symbol=symbol_upper))
+        data = await asyncio.wait_for(
+            VnstockShareholdersFetcher.fetch(ShareholdersQueryParams(symbol=symbol_upper)),
+            timeout=_provider_timeout_budget(),
+        )
         if not data:
+            fallback_data = await _load_shareholders_fallback(db=db, symbol=symbol_upper)
+            if fallback_data:
+                return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
             await _schedule_critical_reinforcement(
                 symbol=symbol_upper,
                 endpoint="equity.shareholders",
@@ -2533,6 +2641,13 @@ async def get_shareholders(symbol: str):
         if _is_control_flow_exception(e):
             raise
         logger.warning("Shareholders endpoint failed (symbol=%s): %s", symbol_upper, e)
+        fallback_data = await _load_shareholders_fallback(db=db, symbol=symbol_upper)
+        if fallback_data:
+            return StandardResponse(
+                data=fallback_data,
+                meta=MetaData(count=len(fallback_data)),
+                error=str(e),
+            )
         await _schedule_critical_reinforcement(
             symbol=symbol_upper,
             endpoint="equity.shareholders",

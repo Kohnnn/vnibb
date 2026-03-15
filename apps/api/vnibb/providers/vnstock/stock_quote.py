@@ -18,6 +18,28 @@ from vnibb.core.exceptions import ProviderError
 logger = logging.getLogger(__name__)
 
 
+def _coerce_quote_timestamp(value: object) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        for parser in (
+            lambda raw: datetime.fromisoformat(raw),
+            lambda raw: datetime.strptime(raw, "%Y-%m-%d"),
+        ):
+            try:
+                return parser(text).replace(tzinfo=None)
+            except ValueError:
+                continue
+    return None
+
+
 # =============================================================================
 # DATA MODELS
 # =============================================================================
@@ -190,7 +212,10 @@ class VnstockStockQuoteFetcher:
                 change_pct=round(change_pct, 2) if change_pct is not None else None,
                 volume=int(latest.get("volume") or 0) if latest.get("volume") else None,
                 value=float(latest.get("value") or 0) if latest.get("value") else None,
-                updated_at=datetime.utcnow(),
+                updated_at=_coerce_quote_timestamp(
+                    latest.get("updated_at") or latest.get("time") or latest.get("date")
+                )
+                or datetime.utcnow(),
             )
             
             # Store in cache
