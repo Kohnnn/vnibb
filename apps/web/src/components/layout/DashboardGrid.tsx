@@ -60,31 +60,47 @@ export function DashboardGrid({
 
     // Measure container width with debounce to prevent excessive re-renders during animations
     useEffect(() => {
-        let timeoutId: NodeJS.Timeout;
-        const updateWidth = () => {
-            if (containerRef.current) {
-                const newWidth = containerRef.current.offsetWidth;
-                if (newWidth > 0) {
-                    setWidth((currentWidth) => (currentWidth === newWidth ? currentWidth : newWidth));
-                }
+        let timeoutId: number | undefined;
+
+        const updateWidth = (nextWidth?: number) => {
+            const measuredWidth = nextWidth ?? containerRef.current?.getBoundingClientRect().width ?? 0;
+            const roundedWidth = Math.round(measuredWidth);
+            if (!Number.isFinite(roundedWidth) || roundedWidth <= 0) {
+                return;
             }
+
+            setWidth((currentWidth) => (currentWidth === roundedWidth ? currentWidth : roundedWidth));
         };
 
-        const debouncedUpdate = () => {
-            clearTimeout(timeoutId);
-            timeoutId = setTimeout(updateWidth, 100);
+        const debouncedUpdate = (nextWidth?: number) => {
+            if (timeoutId !== undefined) {
+                window.clearTimeout(timeoutId);
+            }
+            timeoutId = window.setTimeout(() => updateWidth(nextWidth), 100);
         };
 
         updateWidth();
 
-        const resizeObserver = new ResizeObserver(debouncedUpdate);
+        const resizeObserver = new ResizeObserver((entries) => {
+            const entry = entries[0];
+            if (!entry) return;
+
+            const { width: nextWidth, height: nextHeight } = entry.contentRect;
+            if (nextWidth <= 0 || nextHeight <= 0) {
+                return;
+            }
+
+            debouncedUpdate(nextWidth);
+        });
         if (containerRef.current) {
             resizeObserver.observe(containerRef.current);
         }
 
         return () => {
             resizeObserver.disconnect();
-            clearTimeout(timeoutId);
+            if (timeoutId !== undefined) {
+                window.clearTimeout(timeoutId);
+            }
         };
     }, []);
 

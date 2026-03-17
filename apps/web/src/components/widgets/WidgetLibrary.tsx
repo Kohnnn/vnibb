@@ -134,6 +134,17 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         });
     }, []);
 
+    const selectCategoryWidgets = useCallback((widgetTypes: WidgetType[]) => {
+        if (!dashboardEditable || widgetTypes.length === 0) return;
+        setSelectedWidgetTypes((current) => Array.from(new Set([...current, ...widgetTypes])));
+    }, [dashboardEditable]);
+
+    const clearCategoryWidgets = useCallback((widgetTypes: WidgetType[]) => {
+        if (widgetTypes.length === 0) return;
+        const widgetTypeSet = new Set(widgetTypes);
+        setSelectedWidgetTypes((current) => current.filter((type) => !widgetTypeSet.has(type)));
+    }, []);
+
     const handleAddSelected = useCallback(() => {
         if (!selectedWidgetTypes.length) return;
         const definitionsByType = new Map(widgetDefinitions.map((widget) => [widget.type, widget]));
@@ -237,6 +248,10 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                             {filteredCategories.map((cat) => {
                                 const Icon = CATEGORY_ICONS[cat.id] || Box;
                                 const isExpanded = activeCategory === cat.id || searchQuery !== '';
+                                const categoryWidgetTypes = cat.widgets.map((widget) => widget.type);
+                                const selectedInCategory = categoryWidgetTypes.filter((type) =>
+                                    selectedWidgetTypes.includes(type)
+                                ).length;
 
                                 return (
                                     <div key={cat.id} className="border-b border-[var(--border-subtle)] last:border-0">
@@ -261,6 +276,28 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
 
                                         {isExpanded && (
                                             <div className="p-1 space-y-1 bg-[var(--bg-secondary)]/60">
+                                                <div className="flex items-center justify-between rounded-lg px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                                                    <span>{selectedInCategory} selected</span>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => selectCategoryWidgets(categoryWidgetTypes)}
+                                                            disabled={!dashboardEditable || categoryWidgetTypes.length === 0}
+                                                            className="rounded-md border border-[var(--border-default)] px-2 py-1 transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                                                        >
+                                                            Select All
+                                                        </button>
+                                                        {selectedInCategory > 0 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => clearCategoryWidgets(categoryWidgetTypes)}
+                                                                className="rounded-md border border-[var(--border-default)] px-2 py-1 transition-colors hover:bg-[var(--bg-hover)]"
+                                                            >
+                                                                Clear
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
                                                 {cat.widgets.map((widget) => (
                                                     <div
                                                         key={widget.type}

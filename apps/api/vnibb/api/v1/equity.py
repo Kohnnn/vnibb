@@ -16,11 +16,12 @@ from sqlalchemy import select, desc, func
 from vnibb.api.v1.schemas import StandardResponse, MetaData
 from vnibb.core.database import get_db
 from vnibb.core.exceptions import ProviderTimeoutError
-from vnibb.core.cache import cached
+from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
 from vnibb.core.appwrite_client import get_appwrite_stock, get_appwrite_stock_prices
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.services.cache_manager import CacheManager
+from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
 
 # Providers
 from vnibb.providers.vnstock.equity_historical import (
@@ -35,8 +36,9 @@ from vnibb.providers.vnstock.equity_profile import (
 )
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.company import Company, Shareholder
+from vnibb.models.news import CompanyEvent, Dividend
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.trading import FinancialRatio
+from vnibb.models.trading import FinancialRatio, OrderbookSnapshot
 from vnibb.providers.vnstock.financials import (
     FinancialStatementData,
     StatementType,
@@ -304,6 +306,67 @@ async def _load_financial_statement_fallback(
     ]
 
 
+def _coerce_iso_timestamp(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).isoformat()
+    except ValueError:
+        return _coerce_iso_date(raw)
+
+
+def _pick_latest_iso_date_from_rows(rows: list[dict[str, Any]], *keys: str) -> Optional[str]:
+    latest_value: date | None = None
+    for row in rows:
+        for key in keys:
+            iso_value = _coerce_iso_date(row.get(key))
+            if not iso_value:
+                continue
+            try:
+                parsed = date.fromisoformat(iso_value)
+            except ValueError:
+                continue
+            if latest_value is None or parsed > latest_value:
+                latest_value = parsed
+    return latest_value.isoformat() if latest_value else None
+
+
+async def _get_model_last_updated(
+    db: AsyncSession,
+    model: Any,
+    symbol: str,
+) -> Optional[str]:
+    result = await db.execute(
+        select(func.max(model.updated_at)).where(model.symbol == symbol.upper())
+    )
+    return _coerce_iso_timestamp(result.scalar())
+
+
+async def _get_profile_last_data_date(db: AsyncSession, symbol: str) -> Optional[str]:
+    symbol_upper = symbol.upper()
+    company_result = await db.execute(
+        select(func.max(Company.updated_at)).where(Company.symbol == symbol_upper)
+    )
+    stock_result = await db.execute(
+        select(func.max(Stock.updated_at)).where(Stock.symbol == symbol_upper)
+    )
+
+    company_last_updated = _coerce_iso_timestamp(company_result.scalar())
+    if company_last_updated:
+        return company_last_updated
+
+    return _coerce_iso_timestamp(stock_result.scalar())
+
+
 def _to_historical_data(row: StockPrice) -> EquityHistoricalData:
     return EquityHistoricalData(
         symbol=row.symbol,
@@ -403,6 +466,103 @@ async def _load_historical_from_appwrite(
     return rows
 
 
+async def _load_historical_from_recent_cache(
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    interval: str,
+) -> List[EquityHistoricalData]:
+    if (interval or "1D").upper() != "1D":
+        return []
+    if (end_date - start_date).days > 90:
+        return []
+
+    cache_key = build_cache_key("vnibb", "price", "recent", symbol.upper())
+    try:
+        cached_rows = await redis_client.get_json(cache_key)
+    except Exception:
+        return []
+
+    if not isinstance(cached_rows, list) or not cached_rows:
+        return []
+
+    rows: List[EquityHistoricalData] = []
+    for row in cached_rows:
+        if not isinstance(row, dict):
+            continue
+        item = _to_historical_data_from_appwrite(
+            {
+                "symbol": symbol.upper(),
+                "interval": "1D",
+                **row,
+            }
+        )
+        if item is None:
+            continue
+        if start_date <= item.time <= end_date:
+            rows.append(item)
+
+    rows.sort(key=lambda item: item.time)
+    return rows
+
+
+async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
+    latest_key = build_cache_key("vnibb", "price", "latest", symbol.upper())
+    recent_key = build_cache_key("vnibb", "price", "recent", symbol.upper())
+
+    try:
+        latest_payload = await redis_client.get_json(latest_key)
+        recent_rows = await redis_client.get_json(recent_key)
+    except Exception:
+        return None
+
+    if not isinstance(latest_payload, dict):
+        return None
+
+    latest_close = _coerce_optional_float(latest_payload.get("close"))
+    if latest_close is None:
+        return None
+
+    normalized_recent = (
+        [row for row in recent_rows if isinstance(row, dict)]
+        if isinstance(recent_rows, list)
+        else []
+    )
+    normalized_recent.sort(key=lambda row: str(row.get("time") or ""))
+
+    prev_close: Optional[float] = None
+    for row in reversed(normalized_recent[:-1] if len(normalized_recent) > 1 else []):
+        prev_close = _coerce_optional_float(row.get("close"))
+        if prev_close is not None:
+            break
+
+    change = latest_close - prev_close if prev_close is not None else None
+    change_pct = (
+        ((change / prev_close) * 100)
+        if change is not None and prev_close not in (None, 0)
+        else None
+    )
+
+    updated_at = _coerce_meta_datetime(
+        latest_payload.get("updated_at")
+        or latest_payload.get("time")
+        or latest_payload.get("$updatedAt")
+    )
+
+    return StockQuoteData(
+        symbol=symbol.upper(),
+        price=latest_close,
+        open=_coerce_optional_float(latest_payload.get("open")),
+        high=_coerce_optional_float(latest_payload.get("high")),
+        low=_coerce_optional_float(latest_payload.get("low")),
+        prev_close=prev_close,
+        change=change,
+        change_pct=round(change_pct, 2) if change_pct is not None else None,
+        volume=_appwrite_optional_int(latest_payload.get("volume")),
+        updated_at=updated_at,
+    )
+
+
 async def _load_profile_from_appwrite(symbol: str) -> Optional[EquityProfileData]:
     doc = await get_appwrite_stock(symbol)
     if not doc:
@@ -500,6 +660,33 @@ def _pick_optional_float(*values: Any) -> Optional[float]:
         parsed = _coerce_optional_float(value)
         if parsed is not None:
             return parsed
+    return None
+
+
+def _pick_optional_text(*values: Any) -> Optional[str]:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _normalize_share_count(value: Any) -> Optional[float]:
+    numeric = _coerce_optional_float(value)
+    if numeric in (None, 0):
+        return None
+    if abs(numeric) < 1_000_000:
+        return numeric * 1_000_000.0
+    return numeric
+
+
+def _pick_optional_share_count(*values: Any) -> Optional[float]:
+    for value in values:
+        normalized = _normalize_share_count(value)
+        if normalized is not None:
+            return normalized
     return None
 
 
@@ -672,19 +859,23 @@ async def _load_shareholders_fallback(
     limit: int = 20,
 ) -> List[ShareholderData]:
     rows = (
-        await db.execute(
-            select(Shareholder)
-            .where(Shareholder.symbol == symbol)
-            .order_by(
-                Shareholder.as_of_date.desc(),
-                Shareholder.updated_at.desc(),
-                Shareholder.ownership_pct.desc(),
-                Shareholder.shares_held.desc(),
-                Shareholder.name.asc(),
+        (
+            await db.execute(
+                select(Shareholder)
+                .where(Shareholder.symbol == symbol)
+                .order_by(
+                    Shareholder.as_of_date.desc(),
+                    Shareholder.updated_at.desc(),
+                    Shareholder.ownership_pct.desc(),
+                    Shareholder.shares_held.desc(),
+                    Shareholder.name.asc(),
+                )
+                .limit(limit)
             )
-            .limit(limit)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return [
         ShareholderData(
@@ -913,6 +1104,71 @@ def _classify_dividend_type(
     return "other"
 
 
+def _build_dividend_row_from_payload(
+    symbol: str, payload: dict[str, Any]
+) -> Optional[dict[str, Any]]:
+    cash_dividend = _coerce_optional_float(
+        payload.get("cash_dividend") or payload.get("cashDividend") or payload.get("value")
+    )
+    stock_dividend = _coerce_optional_float(
+        payload.get("stock_dividend") or payload.get("stockDividend")
+    )
+    dividend_ratio = payload.get("dividend_ratio") or payload.get("ratio")
+    if isinstance(dividend_ratio, str):
+        dividend_ratio = dividend_ratio.strip() or None
+
+    if cash_dividend is None and stock_dividend is None and dividend_ratio is None:
+        return None
+
+    ex_date = _coerce_iso_date(payload.get("ex_date") or payload.get("exDate"))
+    record_date = _coerce_iso_date(payload.get("record_date") or payload.get("recordDate"))
+    payment_date = _coerce_iso_date(payload.get("payment_date") or payload.get("paymentDate"))
+    fiscal_year = _extract_calendar_year(
+        payload.get("fiscal_year"),
+        payload.get("fiscalYear"),
+    )
+    issue_year = _extract_calendar_year(
+        payload.get("issue_year"),
+        payload.get("issueYear"),
+    )
+    event_year = _extract_calendar_year(
+        fiscal_year,
+        issue_year,
+        ex_date,
+        record_date,
+        payment_date,
+    )
+    raw_type = payload.get("dividend_type") or payload.get("type") or payload.get("issue_method")
+    description = payload.get("description")
+    dividend_type = _classify_dividend_type(
+        raw_type=raw_type,
+        cash_dividend=cash_dividend,
+        stock_dividend=stock_dividend,
+        dividend_ratio=dividend_ratio,
+        description=description,
+    )
+
+    return {
+        "symbol": symbol.upper(),
+        "ex_date": ex_date,
+        "record_date": record_date,
+        "payment_date": payment_date,
+        "type": dividend_type,
+        "dividend_type": dividend_type,
+        "raw_dividend_type": raw_type,
+        "cash_dividend": cash_dividend,
+        "stock_dividend": stock_dividend,
+        "dividend_ratio": dividend_ratio,
+        "value": cash_dividend if cash_dividend is not None else stock_dividend,
+        "fiscal_year": fiscal_year,
+        "issue_year": issue_year,
+        "year": event_year,
+        "annual_dps": None,
+        "dividend_yield": None,
+        "description": description,
+    }
+
+
 async def _resolve_profile_market_cap(
     db: AsyncSession,
     symbol: str,
@@ -938,9 +1194,11 @@ async def _resolve_profile_market_cap(
                 "Quote fallback failed while resolving market cap for %s: %s", symbol, exc
             )
 
-    if shares_value not in (None, 0) and latest_price not in (None, 0):
+    latest_price_vnd = _price_to_vnd_units(latest_price, dps_hint=1.0)
+
+    if shares_value not in (None, 0) and latest_price_vnd not in (None, 0):
         multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
-        return shares_value * multiplier * latest_price
+        return shares_value * multiplier * latest_price_vnd
 
     direct_market_cap = _coerce_optional_float(fallback_market_cap)
     if direct_market_cap not in (None, 0):
@@ -993,12 +1251,14 @@ async def _get_outstanding_shares(db: AsyncSession, symbol: str) -> Optional[flo
         return None
 
     raw_payload = company_row[2] if isinstance(company_row[2], dict) else {}
-    return _pick_optional_float(
+    return _pick_optional_share_count(
         company_row[0],
         company_row[1],
         raw_payload.get("outstanding_shares"),
+        raw_payload.get("listed_shares"),
         raw_payload.get("issue_share"),
         raw_payload.get("financial_ratio_issue_share"),
+        raw_payload.get("listed_volume"),
     )
 
 
@@ -1875,6 +2135,15 @@ async def get_historical_prices(
         data = [_to_historical_data(r) for r in cache_result.data]
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
 
+    recent_cache_data = await _load_historical_from_recent_cache(
+        symbol=symbol_upper,
+        start_date=start_date,
+        end_date=end_date,
+        interval=interval,
+    )
+    if recent_cache_data:
+        return StandardResponse(data=recent_cache_data, meta=MetaData(count=len(recent_cache_data)))
+
     if settings.resolved_data_backend == "appwrite" and use_appwrite_data:
         appwrite_data = await _load_historical_from_appwrite(
             symbol=symbol_upper,
@@ -2031,7 +2300,9 @@ async def get_quote(
             latest_row = price_rows[0] if price_rows else None
             previous_row = price_rows[1] if len(price_rows) > 1 else None
 
-            latest_close = float(latest_row.close) if latest_row and latest_row.close is not None else None
+            latest_close = (
+                float(latest_row.close) if latest_row and latest_row.close is not None else None
+            )
             prev_close = (
                 float(previous_row.close)
                 if previous_row and previous_row.close is not None
@@ -2089,6 +2360,10 @@ async def get_quote(
         return screener_snapshot_quote
 
     if not refresh:
+        cached_price_quote = await _load_quote_from_price_cache(symbol_upper)
+        if cached_price_quote:
+            return StandardResponse(data=cached_price_quote, meta=MetaData(count=1))
+
         cached_quote = await _get_db_quote()
         if cached_quote:
             return StandardResponse(data=cached_quote, meta=MetaData(count=1))
@@ -2116,7 +2391,9 @@ async def get_quote(
             if appwrite_quote:
                 screener_quote = await _get_screener_snapshot_quote()
                 if _should_prefer_screener_quote(appwrite_quote, screener_quote):
-                    return StandardResponse(data=screener_quote, meta=MetaData(count=1), error=str(e))
+                    return StandardResponse(
+                        data=screener_quote, meta=MetaData(count=1), error=str(e)
+                    )
                 return StandardResponse(data=appwrite_quote, meta=MetaData(count=1), error=str(e))
 
         fallback = await _get_db_quote()
@@ -2161,13 +2438,28 @@ async def get_profile(
                 raw_profile = company.raw_data if isinstance(company.raw_data, dict) else {}
                 stock_row = (
                     await db.execute(
-                        select(Stock.exchange, Stock.listing_date).where(
-                            Stock.symbol == symbol_upper
-                        )
+                        select(
+                            Stock.exchange, Stock.listing_date, Stock.industry, Stock.sector
+                        ).where(Stock.symbol == symbol_upper)
                     )
                 ).first()
 
                 exchange = company.exchange or (stock_row[0] if stock_row else None)
+                industry = _pick_optional_text(
+                    company.industry,
+                    raw_profile.get("industry"),
+                    raw_profile.get("icb_name3"),
+                    raw_profile.get("icb_name4"),
+                    stock_row[2] if stock_row else None,
+                )
+                sector = _pick_optional_text(
+                    company.sector,
+                    raw_profile.get("sector"),
+                    raw_profile.get("icb_name2"),
+                    raw_profile.get("company_type"),
+                    stock_row[3] if stock_row else None,
+                    industry,
+                )
                 listing_date = (
                     _coerce_iso_date(company.listing_date)
                     or _coerce_iso_date(raw_profile.get("listing_date"))
@@ -2183,13 +2475,24 @@ async def get_profile(
                     or _coerce_iso_date(raw_profile.get("founded"))
                 )
 
-                outstanding_shares = _pick_optional_float(
+                outstanding_shares = _pick_optional_share_count(
                     company.outstanding_shares,
                     company.listed_shares,
                     raw_profile.get("outstanding_shares"),
+                    raw_profile.get("listed_shares"),
                     raw_profile.get("issue_share"),
                     raw_profile.get("financial_ratio_issue_share"),
+                    raw_profile.get("listed_volume"),
                     await _get_outstanding_shares(db, symbol_upper),
+                )
+                listed_shares = _pick_optional_share_count(
+                    company.listed_shares,
+                    company.outstanding_shares,
+                    raw_profile.get("listed_shares"),
+                    raw_profile.get("listed_volume"),
+                    raw_profile.get("issue_share"),
+                    raw_profile.get("financial_ratio_issue_share"),
+                    outstanding_shares,
                 )
                 market_cap = await _resolve_profile_market_cap(
                     db=db,
@@ -2221,26 +2524,35 @@ async def get_profile(
                         company_name=company.company_name,
                         short_name=company.short_name,
                         exchange=exchange,
-                        industry=company.industry,
-                        sector=company.sector,
+                        industry=industry,
+                        sector=sector,
                         established_date=established_date,
                         listing_date=listing_date,
                         website=website,
                         description=description,
                         outstanding_shares=outstanding_shares,
-                        listed_shares=company.listed_shares,
+                        listed_shares=listed_shares,
                         market_cap=market_cap,
                         address=address,
                         phone=phone,
                         email=email,
                     ),
-                    meta=MetaData(count=1),
+                    meta=MetaData(
+                        count=1,
+                        last_data_date=await _get_profile_last_data_date(db, symbol_upper),
+                    ),
                 )
 
         if not refresh and settings.resolved_data_backend == "appwrite" and use_appwrite_data:
             appwrite_profile = await _load_profile_from_appwrite(symbol_upper)
             if appwrite_profile:
-                return StandardResponse(data=appwrite_profile, meta=MetaData(count=1))
+                return StandardResponse(
+                    data=appwrite_profile,
+                    meta=MetaData(
+                        count=1,
+                        last_data_date=await _get_profile_last_data_date(db, symbol_upper),
+                    ),
+                )
 
         fallback_profile: Optional[EquityProfileData] = None
         if not refresh:
@@ -2259,7 +2571,7 @@ async def get_profile(
                     short_name=stock.short_name,
                     exchange=stock.exchange,
                     industry=stock.industry,
-                    sector=stock.sector,
+                    sector=stock.sector or stock.industry,
                     listing_date=_coerce_iso_date(stock.listing_date),
                     market_cap=market_cap,
                 )
@@ -2269,12 +2581,24 @@ async def get_profile(
                 f"profile:{symbol_upper}",
                 lambda: _refresh_profile_cache(symbol_upper),
             )
-            return StandardResponse(data=fallback_profile, meta=MetaData(count=1))
+            return StandardResponse(
+                data=fallback_profile,
+                meta=MetaData(
+                    count=1,
+                    last_data_date=await _get_profile_last_data_date(db, symbol_upper),
+                ),
+            )
 
         if not refresh and use_appwrite_data:
             appwrite_profile = await _load_profile_from_appwrite(symbol_upper)
             if appwrite_profile:
-                return StandardResponse(data=appwrite_profile, meta=MetaData(count=1))
+                return StandardResponse(
+                    data=appwrite_profile,
+                    meta=MetaData(
+                        count=1,
+                        last_data_date=await _get_profile_last_data_date(db, symbol_upper),
+                    ),
+                )
 
         params = EquityProfileQueryParams(symbol=symbol)
         data = await asyncio.wait_for(
@@ -2289,7 +2613,9 @@ async def get_profile(
 
             stock_row = (
                 await db.execute(
-                    select(Stock.exchange, Stock.listing_date).where(Stock.symbol == symbol_upper)
+                    select(Stock.exchange, Stock.listing_date, Stock.industry, Stock.sector).where(
+                        Stock.symbol == symbol_upper
+                    )
                 )
             ).first()
             if not profile_data.exchange and stock_row and stock_row[0]:
@@ -2329,24 +2655,58 @@ async def get_profile(
             if not profile_data.email:
                 profile_data.email = raw_profile.get("email")
 
+            profile_data.industry = _pick_optional_text(
+                profile_data.industry,
+                raw_profile.get("industry"),
+                raw_profile.get("icb_name3"),
+                raw_profile.get("icb_name4"),
+                stock_row[2] if stock_row else None,
+            )
+            profile_data.sector = _pick_optional_text(
+                profile_data.sector,
+                raw_profile.get("sector"),
+                raw_profile.get("icb_name2"),
+                raw_profile.get("company_type"),
+                stock_row[3] if stock_row else None,
+                profile_data.industry,
+            )
+
+            profile_data.outstanding_shares = _pick_optional_share_count(
+                profile_data.outstanding_shares,
+                profile_data.listed_shares,
+                raw_profile.get("outstanding_shares"),
+                raw_profile.get("listed_shares"),
+                raw_profile.get("issue_share"),
+                raw_profile.get("financial_ratio_issue_share"),
+                raw_profile.get("listed_volume"),
+                await _get_outstanding_shares(db, symbol_upper),
+            )
+            profile_data.listed_shares = _pick_optional_share_count(
+                profile_data.listed_shares,
+                raw_profile.get("listed_shares"),
+                raw_profile.get("listed_volume"),
+                raw_profile.get("issue_share"),
+                raw_profile.get("financial_ratio_issue_share"),
+                profile_data.outstanding_shares,
+            )
+
             profile_data.market_cap = await _resolve_profile_market_cap(
                 db=db,
                 symbol=symbol_upper,
-                outstanding_shares=_pick_optional_float(
-                    profile_data.outstanding_shares,
-                    profile_data.listed_shares,
-                    raw_profile.get("outstanding_shares"),
-                    raw_profile.get("issue_share"),
-                    raw_profile.get("financial_ratio_issue_share"),
-                    await _get_outstanding_shares(db, symbol_upper),
-                ),
+                outstanding_shares=profile_data.outstanding_shares,
                 fallback_market_cap=profile_data.market_cap,
             )
 
             await cache_manager.store_profile_data(
                 symbol_upper, profile_data.model_dump(mode="json")
             )
-            return StandardResponse(data=profile_data, meta=MetaData(count=1))
+            return StandardResponse(
+                data=profile_data,
+                meta=MetaData(
+                    count=1,
+                    last_data_date=await _get_profile_last_data_date(db, symbol_upper),
+                ),
+            )
 
         # Return None data instead of 404
         return StandardResponse(data=None, error="Profile not found")
@@ -2358,7 +2718,14 @@ async def get_profile(
         if use_appwrite_data:
             appwrite_profile = await _load_profile_from_appwrite(symbol_upper)
             if appwrite_profile:
-                return StandardResponse(data=appwrite_profile, meta=MetaData(count=1), error=str(e))
+                return StandardResponse(
+                    data=appwrite_profile,
+                    meta=MetaData(
+                        count=1,
+                        last_data_date=await _get_profile_last_data_date(db, symbol_upper),
+                    ),
+                    error=str(e),
+                )
 
         return StandardResponse(data=None, error=str(e))
 
@@ -2371,6 +2738,16 @@ async def get_financials(
     limit: int = Query(5, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ):
+    statement_model = {
+        "income": IncomeStatement,
+        "balance": BalanceSheet,
+        "cashflow": CashFlow,
+    }.get(statement_type)
+    last_data_date = (
+        await _get_model_last_updated(db, statement_model, symbol)
+        if statement_model is not None
+        else None
+    )
     try:
         data = await get_financials_with_ttm(
             symbol=symbol,
@@ -2379,7 +2756,10 @@ async def get_financials(
             limit=limit,
         )
         if data:
-            return StandardResponse(data=data, meta=MetaData(count=len(data)))
+            return StandardResponse(
+                data=data,
+                meta=MetaData(count=len(data), last_data_date=last_data_date),
+            )
 
         fallback_data = await _load_financial_statement_fallback(
             db=db,
@@ -2389,9 +2769,12 @@ async def get_financials(
             limit=limit,
         )
         if fallback_data:
-            return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+            return StandardResponse(
+                data=fallback_data,
+                meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+            )
 
-        return StandardResponse(data=[], meta=MetaData(count=0))
+        return StandardResponse(data=[], meta=MetaData(count=0, last_data_date=last_data_date))
     except BaseException as e:
         if _is_control_flow_exception(e):
             raise
@@ -2405,7 +2788,10 @@ async def get_financials(
                 limit=limit,
             )
             if fallback_data:
-                return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+                return StandardResponse(
+                    data=fallback_data,
+                    meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+                )
         except Exception as fallback_error:
             logger.warning(f"DB fallback failed for financials {symbol}: {fallback_error}")
 
@@ -2665,17 +3051,26 @@ async def get_officers(symbol: str):
         return StandardResponse(data=[], error=str(e))
 
 
+def _depth_value(depth_data: Any, key: str) -> Any:
+    if isinstance(depth_data, dict):
+        if key in depth_data:
+            return depth_data.get(key)
+        camel_key = re.sub(r"_([a-z])", lambda match: match.group(1).upper(), key)
+        return depth_data.get(camel_key)
+    return getattr(depth_data, key, None)
+
+
 def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
     entries: List[dict[str, Any]] = []
 
     for level in range(1, 4):
-        bid_level = getattr(depth_data, f"bid_{level}", None)
-        ask_level = getattr(depth_data, f"ask_{level}", None)
+        bid_level = _depth_value(depth_data, f"bid_{level}")
+        ask_level = _depth_value(depth_data, f"ask_{level}")
 
-        bid_price = getattr(bid_level, "price", None) if bid_level else None
-        ask_price = getattr(ask_level, "price", None) if ask_level else None
-        bid_vol = getattr(bid_level, "volume", None) if bid_level else None
-        ask_vol = getattr(ask_level, "volume", None) if ask_level else None
+        bid_price = _depth_value(bid_level, "price") if bid_level else None
+        ask_price = _depth_value(ask_level, "price") if ask_level else None
+        bid_vol = _depth_value(bid_level, "volume") if bid_level else None
+        ask_vol = _depth_value(ask_level, "volume") if ask_level else None
         price = bid_price if bid_price is not None else ask_price
 
         if any(value is not None for value in (price, bid_vol, ask_vol)):
@@ -2688,7 +3083,7 @@ def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
                 }
             )
 
-    raw_levels = getattr(depth_data, "raw_levels", None) or []
+    raw_levels = _depth_value(depth_data, "raw_levels") or []
     if entries or not raw_levels:
         return entries
 
@@ -2712,28 +3107,149 @@ def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
     return entries
 
 
-async def _get_orderbook_payload(symbol: str) -> dict[str, Any]:
-    depth = await asyncio.wait_for(
-        VnstockPriceDepthFetcher.fetch(symbol=symbol.upper(), source=settings.vnstock_source),
-        timeout=30,
+def _build_orderbook_payload(
+    symbol: str,
+    depth_data: Any,
+    *,
+    snapshot_time: str | None = None,
+) -> dict[str, Any]:
+    cached_entries = depth_data.get("entries") if isinstance(depth_data, dict) else None
+    entries = (
+        cached_entries
+        if isinstance(cached_entries, list) and cached_entries
+        else _normalize_orderbook_entries(depth_data)
     )
-    entries = _normalize_orderbook_entries(depth)
-
     return {
         "symbol": symbol.upper(),
         "entries": entries,
-        "total_bid_volume": getattr(depth, "total_bid_volume", None),
-        "total_ask_volume": getattr(depth, "total_ask_volume", None),
-        "last_price": getattr(depth, "last_price", None),
-        "last_volume": getattr(depth, "last_volume", None),
+        "total_bid_volume": _depth_value(depth_data, "total_bid_volume"),
+        "total_ask_volume": _depth_value(depth_data, "total_ask_volume"),
+        "last_price": _depth_value(depth_data, "last_price"),
+        "last_volume": _depth_value(depth_data, "last_volume"),
+        "snapshot_time": snapshot_time,
     }
 
 
-@router.get("/{symbol}/price-depth", response_model=StandardResponse[dict[str, Any]])
-async def get_price_depth(symbol: str):
+def _build_orderbook_payload_from_snapshot(snapshot: OrderbookSnapshot) -> dict[str, Any]:
+    payload = _build_orderbook_payload(
+        snapshot.symbol,
+        snapshot.price_depth or {},
+        snapshot_time=_serialize_meta_datetime(snapshot.snapshot_time),
+    )
+    if payload.get("entries"):
+        return payload
+
+    entries: List[dict[str, Any]] = []
+    for level in range(1, 4):
+        bid_price = getattr(snapshot, f"bid{level}_price")
+        ask_price = getattr(snapshot, f"ask{level}_price")
+        bid_volume = getattr(snapshot, f"bid{level}_volume")
+        ask_volume = getattr(snapshot, f"ask{level}_volume")
+        price = bid_price if bid_price is not None else ask_price
+        if any(value is not None for value in (price, bid_volume, ask_volume)):
+            entries.append(
+                {
+                    "level": level,
+                    "price": price,
+                    "bid_vol": bid_volume,
+                    "ask_vol": ask_volume,
+                }
+            )
+
+    payload["entries"] = entries
+    payload["total_bid_volume"] = snapshot.total_bid_volume
+    payload["total_ask_volume"] = snapshot.total_ask_volume
+    return payload
+
+
+async def _load_cached_orderbook_payload(symbol: str) -> dict[str, Any] | None:
+    cache_key = build_cache_key("vnibb", "orderbook", "latest", symbol.upper())
     try:
-        payload = await _get_orderbook_payload(symbol)
-        return StandardResponse(data=payload, meta=MetaData(count=len(payload.get("entries", []))))
+        cached = await redis_client.get_json(cache_key)
+    except Exception:
+        return None
+
+    if not isinstance(cached, dict):
+        return None
+
+    payload = _build_orderbook_payload(
+        symbol,
+        cached,
+        snapshot_time=_pick_optional_text(cached.get("snapshot_time"), cached.get("cached_at")),
+    )
+    if payload.get("entries") or payload.get("total_bid_volume") is not None:
+        return payload
+    return None
+
+
+async def _load_orderbook_snapshot_from_db(
+    db: AsyncSession,
+    symbol: str,
+) -> dict[str, Any] | None:
+    result = await db.execute(
+        select(OrderbookSnapshot)
+        .where(OrderbookSnapshot.symbol == symbol.upper())
+        .order_by(desc(OrderbookSnapshot.snapshot_time))
+        .limit(1)
+    )
+    snapshot = result.scalar_one_or_none()
+    if snapshot is None:
+        return None
+    return _build_orderbook_payload_from_snapshot(snapshot)
+
+
+async def _cache_orderbook_payload(symbol: str, payload: dict[str, Any]) -> None:
+    snapshot_time = (
+        _pick_optional_text(payload.get("snapshot_time")) or datetime.utcnow().isoformat()
+    )
+    trade_date = str(snapshot_time)[:10]
+
+    latest_key = build_cache_key("vnibb", "orderbook", "latest", symbol.upper())
+    daily_key = build_cache_key("vnibb", "orderbook", "daily", symbol.upper(), trade_date)
+
+    try:
+        await redis_client.set_json(latest_key, payload, ttl=CACHE_TTL_ORDERBOOK)
+        await redis_client.set_json(daily_key, payload, ttl=CACHE_TTL_ORDERBOOK_DAILY)
+    except Exception:
+        return
+
+
+async def _get_orderbook_payload(symbol: str, db: AsyncSession) -> dict[str, Any]:
+    cached_payload = await _load_cached_orderbook_payload(symbol)
+    if cached_payload is not None:
+        return cached_payload
+
+    try:
+        depth = await asyncio.wait_for(
+            VnstockPriceDepthFetcher.fetch(symbol=symbol.upper(), source=settings.vnstock_source),
+            timeout=30,
+        )
+    except Exception:
+        snapshot_payload = await _load_orderbook_snapshot_from_db(db, symbol)
+        if snapshot_payload is not None:
+            return snapshot_payload
+        raise
+
+    payload = _build_orderbook_payload(
+        symbol,
+        depth,
+        snapshot_time=datetime.utcnow().isoformat(),
+    )
+    await _cache_orderbook_payload(symbol, payload)
+    return payload
+
+
+@router.get("/{symbol}/price-depth", response_model=StandardResponse[dict[str, Any]])
+async def get_price_depth(symbol: str, db: AsyncSession = Depends(get_db)):
+    try:
+        payload = await _get_orderbook_payload(symbol, db)
+        return StandardResponse(
+            data=payload,
+            meta=MetaData(
+                count=len(payload.get("entries", [])),
+                last_data_date=_pick_optional_text(payload.get("snapshot_time")),
+            ),
+        )
     except asyncio.TimeoutError:
         return StandardResponse(
             data={"symbol": symbol.upper(), "entries": []}, error="Request timed out"
@@ -2743,10 +3259,16 @@ async def get_price_depth(symbol: str):
 
 
 @router.get("/{symbol}/orderbook", response_model=StandardResponse[dict[str, Any]])
-async def get_orderbook(symbol: str):
+async def get_orderbook(symbol: str, db: AsyncSession = Depends(get_db)):
     try:
-        payload = await _get_orderbook_payload(symbol)
-        return StandardResponse(data=payload, meta=MetaData(count=len(payload.get("entries", []))))
+        payload = await _get_orderbook_payload(symbol, db)
+        return StandardResponse(
+            data=payload,
+            meta=MetaData(
+                count=len(payload.get("entries", [])),
+                last_data_date=_pick_optional_text(payload.get("snapshot_time")),
+            ),
+        )
     except asyncio.TimeoutError:
         return StandardResponse(
             data={"symbol": symbol.upper(), "entries": []}, error="Request timed out"
@@ -3079,6 +3601,7 @@ async def get_income_statement(
     db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.upper()
+    last_data_date = await _get_model_last_updated(db, IncomeStatement, symbol_upper)
     try:
         data = await get_financials_with_ttm(
             symbol=symbol,
@@ -3100,7 +3623,10 @@ async def get_income_statement(
             rows=data,
             db=db,
         )
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        return StandardResponse(
+            data=data,
+            meta=MetaData(count=len(data), last_data_date=last_data_date),
+        )
     except BaseException as e:
         if _is_control_flow_exception(e):
             raise
@@ -3119,7 +3645,10 @@ async def get_income_statement(
                 db=db,
             )
             if fallback_data:
-                return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+                return StandardResponse(
+                    data=fallback_data,
+                    meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+                )
         except Exception:
             pass
         return StandardResponse(data=[], error=str(e))
@@ -3135,6 +3664,7 @@ async def get_balance_sheet(
     limit: int = Query(5, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ):
+    last_data_date = await _get_model_last_updated(db, BalanceSheet, symbol)
     try:
         data = await get_financials_with_ttm(
             symbol=symbol,
@@ -3150,7 +3680,10 @@ async def get_balance_sheet(
                 period=period,
                 limit=limit,
             )
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        return StandardResponse(
+            data=data,
+            meta=MetaData(count=len(data), last_data_date=last_data_date),
+        )
     except BaseException as e:
         if _is_control_flow_exception(e):
             raise
@@ -3163,7 +3696,10 @@ async def get_balance_sheet(
                 limit=limit,
             )
             if fallback_data:
-                return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+                return StandardResponse(
+                    data=fallback_data,
+                    meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+                )
         except Exception:
             pass
         return StandardResponse(data=[], error=str(e))
@@ -3177,6 +3713,7 @@ async def get_cash_flow(
     limit: int = Query(5, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ):
+    last_data_date = await _get_model_last_updated(db, CashFlow, symbol)
     try:
         data = await get_financials_with_ttm(
             symbol=symbol,
@@ -3192,7 +3729,10 @@ async def get_cash_flow(
                 period=period,
                 limit=limit,
             )
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        return StandardResponse(
+            data=data,
+            meta=MetaData(count=len(data), last_data_date=last_data_date),
+        )
     except BaseException as e:
         if _is_control_flow_exception(e):
             raise
@@ -3205,7 +3745,10 @@ async def get_cash_flow(
                 limit=limit,
             )
             if fallback_data:
-                return StandardResponse(data=fallback_data, meta=MetaData(count=len(fallback_data)))
+                return StandardResponse(
+                    data=fallback_data,
+                    meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+                )
         except Exception:
             pass
         return StandardResponse(data=[], error=str(e))
@@ -3226,71 +3769,77 @@ async def get_dividends(
         rows: list[dict[str, Any]] = []
         for item in raw_items:
             payload = item.model_dump(mode="json", by_alias=False)
+            row = _build_dividend_row_from_payload(symbol_upper, payload)
+            if row:
+                rows.append(row)
 
-            cash_dividend = _coerce_optional_float(
-                payload.get("cash_dividend") or payload.get("cashDividend") or payload.get("value")
+        if not rows:
+            fallback_dividends = (
+                (
+                    await db.execute(
+                        select(Dividend)
+                        .where(Dividend.symbol == symbol_upper)
+                        .order_by(desc(Dividend.exercise_date), desc(Dividend.cash_year))
+                        .limit(limit * 4)
+                    )
+                )
+                .scalars()
+                .all()
             )
-            stock_dividend = _coerce_optional_float(
-                payload.get("stock_dividend") or payload.get("stockDividend")
-            )
-            dividend_ratio = payload.get("dividend_ratio") or payload.get("ratio")
-            if isinstance(dividend_ratio, str):
-                dividend_ratio = dividend_ratio.strip() or None
+            for item in fallback_dividends:
+                payload = item.raw_data if isinstance(item.raw_data, dict) else {}
+                row = _build_dividend_row_from_payload(
+                    symbol_upper,
+                    {
+                        "ex_date": item.exercise_date,
+                        "record_date": item.record_date,
+                        "payment_date": item.payment_date,
+                        "cash_dividend": item.dividend_value,
+                        "dividend_ratio": item.dividend_rate,
+                        "dividend_type": item.issue_method,
+                        "fiscal_year": item.cash_year,
+                        "description": payload.get("description"),
+                    },
+                )
+                if row:
+                    rows.append(row)
 
-            if cash_dividend is None and stock_dividend is None and dividend_ratio is None:
-                continue
-
-            ex_date = _coerce_iso_date(payload.get("ex_date") or payload.get("exDate"))
-            record_date = _coerce_iso_date(payload.get("record_date") or payload.get("recordDate"))
-            payment_date = _coerce_iso_date(
-                payload.get("payment_date") or payload.get("paymentDate")
+        if not rows:
+            fallback_events = (
+                (
+                    await db.execute(
+                        select(CompanyEvent)
+                        .where(CompanyEvent.symbol == symbol_upper)
+                        .order_by(desc(CompanyEvent.event_date), desc(CompanyEvent.ex_date))
+                        .limit(limit * 4)
+                    )
+                )
+                .scalars()
+                .all()
             )
-            fiscal_year = _extract_calendar_year(
-                payload.get("fiscal_year"),
-                payload.get("fiscalYear"),
-            )
-            issue_year = _extract_calendar_year(
-                payload.get("issue_year"),
-                payload.get("issueYear"),
-            )
-            event_year = _extract_calendar_year(
-                fiscal_year,
-                issue_year,
-                ex_date,
-                record_date,
-                payment_date,
-            )
-            raw_type = payload.get("dividend_type") or payload.get("type")
-            description = payload.get("description")
-            dividend_type = _classify_dividend_type(
-                raw_type=raw_type,
-                cash_dividend=cash_dividend,
-                stock_dividend=stock_dividend,
-                dividend_ratio=dividend_ratio,
-                description=description,
-            )
-
-            rows.append(
-                {
-                    "symbol": symbol_upper,
-                    "ex_date": ex_date,
-                    "record_date": record_date,
-                    "payment_date": payment_date,
-                    "type": dividend_type,
-                    "dividend_type": dividend_type,
-                    "raw_dividend_type": raw_type,
-                    "cash_dividend": cash_dividend,
-                    "stock_dividend": stock_dividend,
-                    "dividend_ratio": dividend_ratio,
-                    "value": cash_dividend if cash_dividend is not None else stock_dividend,
-                    "fiscal_year": fiscal_year,
-                    "issue_year": issue_year,
-                    "year": event_year,
-                    "annual_dps": None,
-                    "dividend_yield": None,
-                    "description": description,
-                }
-            )
+            for item in fallback_events:
+                event_type = str(item.event_type or "").strip().lower()
+                description = item.description if isinstance(item.description, str) else None
+                if "div" not in event_type and "cổ tức" not in (description or "").lower():
+                    continue
+                payload = item.raw_data if isinstance(item.raw_data, dict) else {}
+                row = _build_dividend_row_from_payload(
+                    symbol_upper,
+                    {
+                        "ex_date": item.ex_date or item.event_date,
+                        "record_date": item.record_date,
+                        "payment_date": item.payment_date,
+                        "cash_dividend": payload.get("cash_dividend") or item.value,
+                        "stock_dividend": payload.get("stock_dividend"),
+                        "dividend_ratio": payload.get("dividend_ratio"),
+                        "dividend_type": item.event_type,
+                        "description": item.description,
+                        "fiscal_year": payload.get("fiscal_year"),
+                        "issue_year": payload.get("issue_year"),
+                    },
+                )
+                if row:
+                    rows.append(row)
 
         rows.sort(
             key=lambda row: row.get("ex_date")
@@ -3324,7 +3873,18 @@ async def get_dividends(
                 )
 
         data = rows[:limit]
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        return StandardResponse(
+            data=data,
+            meta=MetaData(
+                count=len(data),
+                last_data_date=_pick_latest_iso_date_from_rows(
+                    data,
+                    "ex_date",
+                    "record_date",
+                    "payment_date",
+                ),
+            ),
+        )
     except Exception as e:
         return StandardResponse(data=[], error=str(e))
 

@@ -340,6 +340,22 @@ async def sync_prices(
     symbols: Optional[list[str]] = Query(default=None),
     start_date: Optional[date] = Query(default=None),
     end_date: Optional[date] = Query(default=None),
+    cache_recent: bool = Query(
+        default=True,
+        description="Refresh Redis latest/recent price caches after sync",
+    ),
+    source: str = Query(
+        default=settings.vnstock_source,
+        pattern=r"^(KBS|VCI|DNSE)$",
+        description="vnstock source to use for Appwrite-direct historical backfills",
+    ),
+    appwrite_direct: bool = Query(
+        default=False,
+        description=(
+            "Write directly into Appwrite stock_prices from vnstock. "
+            "When false, sync Postgres first and mirror the same range into Appwrite."
+        ),
+    ),
     fill_missing_gaps: bool = Query(
         default=False,
         description="Detect and backfill missing dates between historical min/max",
@@ -348,27 +364,63 @@ async def sync_prices(
 ) -> SyncResponse:
     """Sync daily prices for stocks."""
     from vnibb.services.data_pipeline import data_pipeline
+    from vnibb.services.appwrite_price_service import AppwritePriceService
+
+    resolved_end = end_date or date.today()
+    resolved_start = start_date or (resolved_end - timedelta(days=30))
+    if resolved_start > resolved_end:
+        resolved_start, resolved_end = resolved_end, resolved_start
+
+    async def _run_sync() -> int:
+        if not appwrite_direct:
+            synced_rows = await data_pipeline.sync_daily_prices(
+                symbols=symbols,
+                start_date=resolved_start,
+                end_date=resolved_end,
+                fill_missing_gaps=fill_missing_gaps,
+                cache_recent=cache_recent,
+            )
+
+            if settings.resolved_data_backend == "appwrite" and settings.is_appwrite_configured:
+                service = AppwritePriceService(source=source)
+                mirror_stats = await service.mirror_prices_from_postgres(
+                    symbols=symbols,
+                    start_date=resolved_start,
+                    end_date=resolved_end,
+                    cache_recent=cache_recent,
+                )
+                mirrored_rows = mirror_stats.rows_upserted
+                if max(synced_rows, mirrored_rows) == 0:
+                    direct_stats = await service.sync_prices_from_provider(
+                        symbols=symbols,
+                        start_date=resolved_start,
+                        end_date=resolved_end,
+                        fill_missing_gaps=fill_missing_gaps,
+                        cache_recent=cache_recent,
+                    )
+                    return direct_stats.rows_upserted
+                return max(synced_rows, mirrored_rows)
+            return synced_rows
+
+        service = AppwritePriceService(source=source)
+        direct_stats = await service.sync_prices_from_provider(
+            symbols=symbols,
+            start_date=resolved_start,
+            end_date=resolved_end,
+            fill_missing_gaps=fill_missing_gaps,
+            cache_recent=cache_recent,
+        )
+        return direct_stats.rows_upserted
 
     if async_mode:
-        background_tasks.add_task(
-            data_pipeline.sync_daily_prices,
-            symbols=symbols,
-            start_date=start_date,
-            end_date=end_date,
-            fill_missing_gaps=fill_missing_gaps,
-        )
+        background_tasks.add_task(_run_sync)
         return SyncResponse(
             status="started",
             message="Price sync started in background",
         )
 
     try:
-        count = await data_pipeline.sync_daily_prices(
-            symbols=symbols,
-            start_date=start_date,
-            end_date=end_date,
-            fill_missing_gaps=fill_missing_gaps,
-        )
+        count = await _run_sync()
         return SyncResponse(
             status="success",
             message=f"Synced {count} price records",

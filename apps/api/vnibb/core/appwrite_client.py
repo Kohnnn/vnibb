@@ -55,6 +55,10 @@ def _query_limit(value: int) -> dict[str, Any]:
     return {"method": "limit", "values": [int(value)]}
 
 
+def _query_offset(value: int) -> dict[str, Any]:
+    return {"method": "offset", "values": [int(value)]}
+
+
 def _query_order(attribute: str, descending: bool = False) -> dict[str, Any]:
     return {"method": "orderDesc" if descending else "orderAsc", "attribute": attribute}
 
@@ -103,6 +107,52 @@ async def list_appwrite_documents(
     return []
 
 
+def _strip_pagination_queries(queries: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if not queries:
+        return []
+    return [
+        query
+        for query in queries
+        if (query.get("method") or "") not in {"limit", "offset", "cursorAfter"}
+    ]
+
+
+async def list_appwrite_documents_paginated(
+    collection_id: str,
+    queries: list[dict[str, Any]] | None = None,
+    *,
+    page_size: int = 250,
+    max_documents: int | None = None,
+    timeout_seconds: float = 8.0,
+) -> list[dict[str, Any]]:
+    collected: list[dict[str, Any]] = []
+    offset = 0
+    normalized_page_size = max(1, page_size)
+    base_queries = _strip_pagination_queries(queries)
+
+    while True:
+        remaining = None if max_documents is None else max_documents - len(collected)
+        if remaining is not None and remaining <= 0:
+            break
+
+        window = normalized_page_size if remaining is None else min(normalized_page_size, remaining)
+        page = await list_appwrite_documents(
+            collection_id,
+            queries=base_queries + [_query_limit(window), _query_offset(offset)],
+            timeout_seconds=timeout_seconds,
+        )
+        if not page:
+            break
+
+        collected.extend(page)
+        offset += len(page)
+
+        if len(page) < window:
+            break
+
+    return collected
+
+
 async def get_appwrite_stock(symbol: str) -> dict[str, Any] | None:
     """Fetch a single stock master document by symbol."""
     docs = await list_appwrite_documents(
@@ -113,6 +163,74 @@ async def get_appwrite_stock(symbol: str) -> dict[str, Any] | None:
         ],
     )
     return docs[0] if docs else None
+
+
+async def list_appwrite_stock_documents(
+    *,
+    active_only: bool = True,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    docs = await list_appwrite_documents_paginated(
+        "stocks",
+        queries=[_query_order("symbol")],
+        page_size=250,
+        max_documents=limit,
+    )
+    if not active_only:
+        return docs
+
+    filtered: list[dict[str, Any]] = []
+    for doc in docs:
+        raw_value = doc.get("is_active")
+        normalized = str(raw_value).strip().lower()
+        if normalized in {"0", "false", "none", "null", ""}:
+            continue
+        filtered.append(doc)
+    return filtered
+
+
+async def list_appwrite_stock_symbols(
+    *,
+    active_only: bool = True,
+    limit: int | None = None,
+) -> list[str]:
+    docs = await list_appwrite_stock_documents(active_only=active_only, limit=limit)
+    symbols = [str(doc.get("symbol") or "").strip().upper() for doc in docs]
+    return [symbol for symbol in symbols if symbol]
+
+
+def _dedupe_appwrite_stock_price_documents(
+    docs: list[dict[str, Any]],
+    *,
+    descending: bool,
+    limit: int | None,
+) -> list[dict[str, Any]]:
+    deduped: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    for doc in docs:
+        key = (
+            str(doc.get("symbol") or "").strip().upper(),
+            str(doc.get("time") or "").strip(),
+            str(doc.get("interval") or "1D").strip().upper(),
+        )
+        existing = deduped.get(key)
+        if existing is None:
+            deduped[key] = doc
+            continue
+
+        existing_sequence = int(existing.get("$sequence") or 0)
+        current_sequence = int(doc.get("$sequence") or 0)
+        existing_updated = str(existing.get("$updatedAt") or "")
+        current_updated = str(doc.get("$updatedAt") or "")
+
+        if (current_updated, current_sequence) >= (existing_updated, existing_sequence):
+            deduped[key] = doc
+
+    rows = list(deduped.values())
+    rows.sort(key=lambda item: str(item.get("time") or ""), reverse=descending)
+    if limit is not None:
+        return rows[:limit]
+    return rows
 
 
 async def get_appwrite_stock_prices(
@@ -129,7 +247,6 @@ async def get_appwrite_stock_prices(
         _query_equal("symbol", [symbol.upper()]),
         _query_equal("interval", [interval]),
         _query_order("time", descending=descending),
-        _query_limit(limit),
     ]
 
     if start_date is not None:
@@ -137,7 +254,36 @@ async def get_appwrite_stock_prices(
     if end_date is not None:
         queries.append(_query_lte("time", _date_end_iso(end_date)))
 
-    return await list_appwrite_documents("stock_prices", queries=queries)
+    raw_limit = max(limit * 3, limit + 20) if limit is not None else None
+    docs = await list_appwrite_documents_paginated(
+        "stock_prices",
+        queries=queries,
+        page_size=min(max(limit, 1), 250),
+        max_documents=raw_limit,
+    )
+    return _dedupe_appwrite_stock_price_documents(docs, descending=descending, limit=limit)
+
+
+async def get_appwrite_stock_price_coverage(
+    symbol: str,
+    *,
+    interval: str = "1D",
+) -> tuple[str | None, str | None]:
+    base_queries = [
+        _query_equal("symbol", [symbol.upper()]),
+        _query_equal("interval", [interval]),
+    ]
+    earliest_docs = await list_appwrite_documents(
+        "stock_prices",
+        queries=base_queries + [_query_order("time"), _query_limit(1)],
+    )
+    latest_docs = await list_appwrite_documents(
+        "stock_prices",
+        queries=base_queries + [_query_order("time", descending=True), _query_limit(1)],
+    )
+    earliest = earliest_docs[0].get("time") if earliest_docs else None
+    latest = latest_docs[0].get("time") if latest_docs else None
+    return earliest, latest
 
 
 async def check_appwrite_connectivity(timeout_seconds: float = 3.0) -> dict[str, Any]:

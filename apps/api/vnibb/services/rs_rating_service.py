@@ -12,7 +12,7 @@ Calculation weights: 40% (3mo) + 25% (6mo) + 20% (9mo) + 15% (12mo)
 
 import logging
 from datetime import date, datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import asyncio
 
 import pandas as pd
@@ -24,6 +24,11 @@ from vnibb.core.database import get_db_context
 from vnibb.models.stock import Stock, StockIndex
 from vnibb.models.stock import StockPrice
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.core.config import settings
+from vnibb.providers.vnstock.equity_historical import (
+    EquityHistoricalQueryParams,
+    VnstockEquityHistoricalFetcher,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +140,27 @@ class RSRatingService:
         Returns:
             Dictionary with period returns or None if insufficient data
         """
+        def _calculate_returns(price_rows: List[Dict[str, Any]]) -> Optional[Dict[str, float]]:
+            if len(price_rows) < self.PERIODS["12mo"]:
+                logger.warning(f"Insufficient market data: {len(price_rows)} days")
+                return None
+
+            df = pd.DataFrame(price_rows)
+            df = df.sort_values("time").reset_index(drop=True)
+
+            returns = {}
+            latest_price = df.iloc[-1]["close"]
+
+            for period_name, days in self.PERIODS.items():
+                if len(df) >= days:
+                    period_price = df.iloc[-days]["close"]
+                    returns[period_name] = (latest_price - period_price) / period_price
+                else:
+                    logger.warning(f"Insufficient data for {period_name} period")
+                    returns[period_name] = 0.0
+
+            return returns
+
         try:
             # Get VN-INDEX historical data
             start_date = end_date - timedelta(days=365)  # Get 1 year of data
@@ -152,28 +178,44 @@ class RSRatingService:
             )
 
             index_data = result.scalars().all()
+            returns = _calculate_returns(
+                [{"time": idx.time, "close": idx.close} for idx in index_data]
+            )
+            if returns is not None:
+                return returns
 
-            if len(index_data) < self.PERIODS["12mo"]:
-                logger.warning(f"Insufficient market data: {len(index_data)} days")
-                return None
+            candidate_sources: list[str] = []
+            for source in [settings.vnstock_source, "VCI", "KBS"]:
+                if source and source not in candidate_sources:
+                    candidate_sources.append(source)
 
-            # Convert to DataFrame for easier calculation
-            df = pd.DataFrame([{"time": idx.time, "close": idx.close} for idx in index_data])
-            df = df.sort_values("time").reset_index(drop=True)
+            for source in candidate_sources:
+                try:
+                    provider_rows = await VnstockEquityHistoricalFetcher.fetch(
+                        EquityHistoricalQueryParams(
+                            symbol="VNINDEX",
+                            start_date=start_date,
+                            end_date=end_date,
+                            interval="1D",
+                            source=source,
+                        )
+                    )
+                except Exception as provider_error:
+                    logger.warning(
+                        "VNINDEX provider fallback failed for source=%s: %s",
+                        source,
+                        provider_error,
+                    )
+                    continue
 
-            # Calculate returns for each period
-            returns = {}
-            latest_price = df.iloc[-1]["close"]
+                returns = _calculate_returns(
+                    [{"time": row.time, "close": row.close} for row in provider_rows]
+                )
+                if returns is not None:
+                    logger.info("Recovered VNINDEX market returns via provider fallback (%s)", source)
+                    return returns
 
-            for period_name, days in self.PERIODS.items():
-                if len(df) >= days:
-                    period_price = df.iloc[-days]["close"]
-                    returns[period_name] = (latest_price - period_price) / period_price
-                else:
-                    logger.warning(f"Insufficient data for {period_name} period")
-                    returns[period_name] = 0.0
-
-            return returns
+            return None
 
         except Exception as e:
             logger.error(f"Failed to get market returns: {e}")
@@ -241,6 +283,7 @@ class RSRatingService:
                 {
                     "symbol": symbol,
                     "weighted_return": weighted_return,
+                    "company_name": stock.company_name if stock else None,
                     "sector": stock.sector if stock else None,
                     "industry": stock.industry if stock else None,
                 }
@@ -425,6 +468,117 @@ class RSRatingService:
             ],
         }
 
+    async def _get_latest_price_map(
+        self, db: AsyncSession, symbols: List[str]
+    ) -> Dict[str, float]:
+        if not symbols:
+            return {}
+
+        ranked_prices = (
+            select(
+                StockPrice.symbol.label("symbol"),
+                StockPrice.close.label("close"),
+                func.row_number()
+                .over(
+                    partition_by=StockPrice.symbol,
+                    order_by=StockPrice.time.desc(),
+                )
+                .label("row_num"),
+            )
+            .where(
+                StockPrice.symbol.in_(symbols),
+                StockPrice.interval == "1D",
+            )
+            .subquery()
+        )
+
+        result = await db.execute(
+            select(ranked_prices.c.symbol, ranked_prices.c.close).where(ranked_prices.c.row_num == 1)
+        )
+        return {
+            str(symbol): float(close)
+            for symbol, close in result.all()
+            if symbol and close is not None
+        }
+
+    def _filter_ranked_stocks(
+        self, ranked_stocks: List[Dict[str, Any]], sector: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        if not sector:
+            return ranked_stocks
+
+        sector_key = sector.strip().casefold()
+        filtered: List[Dict[str, Any]] = []
+        for stock in ranked_stocks:
+            haystacks = [
+                str(stock.get("sector") or "").strip().casefold(),
+                str(stock.get("industry") or "").strip().casefold(),
+            ]
+            if any(
+                value and (value == sector_key or sector_key in value or value in sector_key)
+                for value in haystacks
+            ):
+                filtered.append(stock)
+        return filtered
+
+    def _serialize_ranked_stocks(
+        self,
+        ranked_stocks: List[Dict[str, Any]],
+        *,
+        limit: int,
+        reverse: bool,
+    ) -> List[Dict[str, Any]]:
+        ordered = sorted(
+            ranked_stocks,
+            key=lambda item: (item.get("rs_rating") is not None, item.get("rs_rating", 0)),
+            reverse=reverse,
+        )
+        return [
+            {
+                "symbol": item["symbol"],
+                "company_name": item.get("company_name"),
+                "rs_rating": item.get("rs_rating"),
+                "rs_rank": item.get("rs_rank"),
+                "price": item.get("price"),
+                "industry": item.get("industry"),
+            }
+            for item in ordered[:limit]
+            if item.get("rs_rating") is not None
+        ]
+
+    async def _build_live_rankings(
+        self,
+        db: AsyncSession,
+        calculation_date: Optional[date] = None,
+    ) -> List[Dict[str, Any]]:
+        effective_date = calculation_date or date.today()
+        stocks = await self._get_active_stocks(db)
+        if not stocks:
+            return []
+
+        market_returns = await self._get_market_returns(db, effective_date)
+        if not market_returns:
+            return []
+
+        stock_ratings = await self._calculate_all_weighted_returns(
+            db,
+            stocks,
+            market_returns,
+            effective_date,
+        )
+        if not stock_ratings:
+            return []
+
+        ranked_stocks = self._percentile_rank_all(stock_ratings)
+        ranked_stocks = self._calculate_sector_rankings(ranked_stocks)
+        latest_price_map = await self._get_latest_price_map(
+            db, [item["symbol"] for item in ranked_stocks]
+        )
+        for item in ranked_stocks:
+            item["price"] = latest_price_map.get(item["symbol"])
+
+        return ranked_stocks
+
     async def get_rs_rating(self, symbol: str) -> Optional[Dict]:
         """
         Get current RS rating for a single stock.
@@ -435,7 +589,9 @@ class RSRatingService:
         async with get_db_context() as db:
             result = await db.execute(
                 select(ScreenerSnapshot)
-                .where(ScreenerSnapshot.symbol == symbol)
+                .where(
+                    and_(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.rs_rating.isnot(None))
+                )
                 .order_by(desc(ScreenerSnapshot.snapshot_date))
                 .limit(1)
             )
@@ -443,6 +599,15 @@ class RSRatingService:
             snapshot = result.scalar_one_or_none()
 
             if not snapshot or snapshot.rs_rating is None:
+                live_rankings = await self._build_live_rankings(db)
+                for item in live_rankings:
+                    if item["symbol"] == symbol:
+                        return {
+                            "symbol": symbol,
+                            "rs_rating": item["rs_rating"],
+                            "rs_rank": item["rs_rank"],
+                            "snapshot_date": date.today().isoformat(),
+                        }
                 return None
 
             return {
@@ -473,7 +638,12 @@ class RSRatingService:
             latest_date = latest_date_result.scalar()
 
             if not latest_date:
-                return []
+                live_rankings = await self._build_live_rankings(db)
+                return self._serialize_ranked_stocks(
+                    self._filter_ranked_stocks(live_rankings, sector),
+                    limit=limit,
+                    reverse=True,
+                )
 
             # Build query
             query = select(ScreenerSnapshot).where(
@@ -492,6 +662,14 @@ class RSRatingService:
 
             result = await db.execute(query)
             snapshots = result.scalars().all()
+
+            if not snapshots:
+                live_rankings = await self._build_live_rankings(db)
+                return self._serialize_ranked_stocks(
+                    self._filter_ranked_stocks(live_rankings, sector),
+                    limit=limit,
+                    reverse=True,
+                )
 
             return [
                 {
@@ -525,7 +703,12 @@ class RSRatingService:
             latest_date = latest_date_result.scalar()
 
             if not latest_date:
-                return []
+                live_rankings = await self._build_live_rankings(db)
+                return self._serialize_ranked_stocks(
+                    self._filter_ranked_stocks(live_rankings, sector),
+                    limit=limit,
+                    reverse=False,
+                )
 
             query = select(ScreenerSnapshot).where(
                 and_(
@@ -542,6 +725,14 @@ class RSRatingService:
 
             result = await db.execute(query)
             snapshots = result.scalars().all()
+
+            if not snapshots:
+                live_rankings = await self._build_live_rankings(db)
+                return self._serialize_ranked_stocks(
+                    self._filter_ranked_stocks(live_rankings, sector),
+                    limit=limit,
+                    reverse=False,
+                )
 
             return [
                 {

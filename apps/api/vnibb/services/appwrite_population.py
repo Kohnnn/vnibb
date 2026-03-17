@@ -20,6 +20,8 @@ from vnibb.core.database import async_session_maker
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_PUBLIC_READ_PERMISSIONS = ['read("any")']
+
 PRIMARY_APPWRITE_TABLES: tuple[str, ...] = (
     "stocks",
     "stock_prices",
@@ -167,7 +169,7 @@ def _deterministic_document_id(
 def _build_permissions(collection_config: dict[str, Any], row: dict[str, Any]) -> list[str] | None:
     mode = collection_config.get("permissionsMode") or "collectionDefault"
     if mode == "publicRead":
-        return ['read("any")']
+        return DEFAULT_PUBLIC_READ_PERMISSIONS
     if mode == "ownerReadWrite":
         owner_field = collection_config.get("ownerField") or "user_id"
         owner_id = row.get(owner_field)
@@ -217,6 +219,73 @@ async def _upsert_document(
     update_response = await client.patch(update_url, headers=_headers(), json=update_payload)
     update_response.raise_for_status()
     return "updated"
+
+
+async def upsert_appwrite_documents(
+    collection_id: str,
+    rows: Sequence[dict[str, Any]],
+    *,
+    document_id_columns: Sequence[str] | None = None,
+    precision_columns: set[str] | None = None,
+    permissions: list[str] | None = None,
+    concurrency: int = 5,
+    batch_size: int = 200,
+) -> dict[str, int]:
+    if not rows:
+        return {"created": 0, "updated": 0, "failed": 0}
+
+    database_id = settings.appwrite_database_id
+    if not database_id:
+        raise RuntimeError("Appwrite database ID is not configured")
+
+    normalized_keys = list(document_id_columns or ["id"])
+    normalized_precision = set(precision_columns or set())
+    effective_permissions = permissions
+    effective_concurrency = max(1, concurrency)
+    effective_batch_size = max(1, batch_size)
+    timeout = httpx.Timeout(60.0, connect=10.0)
+
+    created = 0
+    updated = 0
+    failed = 0
+
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        semaphore = asyncio.Semaphore(effective_concurrency)
+
+        for start in range(0, len(rows), effective_batch_size):
+            window = list(rows[start : start + effective_batch_size])
+
+            async def worker(row: dict[str, Any]) -> str:
+                async with semaphore:
+                    document_id = _deterministic_document_id(
+                        collection_id,
+                        row,
+                        normalized_keys,
+                    )
+                    document_data = _build_document_data(row, normalized_precision, True)
+                    return await _upsert_document(
+                        client,
+                        database_id,
+                        collection_id,
+                        document_id,
+                        document_data,
+                        effective_permissions,
+                    )
+
+            results = await asyncio.gather(*(worker(row) for row in window), return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, Exception):
+                    failed += 1
+                    logger.warning(
+                        "Appwrite document upsert failed for %s: %s", collection_id, result
+                    )
+                elif result == "created":
+                    created += 1
+                else:
+                    updated += 1
+
+    return {"created": created, "updated": updated, "failed": failed}
 
 
 async def _fetch_rows(

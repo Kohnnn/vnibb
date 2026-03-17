@@ -116,18 +116,11 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
         calls.append("seeded")
         return ["VNM", "FPT"]
 
-    async def fake_sync_screener_data(symbols=None):
-        calls.append(("screener", tuple(symbols or [])))
-        return 10
-
-    async def fake_sync_daily_prices(
-        symbols=None,
-        days=0,
-        fill_missing_gaps=False,
-        cache_recent=True,
+    async def fake_sync_all_prices(
+        self, *, symbols=None, include_historical=False, history_days=None
     ):
-        calls.append(("daily_prices", tuple(symbols or []), days, fill_missing_gaps, cache_recent))
-        return 10
+        calls.append(("prices", tuple(symbols or []), include_historical, history_days))
+        return make_result(20)
 
     async def fake_sync_dividends(symbols=None):
         calls.append(("dividends", tuple(symbols or [])))
@@ -137,23 +130,30 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
         calls.append(("company_events", tuple(symbols or [])))
         return 3
 
+    async def fake_calculate_all_rs_ratings(self, calculation_date=None):
+        calls.append(("rs_ratings", calculation_date))
+        return {"success": True, "total_stocks": 2}
+
     async def fail_run_full_sync(self, **kwargs):
         raise AssertionError("daily market sync should not call full sync")
 
     monkeypatch.setattr(FullMarketSync, "_get_seeded_symbols", fake_get_seeded_symbols)
     monkeypatch.setattr(FullMarketSync, "run_full_sync", fail_run_full_sync)
-    monkeypatch.setattr(data_pipeline, "sync_screener_data", fake_sync_screener_data)
-    monkeypatch.setattr(data_pipeline, "sync_daily_prices", fake_sync_daily_prices)
+    monkeypatch.setattr(FullMarketSync, "sync_all_prices", fake_sync_all_prices)
     monkeypatch.setattr(data_pipeline, "sync_dividends", fake_sync_dividends)
     monkeypatch.setattr(data_pipeline, "sync_company_events", fake_sync_company_events)
+    monkeypatch.setattr(
+        "vnibb.services.rs_rating_service.RSRatingService.calculate_all_rs_ratings",
+        fake_calculate_all_rs_ratings,
+    )
 
     results = await run_daily_market_sync()
 
-    assert list(results.keys()) == ["prices", "corporate_actions"]
+    assert list(results.keys()) == ["prices", "rs_ratings", "corporate_actions"]
     assert calls == [
         "seeded",
-        ("screener", ("VNM", "FPT")),
-        ("daily_prices", ("VNM", "FPT"), 21, True, False),
+        ("prices", ("VNM", "FPT"), True, 21),
+        ("rs_ratings", None),
         ("dividends", ("VNM", "FPT")),
         ("company_events", ("VNM", "FPT")),
     ]

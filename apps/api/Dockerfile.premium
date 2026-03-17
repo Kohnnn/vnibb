@@ -49,7 +49,8 @@ COPY . .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir .
+    pip install --no-cache-dir . && \
+    pip install --no-cache-dir --upgrade "vnstock>=3.5.0,<3.6" "vnai>=2.4.0,<2.5"
 
 # Optional pre-install for vnii from VNStock index.
 # The premium installer can still proceed even if this step fails.
@@ -68,7 +69,7 @@ RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
     fi
 
 # Verify vnstock installation
-RUN python3 -c "import vnstock; print(f'vnstock {vnstock.__version__} installed')" || true
+RUN python3 -c "import vnstock, vnai; print(f'vnstock {vnstock.__version__} | vnai {vnai.__version__}')" || true
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && \

@@ -25,6 +25,7 @@ import type {
 } from '@/types/dashboard';
 import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
+import { findPreferredTabId } from '@/lib/userPreferences';
 import { useDashboardSync } from '@/lib/useDashboardSync';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
@@ -1444,6 +1445,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         activeTabId: null,
     });
 
+    const getPreferredActiveTabId = useCallback((dashboard: Dashboard | null | undefined) => {
+        if (!dashboard) return null;
+        return findPreferredTabId(dashboard.tabs) || dashboard.tabs[0]?.id || null;
+    }, []);
+
     // Load from localStorage on mount
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -1558,7 +1564,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             }
 
             const activeDashboardId = dashboards[0]?.id || null;
-            const activeTabId = dashboards[0]?.tabs[0]?.id || null;
+            const activeTabId = getPreferredActiveTabId(dashboards[0]);
 
             dispatch({
                 type: 'SET_STATE',
@@ -1573,11 +1579,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     dashboards: [defaultDashboard],
                     folders: [],
                     activeDashboardId: defaultDashboard.id,
-                    activeTabId: defaultDashboard.tabs[0]?.id || null,
+                    activeTabId: getPreferredActiveTabId(defaultDashboard),
                 },
             });
         }
-    }, []);
+    }, [getPreferredActiveTabId]);
 
     // Save to localStorage on state change
     useEffect(() => {
@@ -1607,12 +1613,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
     const setActiveDashboard = useCallback((id: string) => {
         dispatch({ type: 'SET_ACTIVE_DASHBOARD', payload: id });
-        // Also set first tab as active
         const dashboard = state.dashboards.find((d) => d.id === id);
-        if (dashboard?.tabs[0]) {
-            dispatch({ type: 'SET_ACTIVE_TAB', payload: dashboard.tabs[0].id });
+        const preferredTabId = getPreferredActiveTabId(dashboard);
+        if (preferredTabId) {
+            dispatch({ type: 'SET_ACTIVE_TAB', payload: preferredTabId });
         }
-    }, [state.dashboards]);
+    }, [getPreferredActiveTabId, state.dashboards]);
 
     const createDashboard = useCallback((data: DashboardCreate): Dashboard => {
         const now = new Date().toISOString();

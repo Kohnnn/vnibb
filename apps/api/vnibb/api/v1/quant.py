@@ -44,6 +44,7 @@ SUPPORTED_METRICS = (
 )
 DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
 PERIOD_PATTERN = r"^(1M|3M|6M|1Y|3Y|5Y|10Y|YTD|ALL)$"
+QUANT_STALE_DAYS_THRESHOLD = 7
 METRIC_ALIASES = {
     "volume_flow": "volume_delta",
     "volume-flow": "volume_delta",
@@ -200,6 +201,30 @@ def _resolve_frame_last_timestamp(frame: pd.DataFrame) -> datetime | None:
     return latest.to_pydatetime()
 
 
+def _build_staleness_warning(frame: pd.DataFrame, end_date: date) -> str | None:
+    latest = _resolve_frame_last_timestamp(frame)
+    if latest is None:
+        return None
+
+    latest_date = latest.date()
+    if (end_date - latest_date).days < QUANT_STALE_DAYS_THRESHOLD:
+        return None
+
+    return f"Latest price data is from {latest_date.isoformat()}."
+
+
+def _merge_warnings(*warnings: str | None) -> str | None:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for warning in warnings:
+        text = str(warning or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        parts.append(text)
+    return " ".join(parts) if parts else None
+
+
 async def _load_quant_frame_with_warning(
     *,
     db: AsyncSession,
@@ -216,7 +241,10 @@ async def _load_quant_frame_with_warning(
         end_date=end_date,
         source=source,
     )
-    return frame, _build_period_warning(frame, start_date, period)
+    return frame, _merge_warnings(
+        _build_period_warning(frame, start_date, period),
+        _build_staleness_warning(frame, end_date),
+    )
 
 
 async def _get_quant_metric_alias_response(
@@ -516,6 +544,21 @@ async def _load_price_frame(
     end_date: date,
     source: str,
 ) -> pd.DataFrame:
+    def _provider_frame_from_rows(provider_rows: list[Any]) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "time": row.time,
+                    "open": row.open,
+                    "high": row.high,
+                    "low": row.low,
+                    "close": row.close,
+                    "volume": row.volume,
+                }
+                for row in provider_rows
+            ]
+        )
+
     stmt = (
         select(
             StockPrice.time,
@@ -550,14 +593,28 @@ async def _load_price_frame(
             logger.warning("Quant price frame query failed for %s: %s", symbol, exc)
         rows = []
 
-    if rows:
-        frame = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
-    else:
+    frame = (
+        pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
+        if rows
+        else pd.DataFrame()
+    )
+
+    latest_db_timestamp = _resolve_frame_last_timestamp(frame)
+    needs_provider_refresh = frame.empty
+    provider_start_date = start_date
+
+    if latest_db_timestamp is not None:
+        latest_db_date = latest_db_timestamp.date()
+        if (end_date - latest_db_date).days >= QUANT_STALE_DAYS_THRESHOLD:
+            needs_provider_refresh = True
+            provider_start_date = max(start_date, latest_db_date - timedelta(days=30))
+
+    if needs_provider_refresh:
         try:
             provider_rows = await VnstockEquityHistoricalFetcher.fetch(
                 EquityHistoricalQueryParams(
                     symbol=symbol,
-                    start_date=start_date,
+                    start_date=provider_start_date,
                     end_date=end_date,
                     interval="1D",
                     source=source,
@@ -567,19 +624,11 @@ async def _load_price_frame(
             logger.warning("Quant fallback fetch failed for %s: %s", symbol, exc)
             provider_rows = []
 
-        frame = pd.DataFrame(
-            [
-                {
-                    "time": row.time,
-                    "open": row.open,
-                    "high": row.high,
-                    "low": row.low,
-                    "close": row.close,
-                    "volume": row.volume,
-                }
-                for row in provider_rows
-            ]
-        )
+        provider_frame = _provider_frame_from_rows(provider_rows)
+        if frame.empty:
+            frame = provider_frame
+        elif not provider_frame.empty:
+            frame = pd.concat([frame, provider_frame], ignore_index=True)
 
     if frame.empty:
         return frame
