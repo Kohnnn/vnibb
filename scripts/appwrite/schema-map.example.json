@@ -14,7 +14,7 @@
       "table": "stock_prices",
       "collectionId": "stock_prices",
       "cursorColumn": "id",
-      "documentIdColumns": ["id"],
+      "documentIdColumns": ["symbol", "time", "interval"],
       "permissionsMode": "publicRead",
       "batchSize": 1000,
       "precisionColumns": ["open", "high", "low", "close", "adj_close", "value"]

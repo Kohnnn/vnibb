@@ -7,6 +7,7 @@ import pytest
 from vnibb.models.trading import FinancialRatio
 from vnibb.models.financials import IncomeStatement, BalanceSheet
 from vnibb.models.company import Company, Shareholder
+from vnibb.models.news import Dividend
 from vnibb.models.comparison import StockComparison
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.screener import ScreenerSnapshot
@@ -38,6 +39,15 @@ async def test_ready_health_endpoint_returns_200(client):
     assert response.status_code == 200
     payload = response.json()
     assert payload["ready"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_status_alias_returns_freshness_payload(client):
+    response = await client.get("/api/v1/admin/sync-status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "data_freshness" in payload
 
 
 @pytest.mark.asyncio
@@ -143,6 +153,117 @@ async def test_profile_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload["data"]["symbol"] == "VNM"
     assert payload["data"]["exchange"] == "HOSE"
+
+
+@pytest.mark.asyncio
+async def test_profile_cache_backfills_sector_and_scales_market_cap(client, test_db):
+    test_db.add(
+        Stock(
+            id=1,
+            symbol="VCI",
+            company_name="Vietcap",
+            exchange="HOSE",
+            industry="Chung khoan",
+            listing_date=date(2017, 7, 7),
+        )
+    )
+    test_db.add(
+        Company(
+            symbol="VCI",
+            company_name="Vietcap",
+            exchange="HOSE",
+            industry="Chung khoan",
+            sector=None,
+            outstanding_shares=850.1,
+            listed_shares=850.1,
+            updated_at=datetime(2026, 3, 14, 9, 30, 0),
+        )
+    )
+    test_db.add(
+        StockPrice(
+            id=1,
+            stock_id=1,
+            symbol="VCI",
+            time=date(2026, 3, 14),
+            open=36.0,
+            high=36.8,
+            low=35.7,
+            close=36.5,
+            volume=1_050_000,
+            interval="1D",
+            source="vnstock",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/VCI/profile")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["sector"] == "Chung khoan"
+    assert payload["data"]["outstanding_shares"] == pytest.approx(850_100_000.0)
+    assert payload["data"]["listed_shares"] == pytest.approx(850_100_000.0)
+    assert payload["data"]["market_cap"] == pytest.approx(31_028_650_000_000.0)
+    assert payload["meta"]["last_data_date"].startswith("2026-03-14T09:30:00")
+
+
+@pytest.mark.asyncio
+async def test_dividends_endpoint_falls_back_to_cached_dividend_rows(client, test_db, monkeypatch):
+    test_db.add(
+        Stock(
+            id=1,
+            symbol="VNM",
+            company_name="Vinamilk",
+            exchange="HOSE",
+        )
+    )
+    test_db.add(
+        StockPrice(
+            id=1,
+            stock_id=1,
+            symbol="VNM",
+            time=date(2026, 3, 14),
+            open=62.9,
+            high=63.4,
+            low=62.3,
+            close=63.1,
+            volume=2_050_000,
+            interval="1D",
+            source="vnstock",
+        )
+    )
+    test_db.add(
+        Dividend(
+            id=1,
+            symbol="VNM",
+            exercise_date=date(2025, 9, 15),
+            cash_year=2025,
+            dividend_value=4300.0,
+            dividend_rate=43.0,
+            issue_method="cash",
+            record_date=date(2025, 9, 16),
+            payment_date=date(2025, 10, 5),
+        )
+    )
+    await test_db.commit()
+
+    async def fake_dividend_fetch(symbol):
+        assert symbol == "VNM"
+        return []
+
+    monkeypatch.setattr("vnibb.api.v1.equity.VnstockDividendsFetcher.fetch", fake_dividend_fetch)
+
+    response = await client.get("/api/v1/equity/VNM/dividends?limit=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["count"] == 1
+    assert payload["meta"]["last_data_date"] == "2025-10-05"
+    assert payload["data"][0]["cash_dividend"] == 4300.0
+    assert payload["data"][0]["dividend_ratio"] == 43.0
+    assert payload["data"][0]["type"] == "cash"
+    assert payload["data"][0]["annual_dps"] == 4300.0
+    assert payload["data"][0]["dividend_yield"] == pytest.approx(6.8146, rel=1e-4)
 
 
 @pytest.mark.asyncio
@@ -372,11 +493,14 @@ async def test_income_statement_falls_back_to_db_on_timeout(client, test_db, mon
             revenue=1500,
             net_income=320,
             source="vnstock",
+            updated_at=datetime(2026, 3, 12, 8, 15, 0),
         )
     )
     await test_db.commit()
 
-    async def fake_get_financials_with_ttm(*, symbol: str, statement_type: str, period: str, limit: int):
+    async def fake_get_financials_with_ttm(
+        *, symbol: str, statement_type: str, period: str, limit: int
+    ):
         raise asyncio.TimeoutError("provider timed out")
 
     monkeypatch.setattr(
@@ -388,6 +512,7 @@ async def test_income_statement_falls_back_to_db_on_timeout(client, test_db, mon
     assert response.status_code == 200
     payload = response.json()
     assert payload["meta"]["count"] == 1
+    assert payload["meta"]["last_data_date"].startswith("2026-03-12T08:15:00")
     assert payload["data"][0]["revenue"] == 1500
     assert payload["data"][0]["net_income"] == 320
 
@@ -472,6 +597,53 @@ async def test_appwrite_quote_uses_source_document_timestamp(monkeypatch):
     assert quote is not None
     assert quote.updated_at is not None
     assert quote.updated_at.isoformat().startswith("2026-03-14T00:00:00")
+
+
+@pytest.mark.asyncio
+async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
+    async def fake_cache_lookup(*args, **kwargs):
+        return SimpleNamespace(hit=False, data=None)
+
+    async def fake_get_json(key):
+        if key.endswith(":price:recent:VNM"):
+            return [
+                {
+                    "time": "2026-03-10T00:00:00",
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.5,
+                    "close": 100.8,
+                    "volume": 1200,
+                },
+                {
+                    "time": "2026-03-11T00:00:00",
+                    "open": 101.0,
+                    "high": 102.0,
+                    "low": 100.0,
+                    "close": 101.5,
+                    "volume": 1500,
+                },
+            ]
+        return None
+
+    async def fail_appwrite_fetch(*args, **kwargs):
+        raise AssertionError("recent price cache should be used before Appwrite fetch")
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.CacheManager.get_historical_prices",
+        fake_cache_lookup,
+    )
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", fake_get_json)
+    monkeypatch.setattr("vnibb.api.v1.equity.get_appwrite_stock_prices", fail_appwrite_fetch)
+
+    response = await client.get(
+        "/api/v1/equity/historical?symbol=VNM&start_date=2026-03-10&end_date=2026-03-11"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["count"] == 2
+    assert payload["data"][0]["time"] == "2026-03-10"
+    assert payload["data"][1]["close"] == 101.5
 
 
 @pytest.mark.asyncio
@@ -661,6 +833,44 @@ async def test_price_depth_smoke_returns_entries(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_orderbook_endpoint_uses_cached_payload_before_provider(client, monkeypatch):
+    async def fake_get_json(key):
+        if key.endswith(":orderbook:latest:VNM"):
+            return {
+                "symbol": "VNM",
+                "snapshot_time": "2026-03-17T14:45:00",
+                "entries": [
+                    {
+                        "level": 1,
+                        "price": 75000,
+                        "bid_vol": 12000,
+                        "ask_vol": 9000,
+                    }
+                ],
+                "total_bid_volume": 12000,
+                "total_ask_volume": 9000,
+                "last_price": 75050,
+            }
+        return None
+
+    async def fail_price_depth_fetch(*args, **kwargs):
+        raise AssertionError("provider fetch should not run when orderbook cache is warm")
+
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", fake_get_json)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockPriceDepthFetcher.fetch",
+        fail_price_depth_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VNM/orderbook")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["count"] == 1
+    assert payload["meta"]["last_data_date"] == "2026-03-17T14:45:00"
+    assert payload["data"]["entries"][0]["bid_vol"] == 12000
+
+
+@pytest.mark.asyncio
 async def test_market_indices_smoke_returns_data(client, monkeypatch):
     async def fake_market_overview_fetch(_params):
         return [
@@ -686,7 +896,9 @@ async def test_market_indices_smoke_returns_data(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_market_indices_prefer_db_rows_over_scaled_provider_payload(client, test_db, monkeypatch):
+async def test_market_indices_prefer_db_rows_over_scaled_provider_payload(
+    client, test_db, monkeypatch
+):
     test_db.add_all(
         [
             StockIndex(

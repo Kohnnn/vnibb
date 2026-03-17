@@ -34,9 +34,15 @@ FRESHNESS_THRESHOLDS_HOURS = {
 }
 FRESHNESS_TABLES = [
     "stocks",
+    "companies",
     "screener_snapshots",
     "stock_prices",
+    "stock_indices",
+    "income_statements",
+    "balance_sheets",
+    "cash_flows",
     "financial_ratios",
+    "dividends",
     "company_news",
     "company_events",
 ]
@@ -445,16 +451,18 @@ async def get_recent_errors(
         try:
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00")).replace(tzinfo=None)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid since timestamp: {since}") from exc
+            raise HTTPException(
+                status_code=400, detail=f"Invalid since timestamp: {since}"
+            ) from exc
 
     if since_dt is not None:
         filtered_errors = []
         for item in errors:
             raw_timestamp = item.get("timestamp")
             try:
-                event_time = datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00")).replace(
-                    tzinfo=None
-                )
+                event_time = datetime.fromisoformat(
+                    str(raw_timestamp).replace("Z", "+00:00")
+                ).replace(tzinfo=None)
             except ValueError:
                 continue
             if event_time >= since_dt:
@@ -1093,6 +1101,7 @@ async def execute_query(query: str = Body(..., embed=True), db: AsyncSession = D
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/sync-status")
 @router.get("/database/sync-status")
 @router.get("/sync/status")
 async def get_sync_status(db: AsyncSession = Depends(get_db)):
@@ -1125,26 +1134,39 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
     # 2. Calculate data freshness (matching old test expectation)
     tables_to_check = [
         ("stocks", "updated_at"),
+        ("companies", "updated_at"),
         ("stock_prices", "time"),
+        ("stock_indices", "time"),
         ("screener_snapshots", "fetched_at"),
+        ("income_statements", "updated_at"),
+        ("balance_sheets", "updated_at"),
+        ("cash_flows", "updated_at"),
+        ("financial_ratios", "updated_at"),
+        ("dividends", "exercise_date"),
+        ("company_events", "event_date"),
     ]
     for table, date_col in tables_to_check:
         try:
+            if not await _table_exists(db, table):
+                continue
             res = await db.execute(
                 text(f"SELECT MAX({date_col}) as last_update, COUNT(*) as count FROM {table}")
             )
             row = res.mappings().first()
             last_update = row["last_update"] if row else None
+            last_update_dt = _normalize_datetime(last_update)
+            freshness_label, age_seconds = _classify_freshness(last_update_dt)
             status_data["data_freshness"][table] = {
-                "last_update": last_update.isoformat()
-                if hasattr(last_update, "isoformat")
+                "last_update": last_update_dt.isoformat()
+                if last_update_dt
                 else str(last_update)
                 if last_update
                 else None,
                 "count": row["count"] if row else 0,
-                "freshness": "fresh" if last_update else "stale",
+                "freshness": freshness_label,
+                "age_seconds": age_seconds,
             }
-        except:
+        except Exception:
             pass
 
     return status_data

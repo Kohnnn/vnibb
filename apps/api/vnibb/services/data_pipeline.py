@@ -223,6 +223,67 @@ class DataPipeline:
 
         return Vnstock()
 
+    @staticmethod
+    def _describe_provider_exception(exc: BaseException) -> str:
+        parts: List[str] = []
+        current: Optional[BaseException] = exc
+        seen: set[int] = set()
+
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            message = str(current).strip()
+            parts.append(
+                f"{type(current).__name__}: {message}" if message else type(current).__name__
+            )
+
+            next_exc: Optional[BaseException] = None
+            last_attempt = getattr(current, "last_attempt", None)
+            exception_getter = getattr(last_attempt, "exception", None)
+            if callable(exception_getter):
+                try:
+                    next_exc = exception_getter()
+                except Exception:
+                    next_exc = None
+
+            if next_exc is None:
+                next_exc = current.__cause__
+            if next_exc is None and not getattr(current, "__suppress_context__", False):
+                next_exc = current.__context__
+
+            current = next_exc
+
+        return " <- ".join(parts)
+
+    async def _fetch_quote_history_frame(
+        self,
+        symbol: str,
+        start: str,
+        end: str,
+        interval: str = "1D",
+        bypass_internal_retry: bool = False,
+    ) -> pd.DataFrame:
+        timeout_seconds = max(float(getattr(settings, "vnstock_timeout", 0) or 0), 1.0)
+        source = settings.vnstock_source
+
+        def _fetch_sync() -> pd.DataFrame:
+            from vnstock import Vnstock
+
+            quote = Vnstock().stock(symbol=symbol, source=source).quote
+            history_callable = quote.history
+            if bypass_internal_retry:
+                # vnstock retries every exception here, including ValueError payload failures.
+                unwrapped_history = getattr(history_callable, "__wrapped__", None)
+                if callable(unwrapped_history):
+                    return unwrapped_history(
+                        quote,
+                        start=start,
+                        end=end,
+                        interval=interval,
+                    )
+            return history_callable(start=start, end=end, interval=interval)
+
+        return await asyncio.wait_for(asyncio.to_thread(_fetch_sync), timeout=timeout_seconds)
+
     async def _ensure_redis(self) -> bool:
         if not settings.redis_url:
             return False
@@ -950,6 +1011,14 @@ class DataPipeline:
                 return parsed
             except (TypeError, ValueError):
                 return None
+
+        def _normalize_share_count(value: Any) -> Optional[float]:
+            parsed = _parse_float(value)
+            if parsed in (None, 0):
+                return None
+            if abs(parsed) < 1_000_000:
+                return parsed * 1_000_000.0
+            return parsed
 
         def _pick_float(*values: Any) -> Optional[float]:
             for value in values:
@@ -1757,11 +1826,8 @@ class DataPipeline:
         total_synced = 0
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
+            active_range: Optional[Tuple[str, str]] = None
             try:
-                from vnstock import Vnstock
-
-                stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
-
                 fetch_ranges: List[Tuple[date, date]] = [(resolved_start, resolved_end)]
                 existing_dates: set[date] = set()
 
@@ -1825,7 +1891,14 @@ class DataPipeline:
                         await self._wait_for_rate_limit("prices")
                         range_start_str = range_start.strftime("%Y-%m-%d")
                         range_end_str = range_end.strftime("%Y-%m-%d")
-                        range_df = stock.quote.history(start=range_start_str, end=range_end_str)
+                        active_range = (range_start_str, range_end_str)
+                        range_df = await self._fetch_quote_history_frame(
+                            symbol=symbol,
+                            start=range_start_str,
+                            end=range_end_str,
+                            interval="1D",
+                            bypass_internal_retry=True,
+                        )
                         if range_df is None or range_df.empty:
                             logger.debug(
                                 "Price gap fetch returned empty for %s (%s -> %s)",
@@ -1926,7 +1999,18 @@ class DataPipeline:
                     progress["stage_stats"]["prices"]["errors"] += 1
                 continue
             except Exception as e:
-                logger.error(f"Failed to sync prices for {symbol}: {e}")
+                error_details = self._describe_provider_exception(e)
+                if active_range is not None:
+                    logger.error(
+                        "Failed to sync prices for %s (%s -> %s): %s",
+                        symbol,
+                        active_range[0],
+                        active_range[1],
+                        error_details,
+                    )
+                else:
+                    logger.error("Failed to sync prices for %s: %s", symbol, error_details)
+                logger.debug("Price sync traceback for %s", symbol, exc_info=True)
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["prices"]["errors"] += 1
@@ -2221,12 +2305,12 @@ class DataPipeline:
                     "listing_date": _parse_date(
                         merged_row.get("listing_date") or merged_row.get("listingDate")
                     ),
-                    "outstanding_shares": _parse_float(
+                    "outstanding_shares": _normalize_share_count(
                         merged_row.get("outstanding_shares")
                         or merged_row.get("issue_share")
                         or merged_row.get("financial_ratio_issue_share")
                     ),
-                    "listed_shares": _parse_float(
+                    "listed_shares": _normalize_share_count(
                         merged_row.get("listed_shares")
                         or merged_row.get("listed_volume")
                         or merged_row.get("issue_share")
@@ -4752,8 +4836,42 @@ class DataPipeline:
                     await session.commit()
                     total += 1
 
+                cache_payload = {
+                    "symbol": symbol,
+                    "snapshot_time": snapshot_time.isoformat(),
+                    "entries": [
+                        {
+                            "level": level,
+                            "price": payload.get(f"bid_{level}", {}).get("price")
+                            if payload.get(f"bid_{level}")
+                            else payload.get(f"ask_{level}", {}).get("price")
+                            if payload.get(f"ask_{level}")
+                            else None,
+                            "bid_vol": payload.get(f"bid_{level}", {}).get("volume")
+                            if payload.get(f"bid_{level}")
+                            else None,
+                            "ask_vol": payload.get(f"ask_{level}", {}).get("volume")
+                            if payload.get(f"ask_{level}")
+                            else None,
+                        }
+                        for level in range(1, 4)
+                        if payload.get(f"bid_{level}") or payload.get(f"ask_{level}")
+                    ],
+                    "total_bid_volume": payload.get("total_bid_volume"),
+                    "total_ask_volume": payload.get("total_ask_volume"),
+                    "last_price": payload.get("last_price"),
+                    "last_volume": payload.get("last_volume"),
+                    "raw_levels": payload.get("raw_levels"),
+                    "bid_1": payload.get("bid_1"),
+                    "bid_2": payload.get("bid_2"),
+                    "bid_3": payload.get("bid_3"),
+                    "ask_1": payload.get("ask_1"),
+                    "ask_2": payload.get("ask_2"),
+                    "ask_3": payload.get("ask_3"),
+                }
+
                 latest_key = build_cache_key("vnibb", "orderbook", "latest", symbol)
-                await self._cache_set_json(latest_key, payload, CACHE_TTL_ORDERBOOK)
+                await self._cache_set_json(latest_key, cache_payload, CACHE_TTL_ORDERBOOK)
 
                 daily_key = build_cache_key(
                     "vnibb",
@@ -4762,7 +4880,7 @@ class DataPipeline:
                     symbol,
                     trade_date.isoformat(),
                 )
-                await self._cache_set_json(daily_key, payload, CACHE_TTL_ORDERBOOK_DAILY)
+                await self._cache_set_json(daily_key, cache_payload, CACHE_TTL_ORDERBOOK_DAILY)
 
                 if progress is not None:
                     progress["success_count"] = progress.get("success_count", 0) + 1

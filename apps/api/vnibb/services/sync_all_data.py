@@ -12,6 +12,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import date, timedelta
 
 from sqlalchemy import select
 
@@ -85,6 +86,8 @@ class FullMarketSync:
         self,
         stage_name: str,
         operation: Callable[[], Awaitable[int]],
+        *,
+        populate_appwrite: bool = True,
     ) -> SyncResult:
         start = time.monotonic()
         errors: list[str] = []
@@ -93,7 +96,8 @@ class FullMarketSync:
 
         try:
             synced_count = int(await operation())
-            await self._populate_appwrite_for_stage(stage_name)
+            if populate_appwrite:
+                await self._populate_appwrite_for_stage(stage_name)
         except Exception as exc:  # noqa: BLE001
             success = False
             errors.append(str(exc))
@@ -146,10 +150,42 @@ class FullMarketSync:
 
         resolved_symbols = symbols or await self._get_seeded_symbols(max_symbols=max_symbols)
         price_days = history_days or (settings.price_history_years * 365)
+        use_appwrite_direct_prices = settings.resolved_data_backend == "appwrite"
 
         async def _operation() -> int:
             total = await data_pipeline.sync_screener_data(symbols=resolved_symbols)
-            if include_historical:
+            if use_appwrite_direct_prices:
+                from vnibb.services.appwrite_price_service import AppwritePriceService
+
+                service = AppwritePriceService(source=self.source)
+                end_date = date.today()
+                start_date = end_date - timedelta(days=price_days if include_historical else 30)
+                synced_rows = await data_pipeline.sync_daily_prices(
+                    symbols=resolved_symbols,
+                    start_date=start_date,
+                    end_date=end_date,
+                    fill_missing_gaps=True,
+                    cache_recent=True,
+                )
+                mirror_stats = await service.mirror_prices_from_postgres(
+                    symbols=resolved_symbols,
+                    start_date=start_date,
+                    end_date=end_date,
+                    cache_recent=True,
+                )
+                mirrored_rows = mirror_stats.rows_upserted
+                if max(synced_rows, mirrored_rows) == 0:
+                    direct_stats = await service.sync_prices_from_provider(
+                        symbols=resolved_symbols,
+                        start_date=start_date,
+                        end_date=end_date,
+                        fill_missing_gaps=True,
+                        cache_recent=True,
+                    )
+                    total += direct_stats.rows_upserted
+                else:
+                    total += max(synced_rows, mirrored_rows)
+            elif include_historical:
                 total += await data_pipeline.sync_daily_prices(
                     symbols=resolved_symbols,
                     days=price_days,
@@ -158,7 +194,11 @@ class FullMarketSync:
                 )
             return total
 
-        return await self._run_stage("prices", _operation)
+        return await self._run_stage(
+            "prices",
+            _operation,
+            populate_appwrite=not use_appwrite_direct_prices,
+        )
 
     async def sync_all_financials(
         self,
@@ -310,17 +350,22 @@ async def run_daily_market_sync(
         results["symbols"] = await _run_direct_stage("symbols", data_pipeline.sync_stock_list)
         symbols = await sync._get_seeded_symbols()
 
-    async def _sync_prices() -> int:
-        total = await data_pipeline.sync_screener_data(symbols=symbols)
-        total += await data_pipeline.sync_daily_prices(
-            symbols=symbols,
-            days=history_days,
-            fill_missing_gaps=True,
-            cache_recent=False,
-        )
-        return total
+    results["prices"] = await sync.sync_all_prices(
+        symbols=symbols,
+        include_historical=True,
+        history_days=history_days,
+    )
 
-    results["prices"] = await _run_direct_stage("prices", _sync_prices)
+    async def _sync_rs_ratings() -> int:
+        from vnibb.services.rs_rating_service import RSRatingService
+
+        service = RSRatingService()
+        result = await service.calculate_all_rs_ratings()
+        if not result.get("success"):
+            raise RuntimeError(result.get("error") or "RS rating calculation failed")
+        return int(result.get("total_stocks") or 0)
+
+    results["rs_ratings"] = await _run_direct_stage("rs_ratings", _sync_rs_ratings)
 
     if include_corporate_actions:
 
