@@ -156,6 +156,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Data Retention
     # ==========================================================================
+    price_backfill_start_date: Optional[str] = "2019-01-01"
     price_history_years: int = 5
     news_retention_days: int = 7
     screener_retention_days: int = 365

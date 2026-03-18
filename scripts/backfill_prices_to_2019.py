@@ -15,7 +15,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Backfill stock price history to 2019."
     )
-    parser.add_argument("--start-date", default="2019-01-01")
+    parser.add_argument(
+        "--start-date",
+        default=settings.price_backfill_start_date or "2019-01-01",
+    )
     parser.add_argument("--end-date", default=date.today().isoformat())
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument("--symbols", default="")

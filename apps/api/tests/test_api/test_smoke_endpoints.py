@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from vnibb.models.trading import FinancialRatio
-from vnibb.models.financials import IncomeStatement, BalanceSheet
+from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 from vnibb.models.company import Company, Shareholder
 from vnibb.models.news import Dividend
 from vnibb.models.comparison import StockComparison
@@ -600,6 +600,40 @@ async def test_appwrite_quote_uses_source_document_timestamp(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_appwrite_profile_enriches_db_sector_and_share_counts(test_db, monkeypatch):
+    from vnibb.api.v1.equity import _load_profile_from_appwrite
+
+    test_db.add(
+        Company(
+            symbol="VCI",
+            company_name="Vietcap",
+            exchange="HOSE",
+            industry="Chung khoan",
+            sector="Chung khoan",
+            outstanding_shares=850.1,
+            listed_shares=850.1,
+        )
+    )
+    await test_db.commit()
+
+    async def fake_get_appwrite_stock(symbol: str):
+        return {
+            "symbol": symbol,
+            "company_name": "Vietcap",
+            "exchange": "HOSE",
+        }
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_appwrite_stock", fake_get_appwrite_stock)
+
+    profile = await _load_profile_from_appwrite("VCI", test_db)
+
+    assert profile is not None
+    assert profile.sector == "Chung khoan"
+    assert profile.outstanding_shares == pytest.approx(850_100_000.0)
+    assert profile.listed_shares == pytest.approx(850_100_000.0)
+
+
+@pytest.mark.asyncio
 async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
     async def fake_cache_lookup(*args, **kwargs):
         return SimpleNamespace(hit=False, data=None)
@@ -644,6 +678,114 @@ async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
     assert payload["meta"]["count"] == 2
     assert payload["data"][0]["time"] == "2026-03-10"
     assert payload["data"][1]["close"] == 101.5
+
+
+@pytest.mark.asyncio
+async def test_income_statement_merges_db_values_when_provider_payload_missing(
+    client, test_db, monkeypatch
+):
+    test_db.add(
+        IncomeStatement(
+            id=101,
+            symbol="VCI",
+            period="2025",
+            period_type="year",
+            fiscal_year=2025,
+            revenue=1500,
+            cost_of_revenue=-600,
+            operating_income=500,
+            income_before_tax=520,
+            income_tax=-100,
+            net_income=420,
+            source="vnstock",
+        )
+    )
+    await test_db.commit()
+
+    async def fake_get_financials_with_ttm(
+        *, symbol: str, statement_type: str, period: str, limit: int
+    ):
+        return [
+            FinancialStatementData(
+                symbol=symbol,
+                period="2025",
+                statement_type=statement_type,
+                fiscal_year=2025,
+                revenue=1500,
+                cost_of_revenue=None,
+                operating_income=None,
+                pre_tax_profit=None,
+                tax_expense=None,
+                net_income=420,
+            )
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.get_financials_with_ttm",
+        fake_get_financials_with_ttm,
+    )
+
+    response = await client.get("/api/v1/equity/VCI/income-statement?period=year&limit=1")
+    assert response.status_code == 200
+    payload = response.json()
+    row = payload["data"][0]
+    assert row["operating_income"] == 500
+    assert row["cost_of_revenue"] == -600
+    assert row["pre_tax_profit"] == 520
+    assert row["tax_expense"] == -100
+
+
+@pytest.mark.asyncio
+async def test_cash_flow_merges_db_values_when_provider_payload_missing(
+    client, test_db, monkeypatch
+):
+    test_db.add(
+        CashFlow(
+            id=201,
+            symbol="VCI",
+            period="2025",
+            period_type="year",
+            fiscal_year=2025,
+            operating_cash_flow=-3550,
+            capital_expenditure=-238,
+            dividends_paid=0,
+            depreciation=38,
+            investing_cash_flow=-215,
+            source="vnstock",
+        )
+    )
+    await test_db.commit()
+
+    async def fake_get_financials_with_ttm(
+        *, symbol: str, statement_type: str, period: str, limit: int
+    ):
+        return [
+            FinancialStatementData(
+                symbol=symbol,
+                period="2025",
+                statement_type=statement_type,
+                fiscal_year=2025,
+                operating_cash_flow=None,
+                capital_expenditure=None,
+                dividends_paid=None,
+                depreciation=None,
+                investing_cash_flow=-215,
+            )
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.get_financials_with_ttm",
+        fake_get_financials_with_ttm,
+    )
+
+    response = await client.get("/api/v1/equity/VCI/cash-flow?period=year&limit=1")
+    assert response.status_code == 200
+    payload = response.json()
+    row = payload["data"][0]
+    assert row["operating_cash_flow"] == -3550
+    assert row["capex"] == -238
+    assert row["dividends_paid"] == 0
+    assert row["depreciation"] == 38
 
 
 @pytest.mark.asyncio
