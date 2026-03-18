@@ -41,7 +41,7 @@ COPY . .
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir . \
     && pip install --no-cache-dir --upgrade "vnstock>=3.5.0,<3.6" "vnai>=2.4.0,<2.5" \
-    && python3 -c "import vnstock, vnai; print(f'vnstock {vnstock.__version__} | vnai {vnai.__version__}')"
+    && python3 -c "from importlib.metadata import version; print(f'vnstock {version(\"vnstock\")} | vnai {version(\"vnai\")}')"
 
 # Optional: install vnii from VNStock index for premium checks.
 # Do not fail the image build if index/package is unavailable.

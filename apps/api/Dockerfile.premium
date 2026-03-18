@@ -69,7 +69,7 @@ RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
     fi
 
 # Verify vnstock installation
-RUN python3 -c "import vnstock, vnai; print(f'vnstock {vnstock.__version__} | vnai {vnai.__version__}')" || true
+RUN python3 -c "from importlib.metadata import version; print(f'vnstock {version(\"vnstock\")} | vnai {version(\"vnai\")}')" || true
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && \
