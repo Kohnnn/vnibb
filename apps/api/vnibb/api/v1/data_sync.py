@@ -279,7 +279,10 @@ async def sync_profiles(
     async def _run_sync() -> int:
         count = await data_pipeline.sync_company_profiles(symbols=symbols)
         if settings.resolved_data_backend == "appwrite" and settings.is_appwrite_configured:
-            await populate_appwrite_tables(["stocks"], full_refresh=True)
+            try:
+                await populate_appwrite_tables(["stocks"], full_refresh=False, max_rows=0)
+            except Exception as exc:
+                logger.warning("Profile sync Appwrite mirror failed: %s", exc)
         return count
 
     if async_mode:

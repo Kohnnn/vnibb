@@ -656,12 +656,12 @@ async def _load_profile_from_appwrite(
         else None,
         await _get_outstanding_shares(db, symbol.upper()) if db is not None else None,
     )
-    listed_shares = _pick_optional_share_count(
+    listed_shares = _resolve_listed_share_count(
         doc.get("listed_shares"),
         doc.get("listed_volume"),
         company_row.listed_shares if company_row else None,
         company_row.outstanding_shares if company_row else None,
-        outstanding_shares,
+        outstanding_shares=outstanding_shares,
     )
     market_cap = (
         await _resolve_profile_market_cap(
@@ -814,6 +814,23 @@ def _pick_optional_share_count(*values: Any) -> Optional[float]:
         if normalized is not None:
             return normalized
     return None
+
+
+def _resolve_listed_share_count(
+    *listed_values: Any,
+    outstanding_shares: Any = None,
+) -> Optional[float]:
+    listed_shares = _pick_optional_share_count(*listed_values)
+    outstanding_value = _normalize_share_count(outstanding_shares)
+    if listed_shares is None:
+        return outstanding_value
+    if outstanding_value is None:
+        return listed_shares
+
+    gap_ratio = abs(outstanding_value - listed_shares) / max(outstanding_value, 1.0)
+    if listed_shares < outstanding_value and gap_ratio <= 0.02:
+        return outstanding_value
+    return listed_shares
 
 
 def _price_to_vnd_units(price: Any, dps_hint: Any = None) -> Optional[float]:
@@ -2544,7 +2561,6 @@ async def get_quote(
 
 
 @router.get("/{symbol}/profile", response_model=StandardResponse[Optional[EquityProfileData]])
-@cached(ttl=604800, key_prefix="profile")
 async def get_profile(
     symbol: str = Path(..., min_length=1, max_length=10, pattern=r"^[A-Za-z0-9._-]+$"),
     refresh: bool = Query(default=False),
@@ -2611,14 +2627,14 @@ async def get_profile(
                     raw_profile.get("listed_volume"),
                     await _get_outstanding_shares(db, symbol_upper),
                 )
-                listed_shares = _pick_optional_share_count(
+                listed_shares = _resolve_listed_share_count(
                     company.listed_shares,
                     company.outstanding_shares,
                     raw_profile.get("listed_shares"),
                     raw_profile.get("listed_volume"),
                     raw_profile.get("issue_share"),
                     raw_profile.get("financial_ratio_issue_share"),
-                    outstanding_shares,
+                    outstanding_shares=outstanding_shares,
                 )
                 market_cap = await _resolve_profile_market_cap(
                     db=db,
@@ -2807,13 +2823,13 @@ async def get_profile(
                 raw_profile.get("listed_volume"),
                 await _get_outstanding_shares(db, symbol_upper),
             )
-            profile_data.listed_shares = _pick_optional_share_count(
+            profile_data.listed_shares = _resolve_listed_share_count(
                 profile_data.listed_shares,
                 raw_profile.get("listed_shares"),
                 raw_profile.get("listed_volume"),
                 raw_profile.get("issue_share"),
                 raw_profile.get("financial_ratio_issue_share"),
-                profile_data.outstanding_shares,
+                outstanding_shares=profile_data.outstanding_shares,
             )
 
             profile_data.market_cap = await _resolve_profile_market_cap(
