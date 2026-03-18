@@ -152,6 +152,17 @@ class FullMarketSync:
         price_days = history_days or (settings.price_history_years * 365)
         use_appwrite_direct_prices = settings.resolved_data_backend == "appwrite"
 
+        historical_start_date: date | None = None
+        if include_historical and history_days is None and settings.price_backfill_start_date:
+            try:
+                historical_start_date = date.fromisoformat(settings.price_backfill_start_date)
+            except ValueError:
+                logger.warning(
+                    "Invalid PRICE_BACKFILL_START_DATE=%s; falling back to history_days=%s",
+                    settings.price_backfill_start_date,
+                    price_days,
+                )
+
         async def _operation() -> int:
             total = await data_pipeline.sync_screener_data(symbols=resolved_symbols)
             if use_appwrite_direct_prices:
@@ -159,7 +170,11 @@ class FullMarketSync:
 
                 service = AppwritePriceService(source=self.source)
                 end_date = date.today()
-                start_date = end_date - timedelta(days=price_days if include_historical else 30)
+                start_date = (
+                    historical_start_date
+                    if include_historical and historical_start_date is not None
+                    else end_date - timedelta(days=price_days if include_historical else 30)
+                )
                 synced_rows = await data_pipeline.sync_daily_prices(
                     symbols=resolved_symbols,
                     start_date=start_date,
@@ -186,12 +201,21 @@ class FullMarketSync:
                 else:
                     total += max(synced_rows, mirrored_rows)
             elif include_historical:
-                total += await data_pipeline.sync_daily_prices(
-                    symbols=resolved_symbols,
-                    days=price_days,
-                    fill_missing_gaps=True,
-                    cache_recent=False,
-                )
+                if historical_start_date is not None:
+                    total += await data_pipeline.sync_daily_prices(
+                        symbols=resolved_symbols,
+                        start_date=historical_start_date,
+                        end_date=date.today(),
+                        fill_missing_gaps=True,
+                        cache_recent=False,
+                    )
+                else:
+                    total += await data_pipeline.sync_daily_prices(
+                        symbols=resolved_symbols,
+                        days=price_days,
+                        fill_missing_gaps=True,
+                        cache_recent=False,
+                    )
             return total
 
         return await self._run_stage(

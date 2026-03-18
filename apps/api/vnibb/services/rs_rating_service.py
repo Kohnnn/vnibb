@@ -56,6 +56,7 @@ class RSRatingService:
         "9mo": 0.20,
         "12mo": 0.15,
     }
+    LOOKBACK_CALENDAR_DAYS = 540
 
     def __init__(self, db: Optional[AsyncSession] = None):
         self.db = db
@@ -140,8 +141,9 @@ class RSRatingService:
         Returns:
             Dictionary with period returns or None if insufficient data
         """
+
         def _calculate_returns(price_rows: List[Dict[str, Any]]) -> Optional[Dict[str, float]]:
-            if len(price_rows) < self.PERIODS["12mo"]:
+            if len(price_rows) < max(self.PERIODS["3mo"], 20):
                 logger.warning(f"Insufficient market data: {len(price_rows)} days")
                 return None
 
@@ -152,18 +154,19 @@ class RSRatingService:
             latest_price = df.iloc[-1]["close"]
 
             for period_name, days in self.PERIODS.items():
-                if len(df) >= days:
-                    period_price = df.iloc[-days]["close"]
-                    returns[period_name] = (latest_price - period_price) / period_price
-                else:
-                    logger.warning(f"Insufficient data for {period_name} period")
-                    returns[period_name] = 0.0
+                row_index = -days if len(df) >= days else 0
+                period_price = df.iloc[row_index]["close"]
+                returns[period_name] = (
+                    (latest_price - period_price) / period_price
+                    if period_price not in (None, 0)
+                    else 0.0
+                )
 
             return returns
 
         try:
             # Get VN-INDEX historical data
-            start_date = end_date - timedelta(days=365)  # Get 1 year of data
+            start_date = end_date - timedelta(days=self.LOOKBACK_CALENDAR_DAYS)
 
             result = await db.execute(
                 select(StockIndex)
@@ -212,7 +215,9 @@ class RSRatingService:
                     [{"time": row.time, "close": row.close} for row in provider_rows]
                 )
                 if returns is not None:
-                    logger.info("Recovered VNINDEX market returns via provider fallback (%s)", source)
+                    logger.info(
+                        "Recovered VNINDEX market returns via provider fallback (%s)", source
+                    )
                     return returns
 
             return None
@@ -230,7 +235,7 @@ class RSRatingService:
     ) -> List[Dict]:
         """Calculate weighted relative returns for all stocks in batch."""
         symbols = [s.symbol for s in stocks]
-        start_date = end_date - timedelta(days=365)
+        start_date = end_date - timedelta(days=self.LOOKBACK_CALENDAR_DAYS)
 
         # Fetch all prices for all stocks in one go
         result = await db.execute(
@@ -258,7 +263,7 @@ class RSRatingService:
         stock_lookup = {s.symbol: s for s in stocks}
 
         for symbol, prices in stock_prices.items():
-            if len(prices) < self.PERIODS["3mo"]:
+            if len(prices) < max(self.PERIODS["3mo"], 20):
                 continue
 
             df = pd.DataFrame(prices).sort_values("time").reset_index(drop=True)
@@ -267,13 +272,13 @@ class RSRatingService:
             # Calculate returns for each period
             returns = {}
             for period_name, days in self.PERIODS.items():
-                if len(df) >= days:
-                    period_price = df.iloc[-days]["close"]
-                    returns[period_name] = (
-                        (latest_price - period_price) / period_price if period_price != 0 else 0.0
-                    )
-                else:
-                    returns[period_name] = 0.0
+                row_index = -days if len(df) >= days else 0
+                period_price = df.iloc[row_index]["close"]
+                returns[period_name] = (
+                    (latest_price - period_price) / period_price
+                    if period_price not in (None, 0)
+                    else 0.0
+                )
 
             # Calculate weighted relative return
             weighted_return = self._calculate_weighted_return(returns, market_returns)
@@ -468,9 +473,7 @@ class RSRatingService:
             ],
         }
 
-    async def _get_latest_price_map(
-        self, db: AsyncSession, symbols: List[str]
-    ) -> Dict[str, float]:
+    async def _get_latest_price_map(self, db: AsyncSession, symbols: List[str]) -> Dict[str, float]:
         if not symbols:
             return {}
 
@@ -493,7 +496,9 @@ class RSRatingService:
         )
 
         result = await db.execute(
-            select(ranked_prices.c.symbol, ranked_prices.c.close).where(ranked_prices.c.row_num == 1)
+            select(ranked_prices.c.symbol, ranked_prices.c.close).where(
+                ranked_prices.c.row_num == 1
+            )
         )
         return {
             str(symbol): float(close)

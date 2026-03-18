@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from datetime import date, datetime
 
+from vnibb.core.config import settings
 from vnibb.services.appwrite_price_service import AppwritePriceService
 
 
@@ -18,7 +19,10 @@ def parse_args() -> argparse.Namespace:
         help="Backfill all active Appwrite stock documents when --symbols is omitted",
     )
     parser.add_argument("--max-symbols", type=int, default=None)
-    parser.add_argument("--start-date", default="2019-01-01")
+    parser.add_argument(
+        "--start-date",
+        default=settings.price_backfill_start_date or "2019-01-01",
+    )
     parser.add_argument("--end-date", default="2021-03-09")
     parser.add_argument("--source", default="KBS")
     parser.add_argument("--symbol-concurrency", type=int, default=2)

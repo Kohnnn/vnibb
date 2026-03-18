@@ -21,14 +21,14 @@ logger = logging.getLogger(__name__)
 
 class EquityProfileQueryParams(BaseModel):
     """Query parameters for company profile."""
-    
+
     symbol: str = Field(
         ...,
         min_length=1,
         max_length=10,
         description="Stock ticker symbol (e.g., VNM)",
     )
-    
+
     @field_validator("symbol")
     @classmethod
     def uppercase_symbol(cls, v: str) -> str:
@@ -38,35 +38,35 @@ class EquityProfileQueryParams(BaseModel):
 class EquityProfileData(BaseModel):
     """
     Standardized company profile data.
-    
+
     Includes basic company info, industry classification, and key stats.
     """
-    
+
     symbol: str = Field(..., description="Stock ticker symbol")
     company_name: Optional[str] = Field(None, description="Full company name")
     short_name: Optional[str] = Field(None, description="Short company name")
     exchange: Optional[str] = Field(None, description="Listed exchange")
     industry: Optional[str] = Field(None, description="Industry classification")
     sector: Optional[str] = Field(None, description="Sector classification")
-    
+
     # Company details
     established_date: Optional[str] = Field(None, description="Date of establishment")
     listing_date: Optional[str] = Field(None, description="IPO/Listing date")
     website: Optional[str] = Field(None, description="Company website")
     description: Optional[str] = Field(None, description="Business description")
-    
+
     # Key metrics
     outstanding_shares: Optional[float] = Field(None, description="Outstanding shares")
     listed_shares: Optional[float] = Field(None, description="Listed shares")
     market_cap: Optional[float] = Field(None, description="Market capitalization")
-    
+
     # Contact
     address: Optional[str] = Field(None, description="Head office address")
     phone: Optional[str] = Field(None, description="Phone number")
     email: Optional[str] = Field(None, description="Email address")
-    
+
     updated_at: Optional[datetime] = Field(None, description="Data timestamp")
-    
+
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -82,22 +82,23 @@ class EquityProfileData(BaseModel):
 
 from vnibb.core.retry import vnstock_cb, circuit_breaker
 
+
 class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityProfileData]):
     """
     Fetcher for company profile via vnstock library.
-    
+
     Returns comprehensive company information including
     identification, classification, and key metrics.
     """
-    
+
     provider_name = "vnstock"
     requires_credentials = False
-    
+
     @staticmethod
     def transform_query(params: EquityProfileQueryParams) -> dict[str, Any]:
         """Transform query params to vnstock-compatible format."""
         return {"symbol": params.symbol.upper()}
-    
+
     @staticmethod
     @circuit_breaker(vnstock_cb)
     async def extract_data(
@@ -106,7 +107,7 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
     ) -> List[dict[str, Any]]:
         """Fetch company profile from vnstock."""
         loop = asyncio.get_event_loop()
-        
+
         def _fetch_sync() -> List[dict[str, Any]]:
             def _is_present(value: Any) -> bool:
                 if value is None:
@@ -122,7 +123,7 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
 
                 record: dict[str, Any] = {}
                 candidate_sources: list[str] = []
-                for source in ["VCI", settings.vnstock_source, "KBS"]:
+                for source in [settings.vnstock_source, "VCI", "KBS"]:
                     if source and source not in candidate_sources:
                         candidate_sources.append(source)
 
@@ -150,7 +151,7 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                 if not record:
                     logger.warning(f"No profile data for {query['symbol']}")
                     return []
-                
+
                 # Get company name from Listing (overview doesn't include it)
                 try:
                     listing = Listing()
@@ -161,9 +162,9 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                             record["organ_name"] = match.iloc[0].get("organ_name", "")
                 except Exception as e:
                     logger.debug(f"Failed to get company name from listing: {e}")
-                
+
                 return [record]
-                
+
             except Exception as e:
                 logger.error(f"vnstock profile fetch error: {e}")
                 raise ProviderError(
@@ -171,7 +172,7 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                     provider="vnstock",
                     details={"symbol": query["symbol"]},
                 )
-        
+
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(None, _fetch_sync),
@@ -182,7 +183,7 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                 provider="vnstock",
                 timeout=settings.vnstock_timeout,
             )
-    
+
     @staticmethod
     def transform_data(
         params: EquityProfileQueryParams,
@@ -190,7 +191,7 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
     ) -> List[EquityProfileData]:
         """
         Transform raw profile data to standardized format.
-        
+
         vnstock company.overview() field mapping:
         - symbol: stock ticker
         - organ_name: company name (from Listing)
@@ -238,7 +239,7 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
             if number < 1_000_000_000:
                 return number * 1_000_000_000
             return number
-        
+
         for row in data:
             try:
                 outstanding_shares = _pick_first(
@@ -259,9 +260,13 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                     short_name=None,  # Not available in VCI overview
                     exchange=row.get("exchange"),
                     # Industry classification from ICB levels
-                    industry=row.get("icb_name3") or row.get("icb_name4") or row.get("company_type"),
+                    industry=row.get("icb_name3")
+                    or row.get("icb_name4")
+                    or row.get("company_type"),
                     sector=row.get("icb_name2") or row.get("company_type") or row.get("icb_name3"),
-                    established_date=_pick_first(row.get("founded_date"), row.get("established_date")),
+                    established_date=_pick_first(
+                        row.get("founded_date"), row.get("established_date")
+                    ),
                     listing_date=row.get("listing_date"),
                     website=row.get("website"),
                     # Business description
@@ -285,9 +290,9 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                     updated_at=datetime.utcnow(),
                 )
                 results.append(profile)
-                
+
             except Exception as e:
                 logger.warning(f"Skipping invalid profile row: {e}")
                 continue
-        
+
         return results

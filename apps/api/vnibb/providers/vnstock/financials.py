@@ -181,8 +181,8 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 statement_type = query["statement_type"]
                 period = query["period"]
                 candidate_sources: list[str] = []
-                # VCI exposes richer statement labels/units on vnstock 3.4.x,
-                # so prefer it first and fall back to the configured source/KBS when needed.
+                # KBS is the default runtime source on vnstock 3.5.x, but VCI still
+                # exposes richer financial statement labels/values for many symbols.
                 for source in ["VCI", settings.vnstock_source, "KBS"]:
                     if source and source not in candidate_sources:
                         candidate_sources.append(source)
@@ -211,6 +211,131 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         kwargs["lang"] = lang
 
                     return method(**kwargs)
+
+                def _score_statement_payload(rows: list[dict[str, Any]]) -> int:
+                    if not rows:
+                        return 0
+
+                    def _normalize_metric_key(raw_key: Any) -> str:
+                        cleaned = (
+                            str(raw_key or "").strip().lower().replace("đ", "d").replace("Đ", "D")
+                        )
+                        cleaned = (
+                            cleaned.replace("&", " and ")
+                            .replace("%", " pct ")
+                            .replace(".", "_")
+                            .replace("/", "_")
+                            .replace("-", "_")
+                            .replace(" ", "_")
+                        )
+                        cleaned = (
+                            unicodedata.normalize("NFKD", cleaned)
+                            .encode("ascii", "ignore")
+                            .decode("ascii")
+                        )
+                        cleaned = re.sub(r"[^a-z0-9_]", "", cleaned)
+                        cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+                        return cleaned
+
+                    period_columns = [
+                        key
+                        for key in rows[0].keys()
+                        if re.match(
+                            r"^(?:Q[1-4]-\d{4}|\d{4}-Q[1-4]|\d{4}Q[1-4]|\d{4})$", str(key).upper()
+                        )
+                    ]
+                    available_items: set[str] = set()
+
+                    for row in rows:
+                        if not period_columns:
+                            for key, value in row.items():
+                                if key in {
+                                    "period",
+                                    "item",
+                                    "item_id",
+                                    "itemId",
+                                    "item_name",
+                                    "itemName",
+                                    "_statement_type",
+                                    "_source",
+                                }:
+                                    continue
+                                try:
+                                    numeric = float(value)
+                                except (TypeError, ValueError):
+                                    continue
+                                if math.isnan(numeric):
+                                    continue
+                                available_items.add(_normalize_metric_key(key))
+                            continue
+
+                        item_key = _normalize_metric_key(
+                            str(
+                                row.get("item_id")
+                                or row.get("itemId")
+                                or row.get("item")
+                                or row.get("item_name")
+                                or row.get("itemName")
+                                or ""
+                            )
+                        )
+                        if not item_key:
+                            continue
+                        has_value = False
+                        for period_column in period_columns:
+                            value = row.get(period_column)
+                            if value is None:
+                                continue
+                            try:
+                                numeric = float(value)
+                            except (TypeError, ValueError):
+                                continue
+                            if not math.isnan(numeric):
+                                has_value = True
+                                break
+                        if has_value:
+                            available_items.add(item_key)
+
+                    score_targets = {
+                        "income": (
+                            {"revenue", "net_sales", "sales"},
+                            {"cost_of_sales", "cost_of_revenue", "operating_expenses_21_33"},
+                            {"operating_income", "operating_profit_loss"},
+                            {"pre_tax_profit", "profit_before_tax", "income_before_tax"},
+                            {"tax_expense", "income_tax", "business_income_tax_current"},
+                            {
+                                "net_income",
+                                "net_profit_for_the_year",
+                                "attribute_to_parent_company_bn_vnd",
+                            },
+                        ),
+                        "balance": (
+                            {"total_assets"},
+                            {"total_liabilities"},
+                            {"total_equity", "equity"},
+                            {"current_assets"},
+                            {"current_liabilities"},
+                        ),
+                        "cashflow": (
+                            {
+                                "operating_cash_flow",
+                                "net_cash_inflows_outflows_from_operating_activities",
+                            },
+                            {"investing_cash_flow", "net_cash_flows_from_investing_activities"},
+                            {"financing_cash_flow", "cash_flows_from_financial_activities"},
+                            {"capex", "capital_expenditure", "purchase_of_fixed_assets"},
+                            {"dividends_paid", "payments_of_dividends"},
+                            {"depreciation", "depreciation_and_amortisation"},
+                        ),
+                    }
+
+                    target_groups = score_targets.get(statement_type, ())
+                    return sum(1 for group in target_groups if available_items.intersection(group))
+
+                best_rows: list[dict[str, Any]] = []
+                best_score = -1
+                best_source: str | None = None
+                best_lang: str | None = None
 
                 for source in candidate_sources:
                     try:
@@ -251,20 +376,30 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                             continue
 
                         if df is not None and not df.empty:
-                            if source != settings.vnstock_source:
-                                logger.info(
-                                    "Using fallback vnstock source for %s %s: %s (lang=%s)",
-                                    query["symbol"],
-                                    statement_type,
-                                    source,
-                                    lang,
-                                )
-                            return _normalize_financial_frame(
+                            normalized_rows = _normalize_financial_frame(
                                 df,
                                 query["limit"],
                                 statement_type,
                                 source,
                             )
+                            score = _score_statement_payload(normalized_rows)
+                            if score > best_score:
+                                best_rows = normalized_rows
+                                best_score = score
+                                best_source = source
+                                best_lang = lang
+
+                if best_rows:
+                    if best_source and best_source != settings.vnstock_source:
+                        logger.info(
+                            "Using richer fallback vnstock source for %s %s: %s (lang=%s score=%s)",
+                            query["symbol"],
+                            statement_type,
+                            best_source,
+                            best_lang,
+                            best_score,
+                        )
+                    return best_rows
 
                 logger.warning(f"No {statement_type} data for {query['symbol']}")
                 return []

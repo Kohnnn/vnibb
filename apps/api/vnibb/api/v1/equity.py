@@ -306,6 +306,50 @@ async def _load_financial_statement_fallback(
     ]
 
 
+def _financial_statement_identity(item: FinancialStatementData) -> tuple[str, int, int]:
+    return (
+        str(item.period or ""),
+        int(item.fiscal_year or 0),
+        int(item.fiscal_quarter or 0),
+    )
+
+
+def _merge_financial_statement_rows(
+    primary_rows: list[FinancialStatementData],
+    fallback_rows: list[FinancialStatementData],
+) -> list[FinancialStatementData]:
+    if not primary_rows:
+        return fallback_rows
+    if not fallback_rows:
+        return primary_rows
+
+    fallback_lookup = {_financial_statement_identity(item): item for item in fallback_rows}
+    merged: list[FinancialStatementData] = []
+    seen: set[tuple[str, int, int]] = set()
+
+    for item in primary_rows:
+        identity = _financial_statement_identity(item)
+        seen.add(identity)
+        fallback = fallback_lookup.get(identity)
+        if fallback is None:
+            merged.append(item)
+            continue
+
+        payload = item.model_dump(mode="json")
+        fallback_payload = fallback.model_dump(mode="json")
+        for field_name in FinancialStatementData.model_fields:
+            if payload.get(field_name) is None and fallback_payload.get(field_name) is not None:
+                payload[field_name] = fallback_payload[field_name]
+        merged.append(FinancialStatementData.model_validate(payload))
+
+    for item in fallback_rows:
+        identity = _financial_statement_identity(item)
+        if identity not in seen:
+            merged.append(item)
+
+    return merged
+
+
 def _coerce_iso_timestamp(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -563,28 +607,110 @@ async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
     )
 
 
-async def _load_profile_from_appwrite(symbol: str) -> Optional[EquityProfileData]:
+async def _load_profile_from_appwrite(
+    symbol: str,
+    db: AsyncSession | None = None,
+) -> Optional[EquityProfileData]:
     doc = await get_appwrite_stock(symbol)
     if not doc:
         return None
 
+    company_row: Company | None = None
+    stock_row: Stock | None = None
+    if db is not None:
+        company_row = (
+            await db.execute(select(Company).where(Company.symbol == symbol.upper()))
+        ).scalar_one_or_none()
+        stock_row = (
+            await db.execute(select(Stock).where(Stock.symbol == symbol.upper()))
+        ).scalar_one_or_none()
+
+    industry = _pick_optional_text(
+        doc.get("industry"),
+        doc.get("icb_name3"),
+        doc.get("icb_name4"),
+        company_row.industry if company_row else None,
+        stock_row.industry if stock_row else None,
+    )
+    sector = _pick_optional_text(
+        doc.get("sector"),
+        doc.get("icb_name2"),
+        company_row.sector if company_row else None,
+        stock_row.sector if stock_row else None,
+        industry,
+    )
+    listing_date = (
+        _coerce_iso_date(doc.get("listing_date"))
+        or _coerce_iso_date(company_row.listing_date if company_row else None)
+        or _coerce_iso_date(stock_row.listing_date if stock_row else None)
+    )
+    established_date = _coerce_iso_date(company_row.established_date if company_row else None)
+
+    outstanding_shares = _pick_optional_share_count(
+        doc.get("outstanding_shares"),
+        doc.get("issue_share"),
+        company_row.outstanding_shares if company_row else None,
+        company_row.listed_shares if company_row else None,
+        stock_row.outstanding_shares
+        if stock_row and hasattr(stock_row, "outstanding_shares")
+        else None,
+        await _get_outstanding_shares(db, symbol.upper()) if db is not None else None,
+    )
+    listed_shares = _pick_optional_share_count(
+        doc.get("listed_shares"),
+        doc.get("listed_volume"),
+        company_row.listed_shares if company_row else None,
+        company_row.outstanding_shares if company_row else None,
+        outstanding_shares,
+    )
+    market_cap = (
+        await _resolve_profile_market_cap(
+            db=db,
+            symbol=symbol.upper(),
+            outstanding_shares=outstanding_shares,
+            fallback_market_cap=doc.get("market_cap"),
+        )
+        if db is not None
+        else _coerce_optional_float(doc.get("market_cap"))
+    )
+
     return EquityProfileData(
         symbol=str(doc.get("symbol") or symbol).upper(),
-        company_name=doc.get("company_name"),
-        short_name=doc.get("short_name"),
-        exchange=doc.get("exchange"),
-        industry=doc.get("industry"),
-        sector=doc.get("sector"),
-        listing_date=_coerce_iso_date(doc.get("listing_date")),
-        established_date=None,
-        website=None,
-        description=None,
-        outstanding_shares=None,
-        listed_shares=None,
-        market_cap=None,
-        address=None,
-        phone=None,
-        email=None,
+        company_name=_pick_optional_text(
+            doc.get("company_name"),
+            company_row.company_name if company_row else None,
+            stock_row.company_name if stock_row else None,
+        ),
+        short_name=_pick_optional_text(
+            doc.get("short_name"),
+            company_row.short_name if company_row else None,
+            stock_row.short_name if stock_row else None,
+        ),
+        exchange=_pick_optional_text(
+            doc.get("exchange"),
+            company_row.exchange if company_row else None,
+            stock_row.exchange if stock_row else None,
+        ),
+        industry=industry,
+        sector=sector,
+        listing_date=listing_date,
+        established_date=established_date,
+        website=_pick_optional_text(
+            doc.get("website"), company_row.website if company_row else None
+        ),
+        description=_pick_optional_text(
+            doc.get("company_profile"),
+            doc.get("description"),
+            company_row.business_description if company_row else None,
+        ),
+        outstanding_shares=outstanding_shares,
+        listed_shares=listed_shares,
+        market_cap=market_cap,
+        address=_pick_optional_text(
+            doc.get("address"), company_row.address if company_row else None
+        ),
+        phone=_pick_optional_text(doc.get("phone"), company_row.phone if company_row else None),
+        email=_pick_optional_text(doc.get("email"), company_row.email if company_row else None),
         updated_at=None,
     )
 
@@ -2544,7 +2670,7 @@ async def get_profile(
                 )
 
         if not refresh and settings.resolved_data_backend == "appwrite" and use_appwrite_data:
-            appwrite_profile = await _load_profile_from_appwrite(symbol_upper)
+            appwrite_profile = await _load_profile_from_appwrite(symbol_upper, db)
             if appwrite_profile:
                 return StandardResponse(
                     data=appwrite_profile,
@@ -2590,7 +2716,7 @@ async def get_profile(
             )
 
         if not refresh and use_appwrite_data:
-            appwrite_profile = await _load_profile_from_appwrite(symbol_upper)
+            appwrite_profile = await _load_profile_from_appwrite(symbol_upper, db)
             if appwrite_profile:
                 return StandardResponse(
                     data=appwrite_profile,
@@ -2716,7 +2842,7 @@ async def get_profile(
         logger.warning("Profile endpoint failed open for %s: %s", symbol_upper, e)
 
         if use_appwrite_data:
-            appwrite_profile = await _load_profile_from_appwrite(symbol_upper)
+            appwrite_profile = await _load_profile_from_appwrite(symbol_upper, db)
             if appwrite_profile:
                 return StandardResponse(
                     data=appwrite_profile,
@@ -2755,12 +2881,6 @@ async def get_financials(
             period=period,
             limit=limit,
         )
-        if data:
-            return StandardResponse(
-                data=data,
-                meta=MetaData(count=len(data), last_data_date=last_data_date),
-            )
-
         fallback_data = await _load_financial_statement_fallback(
             db=db,
             symbol=symbol,
@@ -2768,6 +2888,13 @@ async def get_financials(
             period=period,
             limit=limit,
         )
+        if data:
+            data = _merge_financial_statement_rows(data, fallback_data)
+            return StandardResponse(
+                data=data,
+                meta=MetaData(count=len(data), last_data_date=last_data_date),
+            )
+
         if fallback_data:
             return StandardResponse(
                 data=fallback_data,
@@ -3609,14 +3736,17 @@ async def get_income_statement(
             period=period,
             limit=limit,
         )
-        if not data:
-            data = await _load_financial_statement_fallback(
-                db=db,
-                symbol=symbol,
-                statement_type=StatementType.INCOME.value,
-                period=period,
-                limit=limit,
-            )
+        fallback_data = await _load_financial_statement_fallback(
+            db=db,
+            symbol=symbol,
+            statement_type=StatementType.INCOME.value,
+            period=period,
+            limit=limit,
+        )
+        if data:
+            data = _merge_financial_statement_rows(data, fallback_data)
+        else:
+            data = fallback_data
         data = await _enrich_income_eps_from_ratios(
             symbol=symbol_upper,
             period=period,
@@ -3672,14 +3802,17 @@ async def get_balance_sheet(
             period=period,
             limit=limit,
         )
-        if not data:
-            data = await _load_financial_statement_fallback(
-                db=db,
-                symbol=symbol,
-                statement_type=StatementType.BALANCE.value,
-                period=period,
-                limit=limit,
-            )
+        fallback_data = await _load_financial_statement_fallback(
+            db=db,
+            symbol=symbol,
+            statement_type=StatementType.BALANCE.value,
+            period=period,
+            limit=limit,
+        )
+        if data:
+            data = _merge_financial_statement_rows(data, fallback_data)
+        else:
+            data = fallback_data
         return StandardResponse(
             data=data,
             meta=MetaData(count=len(data), last_data_date=last_data_date),
@@ -3721,14 +3854,17 @@ async def get_cash_flow(
             period=period,
             limit=limit,
         )
-        if not data:
-            data = await _load_financial_statement_fallback(
-                db=db,
-                symbol=symbol,
-                statement_type=StatementType.CASHFLOW.value,
-                period=period,
-                limit=limit,
-            )
+        fallback_data = await _load_financial_statement_fallback(
+            db=db,
+            symbol=symbol,
+            statement_type=StatementType.CASHFLOW.value,
+            period=period,
+            limit=limit,
+        )
+        if data:
+            data = _merge_financial_statement_rows(data, fallback_data)
+        else:
+            data = fallback_data
         return StandardResponse(
             data=data,
             meta=MetaData(count=len(data), last_data_date=last_data_date),

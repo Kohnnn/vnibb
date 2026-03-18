@@ -274,19 +274,23 @@ async def sync_profiles(
 ) -> SyncResponse:
     """Sync company profiles to database."""
     from vnibb.services.data_pipeline import data_pipeline
+    from vnibb.services.appwrite_population import populate_appwrite_tables
+
+    async def _run_sync() -> int:
+        count = await data_pipeline.sync_company_profiles(symbols=symbols)
+        if settings.resolved_data_backend == "appwrite" and settings.is_appwrite_configured:
+            await populate_appwrite_tables(["stocks"], full_refresh=True)
+        return count
 
     if async_mode:
-        background_tasks.add_task(
-            data_pipeline.sync_company_profiles,
-            symbols=symbols,
-        )
+        background_tasks.add_task(_run_sync)
         return SyncResponse(
             status="started",
             message="Profile sync started in background",
         )
 
     try:
-        count = await data_pipeline.sync_company_profiles(symbols=symbols)
+        count = await _run_sync()
         return SyncResponse(
             status="success",
             message=f"Synced {count} company profiles",
@@ -863,20 +867,27 @@ async def sync_financials(
 ) -> SyncResponse:
     """Sync financial statements to database."""
     from vnibb.services.data_pipeline import data_pipeline
+    from vnibb.services.appwrite_population import populate_appwrite_tables
+
+    async def _run_sync() -> int:
+        total = await data_pipeline.sync_financials(symbols=symbols, period=period)
+        if settings.resolved_data_backend == "appwrite" and settings.is_appwrite_configured:
+            await populate_appwrite_tables(
+                ["income_statements", "balance_sheets", "cash_flows"],
+                full_refresh=False,
+                max_rows=0,
+            )
+        return total
 
     if async_mode:
-        background_tasks.add_task(
-            data_pipeline.sync_financials,
-            symbols=symbols,
-            period=period,
-        )
+        background_tasks.add_task(_run_sync)
         return SyncResponse(
             status="started",
             message="Financial statements sync started in background",
         )
 
     try:
-        total = await data_pipeline.sync_financials(symbols=symbols, period=period)
+        total = await _run_sync()
         return SyncResponse(
             status="success",
             message=f"Synced financial statements for {total} symbols",
@@ -901,16 +912,20 @@ async def sync_metrics(
 ) -> SyncResponse:
     """Sync financial ratios to database."""
     from vnibb.services.data_pipeline import data_pipeline
+    from vnibb.services.appwrite_population import populate_appwrite_tables
 
     async def _run_sync():
-        await data_pipeline.sync_financial_ratios(symbols=symbols, period=period)
+        total = await data_pipeline.sync_financial_ratios(symbols=symbols, period=period)
+        if settings.resolved_data_backend == "appwrite" and settings.is_appwrite_configured:
+            await populate_appwrite_tables(["financial_ratios"], full_refresh=False, max_rows=0)
+        return total
 
     if async_mode:
         background_tasks.add_task(_run_sync)
         return SyncResponse(status="started", message="Metrics sync started in background")
 
     try:
-        total = await data_pipeline.sync_financial_ratios(symbols=symbols, period=period)
+        total = await _run_sync()
         return SyncResponse(
             status="success", message=f"Synced ratios for {total} symbols", count=total
         )
