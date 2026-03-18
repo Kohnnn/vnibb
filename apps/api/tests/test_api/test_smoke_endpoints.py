@@ -51,6 +51,34 @@ async def test_admin_sync_status_alias_returns_freshness_payload(client):
 
 
 @pytest.mark.asyncio
+async def test_profile_sync_succeeds_when_appwrite_mirror_fails(client, monkeypatch):
+    async def fake_sync_company_profiles(*, symbols=None):
+        assert symbols == ["VCI"]
+        return 1
+
+    async def fail_populate(*args, **kwargs):
+        raise RuntimeError("mirror failed")
+
+    monkeypatch.setattr(
+        "vnibb.services.data_pipeline.data_pipeline.sync_company_profiles",
+        fake_sync_company_profiles,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "vnibb.services.appwrite_population.populate_appwrite_tables",
+        fail_populate,
+        raising=False,
+    )
+
+    response = await client.post("/api/v1/data/sync/profiles?async_mode=false&symbols=VCI")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_screener_smoke_returns_data(client, monkeypatch):
     async def fake_screener_fetch(_params):
         return [
@@ -631,6 +659,39 @@ async def test_appwrite_profile_enriches_db_sector_and_share_counts(test_db, mon
     assert profile.sector == "Chung khoan"
     assert profile.outstanding_shares == pytest.approx(850_100_000.0)
     assert profile.listed_shares == pytest.approx(850_100_000.0)
+
+
+@pytest.mark.asyncio
+async def test_profile_endpoint_prefers_scaled_listed_shares_from_cached_company_row(
+    client, test_db
+):
+    test_db.add(
+        Company(
+            symbol="VCI",
+            company_name="Vietcap",
+            exchange="HOSE",
+            industry="Chung khoan",
+            sector="Chung khoan",
+            outstanding_shares=850.1,
+            listed_shares=850.0,
+            updated_at=datetime(2026, 3, 18, 8, 0, 0),
+        )
+    )
+    test_db.add(
+        Stock(
+            symbol="VCI",
+            company_name="Vietcap",
+            exchange="HOSE",
+            industry="Chung khoan",
+            sector="Chung khoan",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/VCI/profile")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["listed_shares"] == pytest.approx(850_100_000.0)
 
 
 @pytest.mark.asyncio

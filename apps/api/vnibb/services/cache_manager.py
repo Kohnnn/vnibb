@@ -450,6 +450,41 @@ class CacheManager:
             )
             listing_date = _parse_optional_date(data.get("listing_date") or data.get("listingDate"))
 
+            def _normalize_share_count(value: Any) -> Optional[float]:
+                if value is None:
+                    return None
+                try:
+                    numeric = float(value)
+                except (TypeError, ValueError):
+                    return None
+                if numeric == 0:
+                    return None
+                if abs(numeric) < 1_000_000:
+                    return numeric * 1_000_000.0
+                return numeric
+
+            def _resolve_listed_share_count(
+                listed_value: Any,
+                outstanding_value: Any,
+            ) -> Optional[float]:
+                listed_shares = _normalize_share_count(listed_value)
+                outstanding_shares = _normalize_share_count(outstanding_value)
+                if listed_shares is None:
+                    return outstanding_shares
+                if outstanding_shares is None:
+                    return listed_shares
+
+                gap_ratio = abs(outstanding_shares - listed_shares) / max(outstanding_shares, 1.0)
+                if listed_shares < outstanding_shares and gap_ratio <= 0.02:
+                    return outstanding_shares
+                return listed_shares
+
+            outstanding_shares = _normalize_share_count(data.get("outstanding_shares"))
+            listed_shares = _resolve_listed_share_count(
+                data.get("listed_shares"),
+                outstanding_shares,
+            )
+
             # Check if company exists
             result = await session.execute(select(Company).where(Company.symbol == symbol))
             company = result.scalar_one_or_none()
@@ -468,10 +503,8 @@ class CacheManager:
                 company.business_description = (
                     data.get("description") or company.business_description
                 )
-                company.outstanding_shares = (
-                    data.get("outstanding_shares") or company.outstanding_shares
-                )
-                company.listed_shares = data.get("listed_shares") or company.listed_shares
+                company.outstanding_shares = outstanding_shares or company.outstanding_shares
+                company.listed_shares = listed_shares or company.listed_shares
                 company.address = data.get("address") or company.address
                 company.phone = data.get("phone") or company.phone
                 company.email = data.get("email") or company.email
@@ -491,8 +524,8 @@ class CacheManager:
                     listing_date=listing_date,
                     website=data.get("website"),
                     business_description=data.get("description"),
-                    outstanding_shares=data.get("outstanding_shares"),
-                    listed_shares=data.get("listed_shares"),
+                    outstanding_shares=outstanding_shares,
+                    listed_shares=listed_shares,
                     address=data.get("address"),
                     phone=data.get("phone"),
                     email=data.get("email"),
