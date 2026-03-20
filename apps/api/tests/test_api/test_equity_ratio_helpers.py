@@ -84,6 +84,7 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
             symbol="VNM",
             snapshot_date=date(2025, 1, 10),
             price=100.0,
+            market_cap=2400.0,
         )
     )
     test_db.add_all(
@@ -120,8 +121,11 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
                 total_assets=2000.0,
                 total_liabilities=800.0,
                 total_equity=1200.0,
+                cash_and_equivalents=100.0,
                 inventory=200.0,
                 accounts_receivable=240.0,
+                short_term_debt=50.0,
+                long_term_debt=200.0,
             ),
             BalanceSheet(
                 id=2,
@@ -140,6 +144,7 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
                 fiscal_year=2024,
                 operating_cash_flow=210.0,
                 free_cash_flow=130.0,
+                capital_expenditure=-80.0,
                 dividends_paid=-40.0,
                 debt_repayment=-30.0,
             ),
@@ -157,12 +162,14 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
     assert item.receivables_turnover == pytest.approx(1200.0 / 230.0)
     assert item.debt_assets == pytest.approx(0.4)
     assert item.equity_multiplier == pytest.approx(2000.0 / 1200.0)
+    assert item.roic == pytest.approx((150.0 / 1400.0) * 100)
     assert item.revenue_growth == pytest.approx(20.0)
     assert item.earnings_growth == pytest.approx(25.0)
     assert item.debt_service_coverage == pytest.approx(3.6)
     assert item.ocf_debt == pytest.approx(0.2625)
     assert item.ocf_sales == pytest.approx(0.175)
-    assert item.fcf_yield == pytest.approx(130.0 / 200_000_000_000)
+    assert item.ev_sales == pytest.approx((2400.0 + 250.0 - 100.0) / 1200.0)
+    assert item.fcf_yield == pytest.approx(130.0 / 2400.0)
     assert item.dps == pytest.approx(0.00000002)
     assert item.dividend_yield == pytest.approx(0.00000002)
     assert item.payout_ratio == pytest.approx((40.0 / 150.0) * 100)

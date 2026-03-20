@@ -172,7 +172,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
 
         const columns = Array.from(
             new Set(displayRows.map((row: any) => row.__period).filter((p: any): p is string => Boolean(p)))
-        ).sort((a: string, b: string) => periodSortKey(a) - periodSortKey(b)).reverse();
+        ).sort((a: string, b: string) => periodSortKey(a) - periodSortKey(b));
 
         let metrics: any[] = [];
         if (activeTab === 'ratios') {
@@ -338,7 +338,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                             )}
                             {activeTab !== 'ratios' && (
                                 <div className="px-2 pb-1 text-[10px] text-muted-foreground italic">
-                                    {unitLegend}
+                                    {unitLegend} | Currency: VND | Reporting: VAS | Fiscal year end: Dec 31.
                                 </div>
                             )}
                             <table className="data-table financial-dense freeze-first-col w-full text-[11px] border-collapse table-fixed">
@@ -399,7 +399,6 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                                 {(() => {
                                                     const points = tableData.periods
                                                         .slice()
-                                                        .reverse()
                                                         .map((p) => row.values[p]?.val)
                                                         .filter((value): value is number =>
                                                             typeof value === 'number' && Number.isFinite(value)

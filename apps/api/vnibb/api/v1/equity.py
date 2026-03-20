@@ -5,6 +5,7 @@ Equity API Endpoints with Graceful Degradation.
 import asyncio
 import logging
 import re
+import unicodedata
 from datetime import date, timedelta, datetime
 from typing import List, Optional, Literal, Any, Callable, Awaitable
 
@@ -301,6 +302,7 @@ async def _load_financial_statement_fallback(
             dividends_paid=getattr(row, "dividends_paid", None),
             stock_repurchased=getattr(row, "stock_repurchased", None),
             debt_repayment=getattr(row, "debt_repayment", None),
+            raw_data=getattr(row, "raw_data", None),
         )
         for row in rows
     ]
@@ -348,6 +350,278 @@ def _merge_financial_statement_rows(
             merged.append(item)
 
     return merged
+
+
+def _normalize_financial_metric_key(raw_key: Any) -> str:
+    cleaned = str(raw_key or "").strip().lower()
+    if not cleaned:
+        return ""
+    cleaned = (
+        cleaned.replace("&", " and ")
+        .replace("%", " pct ")
+        .replace(".", "_")
+        .replace("/", "_")
+        .replace("-", "_")
+        .replace("(", " ")
+        .replace(")", " ")
+        .replace(" ", "_")
+    )
+    cleaned = unicodedata.normalize("NFKD", cleaned).encode("ascii", "ignore").decode("ascii")
+    cleaned = re.sub(r"[^a-z0-9_]", "", cleaned)
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    return cleaned
+
+
+def _build_financial_metric_lookup(raw_payload: Any) -> dict[str, Any]:
+    if not isinstance(raw_payload, dict):
+        return {}
+
+    lookup: dict[str, Any] = {}
+    for key, value in raw_payload.items():
+        normalized = _normalize_financial_metric_key(key)
+        if normalized and normalized not in lookup:
+            lookup[normalized] = value
+    return lookup
+
+
+def _lookup_financial_metric(raw_payload: Any, *aliases: str) -> Optional[float]:
+    lookup = _build_financial_metric_lookup(raw_payload)
+    for alias in aliases:
+        normalized = _normalize_financial_metric_key(alias)
+        if normalized in lookup:
+            parsed = _coerce_optional_float(lookup.get(normalized))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _sum_financial_metrics(raw_payload: Any, *aliases: str) -> Optional[float]:
+    lookup = _build_financial_metric_lookup(raw_payload)
+    values: list[float] = []
+    for alias in aliases:
+        normalized = _normalize_financial_metric_key(alias)
+        if normalized not in lookup:
+            continue
+        parsed = _coerce_optional_float(lookup.get(normalized))
+        if parsed is not None:
+            values.append(parsed)
+    if not values:
+        return None
+    return sum(values)
+
+
+def _statement_period_sort_key(period_value: Any) -> int:
+    period_text = str(period_value or "").strip().upper()
+    if not period_text:
+        return 0
+
+    year_match = re.search(r"(20\d{2})", period_text)
+    year = int(year_match.group(1)) if year_match else 0
+    quarter_match = re.search(r"Q([1-4])", period_text)
+    quarter = int(quarter_match.group(1)) if quarter_match else 0
+
+    if "TTM" in period_text:
+        return year * 10 + 9
+    if "YTD" in period_text:
+        return year * 10 + 8
+    if quarter:
+        return year * 10 + quarter
+    return year * 10
+
+
+def _sort_financial_statement_rows(
+    rows: list[FinancialStatementData],
+) -> list[FinancialStatementData]:
+    return sorted(rows, key=lambda item: _statement_period_sort_key(item.period))
+
+
+def _enrich_financial_statement_rows(
+    rows: list[FinancialStatementData],
+) -> list[FinancialStatementData]:
+    if not rows:
+        return rows
+
+    rows_by_period = {
+        str(item.period or "").upper(): item for item in rows if str(item.period or "").strip()
+    }
+
+    for item in rows:
+        raw_data = item.raw_data if isinstance(item.raw_data, dict) else {}
+
+        if item.selling_general_admin is None:
+            selling_expense = _lookup_financial_metric(
+                raw_data, "selling_expenses", "chi_phi_ban_hang"
+            )
+            admin_expense = _lookup_financial_metric(
+                raw_data,
+                "general_and_administrative_expenses",
+                "general_and_admin_expenses",
+                "chi_phi_quan_ly_dn",
+                "chi_phi_quan_ly_doanh_nghiep",
+            )
+            item.selling_general_admin = _sum_financial_metrics(
+                raw_data,
+                "selling_general_admin",
+                "selling_expenses",
+                "general_and_administrative_expenses",
+                "general_and_admin_expenses",
+                "chi_phi_ban_hang",
+                "chi_phi_quan_ly_dn",
+                "chi_phi_quan_ly_doanh_nghiep",
+            )
+            if item.selling_general_admin is None:
+                if selling_expense is not None or admin_expense is not None:
+                    item.selling_general_admin = (selling_expense or 0.0) + (admin_expense or 0.0)
+
+        if item.research_development is None:
+            item.research_development = _lookup_financial_metric(
+                raw_data,
+                "research_development",
+                "research_and_development",
+                "rd_expense",
+            )
+
+        if item.depreciation is None:
+            item.depreciation = _lookup_financial_metric(
+                raw_data,
+                "depreciation",
+                "depreciation_and_amortization",
+                "depreciation_and_amortisation",
+                "depreciation_of_fixed_assets",
+                "depreciation_of_fixed_assets_and_properties_investment",
+                "chi_phi_khau_hao",
+                "khau_hao_tscd",
+                "khau_hao_tai_san_co_dinh",
+            )
+
+        if item.accounts_payable is None:
+            item.accounts_payable = _lookup_financial_metric(
+                raw_data,
+                "accounts_payable",
+                "trade_accounts_payable",
+                "short_term_trade_accounts_payable",
+                "short_term_trade_payable",
+                "long_term_trade_payables",
+                "phai_tra_nguoi_ban",
+                "n_1_short_term_trade_accounts_payable",
+                "n_8_trade_accounts_payable",
+                "n_5_long_term_trade_payables",
+            )
+
+        if item.goodwill is None:
+            item.goodwill = _lookup_financial_metric(
+                raw_data,
+                "goodwill",
+                "good_will_bn_vnd",
+                "loi_the_thuong_mai",
+                "loi_the_thuong_mai_dong",
+                "n_5_goodwill",
+                "n_6_goodwill",
+                "vii_goodwill_before_2015",
+            )
+
+        if item.intangible_assets is None:
+            item.intangible_assets = _lookup_financial_metric(
+                raw_data,
+                "intangible_assets",
+                "intangible_fixed_assets",
+                "tai_san_vo_hinh",
+                "n_3_intangible_fixed_assets",
+            )
+
+        capex_value = _pick_optional_float(item.capex, item.capital_expenditure)
+        if capex_value is None:
+            capex_value = _lookup_financial_metric(
+                raw_data,
+                "capex",
+                "capital_expenditure",
+                "purchase_of_fixed_assets",
+                "payments_for_purchase_of_fixed_assets",
+                "payment_for_fixed_assets_constructions_and_other_long_term_assets",
+                "mua_sam_tai_san_co_dinh",
+                "mua_sam_tscd",
+                "chi_phi_dau_tu_tai_san_co_dinh",
+            )
+        if item.capex is None:
+            item.capex = capex_value
+        if item.capital_expenditure is None:
+            item.capital_expenditure = capex_value
+
+        if item.free_cash_flow is None:
+            item.free_cash_flow = _lookup_financial_metric(
+                raw_data,
+                "free_cash_flow",
+                "free_cashflow",
+            )
+        if (
+            item.free_cash_flow is None
+            and item.operating_cash_flow is not None
+            and capex_value is not None
+        ):
+            item.free_cash_flow = item.operating_cash_flow + capex_value
+
+        if item.statement_type == StatementType.INCOME.value and item.depreciation is None:
+            cashflow_match = rows_by_period.get(str(item.period or "").upper())
+            if cashflow_match is not None and cashflow_match is not item:
+                item.depreciation = _pick_optional_float(
+                    item.depreciation,
+                    cashflow_match.depreciation,
+                    _lookup_financial_metric(
+                        cashflow_match.raw_data, "depreciation", "depreciation_and_amortisation"
+                    ),
+                )
+
+        if item.ebitda is None:
+            item.ebitda = _lookup_financial_metric(raw_data, "ebitda", "ebitda_bn_vnd")
+        if (
+            item.ebitda is None
+            and item.operating_income is not None
+            and item.depreciation is not None
+        ):
+            item.ebitda = item.operating_income + abs(item.depreciation)
+
+    return _sort_financial_statement_rows(rows)
+
+
+async def _cross_fill_income_statement_rows(
+    db: AsyncSession,
+    symbol: str,
+    period: str,
+    limit: int,
+    rows: list[FinancialStatementData],
+) -> list[FinancialStatementData]:
+    if not rows:
+        return rows
+
+    cashflow_rows = _enrich_financial_statement_rows(
+        await _load_financial_statement_fallback(
+            db=db,
+            symbol=symbol,
+            statement_type=StatementType.CASHFLOW.value,
+            period=period,
+            limit=max(limit, len(rows)),
+        )
+    )
+    cashflow_by_period = {
+        str(item.period or "").upper(): item
+        for item in cashflow_rows
+        if str(item.period or "").strip()
+    }
+
+    for item in rows:
+        cashflow_row = cashflow_by_period.get(str(item.period or "").upper())
+        if cashflow_row is None:
+            continue
+        if item.depreciation is None:
+            item.depreciation = _pick_optional_float(item.depreciation, cashflow_row.depreciation)
+        if (
+            item.ebitda is None
+            and item.operating_income is not None
+            and item.depreciation is not None
+        ):
+            item.ebitda = item.operating_income + abs(item.depreciation)
+
+    return _sort_financial_statement_rows(rows)
 
 
 def _coerce_iso_timestamp(value: Any) -> Optional[str]:
@@ -993,6 +1267,18 @@ def _should_prefer_screener_quote(
     if primary_timestamp.date() < screener_timestamp.date():
         return True
 
+    if (
+        getattr(primary_quote, "change_pct", None) is None
+        and getattr(screener_quote, "change_pct", None) is not None
+    ):
+        return True
+
+    if (
+        getattr(primary_quote, "prev_close", None) is None
+        and getattr(screener_quote, "prev_close", None) is not None
+    ):
+        return True
+
     return screener_timestamp > primary_timestamp
 
 
@@ -1127,7 +1413,6 @@ def _dedupe_ratio_rows(rows: List[FinancialRatioData]) -> List[FinancialRatioDat
     return sorted(
         seen.values(),
         key=lambda item: _ratio_period_sort_key(item.period),
-        reverse=True,
     )
 
 
@@ -1479,6 +1764,7 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
         ebitda=_pick_optional_float(raw_data.get("ebitda"), raw_data.get("ebitdaTtm")),
         roe=_pick_optional_float(row.roe, raw_data.get("roe")),
         roa=_pick_optional_float(row.roa, raw_data.get("roa")),
+        roic=_pick_optional_float(getattr(row, "roic", None), raw_data.get("roic")),
         eps=_pick_optional_float(row.eps, raw_data.get("eps"), raw_data.get("earningPerShare")),
         bvps=_pick_optional_float(
             row.bvps, raw_data.get("bvps"), raw_data.get("bookValuePerShare")
@@ -1567,6 +1853,7 @@ def _ratio_has_metric_value(item: FinancialRatioData) -> bool:
         item.ebitda,
         item.roe,
         item.roa,
+        item.roic,
         item.eps,
         item.bvps,
         item.debt_equity,
@@ -1832,6 +2119,8 @@ async def _enrich_missing_ratio_metrics(
             BalanceSheet.book_value_per_share,
             BalanceSheet.inventory,
             BalanceSheet.accounts_receivable,
+            BalanceSheet.short_term_debt,
+            BalanceSheet.long_term_debt,
         )
         .where(BalanceSheet.symbol == symbol, BalanceSheet.period_type == normalized_period)
         .order_by(desc(BalanceSheet.fiscal_year), desc(BalanceSheet.fiscal_quarter))
@@ -1842,6 +2131,7 @@ async def _enrich_missing_ratio_metrics(
             CashFlow.fiscal_quarter,
             CashFlow.operating_cash_flow,
             CashFlow.free_cash_flow,
+            CashFlow.capital_expenditure,
             CashFlow.dividends_paid,
             CashFlow.debt_repayment,
             CashFlow.depreciation,
@@ -1928,6 +2218,8 @@ async def _enrich_missing_ratio_metrics(
         book_value_per_share,
         inventory,
         receivables,
+        short_term_debt,
+        long_term_debt,
     ) in balance_rows:
         if year is None:
             continue
@@ -1941,6 +2233,8 @@ async def _enrich_missing_ratio_metrics(
             "book_value_per_share": _coerce_optional_float(book_value_per_share),
             "inventory": _coerce_optional_float(inventory),
             "accounts_receivable": _coerce_optional_float(receivables),
+            "short_term_debt": _coerce_optional_float(short_term_debt),
+            "long_term_debt": _coerce_optional_float(long_term_debt),
         }
 
     cashflow_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
@@ -1949,6 +2243,7 @@ async def _enrich_missing_ratio_metrics(
         quarter,
         operating_cash_flow,
         free_cash_flow,
+        capital_expenditure,
         dividends_paid,
         debt_repayment,
         depreciation,
@@ -1958,6 +2253,7 @@ async def _enrich_missing_ratio_metrics(
         cashflow_lookup[(int(year), int(quarter or 0))] = {
             "operating_cash_flow": _coerce_optional_float(operating_cash_flow),
             "free_cash_flow": _coerce_optional_float(free_cash_flow),
+            "capital_expenditure": _coerce_optional_float(capital_expenditure),
             "dividends_paid": _coerce_optional_float(dividends_paid),
             "debt_repayment": _coerce_optional_float(debt_repayment),
             "depreciation": _coerce_optional_float(depreciation),
@@ -2055,6 +2351,12 @@ async def _enrich_missing_ratio_metrics(
         receivables = (
             None if balance is None else _coerce_optional_float(balance.get("accounts_receivable"))
         )
+        short_term_debt = (
+            None if balance is None else _coerce_optional_float(balance.get("short_term_debt"))
+        )
+        long_term_debt = (
+            None if balance is None else _coerce_optional_float(balance.get("long_term_debt"))
+        )
         inventory_prev = (
             None if balance_prev is None else _coerce_optional_float(balance_prev.get("inventory"))
         )
@@ -2072,6 +2374,11 @@ async def _enrich_missing_ratio_metrics(
         free_cash_flow = (
             None if cashflow is None else _coerce_optional_float(cashflow.get("free_cash_flow"))
         )
+        capital_expenditure = (
+            None
+            if cashflow is None
+            else _coerce_optional_float(cashflow.get("capital_expenditure"))
+        )
         dividends_paid = (
             None if cashflow is None else _coerce_optional_float(cashflow.get("dividends_paid"))
         )
@@ -2083,12 +2390,23 @@ async def _enrich_missing_ratio_metrics(
         )
         depreciation = depreciation_cashflow
 
+        if (
+            free_cash_flow is None
+            and operating_cash_flow is not None
+            and capital_expenditure is not None
+        ):
+            free_cash_flow = operating_cash_flow + capital_expenditure
+
         turnover_base = cost_of_revenue if cost_of_revenue not in (None, 0) else revenue
 
         if item.roe is None and net_income is not None and total_equity not in (None, 0):
             item.roe = (net_income / total_equity) * 100
         if item.roa is None and net_income is not None and total_assets not in (None, 0):
             item.roa = (net_income / total_assets) * 100
+        if item.roic is None and net_income is not None and total_equity not in (None, 0):
+            invested_capital = total_equity + (long_term_debt or 0.0)
+            if invested_capital not in (None, 0):
+                item.roic = (net_income / invested_capital) * 100
         if (
             item.current_ratio is None
             and current_assets not in (None, 0)
@@ -2121,6 +2439,21 @@ async def _enrich_missing_ratio_metrics(
             item.pb = price_vnd / item.bvps
         if item.ps is None and market_cap not in (None, 0) and revenue not in (None, 0):
             item.ps = market_cap / revenue
+        if item.ev_sales is None and revenue not in (None, 0) and market_cap not in (None, 0):
+            total_debt = None
+            if short_term_debt is not None or long_term_debt is not None:
+                total_debt = (short_term_debt or 0.0) + (long_term_debt or 0.0)
+            elif total_liabilities is not None:
+                total_debt = total_liabilities
+
+            enterprise_value = market_cap
+            if total_debt is not None:
+                enterprise_value += total_debt
+            if cash_and_equivalents is not None:
+                enterprise_value -= cash_and_equivalents
+
+            if revenue not in (None, 0):
+                item.ev_sales = enterprise_value / revenue
         if (
             item.operating_margin is None
             and revenue not in (None, 0)
@@ -2921,12 +3254,30 @@ async def get_financials(
         )
         if data:
             data = _merge_financial_statement_rows(data, fallback_data)
+            data = _enrich_financial_statement_rows(data)
+            if statement_type == StatementType.INCOME.value:
+                data = await _cross_fill_income_statement_rows(
+                    db=db,
+                    symbol=symbol,
+                    period=period,
+                    limit=limit,
+                    rows=data,
+                )
             return StandardResponse(
                 data=data,
                 meta=MetaData(count=len(data), last_data_date=last_data_date),
             )
 
         if fallback_data:
+            fallback_data = _enrich_financial_statement_rows(fallback_data)
+            if statement_type == StatementType.INCOME.value:
+                fallback_data = await _cross_fill_income_statement_rows(
+                    db=db,
+                    symbol=symbol,
+                    period=period,
+                    limit=limit,
+                    rows=fallback_data,
+                )
             return StandardResponse(
                 data=fallback_data,
                 meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
@@ -2946,6 +3297,15 @@ async def get_financials(
                 limit=limit,
             )
             if fallback_data:
+                fallback_data = _enrich_financial_statement_rows(fallback_data)
+                if statement_type == StatementType.INCOME.value:
+                    fallback_data = await _cross_fill_income_statement_rows(
+                        db=db,
+                        symbol=symbol,
+                        period=period,
+                        limit=limit,
+                        rows=fallback_data,
+                    )
                 return StandardResponse(
                     data=fallback_data,
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
@@ -3650,7 +4010,7 @@ async def get_ratio_history(
                 row[key] = getattr(item, key, None)
             rows.append(row)
 
-        rows = sorted(rows, key=lambda r: period_sort_key(str(r.get("period", ""))), reverse=True)
+        rows = sorted(rows, key=lambda r: period_sort_key(str(r.get("period", ""))))
         return StandardResponse(data=rows[:limit], meta=MetaData(count=min(len(rows), limit)))
     except Exception as e:
         return StandardResponse(data=[], error=str(e))
@@ -3778,6 +4138,14 @@ async def get_income_statement(
             data = _merge_financial_statement_rows(data, fallback_data)
         else:
             data = fallback_data
+        data = _enrich_financial_statement_rows(data)
+        data = await _cross_fill_income_statement_rows(
+            db=db,
+            symbol=symbol,
+            period=period,
+            limit=limit,
+            rows=data,
+        )
         data = await _enrich_income_eps_from_ratios(
             symbol=symbol_upper,
             period=period,
@@ -3798,6 +4166,14 @@ async def get_income_statement(
                 statement_type=StatementType.INCOME.value,
                 period=period,
                 limit=limit,
+            )
+            fallback_data = _enrich_financial_statement_rows(fallback_data)
+            fallback_data = await _cross_fill_income_statement_rows(
+                db=db,
+                symbol=symbol,
+                period=period,
+                limit=limit,
+                rows=fallback_data,
             )
             fallback_data = await _enrich_income_eps_from_ratios(
                 symbol=symbol_upper,
@@ -3844,6 +4220,7 @@ async def get_balance_sheet(
             data = _merge_financial_statement_rows(data, fallback_data)
         else:
             data = fallback_data
+        data = _enrich_financial_statement_rows(data)
         return StandardResponse(
             data=data,
             meta=MetaData(count=len(data), last_data_date=last_data_date),
@@ -3860,6 +4237,7 @@ async def get_balance_sheet(
                 limit=limit,
             )
             if fallback_data:
+                fallback_data = _enrich_financial_statement_rows(fallback_data)
                 return StandardResponse(
                     data=fallback_data,
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
@@ -3896,6 +4274,7 @@ async def get_cash_flow(
             data = _merge_financial_statement_rows(data, fallback_data)
         else:
             data = fallback_data
+        data = _enrich_financial_statement_rows(data)
         return StandardResponse(
             data=data,
             meta=MetaData(count=len(data), last_data_date=last_data_date),
@@ -3912,6 +4291,7 @@ async def get_cash_flow(
                 limit=limit,
             )
             if fallback_data:
+                fallback_data = _enrich_financial_statement_rows(fallback_data)
                 return StandardResponse(
                     data=fallback_data,
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),

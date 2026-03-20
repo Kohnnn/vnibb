@@ -211,17 +211,17 @@ export function DenseFinancialTable({
 
   return (
     <div className={cn('overflow-auto', className)}>
-      <table className="data-table financial-dense freeze-first-col w-full text-[11px] text-left">
+      <table className="data-table financial-dense freeze-first-col w-full text-[11px] text-left leading-4">
         <thead className="sticky top-0 z-10 bg-[var(--bg-primary)] text-[var(--text-muted)]">
           <tr className="border-b border-[var(--border-color)]">
-            <th className="py-2 px-2 font-bold uppercase tracking-tighter">Metric</th>
+            <th className="px-2 py-1.5 font-bold uppercase tracking-tighter">Metric</th>
             {visibleColumns.map((column) => {
               const isActiveSort = sortKey === column.key
               return (
                 <th
                   key={column.key}
                   className={cn(
-                    'py-2 px-2 font-bold',
+                    'px-2 py-1.5 font-bold',
                     column.align === 'left' ? 'text-left' : 'text-right',
                     sortable ? 'cursor-pointer select-none hover:text-[var(--text-primary)]' : ''
                   )}
@@ -243,8 +243,6 @@ export function DenseFinancialTable({
         <tbody>
           {displayedRows.map((row, rowIndex) => {
             const trendValues = visibleColumns
-              .slice()
-              .reverse()
               .map((column) => asNumber(row.values[column.key]))
               .filter((value): value is number => value !== null)
 
@@ -258,7 +256,7 @@ export function DenseFinancialTable({
                 )}
               >
                 <td
-                  className="py-2 px-2 text-[var(--text-secondary)]"
+                  className="px-2 py-1.5 text-[var(--text-secondary)]"
                   style={row.indent ? { paddingLeft: `${8 + row.indent}px` } : undefined}
                 >
                   {row.isGroup ? (
@@ -283,8 +281,8 @@ export function DenseFinancialTable({
 
                   const currentNumber = asNumber(rawValue)
                   const previousNumber =
-                    showGrowth && index < visibleColumns.length - 1
-                      ? asNumber(row.values[visibleColumns[index + 1].key])
+                    showGrowth && index > 0
+                      ? asNumber(row.values[visibleColumns[index - 1].key])
                       : null
 
                   let growthPct: number | null = null
@@ -302,7 +300,7 @@ export function DenseFinancialTable({
                       key={`${row.id}:${column.key}`}
                       data-type="number"
                         className={cn(
-                          'py-2 px-2 font-mono text-[var(--text-primary)]',
+                          'px-2 py-1.5 font-mono text-[var(--text-primary)]',
                           column.align === 'left' ? 'text-left' : 'text-right'
                         )}
                     >
@@ -325,7 +323,7 @@ export function DenseFinancialTable({
                 })}
 
                 {showTrend ? (
-                  <td className="py-2 px-2 text-center">
+                  <td className="px-2 py-1.5 text-center">
                     {trendValues.length < 2 ? (
                       <span className="text-[10px] text-[var(--text-muted)]">-</span>
                     ) : (

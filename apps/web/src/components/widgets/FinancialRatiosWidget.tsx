@@ -10,7 +10,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
@@ -118,6 +118,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                 seen.add(entry.period)
                 return true
             })
+            .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period))
     }, [rawRatios]);
     const hasData = ratios.length > 0;
     const isFallback = Boolean(error && hasData);

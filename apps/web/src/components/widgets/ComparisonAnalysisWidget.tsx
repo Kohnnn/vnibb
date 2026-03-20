@@ -36,32 +36,32 @@ const CATEGORY_DEFINITIONS = [
   {
     id: 'valuation',
     name: 'Valuation',
-    metricIds: ['pe_ratio', 'pb_ratio', 'ps_ratio', 'ev_ebitda', 'market_cap'],
-  },
-  {
-    id: 'liquidity',
-    name: 'Liquidity',
-    metricIds: ['current_ratio', 'quick_ratio'],
-  },
-  {
-    id: 'efficiency',
-    name: 'Efficiency',
-    metricIds: ['asset_turnover', 'inventory_turnover'],
+    metricIds: ['pe_ratio', 'pb_ratio', 'ps_ratio', 'ev_ebitda', 'ev_sales', 'peg_ratio'],
   },
   {
     id: 'profitability',
     name: 'Profitability',
-    metricIds: ['roe', 'roa', 'gross_margin', 'net_margin', 'operating_margin'],
+    metricIds: ['roe', 'roa', 'roic', 'gross_margin', 'net_margin', 'operating_margin'],
+  },
+  {
+    id: 'liquidity',
+    name: 'Liquidity',
+    metricIds: ['current_ratio', 'quick_ratio', 'cash_ratio'],
   },
   {
     id: 'leverage',
     name: 'Leverage',
-    metricIds: ['debt_equity', 'debt_assets', 'interest_coverage'],
+    metricIds: ['debt_equity', 'debt_assets', 'interest_coverage', 'equity_multiplier'],
   },
   {
-    id: 'cashflow',
-    name: 'Cash Flow',
-    metricIds: ['ocf_debt', 'fcf_yield', 'ocf_sales'],
+    id: 'efficiency',
+    name: 'Efficiency',
+    metricIds: ['asset_turnover', 'inventory_turnover', 'receivables_turnover'],
+  },
+  {
+    id: 'growth',
+    name: 'Growth',
+    metricIds: ['revenue_growth', 'earnings_growth'],
   },
 ] as const
 
@@ -71,8 +71,6 @@ const MAX_SYMBOLS = 5
 const MIN_SYMBOLS = 2
 
 type PerformancePeriod = (typeof PERFORMANCE_PERIODS)[number]
-
-type RatioTableView = 'valuation' | 'financial'
 
 interface RatioColumn {
   key: keyof FinancialRatioData
@@ -92,10 +90,46 @@ const VALUATION_RATIO_COLUMNS: RatioColumn[] = [
 const FINANCIAL_RATIO_COLUMNS: RatioColumn[] = [
   { key: 'roe', label: 'ROE', format: 'percent-auto' },
   { key: 'roa', label: 'ROA', format: 'percent-auto' },
+  { key: 'roic', label: 'ROIC', format: 'percent-auto' },
+  { key: 'gross_margin', label: 'Gross Margin', format: 'percent-auto' },
+  { key: 'operating_margin', label: 'Operating Margin', format: 'percent-auto' },
   { key: 'net_margin', label: 'Net Margin', format: 'percent-auto' },
   { key: 'current_ratio', label: 'Current Ratio', format: 'ratio' },
   { key: 'debt_equity', label: 'D/E', format: 'ratio' },
 ]
+
+const LIQUIDITY_RATIO_COLUMNS: RatioColumn[] = [
+  { key: 'current_ratio', label: 'Current Ratio', format: 'ratio' },
+  { key: 'quick_ratio', label: 'Quick Ratio', format: 'ratio' },
+  { key: 'cash_ratio', label: 'Cash Ratio', format: 'ratio' },
+]
+
+const LEVERAGE_RATIO_COLUMNS: RatioColumn[] = [
+  { key: 'debt_equity', label: 'D/E', format: 'ratio' },
+  { key: 'debt_assets', label: 'D/A', format: 'percent-auto' },
+  { key: 'interest_coverage', label: 'Interest Coverage', format: 'ratio' },
+  { key: 'equity_multiplier', label: 'Equity Multiplier', format: 'ratio' },
+]
+
+const EFFICIENCY_RATIO_COLUMNS: RatioColumn[] = [
+  { key: 'asset_turnover', label: 'Asset Turnover', format: 'ratio' },
+  { key: 'inventory_turnover', label: 'Inventory Turnover', format: 'ratio' },
+  { key: 'receivables_turnover', label: 'Receivables Turnover', format: 'ratio' },
+]
+
+const GROWTH_RATIO_COLUMNS: RatioColumn[] = [
+  { key: 'revenue_growth', label: 'Revenue Growth', format: 'percent-auto' },
+  { key: 'earnings_growth', label: 'Earnings Growth', format: 'percent-auto' },
+]
+
+const CATEGORY_RATIO_COLUMNS: Record<string, RatioColumn[]> = {
+  valuation: VALUATION_RATIO_COLUMNS,
+  profitability: FINANCIAL_RATIO_COLUMNS,
+  liquidity: LIQUIDITY_RATIO_COLUMNS,
+  leverage: LEVERAGE_RATIO_COLUMNS,
+  efficiency: EFFICIENCY_RATIO_COLUMNS,
+  growth: GROWTH_RATIO_COLUMNS,
+}
 
 interface ComparisonAnalysisWidgetProps {
   id: string
@@ -151,7 +185,6 @@ function ComparisonAnalysisWidgetComponent({
   const [period, setPeriod] = useState<Period>('FY')
   const [performancePeriod, setPerformancePeriod] = useState<PerformancePeriod>('1M')
   const [activeCategory, setActiveCategory] = useState('valuation')
-  const [ratioTableView, setRatioTableView] = useState<RatioTableView>('valuation')
   const [newSymbol, setNewSymbol] = useState('')
 
   const comparisonQuery = useQuery({
@@ -248,6 +281,11 @@ function ComparisonAnalysisWidgetComponent({
       return selectedMetricIds.has(String(metricId))
     })
   }, [comparisonQuery.data?.metrics, activeCategory])
+
+  const activeRatioColumns = useMemo(
+    () => CATEGORY_RATIO_COLUMNS[activeCategory] ?? VALUATION_RATIO_COLUMNS,
+    [activeCategory]
+  )
 
   const addSymbol = () => {
     const cleaned = newSymbol.trim().toUpperCase()
@@ -590,31 +628,13 @@ function ComparisonAnalysisWidgetComponent({
 
         <div className="border-t border-[var(--border-color)]">
           <div className="flex items-center justify-between gap-2 px-3 py-2">
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setRatioTableView('valuation')}
-                className={cn(
-                  'rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors',
-                  ratioTableView === 'valuation'
-                    ? 'bg-blue-600/15 text-blue-300 border border-blue-500/35'
-                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
-                )}
-              >
-                Valuation Multiples
-              </button>
-              <button
-                type="button"
-                onClick={() => setRatioTableView('financial')}
-                className={cn(
-                  'rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors',
-                  ratioTableView === 'financial'
-                    ? 'bg-blue-600/15 text-blue-300 border border-blue-500/35'
-                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
-                )}
-              >
-                Financial Ratios
-              </button>
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                {CATEGORY_DEFINITIONS.find((category) => category.id === activeCategory)?.name ?? 'Valuation'}
+              </div>
+              <div className="text-xs text-[var(--text-secondary)]">
+                Snapshot ratio grid for the selected comparison category
+              </div>
             </div>
             <span className="text-[10px] text-[var(--text-muted)]">
               Period: {period}
@@ -659,10 +679,7 @@ function ComparisonAnalysisWidgetComponent({
                   </tr>
                 </thead>
                 <tbody>
-                  {(ratioTableView === 'valuation'
-                    ? VALUATION_RATIO_COLUMNS
-                    : FINANCIAL_RATIO_COLUMNS
-                  ).map((column) => {
+                  {activeRatioColumns.map((column) => {
                     const numericValues = symbols
                       .map((ticker) => ratioRowBySymbol[ticker]?.[column.key])
                       .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))

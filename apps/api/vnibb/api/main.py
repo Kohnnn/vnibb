@@ -36,6 +36,7 @@ from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException, RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -604,6 +605,9 @@ def create_app() -> FastAPI:
 
     # Protect API workers from hanging requests
     app.add_middleware(RequestTimeoutMiddleware)
+
+    # Compress large financial and screener responses for network efficiency.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     # Add response cache policy middleware for GET/HEAD endpoints
     app.add_middleware(ResponseCacheControlMiddleware)

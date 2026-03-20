@@ -11,6 +11,7 @@ from vnibb.models.news import Dividend
 from vnibb.models.comparison import StockComparison
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.sync_status import SyncStatus
 from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
 from vnibb.providers.vnstock.equity_profile import EquityProfileData
 from vnibb.providers.vnstock.equity_screener import ScreenerData
@@ -48,6 +49,185 @@ async def test_admin_sync_status_alias_returns_freshness_payload(client):
     assert response.status_code == 200
     payload = response.json()
     assert "data_freshness" in payload
+
+
+@pytest.mark.asyncio
+async def test_admin_sync_status_returns_recent_sync_jobs(client, test_db):
+    test_db.add(
+        SyncStatus(
+            sync_type="full_market",
+            started_at=datetime(2026, 3, 20, 10, 0, 0),
+            completed_at=datetime(2026, 3, 20, 10, 30, 0),
+            success_count=25,
+            error_count=1,
+            status="completed",
+            additional_data={"job_id": "full-market-1"},
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/admin/sync-status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["sync_jobs"]) == 1
+    assert payload["sync_jobs"][0]["sync_type"] == "full_market"
+    assert payload["last_successful_sync"] == "2026-03-20T10:30:00"
+
+
+@pytest.mark.asyncio
+async def test_income_statement_endpoint_orders_oldest_first_and_enrichs_missing_fields(
+    client, test_db, monkeypatch
+):
+    test_db.add_all(
+        [
+            IncomeStatement(
+                id=100,
+                symbol="VNM",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                revenue=1000.0,
+                operating_income=200.0,
+                net_income=150.0,
+                raw_data={
+                    "Selling Expenses": -40.0,
+                    "General & Admin Expenses": -60.0,
+                },
+            ),
+            IncomeStatement(
+                id=101,
+                symbol="VNM",
+                period="2023",
+                period_type="year",
+                fiscal_year=2023,
+                revenue=900.0,
+                operating_income=180.0,
+                net_income=130.0,
+                raw_data={
+                    "Selling Expenses": -30.0,
+                    "General & Admin Expenses": -50.0,
+                },
+            ),
+            CashFlow(
+                id=100,
+                symbol="VNM",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                depreciation=30.0,
+                operating_cash_flow=150.0,
+                capital_expenditure=-40.0,
+            ),
+            CashFlow(
+                id=101,
+                symbol="VNM",
+                period="2023",
+                period_type="year",
+                fiscal_year=2023,
+                depreciation=25.0,
+                operating_cash_flow=120.0,
+                capital_expenditure=-35.0,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    async def fake_get_financials_with_ttm(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", fake_get_financials_with_ttm)
+
+    response = await client.get("/api/v1/equity/VNM/income-statement?period=FY&limit=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    periods = [row["period"] for row in payload["data"]]
+    assert periods == ["2023", "2024"]
+    latest = payload["data"][-1]
+    assert latest["selling_general_admin"] == -100.0
+    assert latest["depreciation"] == 30.0
+    assert latest["ebitda"] == 230.0
+
+
+@pytest.mark.asyncio
+async def test_balance_and_cash_flow_endpoints_enrich_fields_and_order_oldest_first(
+    client, test_db, monkeypatch
+):
+    test_db.add_all(
+        [
+            BalanceSheet(
+                id=200,
+                symbol="VNM",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                total_assets=2000.0,
+                total_liabilities=900.0,
+                total_equity=1100.0,
+                raw_data={
+                    "n_1.short_term_trade_accounts_payable": 85.0,
+                    "Good will (Bn. VND)": 12.0,
+                    "n_3.intangible_fixed_assets": 18.0,
+                },
+            ),
+            BalanceSheet(
+                id=201,
+                symbol="VNM",
+                period="2023",
+                period_type="year",
+                fiscal_year=2023,
+                total_assets=1800.0,
+                total_liabilities=800.0,
+                total_equity=1000.0,
+                raw_data={
+                    "n_1.short_term_trade_accounts_payable": 80.0,
+                },
+            ),
+            CashFlow(
+                id=200,
+                symbol="VNM",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                operating_cash_flow=200.0,
+                capital_expenditure=-50.0,
+                free_cash_flow=None,
+            ),
+            CashFlow(
+                id=201,
+                symbol="VNM",
+                period="2023",
+                period_type="year",
+                fiscal_year=2023,
+                operating_cash_flow=170.0,
+                capital_expenditure=-40.0,
+                free_cash_flow=None,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    async def fake_get_financials_with_ttm(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", fake_get_financials_with_ttm)
+
+    balance_response = await client.get("/api/v1/equity/VNM/balance-sheet?period=FY&limit=5")
+    cash_response = await client.get("/api/v1/equity/VNM/cash-flow?period=FY&limit=5")
+
+    assert balance_response.status_code == 200
+    assert cash_response.status_code == 200
+
+    balance_payload = balance_response.json()
+    cash_payload = cash_response.json()
+
+    assert [row["period"] for row in balance_payload["data"]] == ["2023", "2024"]
+    assert [row["period"] for row in cash_payload["data"]] == ["2023", "2024"]
+    assert balance_payload["data"][-1]["accounts_payable"] == 85.0
+    assert balance_payload["data"][-1]["goodwill"] == 12.0
+    assert balance_payload["data"][-1]["intangible_assets"] == 18.0
+    assert cash_payload["data"][-1]["free_cash_flow"] == 150.0
 
 
 @pytest.mark.asyncio
