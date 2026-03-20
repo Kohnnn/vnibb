@@ -309,10 +309,15 @@ async def _load_financial_statement_fallback(
 
 
 def _financial_statement_identity(item: FinancialStatementData) -> tuple[str, int, int]:
+    period_text = str(getattr(item, "period", "") or "")
+    year_match = re.search(r"(20\d{2})", period_text.upper())
+    quarter_match = re.search(r"Q([1-4])", period_text.upper())
+    fiscal_year = getattr(item, "fiscal_year", None)
+    fiscal_quarter = getattr(item, "fiscal_quarter", None)
     return (
-        str(item.period or ""),
-        int(item.fiscal_year or 0),
-        int(item.fiscal_quarter or 0),
+        period_text,
+        int(fiscal_year or (int(year_match.group(1)) if year_match else 0)),
+        int(fiscal_quarter or (int(quarter_match.group(1)) if quarter_match else 0)),
     )
 
 
