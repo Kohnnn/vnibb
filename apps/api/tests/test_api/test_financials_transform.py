@@ -246,6 +246,30 @@ def test_transform_data_maps_bank_customer_deposits_aliases():
     assert data[1].customer_deposits == 1_592_598_206_000_000
 
 
+def test_transform_data_maps_kbs_short_term_trade_accounts_payable_alias():
+    params = FinancialsQueryParams(
+        symbol="VNM", statement_type=StatementType.BALANCE, period="year", limit=2
+    )
+    rows = [
+        {
+            "item_id": "n_1.short_term_trade_accounts_payable",
+            "2025": 3_923_309.0,
+            "_source": "KBS",
+        },
+        {
+            "item_id": "n_3.intangible_fixed_assets",
+            "2025": 1_030_797.45,
+            "_source": "KBS",
+        },
+    ]
+
+    data = VnstockFinancialsFetcher.transform_data(params, rows)
+
+    assert len(data) == 1
+    assert data[0].accounts_payable == 3_923_309_000.0
+    assert data[0].intangible_assets == 1_030_797_450.0
+
+
 def test_transform_data_maps_kbs_income_aliases_and_scales_monetary_values():
     params = FinancialsQueryParams(
         symbol="VCI", statement_type=StatementType.INCOME, period="year", limit=2
@@ -286,7 +310,11 @@ def test_transform_data_maps_kbs_cashflow_aliases_and_net_change():
             "2024": -4_657_314_437.0,
             "_source": "KBS",
         },
-        {"item_id": "iv.net_cash_flows_during_the_period", "2024": 2_156_458_770.0, "_source": "KBS"},
+        {
+            "item_id": "iv.net_cash_flows_during_the_period",
+            "2024": 2_156_458_770.0,
+            "_source": "KBS",
+        },
         {
             "item_id": "n_1.payment_for_fixed_assets_constructions_and_other_long_term_assets",
             "2024": -57_598_155.0,

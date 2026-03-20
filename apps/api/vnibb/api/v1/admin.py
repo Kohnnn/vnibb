@@ -1,5 +1,6 @@
 """Admin API endpoints for database inspection and management."""
 
+import logging
 import re
 from collections import Counter
 from datetime import datetime, timedelta
@@ -17,6 +18,7 @@ from vnibb.core.middleware.logging import get_recent_error_events
 from vnibb.models.sync_status import SyncStatus
 
 router = APIRouter(tags=["Admin"])
+logger = logging.getLogger(__name__)
 
 TABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 TIMESTAMP_CANDIDATES = [
