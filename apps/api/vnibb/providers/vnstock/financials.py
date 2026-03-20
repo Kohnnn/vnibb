@@ -356,6 +356,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 best_score = -1
                 best_source: str | None = None
                 best_lang: str | None = None
+                candidate_payloads: list[tuple[str, str | None, list[dict[str, Any]], int]] = []
 
                 for source in candidate_sources:
                     try:
@@ -403,6 +404,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                                 source,
                             )
                             score = _score_statement_payload(normalized_rows)
+                            candidate_payloads.append((source, lang, normalized_rows, score))
                             if score > best_score:
                                 best_rows = normalized_rows
                                 best_score = score
@@ -410,6 +412,88 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                                 best_lang = lang
 
                 if best_rows:
+                    params_model = FinancialsQueryParams(
+                        symbol=query["symbol"],
+                        statement_type=StatementType(statement_type),
+                        period=query["period"],
+                        limit=query["limit"],
+                    )
+                    merged_rows = VnstockFinancialsFetcher.transform_data(params_model, best_rows)
+
+                    supplemental_fields = {
+                        "income": {
+                            "selling_general_admin",
+                            "depreciation",
+                            "research_development",
+                            "ebitda",
+                        },
+                        "balance": {"accounts_payable", "goodwill", "intangible_assets"},
+                        "cashflow": {
+                            "depreciation",
+                            "free_cash_flow",
+                            "capex",
+                            "capital_expenditure",
+                        },
+                    }.get(statement_type, set())
+
+                    if supplemental_fields:
+
+                        def _merged_period_sort_key(period_value: str) -> int:
+                            upper = str(period_value or "").upper()
+                            year_match = re.search(r"(20\d{2})", upper)
+                            year = int(year_match.group(1)) if year_match else 0
+                            quarter_match = re.search(r"Q([1-4])", upper)
+                            quarter = int(quarter_match.group(1)) if quarter_match else 0
+                            return year * 10 + quarter
+
+                        def _period_identity(item: FinancialStatementData) -> str:
+                            return str(item.period or "").strip().upper()
+
+                        merged_by_period = {
+                            _period_identity(item): item
+                            for item in merged_rows
+                            if _period_identity(item)
+                        }
+
+                        for source, lang, rows, score in candidate_payloads:
+                            if source == best_source and lang == best_lang and score == best_score:
+                                continue
+
+                            alt_rows = VnstockFinancialsFetcher.transform_data(params_model, rows)
+                            for alt_item in alt_rows:
+                                identity = _period_identity(alt_item)
+                                if not identity:
+                                    continue
+                                base_item = merged_by_period.get(identity)
+                                if base_item is None:
+                                    merged_by_period[identity] = alt_item
+                                    continue
+
+                                for field_name in supplemental_fields:
+                                    if (
+                                        getattr(base_item, field_name, None) is None
+                                        and getattr(alt_item, field_name, None) is not None
+                                    ):
+                                        setattr(
+                                            base_item, field_name, getattr(alt_item, field_name)
+                                        )
+
+                                if isinstance(base_item.raw_data, dict) or isinstance(
+                                    alt_item.raw_data, dict
+                                ):
+                                    merged_raw = {}
+                                    if isinstance(alt_item.raw_data, dict):
+                                        merged_raw.update(alt_item.raw_data)
+                                    if isinstance(base_item.raw_data, dict):
+                                        merged_raw.update(base_item.raw_data)
+                                    base_item.raw_data = merged_raw
+
+                        merged_rows = sorted(
+                            merged_by_period.values(),
+                            key=lambda item: _merged_period_sort_key(str(item.period or "")),
+                            reverse=True,
+                        )
+
                     if best_source and best_source != settings.vnstock_source:
                         logger.info(
                             "Using richer fallback vnstock source for %s %s: %s (lang=%s score=%s)",
@@ -419,7 +503,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                             best_lang,
                             best_score,
                         )
-                    return best_rows
+                    return [item.model_dump(mode="json") for item in merged_rows]
 
                 logger.warning(f"No {statement_type} data for {query['symbol']}")
                 return []
