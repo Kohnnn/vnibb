@@ -46,6 +46,7 @@ FRESHNESS_TABLES = [
     "company_news",
     "company_events",
 ]
+SYNC_STATUS_STALE_HOURS = 24
 
 
 def require_admin_access(
@@ -1112,8 +1113,39 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
         "data_freshness": {},
     }
 
-    # 1. Get recent sync jobs
+    # 1. Auto-mark stale running jobs before returning recent sync jobs.
     try:
+        stale_cutoff = datetime.utcnow() - timedelta(hours=SYNC_STATUS_STALE_HOURS)
+        await db.execute(
+            text(
+                """
+                UPDATE sync_status
+                SET status = 'failed',
+                    completed_at = COALESCE(completed_at, :now),
+                    errors = jsonb_set(
+                        COALESCE(errors, '{}'::jsonb),
+                        '{reason}',
+                        to_jsonb('stale_timeout'::text),
+                        true
+                    ),
+                    additional_data = jsonb_set(
+                        COALESCE(additional_data, '{}'::jsonb),
+                        '{stale_marked_at}',
+                        to_jsonb(:now_iso::text),
+                        true
+                    )
+                WHERE status = 'running'
+                  AND started_at < :stale_cutoff
+                """
+            ),
+            {
+                "now": datetime.utcnow(),
+                "now_iso": datetime.utcnow().isoformat(),
+                "stale_cutoff": stale_cutoff,
+            },
+        )
+        await db.commit()
+
         result = await db.execute(
             text("SELECT * FROM sync_status ORDER BY completed_at DESC LIMIT 50")
         )
