@@ -1973,12 +1973,27 @@ async def _enrich_missing_ratio_metrics(
         (await db.execute(latest_price_stmt)).scalar_one_or_none()
     )
     outstanding_shares = await _get_outstanding_shares(db, symbol)
-    market_cap = await _resolve_profile_market_cap(
-        db=db,
-        symbol=symbol,
-        outstanding_shares=outstanding_shares,
-        fallback_market_cap=None,
+    market_cap_stmt = (
+        select(ScreenerSnapshot.market_cap)
+        .where(ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.market_cap.is_not(None))
+        .order_by(ScreenerSnapshot.snapshot_date.desc())
+        .limit(1)
     )
+    market_cap = _coerce_optional_float((await db.execute(market_cap_stmt)).scalar_one_or_none())
+    if (
+        market_cap in (None, 0)
+        and outstanding_shares not in (None, 0)
+        and latest_price not in (None, 0)
+    ):
+        multiplier = 1.0 if outstanding_shares >= 1_000_000 else 1_000_000.0
+        market_cap = outstanding_shares * multiplier * latest_price
+    if market_cap in (None, 0):
+        market_cap = await _resolve_profile_market_cap(
+            db=db,
+            symbol=symbol,
+            outstanding_shares=outstanding_shares,
+            fallback_market_cap=market_cap,
+        )
 
     for item in rows:
         year, quarter = _extract_year_quarter(item.period or "")
