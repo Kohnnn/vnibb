@@ -1120,57 +1120,28 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
 
     # 1. Auto-mark stale running jobs before returning recent sync jobs.
     try:
-        if engine.dialect.name == "postgresql":
-            await db.execute(
-                text(
-                    """
-                    UPDATE sync_status
-                    SET status = 'failed',
-                        completed_at = COALESCE(completed_at, :now),
-                        errors = jsonb_set(
-                            COALESCE(errors, '{}'::jsonb),
-                            '{reason}',
-                            to_jsonb('stale_timeout'::text),
-                            true
-                        ),
-                        additional_data = jsonb_set(
-                            COALESCE(additional_data, '{}'::jsonb),
-                            '{stale_marked_at}',
-                            to_jsonb(:now_iso::text),
-                            true
-                        )
-                    WHERE status = 'running'
-                      AND started_at < :stale_cutoff
-                    """
-                ),
-                {
-                    "now": datetime.utcnow(),
-                    "now_iso": datetime.utcnow().isoformat(),
-                    "stale_cutoff": stale_cutoff,
-                },
+        result = await db.execute(
+            select(SyncStatus).where(
+                SyncStatus.status == "running",
+                SyncStatus.started_at < stale_cutoff,
             )
-        else:
-            result = await db.execute(
-                select(SyncStatus).where(
-                    SyncStatus.status == "running",
-                    SyncStatus.started_at < stale_cutoff,
-                )
+        )
+        stale_rows = result.scalars().all()
+        for record in stale_rows:
+            record.status = "failed"
+            record.completed_at = record.completed_at or datetime.utcnow()
+            errors = record.errors if isinstance(record.errors, dict) else {}
+            errors["reason"] = "stale_timeout"
+            record.errors = errors
+            additional_data = (
+                record.additional_data if isinstance(record.additional_data, dict) else {}
             )
-            stale_rows = result.scalars().all()
-            for record in stale_rows:
-                record.status = "failed"
-                record.completed_at = record.completed_at or datetime.utcnow()
-                errors = record.errors if isinstance(record.errors, dict) else {}
-                errors["reason"] = "stale_timeout"
-                record.errors = errors
-                additional_data = (
-                    record.additional_data if isinstance(record.additional_data, dict) else {}
-                )
-                additional_data["stale_marked_at"] = datetime.utcnow().isoformat()
-                record.additional_data = additional_data
+            additional_data["stale_marked_at"] = datetime.utcnow().isoformat()
+            record.additional_data = additional_data
         await db.commit()
     except Exception as exc:
         logger.warning("Failed to auto-mark stale sync jobs: %s", exc)
+        await db.rollback()
 
     # 2. Load recent sync jobs even if stale-update logic fails.
     try:
