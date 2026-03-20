@@ -718,6 +718,38 @@ async def sync_subsidiaries(
 
 
 @router.post(
+    "/sync/market-indices",
+    response_model=SyncResponse,
+    summary="Sync Market Indices",
+    description="Sync VNINDEX, VN30, HNX, and UPCOM reference snapshots.",
+)
+async def sync_market_indices(
+    background_tasks: BackgroundTasks,
+    async_mode: bool = Query(default=True),
+) -> SyncResponse:
+    """Sync market index snapshots."""
+    from vnibb.services.data_pipeline import data_pipeline
+
+    if async_mode:
+        background_tasks.add_task(data_pipeline.sync_market_indices)
+        return SyncResponse(
+            status="started",
+            message="Market indices sync started in background",
+        )
+
+    try:
+        count = await data_pipeline.sync_market_indices()
+        return SyncResponse(
+            status="success",
+            message=f"Synced {count} market index rows",
+            count=count,
+        )
+    except Exception as e:
+        logger.error(f"Market indices sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
     "/sync/market-sectors",
     response_model=SyncResponse,
     summary="Sync Market Sectors",

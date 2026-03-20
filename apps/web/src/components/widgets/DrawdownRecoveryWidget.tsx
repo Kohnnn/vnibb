@@ -22,7 +22,7 @@ interface DrawdownRecoveryWidgetProps {
   symbol: string
 }
 
-const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y', '10Y'] as const
+const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y'] as const
 
 type PeriodOption = (typeof PERIOD_OPTIONS)[number]
 
@@ -101,7 +101,7 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} underwater`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} underwater`} align="right" />
         </div>
       </div>
 

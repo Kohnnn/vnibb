@@ -43,6 +43,21 @@ async def test_quant_endpoint_rejects_invalid_metrics(client):
 
 
 @pytest.mark.asyncio
+async def test_quant_endpoint_rejects_10y_period(client):
+    response = await client.get(
+        "/api/v1/quant/VNM",
+        params={"metrics": "volume_delta", "period": "10Y"},
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    detail = payload.get("detail", payload)
+    assert detail["code"] == "INVALID_PERIOD"
+    assert detail["requested_period"] == "10Y"
+    assert detail["allowed_periods"] == ["6M", "1Y", "3Y", "5Y"]
+
+
+@pytest.mark.asyncio
 async def test_quant_endpoint_returns_insufficient_data_error(client, monkeypatch):
     async def fake_load_price_frame(*_args, **_kwargs):
         return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])

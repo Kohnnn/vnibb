@@ -22,8 +22,41 @@ from vnibb.core.config import settings
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
+from vnibb.models.trading import FinancialRatio
 
 logger = logging.getLogger(__name__)
+
+
+def _record_value(record: Any, *keys: str) -> Any:
+    for key in keys:
+        if isinstance(record, dict):
+            candidate = record.get(key)
+        else:
+            candidate = getattr(record, key, None)
+        if candidate not in (None, ""):
+            return candidate
+    return None
+
+
+def _coerce_number(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric != numeric:
+        return None
+    return numeric
+
+
+def _normalize_text(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    normalized = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
 
 
 class MetricDefinition(BaseModel):
@@ -243,45 +276,88 @@ class ComparisonService:
 
                 return StockMetrics(symbol=symbol)
 
-            # Map all available fields into metrics dict
-            if hasattr(data, "model_dump"):
-                metrics_dict = data.model_dump()
-            else:
-                # Fallback for ORM objects/other types
-                metrics_dict = {
-                    key: getattr(data, key)
-                    for key in [
-                        "price",
-                        "volume",
-                        "market_cap",
-                        "pe",
-                        "pb",
-                        "ps",
-                        "ev_ebitda",
-                        "roe",
-                        "roa",
-                        "roic",
-                        "gross_margin",
-                        "net_margin",
-                        "operating_margin",
-                        "revenue_growth",
-                        "earnings_growth",
-                        "debt_to_equity",
-                        "current_ratio",
-                        "quick_ratio",
-                        "eps",
-                        "bvps",
-                        "dividend_yield",
-                        "foreign_ownership",
-                    ]
-                    if hasattr(data, key)
+            metrics_dict = {
+                "price": _record_value(data, "price"),
+                "volume": _record_value(data, "volume"),
+                "market_cap": _record_value(data, "market_cap", "marketCap"),
+                "pe": _record_value(data, "pe", "pe_ratio"),
+                "pb": _record_value(data, "pb", "pb_ratio"),
+                "ps": _record_value(data, "ps", "ps_ratio"),
+                "ev_ebitda": _record_value(data, "ev_ebitda", "evEbitda"),
+                "roe": _record_value(data, "roe"),
+                "roa": _record_value(data, "roa"),
+                "roic": _record_value(data, "roic"),
+                "gross_margin": _record_value(data, "gross_margin", "grossMargin"),
+                "net_margin": _record_value(data, "net_margin", "netMargin"),
+                "operating_margin": _record_value(data, "operating_margin", "operatingMargin"),
+                "revenue_growth": _record_value(data, "revenue_growth", "revenueGrowth"),
+                "earnings_growth": _record_value(data, "earnings_growth", "earningsGrowth"),
+                "debt_to_equity": _record_value(data, "debt_to_equity", "debtToEquity"),
+                "current_ratio": _record_value(data, "current_ratio", "currentRatio"),
+                "quick_ratio": _record_value(data, "quick_ratio", "quickRatio"),
+                "eps": _record_value(data, "eps"),
+                "bvps": _record_value(data, "bvps", "book_value_per_share"),
+                "dividend_yield": _record_value(data, "dividend_yield", "dividendYield"),
+                "foreign_ownership": _record_value(data, "foreign_ownership", "foreignOwnership"),
+            }
+
+            async with async_session_maker() as session:
+                stock_row = (
+                    await session.execute(select(Stock).where(Stock.symbol == symbol).limit(1))
+                ).scalar_one_or_none()
+                ratio_row = (
+                    await session.execute(
+                        select(FinancialRatio)
+                        .where(FinancialRatio.symbol == symbol)
+                        .order_by(
+                            desc(FinancialRatio.fiscal_year),
+                            desc(FinancialRatio.fiscal_quarter),
+                            desc(FinancialRatio.updated_at),
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+
+            if ratio_row is not None:
+                ratio_fallbacks = {
+                    "pe": ratio_row.pe_ratio,
+                    "pb": ratio_row.pb_ratio,
+                    "ps": ratio_row.ps_ratio,
+                    "ev_ebitda": ratio_row.ev_ebitda,
+                    "roe": ratio_row.roe,
+                    "roa": ratio_row.roa,
+                    "roic": ratio_row.roic,
+                    "gross_margin": ratio_row.gross_margin,
+                    "net_margin": ratio_row.net_margin,
+                    "operating_margin": ratio_row.operating_margin,
+                    "revenue_growth": ratio_row.revenue_growth,
+                    "earnings_growth": ratio_row.earnings_growth,
+                    "debt_to_equity": ratio_row.debt_to_equity,
+                    "current_ratio": ratio_row.current_ratio,
+                    "quick_ratio": ratio_row.quick_ratio,
+                    "eps": ratio_row.eps,
+                    "bvps": ratio_row.bvps,
                 }
+                for key, value in ratio_fallbacks.items():
+                    if metrics_dict.get(key) is None and value is not None:
+                        metrics_dict[key] = value
+
+            metrics_dict = {key: value for key, value in metrics_dict.items() if value is not None}
+
+            name = _record_value(data, "company_name", "organ_name", "organName")
+            industry = _record_value(data, "industry", "industry_name", "industryName")
+            exchange = _record_value(data, "exchange")
+
+            if stock_row is not None:
+                name = name or stock_row.company_name or stock_row.short_name
+                industry = industry or stock_row.industry or stock_row.sector
+                exchange = exchange or stock_row.exchange
 
             return StockMetrics(
                 symbol=symbol,
-                name=getattr(data, "company_name", getattr(data, "organ_name", "")),
-                industry=getattr(data, "industry", getattr(data, "industry_name", "")),
-                exchange=getattr(data, "exchange", ""),
+                name=name,
+                industry=industry,
+                exchange=exchange,
                 metrics=metrics_dict,
             )
         except Exception as e:
@@ -772,11 +848,18 @@ class ComparisonService:
             if not all_stocks:
                 return {}
 
-            # Filter stocks in the same industry
+            target_label = _normalize_text(industry)
+
+            # Filter stocks in the same industry/sector
             sector_stocks = [
                 s
                 for s in all_stocks
-                if (getattr(s, "industry", None) or getattr(s, "industry_name", None)) == industry
+                if target_label
+                and target_label
+                in {
+                    _normalize_text(_record_value(s, "industry", "industry_name", "industryName")),
+                    _normalize_text(_record_value(s, "sector")),
+                }
             ]
 
             if not sector_stocks:
@@ -785,18 +868,90 @@ class ComparisonService:
             # Calculate averages for key metrics
             averages: Dict[str, float] = {}
             metric_keys = [m.key for m in COMPARISON_METRICS]
+            sector_symbols = sorted(
+                {
+                    str(_record_value(stock, "symbol") or "").upper()
+                    for stock in sector_stocks
+                    if _record_value(stock, "symbol")
+                }
+            )
 
             for key in metric_keys:
                 values = []
                 for stock in sector_stocks:
-                    val = getattr(stock, key, None)
-                    if (
-                        val is not None and isinstance(val, (int, float)) and not (val != val)
-                    ):  # exclude NaN
+                    val = _coerce_number(
+                        _record_value(
+                            stock,
+                            key,
+                            f"{key}_ratio",
+                            {
+                                "pe": "pe_ratio",
+                                "pb": "pb_ratio",
+                                "ps": "ps_ratio",
+                            }.get(key, ""),
+                        )
+                    )
+                    if val is not None:
                         values.append(val)
 
                 if values:
                     averages[key] = sum(values) / len(values)
+
+            missing_keys = [key for key in metric_keys if key not in averages]
+            if missing_keys and sector_symbols:
+                async with async_session_maker() as session:
+                    ratio_rows = (
+                        (
+                            await session.execute(
+                                select(FinancialRatio)
+                                .where(FinancialRatio.symbol.in_(sector_symbols))
+                                .order_by(
+                                    FinancialRatio.symbol.asc(),
+                                    FinancialRatio.fiscal_year.desc(),
+                                    FinancialRatio.fiscal_quarter.desc(),
+                                    FinancialRatio.updated_at.desc(),
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+
+                latest_ratios: Dict[str, FinancialRatio] = {}
+                for row in ratio_rows:
+                    latest_ratios.setdefault(row.symbol.upper(), row)
+
+                ratio_key_map = {
+                    "pe": "pe_ratio",
+                    "pb": "pb_ratio",
+                    "ps": "ps_ratio",
+                    "ev_ebitda": "ev_ebitda",
+                    "eps": "eps",
+                    "bvps": "bvps",
+                    "roe": "roe",
+                    "roa": "roa",
+                    "roic": "roic",
+                    "gross_margin": "gross_margin",
+                    "net_margin": "net_margin",
+                    "operating_margin": "operating_margin",
+                    "revenue_growth": "revenue_growth",
+                    "earnings_growth": "earnings_growth",
+                    "debt_to_equity": "debt_to_equity",
+                    "current_ratio": "current_ratio",
+                    "quick_ratio": "quick_ratio",
+                }
+
+                for key in missing_keys:
+                    attr = ratio_key_map.get(key)
+                    if not attr:
+                        continue
+                    values = [
+                        _coerce_number(getattr(ratio_row, attr, None))
+                        for ratio_row in latest_ratios.values()
+                    ]
+                    clean_values = [value for value in values if value is not None]
+                    if clean_values:
+                        averages[key] = sum(clean_values) / len(clean_values)
 
             return averages
         except Exception as e:
@@ -824,9 +979,9 @@ class ComparisonService:
         # Get sector averages from the first stock's industry
         sector_averages: Dict[str, float] = {}
         if metrics_results:
-            first_industry = metrics_results[0].industry
-            if first_industry:
-                sector_averages = await self.get_sector_averages(first_industry, source=source)
+            first_group = metrics_results[0].industry
+            if first_group:
+                sector_averages = await self.get_sector_averages(first_group, source=source)
 
         return ComparisonResponse(
             symbols=symbols,

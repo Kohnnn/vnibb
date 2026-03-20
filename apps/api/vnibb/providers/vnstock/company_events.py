@@ -19,6 +19,40 @@ from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 logger = logging.getLogger(__name__)
 
 
+def _parse_sortable_event_date(value: Any) -> datetime | None:
+    if value is None:
+        return None
+
+    raw = str(value).strip()
+    if not raw or raw.lower() in {"none", "nan", "nat"}:
+        return None
+
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        pass
+
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y %H:%M",
+        "%d-%m-%Y",
+        "%Y%m%d",
+    ):
+        try:
+            return datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+
+    return None
+
+
 class CompanyEventsQueryParams(BaseModel):
     """Query parameters for company events."""
 
@@ -142,13 +176,20 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                                 }
                             )
                         if fallback_events:
-                            return fallback_events
+                            return sorted(
+                                fallback_events,
+                                key=lambda item: _parse_sortable_event_date(
+                                    item.get("eventDate")
+                                    or item.get("exDate")
+                                    or item.get("recordDate")
+                                    or item.get("paymentDate")
+                                )
+                                or datetime.min,
+                                reverse=True,
+                            )[: query.get("limit", 30)]
 
                     logger.info(f"No events data for {query['symbol']}")
                     return []
-
-                # Limit results
-                events_df = events_df.head(query.get("limit", 30))
 
                 return events_df.to_dict("records")
 
@@ -192,7 +233,17 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                             or dividend.stock_dividend,
                         }
                     )
-                return mapped
+                return sorted(
+                    mapped,
+                    key=lambda item: _parse_sortable_event_date(
+                        item.get("eventDate")
+                        or item.get("exDate")
+                        or item.get("recordDate")
+                        or item.get("paymentDate")
+                    )
+                    or datetime.min,
+                    reverse=True,
+                )[: query.get("limit", 30)]
             except Exception:
                 return []
         except asyncio.TimeoutError:
@@ -252,4 +303,11 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                 logger.warning(f"Skipping invalid event row: {e}")
                 continue
 
-        return results
+        results.sort(
+            key=lambda item: _parse_sortable_event_date(
+                item.event_date or item.ex_date or item.record_date or item.payment_date
+            )
+            or datetime.min,
+            reverse=True,
+        )
+        return results[: params.limit]

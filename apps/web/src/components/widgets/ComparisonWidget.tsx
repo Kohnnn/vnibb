@@ -263,7 +263,7 @@ export function ComparisonWidget({ id, initialSymbols = [DEFAULT_TICKER, 'FPT'],
 }
 
 function formatMetric(value: number | null | undefined, format: string): string {
-    if (value === null || value === undefined) return '-';
+    if (value === null || value === undefined) return 'N/A';
     switch (format) {
         case 'currency': return value.toLocaleString();
         case 'percent': return `${value.toFixed(2)}%`;
