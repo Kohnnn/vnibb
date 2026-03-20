@@ -304,23 +304,75 @@ class FullMarketSync:
             history_days,
         )
 
+        sync_record_id: int | None = None
+        try:
+            sync_record_id = await data_pipeline._create_sync_record(  # noqa: SLF001
+                sync_type="full_market",
+                job_id=f"full-market-{int(time.time())}",
+                days=history_days or 0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Unable to create sync status record for full market sync: %s", exc)
+        sync_metadata: dict[str, object] = {
+            "include_historical": include_historical,
+            "include_corporate_actions": include_corporate_actions,
+            "max_symbols": max_symbols,
+            "history_days": history_days,
+            "stages": {},
+        }
+
         results: dict[str, SyncResult] = {}
-        results["symbols"] = await self.sync_all_symbols()
+        try:
+            results["symbols"] = await self.sync_all_symbols()
+            sync_metadata["stages"] = {
+                **dict(sync_metadata.get("stages") or {}),
+                "symbols": results["symbols"].__dict__,
+            }
 
-        symbols = await self._get_seeded_symbols(max_symbols=max_symbols)
-        if not symbols:
-            logger.warning("No symbols available after stock list sync")
+            symbols = await self._get_seeded_symbols(max_symbols=max_symbols)
+            if not symbols:
+                logger.warning("No symbols available after stock list sync")
 
-        results["prices"] = await self.sync_all_prices(
-            symbols=symbols,
-            include_historical=include_historical,
-            history_days=history_days,
-        )
-        results["indices"] = await self.sync_all_indices()
-        results["profiles"] = await self.sync_all_profiles(symbols=symbols)
-        results["financials"] = await self.sync_all_financials(symbols=symbols)
-        if include_corporate_actions:
-            results["corporate_actions"] = await self.sync_all_corporate_actions(symbols=symbols)
+            results["prices"] = await self.sync_all_prices(
+                symbols=symbols,
+                include_historical=include_historical,
+                history_days=history_days,
+            )
+            results["indices"] = await self.sync_all_indices()
+            results["profiles"] = await self.sync_all_profiles(symbols=symbols)
+            results["financials"] = await self.sync_all_financials(symbols=symbols)
+            if include_corporate_actions:
+                results["corporate_actions"] = await self.sync_all_corporate_actions(
+                    symbols=symbols
+                )
+
+            sync_metadata["stages"] = {key: value.__dict__ for key, value in results.items()}
+
+            total_synced = sum(result.synced_count for result in results.values())
+            total_errors = sum(result.error_count for result in results.values())
+            final_status = (
+                "completed" if all(result.success for result in results.values()) else "partial"
+            )
+            if sync_record_id is not None:
+                await data_pipeline._update_sync_record(  # noqa: SLF001
+                    sync_record_id,
+                    status=final_status,
+                    success_count=total_synced,
+                    error_count=total_errors,
+                    additional_data=sync_metadata,
+                )
+        except Exception as exc:
+            sync_metadata["error"] = str(exc)
+            if sync_record_id is not None:
+                await data_pipeline._update_sync_record(  # noqa: SLF001
+                    sync_record_id,
+                    status="failed",
+                    success_count=sum(result.synced_count for result in results.values()),
+                    error_count=sum(result.error_count for result in results.values()) + 1,
+                    additional_data=sync_metadata,
+                    errors={"message": str(exc)},
+                )
+            raise
 
         total_synced = sum(result.synced_count for result in results.values())
         total_errors = sum(result.error_count for result in results.values())

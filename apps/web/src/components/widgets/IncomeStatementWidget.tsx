@@ -33,7 +33,7 @@ import { usePeriodState } from '@/hooks/usePeriodState';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
-import { formatFinancialPeriodLabel, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 
 interface IncomeStatementWidgetProps {
@@ -86,13 +86,17 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
     } = useIncomeStatement(symbol, { period: apiPeriod });
 
     const items = data?.data || [];
+    const orderedItems = useMemo(
+        () => [...items].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+        [items]
+    );
     const hasData = items.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
     const chartData = useMemo(() => {
-        if (!items.length) return [];
-        const recentItems = [...items].slice(0, 5).reverse();
+        if (!orderedItems.length) return [];
+        const recentItems = orderedItems.slice(-5);
         return recentItems.map((d, index) => ({
             period: formatFinancialPeriodLabel(d.period, {
                 mode: periodMode,
@@ -107,10 +111,10 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
             operatingMargin: d.revenue && d.operating_income ? (d.operating_income / d.revenue) * 100 : 0,
             netMargin: d.revenue && d.net_income ? (d.net_income / d.revenue) * 100 : 0,
         }));
-    }, [items, periodMode]);
+    }, [orderedItems, periodMode]);
 
     const tableScale = useMemo(() => {
-        const values = items.flatMap((item) => [
+        const values = orderedItems.flatMap((item) => [
             item.revenue,
             item.cost_of_revenue,
             item.gross_profit,
@@ -126,26 +130,26 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
             item.net_income,
         ]);
         return resolveUnitScale(values, unitConfig);
-    }, [items, unitConfig]);
+    }, [orderedItems, unitConfig]);
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend} except per-share values. Data for ${symbol}.`,
+        () => `Note: ${unitLegend} except per-share values | Currency: VND | Reporting: VAS | Fiscal year end: Dec 31.`,
         [unitLegend, symbol]
     );
 
     const tableColumns = useMemo(
         () =>
-            items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => ({
+            orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
                     index,
-                    total: Math.min(items.length, TABLE_YEAR_LIMIT),
+                    total: Math.min(orderedItems.length, TABLE_YEAR_LIMIT),
                 }),
                 align: 'right' as const,
             })),
-        [items, periodMode]
+        [orderedItems, periodMode]
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
@@ -185,7 +189,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                 parentId: 'group:profitability',
                 indent: 12,
                 values: Object.fromEntries(
-                    items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
+                    orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
                         rowValue(entry, metricKey),
                     ])
@@ -221,7 +225,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                 parentId: 'group:per-share',
                 indent: 12,
                 values: Object.fromEntries(
-                    items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
+                    orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
                         entry.eps,
                     ])
@@ -233,7 +237,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                 parentId: 'group:per-share',
                 indent: 12,
                 values: Object.fromEntries(
-                    items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
+                    orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
                         entry.eps_diluted,
                     ])
@@ -242,7 +246,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
         ];
 
         return rows;
-    }, [items, tableColumns]);
+    }, [orderedItems, tableColumns]);
 
     const renderTable = () => (
         <div className="space-y-1">
@@ -389,7 +393,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
             noPadding
             widgetId={id}
             showLinkToggle
-            exportData={items}
+            exportData={orderedItems}
         >
             <div className="h-full flex flex-col px-2 py-1.5">
                 <div className="pb-1 border-b border-[var(--border-subtle)]">

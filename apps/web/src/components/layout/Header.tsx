@@ -165,9 +165,27 @@ export function Header({
   }, [historyQuery.data])
 
   const sparklinePoints = useMemo(() => getSparklinePoints(sparklineValues), [sparklineValues])
-  const quoteIsPositive = (quote?.changePct ?? 0) >= 0
+  const displayQuoteChangePct = useMemo(() => {
+    if (quote?.changePct != null) return quote.changePct
+
+    const points = historyQuery.data?.data || []
+    const recentPoints = points.filter(
+      (point) => Number.isFinite(point?.close)
+    )
+    if (recentPoints.length < 2) return null
+
+    const latest = recentPoints[recentPoints.length - 1]?.close
+    const previous = recentPoints[recentPoints.length - 2]?.close
+    if (!Number.isFinite(latest) || !Number.isFinite(previous) || previous === 0) {
+      return null
+    }
+
+    return ((latest - previous) / previous) * 100
+  }, [historyQuery.data?.data, quote?.changePct])
+
+  const quoteIsPositive = (displayQuoteChangePct ?? 0) >= 0
   const quoteChangeClass =
-    quote?.changePct == null
+    displayQuoteChangePct == null
       ? 'text-[var(--text-muted)]'
       : quoteIsPositive
         ? resolvedTheme === 'light'
@@ -329,7 +347,7 @@ export function Header({
                     {formatHeaderPrice(quote?.price)}
                   </span>
                   <span className={cn('text-xs font-semibold', quoteChangeClass)}>
-                    {formatHeaderPercent(quote?.changePct)}
+                    {formatHeaderPercent(displayQuoteChangePct)}
                   </span>
                 </div>
               </div>

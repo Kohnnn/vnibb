@@ -304,6 +304,18 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                             {"pre_tax_profit", "profit_before_tax", "income_before_tax"},
                             {"tax_expense", "income_tax", "business_income_tax_current"},
                             {
+                                "selling_general_admin",
+                                "selling_expenses",
+                                "general_and_administrative_expenses",
+                            },
+                            {
+                                "depreciation",
+                                "depreciation_and_amortization",
+                                "depreciation_and_amortisation",
+                            },
+                            {"research_development", "research_and_development", "rd_expense"},
+                            {"ebitda"},
+                            {
                                 "net_income",
                                 "net_profit_for_the_year",
                                 "attribute_to_parent_company_bn_vnd",
@@ -315,6 +327,13 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                             {"total_equity", "equity"},
                             {"current_assets"},
                             {"current_liabilities"},
+                            {
+                                "accounts_payable",
+                                "trade_accounts_payable",
+                                "short_term_trade_accounts_payable",
+                            },
+                            {"goodwill", "good_will_bn_vnd"},
+                            {"intangible_assets", "intangible_fixed_assets"},
                         ),
                         "cashflow": (
                             {
@@ -324,6 +343,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                             {"investing_cash_flow", "net_cash_flows_from_investing_activities"},
                             {"financing_cash_flow", "cash_flows_from_financial_activities"},
                             {"capex", "capital_expenditure", "purchase_of_fixed_assets"},
+                            {"free_cash_flow", "freecashflow", "free_cashflow"},
                             {"dividends_paid", "payments_of_dividends"},
                             {"depreciation", "depreciation_and_amortisation"},
                         ),

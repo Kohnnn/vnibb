@@ -145,6 +145,7 @@ export interface FinancialRatioData {
   ev_sales?: number;
   roe?: number;
   roa?: number;
+  roic?: number;
   eps?: number;
   bvps?: number;
   debt_equity?: number;
@@ -164,6 +165,8 @@ export interface FinancialRatioData {
   ocf_debt?: number;
   fcf_yield?: number;
   ocf_sales?: number;
+  revenue_growth?: number;
+  earnings_growth?: number;
   dps?: number;
   dividend_yield?: number;
   payout_ratio?: number;

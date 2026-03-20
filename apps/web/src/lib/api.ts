@@ -243,8 +243,12 @@ export interface QuoteData {
     high: number | null;
     low: number | null;
     prevClose: number | null;
+    prev_close?: number | null;
     change: number | null;
+    change_1d?: number | null;
     changePct: number | null;
+    change_pct?: number | null;
+    changePercent?: number | null;
     volume: number | null;
     value: number | null;
     updatedAt: string | null;

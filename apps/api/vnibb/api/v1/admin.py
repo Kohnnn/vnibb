@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks, Body, Header
-from sqlalchemy import text
+from sqlalchemy import text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.database import get_db, engine
@@ -14,6 +14,7 @@ from vnibb.core.cache import redis_client
 from vnibb.core.config import settings
 from vnibb.core.appwrite_client import check_appwrite_connectivity, appwrite_runtime_summary
 from vnibb.core.middleware.logging import get_recent_error_events
+from vnibb.models.sync_status import SyncStatus
 
 router = APIRouter(tags=["Admin"])
 
@@ -1113,41 +1114,68 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
         "data_freshness": {},
     }
 
+    stale_cutoff = datetime.utcnow() - timedelta(hours=SYNC_STATUS_STALE_HOURS)
+
     # 1. Auto-mark stale running jobs before returning recent sync jobs.
     try:
-        stale_cutoff = datetime.utcnow() - timedelta(hours=SYNC_STATUS_STALE_HOURS)
-        await db.execute(
-            text(
-                """
-                UPDATE sync_status
-                SET status = 'failed',
-                    completed_at = COALESCE(completed_at, :now),
-                    errors = jsonb_set(
-                        COALESCE(errors, '{}'::jsonb),
-                        '{reason}',
-                        to_jsonb('stale_timeout'::text),
-                        true
-                    ),
-                    additional_data = jsonb_set(
-                        COALESCE(additional_data, '{}'::jsonb),
-                        '{stale_marked_at}',
-                        to_jsonb(:now_iso::text),
-                        true
-                    )
-                WHERE status = 'running'
-                  AND started_at < :stale_cutoff
-                """
-            ),
-            {
-                "now": datetime.utcnow(),
-                "now_iso": datetime.utcnow().isoformat(),
-                "stale_cutoff": stale_cutoff,
-            },
-        )
+        if engine.dialect.name == "postgresql":
+            await db.execute(
+                text(
+                    """
+                    UPDATE sync_status
+                    SET status = 'failed',
+                        completed_at = COALESCE(completed_at, :now),
+                        errors = jsonb_set(
+                            COALESCE(errors, '{}'::jsonb),
+                            '{reason}',
+                            to_jsonb('stale_timeout'::text),
+                            true
+                        ),
+                        additional_data = jsonb_set(
+                            COALESCE(additional_data, '{}'::jsonb),
+                            '{stale_marked_at}',
+                            to_jsonb(:now_iso::text),
+                            true
+                        )
+                    WHERE status = 'running'
+                      AND started_at < :stale_cutoff
+                    """
+                ),
+                {
+                    "now": datetime.utcnow(),
+                    "now_iso": datetime.utcnow().isoformat(),
+                    "stale_cutoff": stale_cutoff,
+                },
+            )
+        else:
+            result = await db.execute(
+                select(SyncStatus).where(
+                    SyncStatus.status == "running",
+                    SyncStatus.started_at < stale_cutoff,
+                )
+            )
+            stale_rows = result.scalars().all()
+            for record in stale_rows:
+                record.status = "failed"
+                record.completed_at = record.completed_at or datetime.utcnow()
+                errors = record.errors if isinstance(record.errors, dict) else {}
+                errors["reason"] = "stale_timeout"
+                record.errors = errors
+                additional_data = (
+                    record.additional_data if isinstance(record.additional_data, dict) else {}
+                )
+                additional_data["stale_marked_at"] = datetime.utcnow().isoformat()
+                record.additional_data = additional_data
         await db.commit()
+    except Exception as exc:
+        logger.warning("Failed to auto-mark stale sync jobs: %s", exc)
 
+    # 2. Load recent sync jobs even if stale-update logic fails.
+    try:
         result = await db.execute(
-            text("SELECT * FROM sync_status ORDER BY completed_at DESC LIMIT 50")
+            text(
+                "SELECT * FROM sync_status ORDER BY COALESCE(completed_at, started_at) DESC LIMIT 50"
+            )
         )
         rows = result.mappings().all()
         jobs = []
@@ -1158,12 +1186,19 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
                     rd[k] = v.isoformat()
             jobs.append(rd)
         status_data["sync_jobs"] = jobs
-        status_data["sync_status"] = jobs  # Alias
+        status_data["sync_status"] = jobs
         status_data["count"] = len(jobs)
-    except Exception:
-        pass
+        completed_jobs = [job for job in jobs if job.get("status") == "completed"]
+        last_successful_sync = completed_jobs[0].get("completed_at") if completed_jobs else None
+        last_successful_dt = _normalize_datetime(last_successful_sync)
+        status_data["last_successful_sync"] = (
+            last_successful_dt.isoformat() if last_successful_dt else last_successful_sync
+        )
+        status_data["next_scheduled_sync"] = None
+    except Exception as exc:
+        logger.warning("Failed to load sync status rows: %s", exc)
 
-    # 2. Calculate data freshness (matching old test expectation)
+    # 3. Calculate data freshness (matching old test expectation)
     tables_to_check = [
         ("stocks", "updated_at"),
         ("companies", "updated_at"),

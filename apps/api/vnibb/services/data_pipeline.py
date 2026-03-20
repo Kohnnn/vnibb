@@ -2672,6 +2672,39 @@ class DataPipeline:
                                     income_depreciation_lookup[lookup_key] = income_depreciation
                                     annual_income_depreciation[fiscal_year] = income_depreciation
 
+                                sga_value = _pick_float(
+                                    entry.selling_general_admin,
+                                    _extract_raw_float(
+                                        payload,
+                                        "selling_general_admin",
+                                        "selling_expenses",
+                                        "general_and_administrative_expenses",
+                                        "general_and_admin_expenses",
+                                    ),
+                                    _extract_raw_float(
+                                        raw_payload,
+                                        "selling_general_admin",
+                                        "selling_expenses",
+                                        "general_and_administrative_expenses",
+                                        "general_and_admin_expenses",
+                                    ),
+                                )
+                                research_development_value = _pick_float(
+                                    entry.research_development,
+                                    _extract_raw_float(
+                                        payload,
+                                        "research_development",
+                                        "research_and_development",
+                                        "rd_expense",
+                                    ),
+                                    _extract_raw_float(
+                                        raw_payload,
+                                        "research_development",
+                                        "research_and_development",
+                                        "rd_expense",
+                                    ),
+                                )
+
                                 operating_income_value = _coerce_float(entry.operating_income)
                                 ebitda_value = _coerce_float(entry.ebitda)
                                 if ebitda_value is None:
@@ -2683,6 +2716,15 @@ class DataPipeline:
                                             income_depreciation
                                         )
                                         raw_payload["_ebitda_computed_from_operating_income"] = True
+
+                                if sga_value is not None:
+                                    raw_payload["selling_general_admin"] = sga_value
+                                if income_depreciation is not None:
+                                    raw_payload["depreciation"] = income_depreciation
+                                if research_development_value is not None:
+                                    raw_payload["research_development"] = research_development_value
+                                if ebitda_value is not None:
+                                    raw_payload["ebitda"] = ebitda_value
 
                                 values = {
                                     **common,
@@ -2723,6 +2765,58 @@ class DataPipeline:
                                     "raw_data": raw_payload,
                                 }
                             elif statement_type == StatementType.BALANCE:
+                                accounts_payable_value = _pick_float(
+                                    entry.accounts_payable,
+                                    _extract_raw_float(
+                                        payload,
+                                        "accounts_payable",
+                                        "trade_accounts_payable",
+                                        "short_term_trade_accounts_payable",
+                                        "short_term_trade_payable",
+                                        "long_term_trade_payables",
+                                    ),
+                                    _extract_raw_float(
+                                        raw_payload,
+                                        "accounts_payable",
+                                        "trade_accounts_payable",
+                                        "short_term_trade_accounts_payable",
+                                        "short_term_trade_payable",
+                                        "long_term_trade_payables",
+                                    ),
+                                )
+                                goodwill_value = _pick_float(
+                                    entry.goodwill,
+                                    _extract_raw_float(
+                                        payload,
+                                        "goodwill",
+                                        "good_will_bn_vnd",
+                                    ),
+                                    _extract_raw_float(
+                                        raw_payload,
+                                        "goodwill",
+                                        "good_will_bn_vnd",
+                                    ),
+                                )
+                                intangible_assets_value = _pick_float(
+                                    entry.intangible_assets,
+                                    _extract_raw_float(
+                                        payload,
+                                        "intangible_assets",
+                                        "intangible_fixed_assets",
+                                    ),
+                                    _extract_raw_float(
+                                        raw_payload,
+                                        "intangible_assets",
+                                        "intangible_fixed_assets",
+                                    ),
+                                )
+                                if accounts_payable_value is not None:
+                                    raw_payload["accounts_payable"] = accounts_payable_value
+                                if goodwill_value is not None:
+                                    raw_payload["goodwill"] = goodwill_value
+                                if intangible_assets_value is not None:
+                                    raw_payload["intangible_assets"] = intangible_assets_value
+
                                 values = {
                                     **common,
                                     "total_assets": _coerce_float(entry.total_assets),
@@ -2760,7 +2854,7 @@ class DataPipeline:
                                     "fixed_assets": _coerce_float(entry.fixed_assets),
                                     "total_liabilities": _coerce_float(entry.total_liabilities),
                                     "current_liabilities": _coerce_float(entry.current_liabilities),
-                                    "accounts_payable": _coerce_float(entry.accounts_payable),
+                                    "accounts_payable": accounts_payable_value,
                                     "short_term_debt": _coerce_float(entry.short_term_debt),
                                     "non_current_liabilities": _coerce_float(
                                         entry.long_term_liabilities
@@ -2846,16 +2940,49 @@ class DataPipeline:
                                         "investing_cash_flow"
                                     )
 
+                                free_cash_flow_value = _pick_float(
+                                    entry.free_cash_flow,
+                                    _extract_raw_float(
+                                        payload,
+                                        "free_cash_flow",
+                                        "freecashflow",
+                                        "free_cashflow",
+                                    ),
+                                    _extract_raw_float(
+                                        raw_payload,
+                                        "free_cash_flow",
+                                        "freecashflow",
+                                        "free_cashflow",
+                                    ),
+                                )
+                                operating_cash_flow_value = _coerce_float(entry.operating_cash_flow)
+                                if (
+                                    free_cash_flow_value is None
+                                    and operating_cash_flow_value is not None
+                                    and capital_expenditure_value is not None
+                                ):
+                                    free_cash_flow_value = (
+                                        operating_cash_flow_value + capital_expenditure_value
+                                    )
+                                    raw_payload["_free_cash_flow_computed"] = True
+
+                                if depreciation_value is not None:
+                                    raw_payload["depreciation"] = depreciation_value
+                                if capital_expenditure_value is not None:
+                                    raw_payload["capital_expenditure"] = capital_expenditure_value
+                                if free_cash_flow_value is not None:
+                                    raw_payload["free_cash_flow"] = free_cash_flow_value
+
                                 values = {
                                     **common,
-                                    "operating_cash_flow": _coerce_float(entry.operating_cash_flow),
+                                    "operating_cash_flow": operating_cash_flow_value,
                                     "depreciation": depreciation_value,
                                     "investing_cash_flow": investing_cash_flow_value,
                                     "capital_expenditure": capital_expenditure_value,
                                     "financing_cash_flow": _coerce_float(entry.financing_cash_flow),
                                     "dividends_paid": _coerce_float(entry.dividends_paid),
                                     "debt_repayment": _coerce_float(entry.debt_repayment),
-                                    "free_cash_flow": _coerce_float(entry.free_cash_flow),
+                                    "free_cash_flow": free_cash_flow_value,
                                     "net_change_in_cash": _pick_float(
                                         entry.net_change_in_cash,
                                         net_change,
@@ -2895,7 +3022,7 @@ class DataPipeline:
                     progress["stage_stats"]["financials"]["errors"] += 1
                 continue
             except Exception as e:
-                logger.debug(f"Financials failed for {symbol}: {e}")
+                logger.warning("Financial sync failed (symbol=%s period=%s): %s", symbol, period, e)
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["financials"]["errors"] += 1
@@ -3021,9 +3148,11 @@ class DataPipeline:
                         BalanceSheet.fiscal_quarter,
                         BalanceSheet.inventory,
                         BalanceSheet.accounts_receivable,
+                        BalanceSheet.cash_and_equivalents,
                         BalanceSheet.total_liabilities,
                         BalanceSheet.total_assets,
                         BalanceSheet.total_equity,
+                        BalanceSheet.short_term_debt,
                         BalanceSheet.long_term_debt,
                     )
                     .where(
@@ -3041,6 +3170,7 @@ class DataPipeline:
                         CashFlow.fiscal_quarter,
                         CashFlow.operating_cash_flow,
                         CashFlow.free_cash_flow,
+                        CashFlow.capital_expenditure,
                         CashFlow.dividends_paid,
                         CashFlow.debt_repayment,
                     )
@@ -3083,9 +3213,11 @@ class DataPipeline:
                 quarter,
                 inventory,
                 receivables,
+                cash_and_equivalents,
                 total_liabilities,
                 total_assets,
                 total_equity,
+                short_term_debt,
                 long_term_debt,
             ) in balance_rows:
                 if year is None:
@@ -3094,9 +3226,11 @@ class DataPipeline:
                 row_value = {
                     "inventory": _coerce_float(inventory),
                     "accounts_receivable": _coerce_float(receivables),
+                    "cash_and_equivalents": _coerce_float(cash_and_equivalents),
                     "total_liabilities": _coerce_float(total_liabilities),
                     "total_assets": _coerce_float(total_assets),
                     "total_equity": _coerce_float(total_equity),
+                    "short_term_debt": _coerce_float(short_term_debt),
                     "long_term_debt": _coerce_float(long_term_debt),
                 }
                 balance_lookup[period_key] = row_value
@@ -3104,13 +3238,22 @@ class DataPipeline:
 
             cashflow_lookup: Dict[Tuple[int, int], Dict[str, Optional[float]]] = {}
             cashflow_annual: Dict[int, Dict[str, Optional[float]]] = {}
-            for year, quarter, ocf, fcf, dividends_paid, debt_repayment in cashflow_rows:
+            for (
+                year,
+                quarter,
+                ocf,
+                fcf,
+                capital_expenditure,
+                dividends_paid,
+                debt_repayment,
+            ) in cashflow_rows:
                 if year is None:
                     continue
                 period_key = (int(year), int(quarter or 0))
                 row_value = {
                     "operating_cash_flow": _coerce_float(ocf),
                     "free_cash_flow": _coerce_float(fcf),
+                    "capital_expenditure": _coerce_float(capital_expenditure),
                     "dividends_paid": _coerce_float(dividends_paid),
                     "debt_repayment": _coerce_float(debt_repayment),
                 }
@@ -3232,6 +3375,9 @@ class DataPipeline:
                 receivables_current = _pick_float(
                     None if balance is None else balance.get("accounts_receivable")
                 )
+                cash_and_equivalents = _pick_float(
+                    None if balance is None else balance.get("cash_and_equivalents")
+                )
                 receivables_prev = _pick_float(
                     None if balance_prev is None else balance_prev.get("accounts_receivable")
                 )
@@ -3239,6 +3385,9 @@ class DataPipeline:
                     None if balance is None else balance.get("total_liabilities")
                 )
                 total_equity = _pick_float(None if balance is None else balance.get("total_equity"))
+                short_term_debt = _pick_float(
+                    None if balance is None else balance.get("short_term_debt")
+                )
                 long_term_debt = _pick_float(
                     None if balance is None else balance.get("long_term_debt")
                 )
@@ -3248,6 +3397,9 @@ class DataPipeline:
                 )
                 free_cash_flow = _pick_float(
                     None if cashflow is None else cashflow.get("free_cash_flow")
+                )
+                capital_expenditure = _pick_float(
+                    None if cashflow is None else cashflow.get("capital_expenditure")
                 )
                 dividends_paid = _pick_float(
                     None if cashflow is None else cashflow.get("dividends_paid")
@@ -3303,6 +3455,14 @@ class DataPipeline:
                         changed = True
 
                 if _pick_float(raw_payload.get("fcf_yield")) is None:
+                    if (
+                        free_cash_flow is None
+                        and operating_cash_flow is not None
+                        and capital_expenditure is not None
+                    ):
+                        free_cash_flow = operating_cash_flow + capital_expenditure
+                        raw_payload["free_cash_flow"] = free_cash_flow
+                        changed = True
                     if free_cash_flow is not None and market_cap not in (None, 0):
                         raw_payload["fcf_yield"] = round(free_cash_flow / market_cap, 4)
                         changed = True
@@ -3361,6 +3521,27 @@ class DataPipeline:
                         ratio_row.roic = round((net_income / invested_capital) * 100, 4)
                         raw_payload["roic"] = ratio_row.roic
                         changed = True
+
+                if (
+                    ratio_row.ev_sales is None
+                    and revenue not in (None, 0)
+                    and market_cap not in (None, 0)
+                ):
+                    total_debt = None
+                    if short_term_debt is not None or long_term_debt is not None:
+                        total_debt = (short_term_debt or 0.0) + (long_term_debt or 0.0)
+                    elif total_liabilities is not None:
+                        total_debt = total_liabilities
+
+                    enterprise_value = market_cap
+                    if total_debt is not None:
+                        enterprise_value += total_debt
+                    if cash_and_equivalents is not None:
+                        enterprise_value -= cash_and_equivalents
+
+                    ratio_row.ev_sales = round(enterprise_value / revenue, 4)
+                    raw_payload["ev_sales"] = ratio_row.ev_sales
+                    changed = True
 
                 if (
                     ratio_row.pb_ratio is None
@@ -3579,7 +3760,9 @@ class DataPipeline:
                     progress["stage_stats"]["financial_ratios"]["errors"] += 1
                 continue
             except Exception as exc:
-                logger.debug(f"Financial ratios failed for {symbol}: {exc}")
+                logger.warning(
+                    "Financial ratio sync failed (symbol=%s period=%s): %s", symbol, period, exc
+                )
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["financial_ratios"]["errors"] += 1

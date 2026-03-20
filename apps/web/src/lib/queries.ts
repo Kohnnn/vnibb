@@ -831,17 +831,27 @@ export interface StockQuoteView {
 
 export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Promise<StockQuoteView> {
     const response = await api.getQuote(symbol, signal);
+    const quoteData = response.data ?? {};
+    const price = quoteData.price ?? null;
+    const change = quoteData.change ?? quoteData.change_1d ?? null;
+    const prevClose = quoteData.prevClose ?? quoteData.prev_close ?? null;
+    const derivedChangePct =
+        change !== null && prevClose !== null && Number(prevClose) !== 0
+            ? (Number(change) / Number(prevClose)) * 100
+            : null;
+
     return {
-        symbol: response.symbol || response.data?.symbol || symbol,
-        price: response.data.price,
-        change: response.data.change,
-        changePct: response.data.changePct,
-        prevClose: response.data.prevClose,
-        volume: response.data.volume,
-        value: response.data.value,
-        high: response.data.high,
-        low: response.data.low,
-        open: response.data.open,
+        symbol: response.symbol || quoteData.symbol || symbol,
+        price,
+        change,
+        changePct:
+            quoteData.changePct ?? quoteData.change_pct ?? quoteData.changePercent ?? derivedChangePct,
+        prevClose,
+        volume: quoteData.volume ?? null,
+        value: quoteData.value ?? null,
+        high: quoteData.high ?? null,
+        low: quoteData.low ?? null,
+        open: quoteData.open ?? null,
         cached: response.cached,
     };
 }
