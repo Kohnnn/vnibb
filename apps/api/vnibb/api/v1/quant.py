@@ -43,7 +43,7 @@ SUPPORTED_METRICS = (
     "drawdown_recovery",
 )
 DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
-PERIOD_PATTERN = r"^(1M|3M|6M|1Y|3Y|5Y|10Y|YTD|ALL)$"
+ALLOWED_QUANT_PERIODS = ("6M", "1Y", "3Y", "5Y")
 QUANT_STALE_DAYS_THRESHOLD = 7
 METRIC_ALIASES = {
     "volume_flow": "volume_delta",
@@ -114,10 +114,6 @@ def _safe_float(value: Any, decimals: int = 4) -> float | None:
 
 
 def _resolve_start_date(period: str, end_date: date) -> date:
-    if period == "1M":
-        return end_date - timedelta(days=31)
-    if period == "3M":
-        return end_date - timedelta(days=93)
     if period == "6M":
         return end_date - timedelta(days=186)
     if period == "1Y":
@@ -126,13 +122,24 @@ def _resolve_start_date(period: str, end_date: date) -> date:
         return end_date - timedelta(days=365 * 3)
     if period == "5Y":
         return end_date - timedelta(days=365 * 5)
-    if period == "10Y":
-        return end_date - timedelta(days=365 * 10)
-    if period == "YTD":
-        return date(end_date.year, 1, 1)
-    if period == "ALL":
-        return date(2000, 1, 1)
     return end_date - timedelta(days=365 * 5)
+
+
+def _normalize_quant_period(period: str) -> str:
+    normalized = str(period or "").strip().upper()
+    if normalized in ALLOWED_QUANT_PERIODS:
+        return normalized
+
+    allowed = ", ".join(ALLOWED_QUANT_PERIODS)
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "code": "INVALID_PERIOD",
+            "message": f"Quant period must be one of {allowed}. 10Y is no longer supported.",
+            "allowed_periods": list(ALLOWED_QUANT_PERIODS),
+            "requested_period": normalized or None,
+        },
+    )
 
 
 def _normalize_metric_name(value: str) -> str:
@@ -272,7 +279,7 @@ async def _get_quant_metric_alias_response(
             },
         )
 
-    period_upper = period.upper()
+    period_upper = _normalize_quant_period(period)
     end_date = date.today()
     start_date = _resolve_start_date(period_upper, end_date)
     frame, warning = await _load_quant_frame_with_warning(
@@ -1276,7 +1283,7 @@ def _grade_from_quality_score(score: float | None) -> str:
 @router.get("/{symbol}/gamma-exposure", response_model=StandardResponse[Dict[str, Any]])
 async def get_gamma_exposure_proxy(
     symbol: str,
-    period: str = Query(default="3Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="3Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1286,7 +1293,7 @@ async def get_gamma_exposure_proxy(
         raise HTTPException(status_code=400, detail="Symbol is required")
 
     end_date = date.today()
-    period_upper = period.upper()
+    period_upper = _normalize_quant_period(period)
     frame, warning = await _load_quant_frame_with_warning(
         db=db,
         symbol=symbol_upper,
@@ -1339,6 +1346,7 @@ async def get_gamma_exposure_proxy(
         "symbol": symbol_upper,
         "period": period_upper,
         "computed_at": datetime.utcnow(),
+        "last_data_date": last_data_timestamp,
         "current_close": current_close,
         "current_realized_vol_30d_pct": current_vol_30,
         "regime_z_score": z_score,
@@ -1356,7 +1364,7 @@ async def get_gamma_exposure_proxy(
 @router.get("/{symbol}/momentum", response_model=StandardResponse[Dict[str, Any]])
 async def get_momentum_profile(
     symbol: str,
-    period: str = Query(default="3Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="3Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1365,7 +1373,7 @@ async def get_momentum_profile(
     if not symbol_upper:
         raise HTTPException(status_code=400, detail="Symbol is required")
 
-    period_upper = period.upper()
+    period_upper = _normalize_quant_period(period)
     end_date = date.today()
     start_date = _resolve_start_date(period_upper, end_date)
     frame, warning = await _load_quant_frame_with_warning(
@@ -1378,6 +1386,7 @@ async def get_momentum_profile(
     )
 
     closes = pd.to_numeric(frame.get("close"), errors="coerce").dropna().tolist()
+    last_data_timestamp = _resolve_frame_last_timestamp(frame)
 
     def calc_return(lookback: int) -> float | None:
         if len(closes) <= lookback:
@@ -1420,6 +1429,7 @@ async def get_momentum_profile(
                 "symbol": symbol_upper,
                 "period": period_upper,
                 "computed_at": datetime.utcnow(),
+                "last_data_date": last_data_timestamp,
                 "returns_pct": {},
                 "peer_distribution": [],
             },
@@ -1512,6 +1522,7 @@ async def get_momentum_profile(
         "symbol": symbol_upper,
         "period": period_upper,
         "computed_at": datetime.utcnow(),
+        "last_data_date": last_data_timestamp,
         "returns_pct": {
             "r1m": r1m,
             "r3m": r3m,
@@ -1995,7 +2006,7 @@ async def get_relative_rotation(
 @router.get("/{symbol}/volume-flow", response_model=StandardResponse[Dict[str, Any]])
 async def get_volume_flow_metric(
     symbol: str,
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2011,7 +2022,7 @@ async def get_volume_flow_metric(
 @router.get("/{symbol}/rsi-seasonal", response_model=StandardResponse[Dict[str, Any]])
 async def get_rsi_seasonal_metric(
     symbol: str,
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2027,7 +2038,7 @@ async def get_rsi_seasonal_metric(
 @router.get("/{symbol}/bollinger-squeeze", response_model=StandardResponse[Dict[str, Any]])
 async def get_bollinger_squeeze_metric(
     symbol: str,
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2043,7 +2054,7 @@ async def get_bollinger_squeeze_metric(
 @router.get("/{symbol}/atr-regime", response_model=StandardResponse[Dict[str, Any]])
 async def get_atr_regime_metric(
     symbol: str,
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2059,7 +2070,7 @@ async def get_atr_regime_metric(
 @router.get("/{symbol}/sortino-monthly", response_model=StandardResponse[Dict[str, Any]])
 async def get_sortino_monthly_metric(
     symbol: str,
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2075,7 +2086,7 @@ async def get_sortino_monthly_metric(
 @router.get("/{symbol}/macd-crossover", response_model=StandardResponse[Dict[str, Any]])
 async def get_macd_crossover_metric(
     symbol: str,
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2091,7 +2102,7 @@ async def get_macd_crossover_metric(
 @router.get("/{symbol}/parkinson-volatility", response_model=StandardResponse[Dict[str, Any]])
 async def get_parkinson_volatility_metric(
     symbol: str,
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2107,7 +2118,7 @@ async def get_parkinson_volatility_metric(
 @router.get("/{symbol}/ema-respect", response_model=StandardResponse[Dict[str, Any]])
 async def get_ema_respect_metric(
     symbol: str,
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2123,7 +2134,7 @@ async def get_ema_respect_metric(
 @router.get("/{symbol}/drawdown-recovery", response_model=StandardResponse[Dict[str, Any]])
 async def get_drawdown_recovery_metric(
     symbol: str,
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2139,7 +2150,7 @@ async def get_drawdown_recovery_metric(
 @router.get("/{symbol}/gap-analysis", response_model=StandardResponse[Dict[str, Any]])
 async def get_gap_analysis_metric(
     symbol: str,
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2163,7 +2174,7 @@ async def get_quant_metrics(
             "drawdown_recovery)"
         ),
     ),
-    period: str = Query(default="5Y", pattern=PERIOD_PATTERN),
+    period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2189,7 +2200,7 @@ async def get_quant_metrics(
             },
         )
 
-    period_upper = period.upper()
+    period_upper = _normalize_quant_period(period)
     end_date = date.today()
     start_date = _resolve_start_date(period_upper, end_date)
 

@@ -35,6 +35,10 @@ async def test_run_full_sync_includes_corporate_actions(monkeypatch):
         calls.append(("profiles", tuple(symbols or []), max_symbols))
         return make_result(2)
 
+    async def fake_sync_all_indices():
+        calls.append("indices")
+        return make_result(4)
+
     async def fake_sync_all_financials(*, symbols=None, max_symbols=None):
         calls.append(("financials", tuple(symbols or []), max_symbols))
         return make_result(4)
@@ -46,6 +50,7 @@ async def test_run_full_sync_includes_corporate_actions(monkeypatch):
     monkeypatch.setattr(sync, "sync_all_symbols", fake_sync_all_symbols)
     monkeypatch.setattr(sync, "_get_seeded_symbols", fake_get_seeded_symbols)
     monkeypatch.setattr(sync, "sync_all_prices", fake_sync_all_prices)
+    monkeypatch.setattr(sync, "sync_all_indices", fake_sync_all_indices)
     monkeypatch.setattr(sync, "sync_all_profiles", fake_sync_all_profiles)
     monkeypatch.setattr(sync, "sync_all_financials", fake_sync_all_financials)
     monkeypatch.setattr(sync, "sync_all_corporate_actions", fake_sync_all_corporate_actions)
@@ -60,6 +65,7 @@ async def test_run_full_sync_includes_corporate_actions(monkeypatch):
     assert list(results.keys()) == [
         "symbols",
         "prices",
+        "indices",
         "profiles",
         "financials",
         "corporate_actions",
@@ -68,6 +74,7 @@ async def test_run_full_sync_includes_corporate_actions(monkeypatch):
         "symbols",
         ("seeded", 2),
         ("prices", ("VNM", "FPT"), True, 120),
+        "indices",
         ("profiles", ("VNM", "FPT"), None),
         ("financials", ("VNM", "FPT"), None),
         ("corporate_actions", ("VNM", "FPT"), None),
@@ -90,6 +97,9 @@ async def test_run_full_sync_can_skip_corporate_actions(monkeypatch):
     async def fake_sync_all_profiles(*, symbols=None, max_symbols=None):
         return make_result(1)
 
+    async def fake_sync_all_indices():
+        return make_result(1)
+
     async def fake_sync_all_financials(*, symbols=None, max_symbols=None):
         return make_result(1)
 
@@ -99,13 +109,14 @@ async def test_run_full_sync_can_skip_corporate_actions(monkeypatch):
     monkeypatch.setattr(sync, "sync_all_symbols", fake_sync_all_symbols)
     monkeypatch.setattr(sync, "_get_seeded_symbols", fake_get_seeded_symbols)
     monkeypatch.setattr(sync, "sync_all_prices", fake_sync_all_prices)
+    monkeypatch.setattr(sync, "sync_all_indices", fake_sync_all_indices)
     monkeypatch.setattr(sync, "sync_all_profiles", fake_sync_all_profiles)
     monkeypatch.setattr(sync, "sync_all_financials", fake_sync_all_financials)
     monkeypatch.setattr(sync, "sync_all_corporate_actions", fail_sync_all_corporate_actions)
 
     results = await sync.run_full_sync(include_corporate_actions=False)
 
-    assert list(results.keys()) == ["symbols", "prices", "profiles", "financials"]
+    assert list(results.keys()) == ["symbols", "prices", "indices", "profiles", "financials"]
 
 
 @pytest.mark.asyncio
@@ -121,6 +132,10 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
     ):
         calls.append(("prices", tuple(symbols or []), include_historical, history_days))
         return make_result(20)
+
+    async def fake_sync_all_indices(self):
+        calls.append("indices")
+        return make_result(4)
 
     async def fake_sync_dividends(symbols=None):
         calls.append(("dividends", tuple(symbols or [])))
@@ -140,6 +155,7 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
     monkeypatch.setattr(FullMarketSync, "_get_seeded_symbols", fake_get_seeded_symbols)
     monkeypatch.setattr(FullMarketSync, "run_full_sync", fail_run_full_sync)
     monkeypatch.setattr(FullMarketSync, "sync_all_prices", fake_sync_all_prices)
+    monkeypatch.setattr(FullMarketSync, "sync_all_indices", fake_sync_all_indices)
     monkeypatch.setattr(data_pipeline, "sync_dividends", fake_sync_dividends)
     monkeypatch.setattr(data_pipeline, "sync_company_events", fake_sync_company_events)
     monkeypatch.setattr(
@@ -149,10 +165,11 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
 
     results = await run_daily_market_sync()
 
-    assert list(results.keys()) == ["prices", "rs_ratings", "corporate_actions"]
+    assert list(results.keys()) == ["prices", "indices", "rs_ratings", "corporate_actions"]
     assert calls == [
         "seeded",
         ("prices", ("VNM", "FPT"), True, 21),
+        "indices",
         ("rs_ratings", None),
         ("dividends", ("VNM", "FPT")),
         ("company_events", ("VNM", "FPT")),

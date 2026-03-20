@@ -1268,7 +1268,7 @@ export async function getPeerCompanies(symbol: string, limit = 5): Promise<Peers
 
 // ============ Quant API ============
 
-export type QuantPeriod = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | '10Y' | 'YTD' | 'ALL'
+export type QuantPeriod = '6M' | '1Y' | '3Y' | '5Y'
 
 export type QuantMetric =
     | 'volume_delta'
@@ -1288,6 +1288,7 @@ export interface QuantResponse {
         symbol: string
         period: QuantPeriod
         computed_at: string
+        last_data_date?: string | null
         metrics: Record<string, any>
         warning?: string | null
     }
@@ -1325,6 +1326,7 @@ export interface GammaExposurePayload {
     symbol: string;
     period: QuantPeriod;
     computed_at: string;
+    last_data_date?: string | null;
     current_close: number | null;
     current_realized_vol_30d_pct: number | null;
     regime_z_score: number | null;
@@ -1350,6 +1352,7 @@ export interface MomentumProfilePayload {
     symbol: string;
     period: QuantPeriod;
     computed_at: string;
+    last_data_date?: string | null;
     data_quality_note?: string;
     returns_pct: {
         r1m?: number | null;

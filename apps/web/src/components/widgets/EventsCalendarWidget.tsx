@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Calendar, DollarSign, Split, Users, RefreshCw } from 'lucide-react';
 import { useCompanyEvents } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -64,7 +64,22 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
     } = useCompanyEvents(symbol, { limit: 20, enabled: !!symbol });
 
     const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
-    const events = data?.data || [];
+    const events = useMemo(() => {
+        const items = [...(data?.data || [])];
+        const getEventTime = (value: string | null | undefined) => {
+            const parsed = new Date(value || '');
+            return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+        };
+        return items.sort((left, right) => {
+            const leftTime = getEventTime(
+                left.event_date || left.ex_date || left.record_date || left.payment_date
+            );
+            const rightTime = getEventTime(
+                right.event_date || right.ex_date || right.record_date || right.payment_date
+            );
+            return rightTime - leftTime;
+        });
+    }, [data?.data]);
     const hasData = events.length > 0;
     const isFallback = Boolean(error && hasData);
 

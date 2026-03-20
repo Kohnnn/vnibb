@@ -14,7 +14,7 @@ interface SortinoMonthlyWidgetProps {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y', '10Y'] as const
+const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y'] as const
 
 type PeriodOption = (typeof PERIOD_OPTIONS)[number]
 
@@ -73,7 +73,7 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} Sortino vs Sharpe`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} Sortino vs Sharpe`} align="right" />
         </div>
       </div>
 

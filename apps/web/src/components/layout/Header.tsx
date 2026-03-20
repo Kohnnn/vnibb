@@ -301,8 +301,9 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85">
-      <div className="grid h-14 grid-cols-[minmax(0,1fr)_minmax(220px,380px)_auto] items-center gap-3 px-4">
-        <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+      <div className="px-4 py-2">
+        <div className="grid min-h-[2.75rem] grid-cols-[minmax(0,1fr)_minmax(160px,240px)_auto] items-center gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,380px)_auto] md:gap-3">
+          <div className="flex min-w-0 items-center gap-2 overflow-hidden">
           <div className="inline-flex shrink-0 items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-secondary)]">
             <span className="h-2 w-2 rounded-full bg-sky-500" />
             <span>VNIBB</span>
@@ -317,7 +318,7 @@ export function Header({
             </span>
           </div>
 
-          <div className="hidden min-w-0 items-center gap-2 lg:flex">
+            <div className="hidden min-w-0 items-center gap-2 lg:flex">
             <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
               <div className="min-w-0">
                 <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
@@ -395,9 +396,9 @@ export function Header({
               </div>
             </div>
           </div>
-        </div>
+          </div>
 
-        <div className="relative w-full max-w-md justify-self-center">
+          <div className="relative w-full max-w-md justify-self-center">
           <Search
             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
             size={14}
@@ -445,9 +446,9 @@ export function Header({
               <X size={12} />
             </button>
           )}
-        </div>
+          </div>
 
-        <div className="flex items-center gap-1 justify-self-end">
+          <div className="flex items-center gap-1 justify-self-end">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -547,6 +548,58 @@ export function Header({
           <button className="hidden rounded-md p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:block">
             <User size={16} />
           </button>
+          </div>
+        </div>
+
+        <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-1 xl:hidden scrollbar-hide">
+          {headerMarketIndices.map((index) => {
+            const positive = (index.changePct ?? 0) >= 0
+            const accentClass = positive
+              ? resolvedTheme === 'light'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700'
+                : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
+              : resolvedTheme === 'light'
+                ? 'border-rose-500/30 bg-rose-500/10 text-rose-700'
+                : 'border-rose-500/25 bg-rose-500/10 text-rose-300'
+
+            return (
+              <div
+                key={`${index.key}-compact`}
+                className="inline-flex shrink-0 items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5"
+              >
+                <div>
+                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                    {index.label}
+                  </div>
+                  <div className="text-xs font-semibold text-[var(--text-primary)]">
+                    {formatHeaderPrice(index.value)}
+                  </div>
+                </div>
+                <div className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold', accentClass)}>
+                  {positive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                  <span>{formatHeaderPercent(index.changePct)}</span>
+                </div>
+              </div>
+            )
+          })}
+
+          <div
+            className={cn(
+              'inline-flex shrink-0 items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold',
+              healthBadge.className,
+            )}
+            title={healthTitle}
+            aria-label={healthTitle}
+          >
+            <span
+              className={cn(
+                'h-2 w-2 rounded-full',
+                healthBadge.dotClassName,
+                marketStatus.isOpen && connectionStatus === 'online' ? 'animate-pulse' : '',
+              )}
+            />
+            <span>{marketStatus.isOpen ? 'HOSE Open' : 'HOSE Closed'}</span>
+          </div>
         </div>
       </div>
     </header>

@@ -54,6 +54,7 @@ class FullMarketSync:
         stage_tables = {
             "symbols": ("stocks",),
             "prices": ("stock_prices",),
+            "indices": (),
             "profiles": ("stocks",),
             "financials": (
                 "income_statements",
@@ -249,6 +250,14 @@ class FullMarketSync:
 
         return await self._run_stage("financials", _operation)
 
+    async def sync_all_indices(self) -> SyncResult:
+        """Sync latest market indices into the stock_indices table."""
+
+        async def _operation() -> int:
+            return await data_pipeline.sync_market_indices()
+
+        return await self._run_stage("indices", _operation, populate_appwrite=False)
+
     async def sync_all_corporate_actions(
         self,
         symbols: list[str] | None = None,
@@ -279,9 +288,10 @@ class FullMarketSync:
         Execution order:
         1) Stock symbols
         2) Screener + prices
-        3) Profiles
-        4) Financials + ratios
-        5) Dividends + company events
+        3) Market indices
+        4) Profiles
+        5) Financials + ratios
+        6) Dividends + company events
         """
 
         logger.info(
@@ -306,6 +316,7 @@ class FullMarketSync:
             include_historical=include_historical,
             history_days=history_days,
         )
+        results["indices"] = await self.sync_all_indices()
         results["profiles"] = await self.sync_all_profiles(symbols=symbols)
         results["financials"] = await self.sync_all_financials(symbols=symbols)
         if include_corporate_actions:
@@ -379,6 +390,7 @@ async def run_daily_market_sync(
         include_historical=True,
         history_days=history_days,
     )
+    results["indices"] = await sync.sync_all_indices()
 
     async def _sync_rs_ratings() -> int:
         from vnibb.services.rs_rating_service import RSRatingService

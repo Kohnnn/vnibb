@@ -20,6 +20,15 @@
       "precisionColumns": ["open", "high", "low", "close", "adj_close", "value"]
     },
     {
+      "table": "stock_indices",
+      "collectionId": "stock_indices",
+      "cursorColumn": "id",
+      "documentIdColumns": ["index_code", "time"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["open", "high", "low", "close", "value", "change", "change_pct"]
+    },
+    {
       "table": "intraday_trades",
       "collectionId": "intraday_trades",
       "cursorColumn": "id",

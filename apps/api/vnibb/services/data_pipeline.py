@@ -79,7 +79,7 @@ CACHE_TTL_DERIVATIVES_RECENT = 24 * 60 * 60
 RECENT_PRICE_DAYS = 60
 RECENT_DERIVATIVE_DAYS = 60
 
-STAGE_ORDER = ["stock_list", "screener", "profiles", "prices", "financials"]
+STAGE_ORDER = ["stock_list", "screener", "profiles", "prices", "indices", "financials"]
 DAILY_TRADING_STAGES = [
     "foreign_trading",
     "intraday_trades",
@@ -93,6 +93,17 @@ RATE_MODE_NORMAL = "normal"
 RATE_MODE_REINFORCEMENT = "reinforcement"
 RATE_MODE_CONTEXT: ContextVar[str] = ContextVar("vnibb_rate_mode", default=RATE_MODE_NORMAL)
 _SYNC_RUN_LOCKS: Dict[str, asyncio.Lock] = {}
+MARKET_INDEX_ALIASES = {
+    "VNINDEX": "VNINDEX",
+    "VN-INDEX": "VNINDEX",
+    "VN30": "VN30",
+    "HNX": "HNX",
+    "HNXINDEX": "HNX",
+    "HNX-INDEX": "HNX",
+    "UPCOM": "UPCOM",
+    "UPCOMINDEX": "UPCOM",
+    "UPCOM-INDEX": "UPCOM",
+}
 
 
 def get_upsert_stmt(model, index_elements, values):
@@ -623,6 +634,13 @@ class DataPipeline:
             except ValueError:
                 continue
         return None
+
+    @staticmethod
+    def _normalize_market_index_code(value: Any) -> str:
+        normalized = str(value or "").strip().upper().replace(" ", "")
+        if not normalized:
+            return ""
+        return MARKET_INDEX_ALIASES.get(normalized, normalized.replace("-", ""))
 
     def _iter_weekdays(self, start_date: date, end_date: date):
         current = start_date
@@ -3006,6 +3024,7 @@ class DataPipeline:
                         BalanceSheet.total_liabilities,
                         BalanceSheet.total_assets,
                         BalanceSheet.total_equity,
+                        BalanceSheet.long_term_debt,
                     )
                     .where(
                         BalanceSheet.symbol == symbol_value,
@@ -3067,6 +3086,7 @@ class DataPipeline:
                 total_liabilities,
                 total_assets,
                 total_equity,
+                long_term_debt,
             ) in balance_rows:
                 if year is None:
                     continue
@@ -3077,6 +3097,7 @@ class DataPipeline:
                     "total_liabilities": _coerce_float(total_liabilities),
                     "total_assets": _coerce_float(total_assets),
                     "total_equity": _coerce_float(total_equity),
+                    "long_term_debt": _coerce_float(long_term_debt),
                 }
                 balance_lookup[period_key] = row_value
                 balance_annual.setdefault(int(year), row_value)
@@ -3217,6 +3238,10 @@ class DataPipeline:
                 total_liabilities = _pick_float(
                     None if balance is None else balance.get("total_liabilities")
                 )
+                total_equity = _pick_float(None if balance is None else balance.get("total_equity"))
+                long_term_debt = _pick_float(
+                    None if balance is None else balance.get("long_term_debt")
+                )
 
                 operating_cash_flow = _pick_float(
                     None if cashflow is None else cashflow.get("operating_cash_flow")
@@ -3311,6 +3336,41 @@ class DataPipeline:
 
                 payout_ratio_value = _pick_float(raw_payload.get("payout_ratio"))
                 eps_value = _pick_float(ratio_row.eps, raw_payload.get("eps"))
+
+                if (
+                    ratio_row.bvps is None
+                    and total_equity not in (None, 0)
+                    and outstanding_shares not in (None, 0)
+                ):
+                    shares_denominator = (
+                        outstanding_shares
+                        if outstanding_shares >= 1_000_000
+                        else outstanding_shares * 1_000_000
+                    )
+                    if shares_denominator not in (None, 0):
+                        ratio_row.bvps = round(total_equity / shares_denominator, 4)
+                        raw_payload["bvps"] = ratio_row.bvps
+                        changed = True
+
+                if ratio_row.roic is None and net_income is not None:
+                    invested_capital = None
+                    if total_equity not in (None, 0):
+                        debt_component = long_term_debt if long_term_debt is not None else 0.0
+                        invested_capital = total_equity + debt_component
+                    if invested_capital not in (None, 0):
+                        ratio_row.roic = round((net_income / invested_capital) * 100, 4)
+                        raw_payload["roic"] = ratio_row.roic
+                        changed = True
+
+                if (
+                    ratio_row.pb_ratio is None
+                    and latest_price not in (None, 0)
+                    and ratio_row.bvps not in (None, 0)
+                ):
+                    ratio_row.pb_ratio = round(latest_price / ratio_row.bvps, 4)
+                    raw_payload["pb"] = ratio_row.pb_ratio
+                    raw_payload["pb_ratio"] = ratio_row.pb_ratio
+                    changed = True
 
                 if (
                     payout_ratio_value is None
@@ -4167,6 +4227,124 @@ class DataPipeline:
             await session.commit()
 
         return total
+
+    async def sync_market_indices(
+        self,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
+    ) -> int:
+        """Sync the latest market index snapshots into stock_indices."""
+        from vnibb.providers.vnstock.market_overview import (
+            MarketOverviewQueryParams,
+            VnstockMarketOverviewFetcher,
+        )
+
+        def _parse_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        if progress is not None:
+            progress.setdefault("stage_stats", {})
+            progress["stage"] = "indices"
+            progress["stage_index"] = STAGE_ORDER.index("indices")
+            progress["stage_stats"].setdefault(
+                "indices",
+                {"success": 0, "errors": 0, "total": len(set(MARKET_INDEX_ALIASES.values()))},
+            )
+
+        try:
+            rows = await VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams())
+        except Exception as exc:
+            logger.error("Market index sync failed during provider fetch: %s", exc)
+            raise
+
+        if not rows:
+            logger.warning("Market index sync returned no provider rows")
+            return 0
+
+        upsert_count = 0
+        async with async_session_maker() as session:
+            for raw_row in rows:
+                row = raw_row.model_dump() if hasattr(raw_row, "model_dump") else dict(raw_row)
+                index_code = self._normalize_market_index_code(
+                    row.get("index_name") or row.get("index_code") or row.get("symbol")
+                )
+                if not index_code:
+                    logger.warning("Skipping market index row with missing code: %s", row)
+                    if progress is not None:
+                        progress["error_count"] = progress.get("error_count", 0) + 1
+                        progress["stage_stats"]["indices"]["errors"] += 1
+                    continue
+
+                parsed_date = (
+                    self._parse_date_value(
+                        row.get("time") or row.get("trading_date") or row.get("date")
+                    )
+                    or self._get_market_date()
+                )
+
+                close_value = _parse_float(
+                    row.get("close") or row.get("current_value") or row.get("price")
+                )
+                if close_value is None:
+                    logger.warning(
+                        "Skipping market index row without close value (%s): %s", index_code, row
+                    )
+                    if progress is not None:
+                        progress["error_count"] = progress.get("error_count", 0) + 1
+                        progress["stage_stats"]["indices"]["errors"] += 1
+                    continue
+
+                open_value = _parse_float(
+                    row.get("open") or row.get("open_price") or row.get("openPrice")
+                )
+                high_value = _parse_float(row.get("high") or row.get("highest"))
+                low_value = _parse_float(row.get("low") or row.get("lowest"))
+                volume_value = _parse_float(row.get("volume") or row.get("total_volume"))
+                change_value = _parse_float(row.get("change") or row.get("price_change"))
+                change_pct_value = _parse_float(
+                    row.get("change_pct")
+                    or row.get("pctChange")
+                    or row.get("pct_change")
+                    or row.get("changePercent")
+                    or row.get("percent_change")
+                    or row.get("change_ratio")
+                )
+
+                values = {
+                    "index_code": index_code,
+                    "time": parsed_date,
+                    "open": open_value if open_value is not None else close_value,
+                    "high": high_value if high_value is not None else close_value,
+                    "low": low_value if low_value is not None else close_value,
+                    "close": close_value,
+                    "volume": int(volume_value or 0),
+                    "value": _parse_float(row.get("value")),
+                    "change": change_value,
+                    "change_pct": change_pct_value,
+                    "created_at": datetime.utcnow(),
+                }
+
+                stmt = get_upsert_stmt(StockIndex, ["index_code", "time"], values)
+                await session.execute(stmt)
+                upsert_count += 1
+
+                if progress is not None:
+                    progress["success_count"] = progress.get("success_count", 0) + 1
+                    progress["stage_stats"]["indices"]["success"] += 1
+                    progress["last_symbol"] = index_code
+
+            await session.commit()
+
+        if progress is not None and sync_id is not None:
+            await self._checkpoint(progress, sync_id)
+
+        logger.info("Synced %d market index rows", upsert_count)
+        return upsert_count
 
     async def sync_foreign_trading(
         self,
@@ -5665,6 +5843,11 @@ class DataPipeline:
                                     )
                             except Exception as e:
                                 logger.warning(f"Price sync failed: {e}")
+                    elif stage == "indices":
+                        try:
+                            await self.sync_market_indices(progress=progress, sync_id=sync_id)
+                        except Exception as e:
+                            logger.warning(f"Market indices sync failed: {e}")
                     elif stage == "financials":
                         try:
                             await self.sync_financials(

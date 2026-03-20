@@ -13,7 +13,7 @@ interface GammaExposureWidgetProps {
   onRemove?: () => void
 }
 
-const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y', '10Y'] as const
+const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y'] as const
 
 type PeriodOption = (typeof PERIOD_OPTIONS)[number]
 
@@ -80,7 +80,7 @@ export function GammaExposureWidget({ symbol }: GammaExposureWidgetProps) {
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} proxy`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} proxy`} align="right" />
         </div>
       </div>
 

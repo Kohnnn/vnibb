@@ -96,12 +96,62 @@ export function formatTimestamp(
   return formatAbsoluteTimestamp(date);
 }
 
+export function parseFlexibleDate(
+  value: Date | string | number | null | undefined
+): Date | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === 'number') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const direct = new Date(raw);
+  if (!Number.isNaN(direct.getTime())) return direct;
+
+  const compact = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) {
+    const parsed = new Date(
+      Number(compact[1]),
+      Number(compact[2]) - 1,
+      Number(compact[3])
+    );
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const dmy = raw.match(
+    /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+  if (dmy) {
+    const year = Number(dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3]);
+    const parsed = new Date(
+      year,
+      Number(dmy[2]) - 1,
+      Number(dmy[1]),
+      Number(dmy[4] ?? 0),
+      Number(dmy[5] ?? 0),
+      Number(dmy[6] ?? 0)
+    );
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const normalized = raw.replace(/\//g, '-');
+  const fallback = new Date(normalized);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
 export function formatAbsoluteTimestamp(
   date: Date | string | number | null | undefined
 ): string {
   if (date === null || date === undefined) return '-'
 
-  const parsed = date instanceof Date ? date : new Date(date)
+  const parsed = parseFlexibleDate(date)
+  if (!parsed) return '-'
   if (Number.isNaN(parsed.getTime())) return '-'
 
   const yyyy = parsed.getFullYear()
@@ -132,7 +182,8 @@ export function formatTime(
   includeSeconds: boolean = false,
   locale: string = 'en-US'
 ): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
+  const d = parseFlexibleDate(date);
+  if (!d) return '-';
 
   return d.toLocaleTimeString(locale, {
     hour: '2-digit',

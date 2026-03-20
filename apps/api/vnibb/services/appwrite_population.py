@@ -25,6 +25,7 @@ DEFAULT_PUBLIC_READ_PERMISSIONS = ['read("any")']
 PRIMARY_APPWRITE_TABLES: tuple[str, ...] = (
     "stocks",
     "stock_prices",
+    "stock_indices",
     "income_statements",
     "balance_sheets",
     "cash_flows",

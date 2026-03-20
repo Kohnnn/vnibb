@@ -569,7 +569,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
 
 // Helper: Format cell values based on metric format type
 function formatCellValue(value: any, format: string) {
-    if (value === null || value === undefined) return '-';
+    if (value === null || value === undefined) return 'N/A';
     if (typeof value !== 'number') return String(value);
 
     switch (format) {

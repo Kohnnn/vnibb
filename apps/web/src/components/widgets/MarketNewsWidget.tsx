@@ -34,21 +34,9 @@ function cleanText(value: string | null | undefined): string {
     .trim();
 }
 
-function parseNewsDate(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    const normalized = value.replace(/\//g, '-');
-    const fallback = new Date(normalized);
-    return Number.isNaN(fallback.getTime()) ? null : fallback;
-  }
-  return parsed;
-}
-
 function formatPublishedTime(value: string | null | undefined): string {
-  const parsed = parseNewsDate(value);
-  if (!parsed) return 'Unknown time';
-  return formatTimestamp(parsed);
+  const formatted = formatTimestamp(value);
+  return formatted === '-' ? 'Unknown time' : formatted;
 }
 
 function MarketNewsWidgetComponent() {

@@ -16,13 +16,8 @@ from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 
 from vnibb.providers.vnstock import get_vnstock
-from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
-
-# Shared thread pool for parallel fetching across requests
-# This avoids the blocking behavior of 'with ThreadPoolExecutor' on timeout
-_executor = ThreadPoolExecutor(max_workers=10)
 
 MARKET_INDEX_MIN_EXPECTED_VALUE: dict[str, float] = {
     "VNINDEX": 100.0,
@@ -99,8 +94,6 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
         query: dict[str, Any],
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
-        loop = asyncio.get_running_loop()
-
         index_candidates: dict[str, list[str]] = {
             "VNINDEX": ["VNINDEX", "VN-INDEX"],
             "VN30": ["VN30"],
@@ -118,54 +111,65 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
 
         def _fetch_single_index(index_name: str, symbols: list[str]) -> Optional[dict[str, Any]]:
             """Fetch a single market index with timeout handling."""
-            try:
-                stock_manager = get_vnstock()
+            stock_manager = get_vnstock()
 
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=5)
-                prev_end_date = end_date - timedelta(days=1)
-                prev_start_date = prev_end_date - timedelta(days=45)
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=5)
+            prev_end_date = end_date - timedelta(days=1)
+            prev_start_date = prev_end_date - timedelta(days=45)
 
-                for source in source_candidates:
-                    for symbol in symbols:
+            for source in source_candidates:
+                for symbol in symbols:
+                    try:
                         stock = stock_manager.stock(symbol=symbol, source=source)
                         df = stock.quote.history(
                             start=start_date.strftime("%Y-%m-%d"),
                             end=end_date.strftime("%Y-%m-%d"),
                             show_log=False,
                         )
-                        if df is None or df.empty:
-                            continue
+                    except Exception as exc:
+                        logger.debug(
+                            "Index fetch candidate failed for %s source=%s symbol=%s: %s",
+                            index_name,
+                            source,
+                            symbol,
+                            exc,
+                        )
+                        continue
 
-                        if "time" in df.columns:
-                            df = df.sort_values("time")
-                        elif "date" in df.columns:
-                            df = df.sort_values("date")
+                    if df is None or df.empty:
+                        continue
 
-                        latest = df.iloc[-1].to_dict()
-                        if _is_suspicious_index_value(index_name, latest.get("close")):
-                            logger.info(
-                                "Skipping compact market-index payload for %s from source=%s symbol=%s close=%s",
-                                index_name,
-                                source,
-                                symbol,
-                                latest.get("close"),
-                            )
-                            continue
+                    if "time" in df.columns:
+                        df = df.sort_values("time")
+                    elif "date" in df.columns:
+                        df = df.sort_values("date")
 
-                        prev_close = None
-                        if len(df.index) > 1:
-                            prev_close = df.iloc[-2].get("close")
+                    latest = df.iloc[-1].to_dict()
+                    if _is_suspicious_index_value(index_name, latest.get("close")):
+                        logger.info(
+                            "Skipping compact market-index payload for %s from source=%s symbol=%s close=%s",
+                            index_name,
+                            source,
+                            symbol,
+                            latest.get("close"),
+                        )
+                        continue
 
-                        if prev_close is None:
-                            prev_close = _first_non_none(
-                                latest.get("prev_close"),
-                                latest.get("previous_close"),
-                                latest.get("ref_price"),
-                                latest.get("close_prev"),
-                            )
+                    prev_close = None
+                    if len(df.index) > 1:
+                        prev_close = df.iloc[-2].get("close")
 
-                        if prev_close is None:
+                    if prev_close is None:
+                        prev_close = _first_non_none(
+                            latest.get("prev_close"),
+                            latest.get("previous_close"),
+                            latest.get("ref_price"),
+                            latest.get("close_prev"),
+                        )
+
+                    if prev_close is None:
+                        try:
                             prev_df = stock.quote.history(
                                 start=prev_start_date.strftime("%Y-%m-%d"),
                                 end=prev_end_date.strftime("%Y-%m-%d"),
@@ -177,26 +181,32 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                                 elif "date" in prev_df.columns:
                                     prev_df = prev_df.sort_values("date")
                                 prev_close = prev_df.iloc[-1].get("close")
+                        except Exception as exc:
+                            logger.debug(
+                                "Previous-close lookup failed for %s source=%s symbol=%s: %s",
+                                index_name,
+                                source,
+                                symbol,
+                                exc,
+                            )
 
-                        if prev_close is not None:
-                            latest["prev_close"] = prev_close
+                    if prev_close is not None:
+                        latest["prev_close"] = prev_close
 
-                        latest["index_name"] = index_name
-                        latest["index_symbol"] = symbol
-                        latest["source"] = source
-                        return latest
-            except Exception as e:
-                # Downgrade to debug log to reduce noise if fetching fails
-                logger.debug("Failed to fetch %s: %s", index_name, str(e))
+                    latest["index_name"] = index_name
+                    latest["index_symbol"] = symbol
+                    latest["source"] = source
+                    return latest
+
             return None
 
         async def _fetch_index_async(
-            pool, index_name: str, symbols: list[str], timeout: int = 8
+            index_name: str, symbols: list[str], timeout: int = 12
         ) -> Optional[dict[str, Any]]:
             """Fetch a single index with timeout."""
             try:
                 return await asyncio.wait_for(
-                    loop.run_in_executor(pool, _fetch_single_index, index_name, symbols),
+                    asyncio.to_thread(_fetch_single_index, index_name, symbols),
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:
@@ -209,24 +219,33 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
         try:
             indices = []
 
-            # Fetch indices in parallel with per-index timeout of 8 seconds
+            # Fetch indices in parallel with per-index timeout generous enough
+            # for vnstock initialization and index alias fallback paths.
             tasks = [
-                _fetch_index_async(_executor, idx, symbols, timeout=8)
+                _fetch_index_async(idx, symbols, timeout=12)
                 for idx, symbols in index_candidates.items()
             ]
 
-            # Total timeout of 15 seconds for all parallel requests
             results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True), timeout=15
+                asyncio.gather(*tasks, return_exceptions=True), timeout=30
             )
 
             for result in results:
                 if isinstance(result, dict):
                     indices.append(result)
 
+            if len(indices) < len(index_candidates):
+                fetched_codes = {str(item.get("index_name") or "").upper() for item in indices}
+                for index_name, symbols in index_candidates.items():
+                    if index_name in fetched_codes:
+                        continue
+                    fallback_row = await _fetch_index_async(index_name, symbols, timeout=18)
+                    if isinstance(fallback_row, dict):
+                        indices.append(fallback_row)
+
             return indices
         except asyncio.TimeoutError:
-            raise ProviderTimeoutError(provider="vnstock", timeout=15)
+            raise ProviderTimeoutError(provider="vnstock", timeout=30)
         except Exception as e:
             logger.error(f"vnstock market overview fetch error: {e}")
             raise ProviderError(message=str(e), provider="vnstock", details={})
