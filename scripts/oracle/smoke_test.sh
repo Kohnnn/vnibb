@@ -28,7 +28,7 @@ if [[ -z "$CORS_TEST_ORIGIN" ]]; then
       CORS_TEST_ORIGIN="http://localhost:3000"
       ;;
     *)
-      CORS_TEST_ORIGIN="https://vnibb.vercel.app"
+      CORS_TEST_ORIGIN="https://vnibb-web.vercel.app"
       ;;
   esac
 fi
@@ -49,6 +49,7 @@ echo "Oracle smoke test target: ${BASE_URL}"
 expect_ok "live" "/live"
 expect_ok "ready" "/ready"
 expect_ok "health" "/health/"
+expect_ok "api_health" "/api/v1/health"
 expect_ok "profile" "/api/v1/equity/VNM/profile"
 expect_ok "quote" "/api/v1/equity/VNM/quote"
 expect_ok "screener" "/api/v1/screener/?limit=5"

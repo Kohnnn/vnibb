@@ -6,7 +6,7 @@ This document captures the current VNIBB v1 API surface used by the web app and 
 
 Base URL:
 - Local: `http://localhost:8000/api/v1`
-- Production: `https://api.example.com/api/v1`
+- Production (current OCI deployment): `https://213.35.101.237.sslip.io/api/v1`
 
 ## Conventions
 

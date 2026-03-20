@@ -119,9 +119,9 @@ docker compose -f docker-compose.oracle.yml logs caddy --tail=200
 
 ### What to confirm
 
-- `/live`, `/ready`, and `/health/` return `200`
+- `/live`, `/ready`, `/health/`, and `/api/v1/health` return `200`
 - Appwrite is reported as connected
-- CORS preflight succeeds for `https://vnibb.vercel.app`
+- CORS preflight succeeds for `https://vnibb-web.vercel.app`
 - Key API endpoints succeed
 - Websocket probe succeeds or is explicitly skipped with a known reason
 
@@ -129,9 +129,9 @@ docker compose -f docker-compose.oracle.yml logs caddy --tail=200
 
 1. Freeze backend changes.
 2. Re-run Oracle health and smoke checks.
-3. Re-run Zeabur health checks for comparison.
+3. Re-run health checks against any rollback target that is still being kept warm.
 4. Confirm the stable hostname TTL is already `60`.
-5. Switch the stable hostname from Zeabur to the Oracle reserved IP.
+5. Switch the stable hostname from the previous backend or OCI canary hostname to the Oracle reserved IP.
 6. Wait for DNS propagation.
 7. Test the production Vercel frontend against the stable hostname.
 8. Monitor minute 0-15:
@@ -168,7 +168,7 @@ docker compose -f docker-compose.oracle.yml restart caddy
 
 ### When to rollback
 
-- `/ready` is non-200 after restart attempts
+- `/ready` or `/api/v1/health` is non-200 after restart attempts
 - sustained 5xx errors
 - broken Appwrite auth/session behavior
 - websocket instability severe enough to degrade user experience
