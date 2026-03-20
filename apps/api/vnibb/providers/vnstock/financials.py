@@ -733,6 +733,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "receivables": "accounts_receivable",
                     "accounts_payable": "accounts_payable",
                     "trade_accounts_payable": "accounts_payable",
+                    "short_term_trade_accounts_payable": "accounts_payable",
                     "long_term_trade_payables": "accounts_payable",
                     "payables": "accounts_payable",
                     "customer_deposits": "customer_deposits",
