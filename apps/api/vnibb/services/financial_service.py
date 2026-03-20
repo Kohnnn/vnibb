@@ -147,7 +147,7 @@ async def _inject_latest_ytd_row(
         symbol=symbol,
         statement_type=StatementType(statement_type),
         period="quarter",
-        limit=max(limit * 6, 20),
+        limit=20,
     )
 
     try:
