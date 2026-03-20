@@ -7,7 +7,7 @@ Runtime model:
 - Appwrite is the primary runtime datastore for Appwrite-enabled reads.
 - Supabase/Postgres stays in place as the fallback source and seed source.
 - Backend sync flows can call this migration runner to populate Appwrite after Postgres syncs.
-- Production backend now has a Python HTTP mirror fallback, so Appwrite population can still run on Zeabur even when `node` is unavailable in the container.
+- Production backend now has a Python HTTP mirror fallback, so Appwrite population can still run in OCI/Docker Python-only containers even when `node` is unavailable in the runtime image.
 
 ## Files
 
@@ -23,7 +23,7 @@ Runtime model:
 - `run_backfill_loop.mjs`: repeatedly runs chunked backfills for one table until caught up or chunk limit is reached.
 - `inspect_migration_state.mjs`: prints per-table keyset checkpoint progress from migration state.
 - `check_cutover_readiness.mjs`: baseline-based readiness gate for full Appwrite data cutover.
-- `generate_cutover_env_checklist.mjs`: prints Zeabur/Vercel Appwrite env checklist from `apps/api/.env`.
+- `generate_cutover_env_checklist.mjs`: prints backend/frontend Appwrite env checklist from `apps/api/.env`.
 
 ## Prerequisites
 
@@ -140,7 +140,7 @@ Runtime sync/seed helpers that now populate Appwrite automatically:
 - `apps/api/scripts/seed_historical.py`
 - `apps/api/scripts/full_seed.py`
 
-For Zeabur-style Python containers, set `APPWRITE_POPULATE_FORCE_HTTP=1` to use the built-in HTTP mirror fallback instead of relying on `node` in the runtime image.
+For OCI-style Python containers, set `APPWRITE_POPULATE_FORCE_HTTP=1` to use the built-in HTTP mirror fallback instead of relying on `node` in the runtime image.
 
 Create collections from schema map:
 
@@ -181,7 +181,7 @@ Run full baseline readiness gate (recommended before cutover):
 node ./scripts/appwrite/check_cutover_readiness.mjs
 ```
 
-Generate deployment env checklist for Zeabur + Vercel:
+Generate deployment env checklist for OCI backend + Vercel frontend:
 
 ```bash
 node ./scripts/appwrite/generate_cutover_env_checklist.mjs
