@@ -1026,6 +1026,78 @@ async def _load_latest_income_revenue(symbols: List[str]) -> Dict[str, Optional[
     return {_normalize_symbol(row["symbol"]): _to_float(row.get("revenue")) for row in rows}
 
 
+async def _load_latest_screener_rows_from_db(limit: int = 500) -> List[dict[str, Any]]:
+    async with async_session_maker() as session:
+        ranked_snapshots = select(
+            ScreenerSnapshot.symbol.label("symbol"),
+            ScreenerSnapshot.company_name.label("company_name"),
+            ScreenerSnapshot.exchange.label("exchange"),
+            ScreenerSnapshot.industry.label("industry"),
+            ScreenerSnapshot.price.label("price"),
+            ScreenerSnapshot.volume.label("volume"),
+            ScreenerSnapshot.market_cap.label("market_cap"),
+            ScreenerSnapshot.pe.label("pe"),
+            ScreenerSnapshot.pb.label("pb"),
+            ScreenerSnapshot.ps.label("ps"),
+            ScreenerSnapshot.roe.label("roe"),
+            ScreenerSnapshot.roa.label("roa"),
+            ScreenerSnapshot.roic.label("roic"),
+            ScreenerSnapshot.revenue_growth.label("revenue_growth"),
+            ScreenerSnapshot.earnings_growth.label("earnings_growth"),
+            ScreenerSnapshot.debt_to_equity.label("debt_to_equity"),
+            ScreenerSnapshot.snapshot_date.label("snapshot_date"),
+            func.row_number()
+            .over(
+                partition_by=ScreenerSnapshot.symbol,
+                order_by=(
+                    ScreenerSnapshot.snapshot_date.desc(),
+                    ScreenerSnapshot.created_at.desc(),
+                ),
+            )
+            .label("rn"),
+        ).subquery()
+
+        rows = (
+            (
+                await session.execute(
+                    select(ranked_snapshots)
+                    .where(ranked_snapshots.c.rn == 1)
+                    .order_by(ranked_snapshots.c.market_cap.desc().nullslast())
+                    .limit(limit)
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+    normalized_rows: List[dict[str, Any]] = []
+    for row in rows:
+        normalized_rows.append(
+            _normalize_screener_row(
+                {
+                    "symbol": row.get("symbol"),
+                    "company_name": row.get("company_name"),
+                    "exchange": row.get("exchange"),
+                    "industry_name": row.get("industry"),
+                    "price": row.get("price"),
+                    "volume": row.get("volume"),
+                    "market_cap": row.get("market_cap"),
+                    "pe": row.get("pe"),
+                    "pb": row.get("pb"),
+                    "ps": row.get("ps"),
+                    "roe": row.get("roe"),
+                    "roa": row.get("roa"),
+                    "roic": row.get("roic"),
+                    "revenue_growth": row.get("revenue_growth"),
+                    "earnings_growth": row.get("earnings_growth"),
+                    "debt_to_equity": row.get("debt_to_equity"),
+                    "snapshot_date": row.get("snapshot_date"),
+                }
+            )
+        )
+    return [row for row in normalized_rows if row.get("symbol")]
+
+
 def _resolve_industry_bubble_metric(
     row: dict[str, Any],
     ratio_metrics: dict[str, Optional[float]],
@@ -1790,6 +1862,19 @@ async def get_industry_bubble(
     except Exception as exc:
         logger.warning("Industry bubble cache lookup failed: %s", exc)
 
+    try:
+        db_rows = await _load_latest_screener_rows_from_db(limit=500)
+        if db_rows:
+            merged_rows = {row["symbol"]: row for row in db_rows if row.get("symbol")}
+            for row in screener_rows:
+                ticker = row.get("symbol")
+                if not ticker:
+                    continue
+                merged_rows[ticker] = {**merged_rows.get(ticker, {}), **row}
+            screener_rows = list(merged_rows.values())
+    except Exception as exc:
+        logger.warning("Industry bubble DB screener fallback failed: %s", exc)
+
     if not screener_rows:
         screener_rows = await _fetch_fresh_rows()
 
@@ -1818,6 +1903,22 @@ async def get_industry_bubble(
     if reference_row is None:
         screener_rows = await _fetch_fresh_rows()
         screener_rows = [row for row in screener_rows if row.get("symbol")]
+        symbols = [row["symbol"] for row in screener_rows]
+        metadata_map = await _load_stock_metadata(symbols)
+        change_map = await _load_change_pct_map(symbols)
+        ratio_map = await _load_latest_ratio_metrics(symbols)
+        revenue_map = await _load_latest_income_revenue(symbols)
+        for row in screener_rows:
+            ticker = row["symbol"]
+            metadata = metadata_map.get(ticker) or {}
+            if not row.get("exchange") and metadata.get("exchange"):
+                row["exchange"] = metadata.get("exchange")
+            if not row.get("industry") and metadata.get("industry"):
+                row["industry"] = metadata.get("industry")
+            if not row.get("sector") and metadata.get("sector"):
+                row["sector"] = metadata.get("sector")
+            if row.get("change_pct") is None and ticker in change_map:
+                row["change_pct"] = change_map[ticker]
         reference_row = next(
             (row for row in screener_rows if row.get("symbol") == reference_symbol), None
         )
