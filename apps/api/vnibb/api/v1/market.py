@@ -2397,6 +2397,8 @@ async def get_money_flow_trend(
             stocks=[],
         )
 
+    price_frame["time"] = pd.to_datetime(price_frame["time"], errors="coerce").dt.date
+    index_frame["time"] = pd.to_datetime(index_frame["time"], errors="coerce").dt.date
     price_frame["close"] = pd.to_numeric(price_frame["close"], errors="coerce")
     price_frame = price_frame.dropna(subset=["close"])
     index_frame["close_index"] = pd.to_numeric(index_frame["close_index"], errors="coerce")
