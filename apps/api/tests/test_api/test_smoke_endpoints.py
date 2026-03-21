@@ -1575,6 +1575,97 @@ async def test_industry_bubble_returns_sector_points(client, test_db, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_sector_board_returns_grouped_sector_columns(client, monkeypatch):
+    async def fake_get_screener_data(*args, **kwargs):
+        return SimpleNamespace(
+            data=[
+                {
+                    "symbol": "VCI",
+                    "organ_name": "Vietcap",
+                    "exchange": "HOSE",
+                    "industry_name": "Chung khoan",
+                    "price": 35.7,
+                    "volume": 1_000_000,
+                    "market_cap": 30_000_000_000.0,
+                    "price_change_1d_pct": 1.5,
+                },
+                {
+                    "symbol": "SSI",
+                    "organ_name": "SSI Securities",
+                    "exchange": "HOSE",
+                    "industry_name": "Chung khoan",
+                    "price": 28.5,
+                    "volume": 900_000,
+                    "market_cap": 25_000_000_000.0,
+                    "price_change_1d_pct": 0.8,
+                },
+                {
+                    "symbol": "FPT",
+                    "organ_name": "FPT",
+                    "exchange": "HOSE",
+                    "industry_name": "Cong nghe va thong tin",
+                    "price": 120.0,
+                    "volume": 800_000,
+                    "market_cap": 100_000_000_000.0,
+                    "price_change_1d_pct": -0.5,
+                },
+            ],
+            is_fresh=True,
+        )
+
+    async def fake_load_stock_metadata(_symbols):
+        return {
+            "VCI": {"exchange": "HOSE", "industry": "chung khoan", "sector": "securities"},
+            "SSI": {"exchange": "HOSE", "industry": "chung khoan", "sector": "securities"},
+            "FPT": {
+                "exchange": "HOSE",
+                "industry": "cong nghe va thong tin",
+                "sector": "technology",
+            },
+        }
+
+    async def fake_change_pct_map(_symbols):
+        return {}
+
+    async def fake_load_market_indices_from_db(_db):
+        return [
+            {
+                "index_name": "VNINDEX",
+                "current_value": 1647.81,
+                "change_pct": -3.02,
+                "time": date(2026, 3, 20),
+            },
+            {
+                "index_name": "VN30",
+                "current_value": 1797.99,
+                "change_pct": -3.03,
+                "time": date(2026, 3, 20),
+            },
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.market.CacheManager.get_screener_data", fake_get_screener_data
+    )
+    monkeypatch.setattr("vnibb.api.v1.market._load_stock_metadata", fake_load_stock_metadata)
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", fake_change_pct_map)
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._load_latest_market_indices_from_db",
+        fake_load_market_indices_from_db,
+    )
+
+    response = await client.get("/api/v1/market/sector-board?limit_per_sector=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["limit_per_sector"] == 5
+    assert payload["market_summary"]["VNINDEX"]["value"] == pytest.approx(1647.81)
+    assert len(payload["sectors"]) == 2
+    assert payload["sectors"][0]["name"] in {"Công nghệ", "Công nghệ - Truyền thông", "Chứng khoán"}
+    first_stock = payload["sectors"][0]["stocks"][0]
+    assert first_stock["color"] in {"green", "red", "yellow", "blue", "purple"}
+
+
+@pytest.mark.asyncio
 async def test_market_top_movers_smoke_returns_data(client, monkeypatch):
     async def fake_top_movers_fetch(*, type: str, index: str, limit: int):
         return [

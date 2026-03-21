@@ -260,6 +260,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
+        type: 'sector_board',
+        name: 'Sector Board',
+        description: 'Columnar market board grouped by sector with price, change, and liquidity',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
         type: 'foreign_trading',
         name: 'Foreign Trading',
         description: 'Foreign investor buy/sell volumes and net flow',

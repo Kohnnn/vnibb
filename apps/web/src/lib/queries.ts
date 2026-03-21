@@ -66,6 +66,7 @@ export const queryKeys = {
     topMovers: (type: string, index: string, limit: number) => ['topMovers', type, index, limit] as const,
     sectorTopMovers: (type: string, limit: number) => ['sectorTopMovers', type, limit] as const,
     sectorsCatalog: (symbolLimit: number) => ['sectorsCatalog', symbolLimit] as const,
+    sectorBoard: (params?: Record<string, unknown>) => ['sectorBoard', params] as const,
     // Derivatives
     derivativesContracts: () => ['derivativesContracts'] as const,
     derivativesHistory: (symbol: string) => ['derivativesHistory', symbol] as const,
@@ -693,6 +694,25 @@ export function useSectorPerformance(options?: {
         refetchIntervalInBackground: false,
         networkMode: 'online',
         retry: 2,
+    });
+}
+
+export function useSectorBoard(options?: {
+    limit_per_sector?: number;
+    sectors?: string;
+    sort_by?: 'volume' | 'market_cap' | 'change_pct';
+    enabled?: boolean;
+    refetchInterval?: number;
+}) {
+    return useQuery({
+        queryKey: queryKeys.sectorBoard(options),
+        queryFn: () => api.getSectorBoard(options),
+        enabled: options?.enabled !== false,
+        staleTime: 60 * 1000,
+        refetchInterval:
+            options?.refetchInterval ?? (() => getAdaptiveRefetchInterval(POLLING_PRESETS.movers)),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
     });
 }
 
