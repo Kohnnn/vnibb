@@ -972,10 +972,10 @@ async def _load_latest_ratio_metrics(symbols: List[str]) -> Dict[str, dict[str, 
         )
 
         rows = (
-            await session.execute(
-                select(ranked_ratios).where(ranked_ratios.c.rn == 1)
-            )
-        ).mappings().all()
+            (await session.execute(select(ranked_ratios).where(ranked_ratios.c.rn == 1)))
+            .mappings()
+            .all()
+        )
 
     return {
         _normalize_symbol(row["symbol"]): {
@@ -1018,8 +1018,10 @@ async def _load_latest_income_revenue(symbols: List[str]) -> Dict[str, Optional[
             .subquery()
         )
         rows = (
-            await session.execute(select(ranked_income).where(ranked_income.c.rn == 1))
-        ).mappings().all()
+            (await session.execute(select(ranked_income).where(ranked_income.c.rn == 1)))
+            .mappings()
+            .all()
+        )
 
     return {_normalize_symbol(row["symbol"]): _to_float(row.get("revenue")) for row in rows}
 
@@ -1761,6 +1763,22 @@ async def get_industry_bubble(
     cache_manager = CacheManager()
     screener_rows: List[dict[str, Any]] = []
 
+    async def _fetch_fresh_rows() -> List[dict[str, Any]]:
+        params = StockScreenerParams(
+            symbol=None,
+            exchange="ALL",
+            limit=500,
+            source=settings.vnstock_source,
+        )
+        try:
+            screener_data = await asyncio.wait_for(
+                VnstockScreenerFetcher.fetch(params),
+                timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
+        return [_normalize_screener_row(item) for item in screener_data]
+
     try:
         cache_result = await cache_manager.get_screener_data(
             symbol=None,
@@ -1773,15 +1791,7 @@ async def get_industry_bubble(
         logger.warning("Industry bubble cache lookup failed: %s", exc)
 
     if not screener_rows:
-        params = StockScreenerParams(symbol=None, exchange="ALL", limit=500, source=settings.vnstock_source)
-        try:
-            screener_data = await asyncio.wait_for(
-                VnstockScreenerFetcher.fetch(params),
-                timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError as exc:
-            raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
-        screener_rows = [_normalize_screener_row(item) for item in screener_data]
+        screener_rows = await _fetch_fresh_rows()
 
     screener_rows = [row for row in screener_rows if row.get("symbol")]
     symbols = [row["symbol"] for row in screener_rows]
@@ -1802,9 +1812,19 @@ async def get_industry_bubble(
         if row.get("change_pct") is None and ticker in change_map:
             row["change_pct"] = change_map[ticker]
 
-    reference_row = next((row for row in screener_rows if row.get("symbol") == reference_symbol), None)
+    reference_row = next(
+        (row for row in screener_rows if row.get("symbol") == reference_symbol), None
+    )
     if reference_row is None:
-        raise HTTPException(status_code=404, detail=f"Reference symbol {reference_symbol} not found")
+        screener_rows = await _fetch_fresh_rows()
+        screener_rows = [row for row in screener_rows if row.get("symbol")]
+        reference_row = next(
+            (row for row in screener_rows if row.get("symbol") == reference_symbol), None
+        )
+    if reference_row is None:
+        raise HTTPException(
+            status_code=404, detail=f"Reference symbol {reference_symbol} not found"
+        )
 
     sector_name = _resolve_sector_name(
         reference_symbol,
@@ -1814,13 +1834,16 @@ async def get_industry_bubble(
     reference_sector_match = _normalize_lookup_text(sector_name)
 
     def _same_sector(row: dict[str, Any]) -> bool:
-        return _normalize_lookup_text(
-            _resolve_sector_name(
-                row.get("symbol", ""),
-                row.get("industry"),
-                row.get("sector"),
+        return (
+            _normalize_lookup_text(
+                _resolve_sector_name(
+                    row.get("symbol", ""),
+                    row.get("industry"),
+                    row.get("sector"),
+                )
             )
-        ) == reference_sector_match
+            == reference_sector_match
+        )
 
     sector_rows = [row for row in screener_rows if _same_sector(row)]
 
@@ -1852,7 +1875,9 @@ async def get_industry_bubble(
         )
 
     if not points:
-        raise HTTPException(status_code=404, detail="No comparable sector data available for bubble chart")
+        raise HTTPException(
+            status_code=404, detail="No comparable sector data available for bubble chart"
+        )
 
     points.sort(key=lambda item: item.size, reverse=True)
     selected = points[:top_n]
