@@ -24,6 +24,7 @@ import { FinancialRatiosWidget } from './FinancialRatiosWidget';
 import { BankMetricsWidget } from './BankMetricsWidget';
 import { TransactionFlowWidget } from './TransactionFlowWidget';
 import { IndustryBubbleWidget } from './IndustryBubbleWidget';
+import { SectorBoardWidget } from './SectorBoardWidget';
 import { ForeignTradingWidget } from './ForeignTradingWidget';
 import { SubsidiariesWidget } from './SubsidiariesWidget';
 import { BalanceSheetWidget } from './BalanceSheetWidget';
@@ -157,6 +158,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     bank_metrics: BankMetricsWidget as ComponentType<WidgetProps>,
     transaction_flow: TransactionFlowWidget as ComponentType<WidgetProps>,
     industry_bubble: IndustryBubbleWidget as ComponentType<WidgetProps>,
+    sector_board: SectorBoardWidget as ComponentType<WidgetProps>,
 
     // Company info widgets
     company_filings: CompanyFilingsWidget as ComponentType<WidgetProps>,
@@ -282,6 +284,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     bank_metrics: { w: 7, h: 7, minW: 5, minH: 5 },
     transaction_flow: { w: 8, h: 7, minW: 6, minH: 5 },
     industry_bubble: { w: 8, h: 7, minW: 6, minH: 5 },
+    sector_board: { w: 12, h: 8, minW: 8, minH: 6 },
     foreign_trading: { w: 5, h: 7, minW: 4, minH: 5 },
     subsidiaries: { w: 5, h: 6, minW: 4, minH: 5 },
     balance_sheet: { w: 7, h: 7, minW: 5, minH: 5 },
@@ -383,6 +386,7 @@ export const widgetNames: Record<WidgetType, string> = {
     bank_metrics: 'Bank Analytics',
     transaction_flow: 'Transaction Flow',
     industry_bubble: 'Industry Bubble',
+    sector_board: 'Sector Board',
     foreign_trading: 'Foreign Trading',
     subsidiaries: 'Subsidiaries',
     balance_sheet: 'Balance Sheet',
@@ -481,6 +485,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     bank_metrics: 'Bank-specific funding, profitability, and risk analytics',
     transaction_flow: 'Daily domestic, foreign, and proprietary flow with price overlay',
     industry_bubble: 'Sector-relative bubble chart for valuation and quality metrics',
+    sector_board: 'Columnar sector tape with price, change, and liquidity',
     foreign_trading: 'Foreign inflow/outflow tracker',
     subsidiaries: 'Company organizational tree',
     balance_sheet: 'Assets, liabilities, and equity',

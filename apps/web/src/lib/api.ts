@@ -1035,6 +1035,37 @@ export async function getSectorPerformance(_options?: {
     return fetchAPI<SectorPerformanceResponse>('/market/sector-performance');
 }
 
+export interface SectorBoardStock {
+    symbol: string;
+    price?: number | null;
+    change_pct?: number | null;
+    volume?: number | null;
+    market_cap?: number | null;
+    color: string;
+}
+
+export interface SectorBoardSector {
+    name: string;
+    change_pct: number;
+    stocks: SectorBoardStock[];
+}
+
+export interface SectorBoardResponse {
+    market_summary: Record<string, { value?: number | null; change_pct?: number | null; time?: string | null }>;
+    sectors: SectorBoardSector[];
+    sort_by: string;
+    limit_per_sector: number;
+    updated_at?: string | null;
+}
+
+export async function getSectorBoard(options?: {
+    limit_per_sector?: number;
+    sectors?: string;
+    sort_by?: 'volume' | 'market_cap' | 'change_pct';
+}): Promise<SectorBoardResponse> {
+    return fetchAPI<SectorBoardResponse>('/market/sector-board', { params: options });
+}
+
 export type ResearchRssSource = 'cafef' | 'vietstock' | 'vnexpress'
 
 export interface ResearchRssItem {

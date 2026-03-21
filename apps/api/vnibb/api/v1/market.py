@@ -124,6 +124,29 @@ class IndustryBubbleResponse(BaseModel):
     updated_at: Optional[str] = None
 
 
+class SectorBoardStock(BaseModel):
+    symbol: str
+    price: Optional[float] = None
+    change_pct: Optional[float] = None
+    volume: Optional[float] = None
+    market_cap: Optional[float] = None
+    color: str
+
+
+class SectorBoardSector(BaseModel):
+    name: str
+    change_pct: float
+    stocks: List[SectorBoardStock]
+
+
+class SectorBoardResponse(BaseModel):
+    market_summary: Dict[str, dict[str, Any]]
+    sectors: List[SectorBoardSector]
+    sort_by: str
+    limit_per_sector: int
+    updated_at: Optional[str] = None
+
+
 class MarketIndicesResponse(BaseModel):
     count: int
     data: List[dict[str, Any]]
@@ -300,6 +323,20 @@ INDUSTRY_BUBBLE_COLORS = [
     "#14b8a6",
     "#f472b6",
 ]
+
+
+def _resolve_board_color(change_pct: Optional[float]) -> str:
+    if change_pct is None:
+        return "yellow"
+    if change_pct >= 6.8:
+        return "purple"
+    if change_pct <= -6.8:
+        return "blue"
+    if change_pct > 0:
+        return "green"
+    if change_pct < 0:
+        return "red"
+    return "yellow"
 
 
 def _map_text_to_sector_name(value: Optional[str]) -> Optional[str]:
@@ -2005,6 +2042,135 @@ async def get_industry_bubble(
         top_n=top_n,
         sector_average=sector_average,
         data=selected,
+        updated_at=updated_at,
+    )
+
+
+@router.get("/sector-board", response_model=SectorBoardResponse)
+@cached(ttl=180, key_prefix="sector_board")
+async def get_sector_board(
+    limit_per_sector: int = Query(default=15, ge=5, le=30),
+    sectors: Optional[str] = Query(default=None),
+    sort_by: str = Query(default="volume", pattern=r"^(volume|market_cap|change_pct)$"),
+    db: AsyncSession = Depends(get_db),
+) -> SectorBoardResponse:
+    screener_rows: List[dict[str, Any]] = []
+    cache_manager = CacheManager()
+
+    try:
+        cache_result = await cache_manager.get_screener_data(
+            symbol=None,
+            source=settings.vnstock_source,
+            allow_stale=True,
+        )
+        if cache_result.data:
+            screener_rows = [_normalize_screener_row(item) for item in cache_result.data]
+    except Exception as exc:
+        logger.warning("Sector board cache lookup failed: %s", exc)
+
+    try:
+        db_rows = await _load_latest_screener_rows_from_db(limit=500)
+        if db_rows:
+            merged_rows = {row["symbol"]: row for row in db_rows if row.get("symbol")}
+            for row in screener_rows:
+                ticker = row.get("symbol")
+                if not ticker:
+                    continue
+                merged_rows[ticker] = {**merged_rows.get(ticker, {}), **row}
+            screener_rows = list(merged_rows.values())
+    except Exception as exc:
+        logger.warning("Sector board DB screener fallback failed: %s", exc)
+
+    screener_rows = [row for row in screener_rows if row.get("symbol")]
+    symbols = [row["symbol"] for row in screener_rows]
+    metadata_map = await _load_stock_metadata(symbols)
+    change_map = await _load_change_pct_map(symbols)
+
+    allowed_sector_filters = {
+        _normalize_lookup_text(item) for item in (sectors or "").split(",") if str(item).strip()
+    }
+
+    grouped: Dict[str, List[dict[str, Any]]] = defaultdict(list)
+    for row in screener_rows:
+        ticker = row["symbol"]
+        metadata = metadata_map.get(ticker) or {}
+        if not row.get("exchange") and metadata.get("exchange"):
+            row["exchange"] = metadata.get("exchange")
+        if not row.get("industry") and metadata.get("industry"):
+            row["industry"] = metadata.get("industry")
+        if not row.get("sector") and metadata.get("sector"):
+            row["sector"] = metadata.get("sector")
+        if row.get("change_pct") is None and ticker in change_map:
+            row["change_pct"] = change_map[ticker]
+
+        sector_name = _resolve_sector_name(ticker, row.get("industry"), row.get("sector"))
+        if (
+            allowed_sector_filters
+            and _normalize_lookup_text(sector_name) not in allowed_sector_filters
+        ):
+            continue
+        grouped[sector_name].append(row)
+
+    def _sort_metric(row: dict[str, Any]) -> float:
+        value = _to_float(row.get(sort_by))
+        return value if value is not None else float("-inf")
+
+    sector_payloads: List[SectorBoardSector] = []
+    for sector_name, rows in grouped.items():
+        rows.sort(key=_sort_metric, reverse=True)
+        selected_rows = rows[:limit_per_sector]
+        weighted_total = sum((_to_float(row.get("market_cap")) or 0.0) for row in selected_rows)
+        if weighted_total > 0:
+            change_pct = (
+                sum(
+                    (_to_float(row.get("change_pct")) or 0.0)
+                    * (_to_float(row.get("market_cap")) or 0.0)
+                    for row in selected_rows
+                )
+                / weighted_total
+            )
+        else:
+            valid_changes = [(_to_float(row.get("change_pct")) or 0.0) for row in selected_rows]
+            change_pct = sum(valid_changes) / len(valid_changes) if valid_changes else 0.0
+
+        stocks = [
+            SectorBoardStock(
+                symbol=row["symbol"],
+                price=_to_float(row.get("price")),
+                change_pct=_to_float(row.get("change_pct")),
+                volume=_to_float(row.get("volume")),
+                market_cap=_to_float(row.get("market_cap")),
+                color=_resolve_board_color(_to_float(row.get("change_pct"))),
+            )
+            for row in selected_rows
+        ]
+        sector_payloads.append(
+            SectorBoardSector(name=sector_name, change_pct=change_pct, stocks=stocks)
+        )
+
+    sector_payloads.sort(
+        key=lambda item: sum((stock.market_cap or 0.0) for stock in item.stocks),
+        reverse=True,
+    )
+
+    market_summary_rows = await _load_latest_market_indices_from_db(db)
+    market_summary = {
+        str(row.get("index_name") or ""): {
+            "value": _to_float(row.get("current_value")),
+            "change_pct": _to_float(row.get("change_pct")),
+            "time": row.get("time").isoformat()
+            if hasattr(row.get("time"), "isoformat")
+            else row.get("time"),
+        }
+        for row in market_summary_rows
+    }
+
+    updated_at = _latest_timestamp([row.get("updated_at") for row in screener_rows])
+    return SectorBoardResponse(
+        market_summary=market_summary,
+        sectors=sector_payloads,
+        sort_by=sort_by,
+        limit_per_sector=limit_per_sector,
         updated_at=updated_at,
     )
 
