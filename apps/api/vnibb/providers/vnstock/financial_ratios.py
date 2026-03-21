@@ -147,6 +147,10 @@ class FinancialRatioData(BaseModel):
     asset_turnover: Optional[float] = None
     inventory_turnover: Optional[float] = None
     receivables_turnover: Optional[float] = None
+    loan_to_deposit: Optional[float] = None
+    deposit_growth: Optional[float] = None
+    equity_to_assets: Optional[float] = None
+    asset_yield: Optional[float] = None
     gross_margin: Optional[float] = None
     net_margin: Optional[float] = None
     operating_margin: Optional[float] = None

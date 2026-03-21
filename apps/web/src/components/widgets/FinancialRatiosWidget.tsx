@@ -43,6 +43,10 @@ const ratioLabels: Record<string, string> = {
     asset_turnover: 'Asset Turnover',
     inventory_turnover: 'Inventory Turnover',
     receivables_turnover: 'Receivables Turnover',
+    loan_to_deposit: 'Loan/Deposit',
+    deposit_growth: 'Deposit Growth',
+    equity_to_assets: 'Equity/Assets',
+    asset_yield: 'Asset Yield',
     gross_margin: 'Gross Margin',
     operating_margin: 'Operating Margin',
     net_margin: 'Net Margin',
@@ -127,6 +131,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
         valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda', 'peg_ratio'],
         liquidity: ['current_ratio', 'quick_ratio', 'cash_ratio'],
         efficiency: ['asset_turnover', 'inventory_turnover', 'receivables_turnover'],
+        banking: ['loan_to_deposit', 'deposit_growth', 'equity_to_assets', 'asset_yield'],
         profitability: ['gross_margin', 'operating_margin', 'net_margin', 'roe', 'roa'],
         leverage: ['debt_equity', 'debt_assets', 'equity_multiplier'],
         coverage: ['interest_coverage', 'debt_service_coverage'],
@@ -139,6 +144,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
         valuation: 'Valuation',
         liquidity: 'Liquidity',
         efficiency: 'Efficiency',
+        banking: 'Banking',
         profitability: 'Profitability',
         leverage: 'Leverage',
         coverage: 'Coverage',
@@ -160,6 +166,9 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
         'earnings_growth',
         'dividend_yield',
         'payout_ratio',
+        'deposit_growth',
+        'equity_to_assets',
+        'asset_yield',
     ]);
 
     const headerActions = (
