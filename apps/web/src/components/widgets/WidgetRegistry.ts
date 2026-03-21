@@ -22,6 +22,7 @@ import { OfficersManagementWidget } from './OfficersManagementWidget';
 import { IntradayTradesWidget } from './IntradayTradesWidget';
 import { FinancialRatiosWidget } from './FinancialRatiosWidget';
 import { BankMetricsWidget } from './BankMetricsWidget';
+import { TransactionFlowWidget } from './TransactionFlowWidget';
 import { ForeignTradingWidget } from './ForeignTradingWidget';
 import { SubsidiariesWidget } from './SubsidiariesWidget';
 import { BalanceSheetWidget } from './BalanceSheetWidget';
@@ -153,6 +154,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     cash_flow: CashFlowWidget as ComponentType<WidgetProps>,
     financial_ratios: FinancialRatiosWidget as ComponentType<WidgetProps>,
     bank_metrics: BankMetricsWidget as ComponentType<WidgetProps>,
+    transaction_flow: TransactionFlowWidget as ComponentType<WidgetProps>,
 
     // Company info widgets
     company_filings: CompanyFilingsWidget as ComponentType<WidgetProps>,
@@ -276,6 +278,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     intraday_trades: { w: 5, h: 7, minW: 4, minH: 5 },
     financial_ratios: { w: 7, h: 7, minW: 5, minH: 5 },
     bank_metrics: { w: 7, h: 7, minW: 5, minH: 5 },
+    transaction_flow: { w: 8, h: 7, minW: 6, minH: 5 },
     foreign_trading: { w: 5, h: 7, minW: 4, minH: 5 },
     subsidiaries: { w: 5, h: 6, minW: 4, minH: 5 },
     balance_sheet: { w: 7, h: 7, minW: 5, minH: 5 },
@@ -375,6 +378,7 @@ export const widgetNames: Record<WidgetType, string> = {
     intraday_trades: 'Intraday Trades',
     financial_ratios: 'Financial Ratios',
     bank_metrics: 'Bank Analytics',
+    transaction_flow: 'Transaction Flow',
     foreign_trading: 'Foreign Trading',
     subsidiaries: 'Subsidiaries',
     balance_sheet: 'Balance Sheet',
@@ -471,6 +475,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     intraday_trades: 'Live tick-by-tick tape',
     financial_ratios: 'Deep dive ratio analysis',
     bank_metrics: 'Bank-specific funding, profitability, and risk analytics',
+    transaction_flow: 'Daily domestic, foreign, and proprietary flow with price overlay',
     foreign_trading: 'Foreign inflow/outflow tracker',
     subsidiaries: 'Company organizational tree',
     balance_sheet: 'Assets, liabilities, and equity',

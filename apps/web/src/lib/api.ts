@@ -203,7 +203,7 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
 
 // ============ Equity API ============
 
-import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, AnalystEstimatesResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
+import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, AnalystEstimatesResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, TransactionFlowResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
 import type { ScreenerResponse } from '@/types/screener';
 import type { Dashboard, DashboardCreate, DashboardUpdate, WidgetCreate } from '@/types/dashboard';
 import type { FullTechnicalAnalysis, SignalSummary, TechnicalIndicators } from '@/types/technical';
@@ -377,6 +377,15 @@ export async function getForeignTrading(
 ): Promise<ForeignTradingResponse> {
     return fetchAPI<ForeignTradingResponse>(`/equity/${symbol}/foreign-trading`, {
         params: { limit: options?.limit },
+    });
+}
+
+export async function getTransactionFlow(
+    symbol: string,
+    options?: { days?: number }
+): Promise<TransactionFlowResponse> {
+    return fetchAPI<TransactionFlowResponse>(`/equity/${symbol}/transaction-flow`, {
+        params: { days: options?.days },
     });
 }
 

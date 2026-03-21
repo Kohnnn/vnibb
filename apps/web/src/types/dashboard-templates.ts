@@ -34,7 +34,7 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     category: 'trading',
     widgets: [
       { type: 'price_chart', layout: { x: 0, y: 0, w: 14, h: 8 } },
-      { type: 'volume_flow', layout: { x: 14, y: 0, w: 10, h: 4 } },
+      { type: 'transaction_flow', layout: { x: 14, y: 0, w: 10, h: 4 } },
       { type: 'macd_crossovers', layout: { x: 14, y: 4, w: 10, h: 4 } },
       { type: 'intraday_trades', layout: { x: 0, y: 8, w: 12, h: 6 } },
       { type: 'orderbook', layout: { x: 12, y: 8, w: 12, h: 6 } },

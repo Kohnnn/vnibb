@@ -244,6 +244,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
     },
     {
+        type: 'transaction_flow',
+        name: 'Transaction Flow',
+        description: 'Daily domestic, foreign, and proprietary flow with price overlay',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
         type: 'foreign_trading',
         name: 'Foreign Trading',
         description: 'Foreign investor buy/sell volumes and net flow',
