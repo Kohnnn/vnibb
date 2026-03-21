@@ -274,3 +274,71 @@ async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
     assert item.ocf_sales is None
     assert item.fcf_yield is None
     assert item.debt_equity is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
+    test_db.add(
+        Stock(
+            symbol="VCB",
+            exchange="HOSE",
+            industry="Banking",
+            sector="Banking",
+        )
+    )
+    test_db.add_all(
+        [
+            IncomeStatement(
+                id=20,
+                symbol="VCB",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                revenue=120.0,
+                net_income=30.0,
+            ),
+            IncomeStatement(
+                id=21,
+                symbol="VCB",
+                period="2023",
+                period_type="year",
+                fiscal_year=2023,
+                revenue=100.0,
+                net_income=25.0,
+            ),
+            BalanceSheet(
+                id=20,
+                symbol="VCB",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                total_assets=1000.0,
+                total_liabilities=850.0,
+                total_equity=150.0,
+                accounts_receivable=700.0,
+                raw_data={"Deposits from customers": 500.0},
+            ),
+            BalanceSheet(
+                id=21,
+                symbol="VCB",
+                period="2023",
+                period_type="year",
+                fiscal_year=2023,
+                total_assets=900.0,
+                total_liabilities=770.0,
+                total_equity=130.0,
+                accounts_receivable=630.0,
+                raw_data={"Deposits from customers": 400.0},
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    rows = [FinancialRatioData(symbol="VCB", period="2024", pe=10.0, pb=1.8)]
+    enriched = await _enrich_missing_ratio_metrics("VCB", "year", rows, test_db)
+    item = enriched[0]
+
+    assert item.loan_to_deposit == pytest.approx(700.0 / 500.0)
+    assert item.deposit_growth == pytest.approx((500.0 - 400.0) / 400.0 * 100)
+    assert item.equity_to_assets == pytest.approx((150.0 / 1000.0) * 100)
+    assert item.asset_yield == pytest.approx((120.0 / 700.0) * 100)

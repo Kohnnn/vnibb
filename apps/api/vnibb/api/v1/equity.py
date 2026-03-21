@@ -443,6 +443,13 @@ BANK_UNSUPPORTED_RATIO_FIELDS = (
     "debt_equity",
 )
 
+BANK_NATIVE_RATIO_FIELDS = (
+    "loan_to_deposit",
+    "deposit_growth",
+    "equity_to_assets",
+    "asset_yield",
+)
+
 
 def _normalize_classification_text(value: Any) -> str:
     return _normalize_financial_metric_key(value).replace("_", " ")
@@ -2243,6 +2250,7 @@ async def _enrich_missing_ratio_metrics(
             BalanceSheet.accounts_receivable,
             BalanceSheet.short_term_debt,
             BalanceSheet.long_term_debt,
+            BalanceSheet.raw_data,
         )
         .where(BalanceSheet.symbol == symbol, BalanceSheet.period_type == normalized_period)
         .order_by(desc(BalanceSheet.fiscal_year), desc(BalanceSheet.fiscal_quarter))
@@ -2342,9 +2350,11 @@ async def _enrich_missing_ratio_metrics(
         receivables,
         short_term_debt,
         long_term_debt,
+        raw_data,
     ) in balance_rows:
         if year is None:
             continue
+        raw_payload = raw_data if isinstance(raw_data, dict) else {}
         balance_lookup[(int(year), int(quarter or 0))] = {
             "total_assets": _coerce_optional_float(total_assets),
             "current_assets": _coerce_optional_float(current_assets),
@@ -2355,9 +2365,23 @@ async def _enrich_missing_ratio_metrics(
             "book_value_per_share": _coerce_optional_float(book_value_per_share),
             "inventory": _coerce_optional_float(inventory),
             "accounts_receivable": _coerce_optional_float(receivables),
+            "customer_deposits": _pick_optional_float(
+                _lookup_financial_metric(
+                    raw_payload,
+                    "customer_deposits",
+                    "deposits_from_customers",
+                    "tien_gui_cua_khach_hang",
+                )
+            ),
             "short_term_debt": _coerce_optional_float(short_term_debt),
             "long_term_debt": _coerce_optional_float(long_term_debt),
         }
+
+    prev_balance_values: dict[tuple[int, int], dict[str, float | None]] = {}
+    for key in list(balance_lookup.keys()):
+        year, quarter = key
+        prev_key = (year - 1, quarter if normalized_period == "quarter" else 0)
+        prev_balance_values[key] = balance_lookup.get(prev_key) or {}
 
     cashflow_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
     for (
@@ -2473,6 +2497,9 @@ async def _enrich_missing_ratio_metrics(
         receivables = (
             None if balance is None else _coerce_optional_float(balance.get("accounts_receivable"))
         )
+        customer_deposits = (
+            None if balance is None else _coerce_optional_float(balance.get("customer_deposits"))
+        )
         short_term_debt = (
             None if balance is None else _coerce_optional_float(balance.get("short_term_debt"))
         )
@@ -2486,6 +2513,9 @@ async def _enrich_missing_ratio_metrics(
             None
             if balance_prev is None
             else _coerce_optional_float(balance_prev.get("accounts_receivable"))
+        )
+        customer_deposits_prev = _coerce_optional_float(
+            (prev_balance_values.get(key) or {}).get("customer_deposits")
         )
 
         operating_cash_flow = (
@@ -2631,6 +2661,20 @@ async def _enrich_missing_ratio_metrics(
             and total_equity not in (None, 0)
         ):
             item.equity_multiplier = total_assets / total_equity
+        if is_bank_like and total_assets not in (None, 0) and total_equity not in (None, 0):
+            item.equity_to_assets = (total_equity / total_assets) * 100
+        if is_bank_like and receivables not in (None, 0) and customer_deposits not in (None, 0):
+            item.loan_to_deposit = receivables / customer_deposits
+        if (
+            is_bank_like
+            and customer_deposits not in (None, 0)
+            and customer_deposits_prev not in (None, 0)
+        ):
+            item.deposit_growth = (
+                (customer_deposits - customer_deposits_prev) / customer_deposits_prev
+            ) * 100
+        if is_bank_like and revenue not in (None, 0) and receivables not in (None, 0):
+            item.asset_yield = (revenue / receivables) * 100
 
         prev_revenue, prev_net_income, _prev_eps = prev_income_values.get(key, (None, None, None))
         if (
