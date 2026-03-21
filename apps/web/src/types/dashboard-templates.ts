@@ -61,10 +61,22 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     widgets: [
       { type: 'bollinger_squeeze', layout: { x: 0, y: 0, w: 8, h: 5 } },
       { type: 'ema_respect', layout: { x: 8, y: 0, w: 8, h: 5 } },
-      { type: 'relative_rotation', layout: { x: 16, y: 0, w: 8, h: 5 } },
+      { type: 'money_flow_trend', layout: { x: 16, y: 0, w: 8, h: 5 } },
       { type: 'momentum', layout: { x: 0, y: 5, w: 8, h: 5 } },
       { type: 'drawdown_recovery', layout: { x: 8, y: 5, w: 8, h: 5 } },
       { type: 'sortino_monthly', layout: { x: 16, y: 5, w: 8, h: 5 } },
+    ],
+  },
+  {
+    id: 'money-flow-monitor',
+    name: 'Money Flow Monitor',
+    description: 'Track sector-relative rotation, transaction flow, and price context in one workspace.',
+    category: 'analysis',
+    widgets: [
+      { type: 'money_flow_trend', layout: { x: 0, y: 0, w: 12, h: 7 } },
+      { type: 'transaction_flow', layout: { x: 12, y: 0, w: 12, h: 7 } },
+      { type: 'industry_bubble', layout: { x: 0, y: 7, w: 12, h: 7 } },
+      { type: 'price_chart', layout: { x: 12, y: 7, w: 12, h: 7 } },
     ],
   },
   {

@@ -50,6 +50,7 @@ export type WidgetType =
     | 'transaction_flow'
     | 'industry_bubble'
     | 'sector_board'
+    | 'money_flow_trend'
     | 'foreign_trading'
     | 'subsidiaries'
     | 'balance_sheet'

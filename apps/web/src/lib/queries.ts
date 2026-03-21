@@ -67,6 +67,7 @@ export const queryKeys = {
     sectorTopMovers: (type: string, limit: number) => ['sectorTopMovers', type, limit] as const,
     sectorsCatalog: (symbolLimit: number) => ['sectorsCatalog', symbolLimit] as const,
     sectorBoard: (params?: Record<string, unknown>) => ['sectorBoard', params] as const,
+    moneyFlowTrend: (params?: Record<string, unknown>) => ['moneyFlowTrend', params] as const,
     // Derivatives
     derivativesContracts: () => ['derivativesContracts'] as const,
     derivativesHistory: (symbol: string) => ['derivativesHistory', symbol] as const,
@@ -713,6 +714,23 @@ export function useSectorBoard(options?: {
             options?.refetchInterval ?? (() => getAdaptiveRefetchInterval(POLLING_PRESETS.movers)),
         refetchIntervalInBackground: false,
         networkMode: 'online',
+    });
+}
+
+export function useMoneyFlowTrend(options?: {
+    symbol?: string;
+    symbols?: string;
+    sector?: string;
+    timeframe?: 'short' | 'medium' | 'long';
+    trail_length?: number;
+    enabled?: boolean;
+}) {
+    return useQuery({
+        queryKey: queryKeys.moneyFlowTrend(options),
+        queryFn: () => api.getMoneyFlowTrend(options),
+        enabled: options?.enabled !== false && Boolean(options?.symbol || options?.symbols || options?.sector),
+        staleTime: 2 * 60 * 1000,
+        retry: 2,
     });
 }
 
