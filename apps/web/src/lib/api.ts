@@ -1711,6 +1711,45 @@ export async function getMarketHeatmap(options?: {
     return fetchAPI<HeatmapResponse>('/market/heatmap', { params: options });
 }
 
+export interface IndustryBubblePoint {
+    symbol: string;
+    name: string;
+    sector: string;
+    industry?: string | null;
+    x: number;
+    y: number;
+    size: number;
+    price?: number | null;
+    change_pct?: number | null;
+    color: string;
+    is_reference: boolean;
+}
+
+export interface IndustryBubbleResponse {
+    sector: string;
+    reference_symbol: string;
+    x_metric: string;
+    y_metric: string;
+    size_metric: string;
+    top_n: number;
+    sector_average: {
+        x?: number | null;
+        y?: number | null;
+    };
+    data: IndustryBubblePoint[];
+    updated_at?: string | null;
+}
+
+export async function getIndustryBubble(options: {
+    symbol: string;
+    x_metric?: string;
+    y_metric?: string;
+    size_metric?: string;
+    top_n?: number;
+}): Promise<IndustryBubbleResponse> {
+    return fetchAPI<IndustryBubbleResponse>('/market/industry-bubble', { params: options });
+}
+
 // ============ RS Rating API ============
 
 export interface RSStockItem {

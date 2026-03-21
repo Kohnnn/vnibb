@@ -1445,6 +1445,136 @@ def test_market_overview_rejects_compact_index_payloads():
 
 
 @pytest.mark.asyncio
+async def test_industry_bubble_returns_sector_points(client, test_db, monkeypatch):
+    async def fake_get_screener_data(*args, **kwargs):
+        return SimpleNamespace(
+            data=[
+                {
+                    "symbol": "VCI",
+                    "organ_name": "Vietcap",
+                    "exchange": "HOSE",
+                    "industry_name": "Chung khoan",
+                    "price": 35.7,
+                    "volume": 1_000_000,
+                    "market_cap": 30_000_000_000.0,
+                    "pe": 18.0,
+                    "pb": 1.5,
+                    "price_change_1d_pct": 1.5,
+                    "snapshot_date": "2026-03-21",
+                },
+                {
+                    "symbol": "SSI",
+                    "organ_name": "SSI Securities",
+                    "exchange": "HOSE",
+                    "industry_name": "Chung khoan",
+                    "price": 28.5,
+                    "volume": 900_000,
+                    "market_cap": 25_000_000_000.0,
+                    "pe": 16.0,
+                    "pb": 1.3,
+                    "price_change_1d_pct": 0.8,
+                    "snapshot_date": "2026-03-21",
+                },
+                {
+                    "symbol": "FPT",
+                    "organ_name": "FPT",
+                    "exchange": "HOSE",
+                    "industry_name": "Cong nghe va thong tin",
+                    "price": 120.0,
+                    "volume": 800_000,
+                    "market_cap": 100_000_000_000.0,
+                    "pe": 20.0,
+                    "pb": 4.0,
+                    "price_change_1d_pct": 1.0,
+                    "snapshot_date": "2026-03-21",
+                },
+            ],
+            is_fresh=True,
+        )
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.market.CacheManager.get_screener_data",
+        fake_get_screener_data,
+    )
+
+    async def fake_load_stock_metadata(_symbols):
+        return {
+            "VCI": {"exchange": "HOSE", "industry": "chung khoan", "sector": "securities"},
+            "SSI": {"exchange": "HOSE", "industry": "chung khoan", "sector": "securities"},
+            "FPT": {
+                "exchange": "HOSE",
+                "industry": "cong nghe va thong tin",
+                "sector": "technology",
+            },
+        }
+
+    async def fake_change_pct_map(_symbols):
+        return {}
+
+    async def fake_ratio_metrics(_symbols):
+        return {
+            "VCI": {"pe_ratio": 18.0, "pb_ratio": 1.5, "roe": 12.0},
+            "SSI": {"pe_ratio": 16.0, "pb_ratio": 1.3, "roe": 11.0},
+        }
+
+    async def fake_income_revenue(_symbols):
+        return {"VCI": 5_000_000_000.0, "SSI": 4_000_000_000.0}
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._load_stock_metadata",
+        fake_load_stock_metadata,
+    )
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", fake_change_pct_map)
+    monkeypatch.setattr("vnibb.api.v1.market._load_latest_ratio_metrics", fake_ratio_metrics)
+    monkeypatch.setattr("vnibb.api.v1.market._load_latest_income_revenue", fake_income_revenue)
+
+    test_db.add_all(
+        [
+            Stock(
+                id=601, symbol="VCI", exchange="HOSE", industry="Chung khoan", sector="securities"
+            ),
+            Stock(
+                id=602, symbol="SSI", exchange="HOSE", industry="Chung khoan", sector="securities"
+            ),
+            FinancialRatio(
+                id=601,
+                symbol="VCI",
+                period="2025",
+                period_type="year",
+                fiscal_year=2025,
+                pe_ratio=18.0,
+                pb_ratio=1.5,
+                roe=12.0,
+                updated_at=datetime.utcnow(),
+            ),
+            FinancialRatio(
+                id=602,
+                symbol="SSI",
+                period="2025",
+                period_type="year",
+                fiscal_year=2025,
+                pe_ratio=16.0,
+                pb_ratio=1.3,
+                roe=11.0,
+                updated_at=datetime.utcnow(),
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get(
+        "/api/v1/market/industry-bubble?symbol=VCI&x_metric=pb_ratio&y_metric=pe_ratio&top_n=5"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reference_symbol"] == "VCI"
+    assert len(payload["data"]) == 2
+    assert any(point["is_reference"] for point in payload["data"])
+    assert payload["sector_average"]["x"] == pytest.approx((1.5 + 1.3) / 2)
+
+
+@pytest.mark.asyncio
 async def test_market_top_movers_smoke_returns_data(client, monkeypatch):
     async def fake_top_movers_fetch(*, type: str, index: str, limit: int):
         return [
