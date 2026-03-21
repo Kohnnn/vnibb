@@ -1066,6 +1066,45 @@ export async function getSectorBoard(options?: {
     return fetchAPI<SectorBoardResponse>('/market/sector-board', { params: options });
 }
 
+export interface MoneyFlowTrailPoint {
+    date: string;
+    s_trend?: number | null;
+    s_strength?: number | null;
+}
+
+export interface MoneyFlowTrendStock {
+    symbol: string;
+    name?: string | null;
+    sector?: string | null;
+    price?: number | null;
+    change_pct?: number | null;
+    s_trend?: number | null;
+    s_strength?: number | null;
+    quadrant: string;
+    color: string;
+    trail: MoneyFlowTrailPoint[];
+}
+
+export interface MoneyFlowTrendResponse {
+    timeframe: 'short' | 'medium' | 'long';
+    benchmark: string;
+    center: [number, number];
+    reference_symbol?: string | null;
+    sector?: string | null;
+    stocks: MoneyFlowTrendStock[];
+    updated_at?: string | null;
+}
+
+export async function getMoneyFlowTrend(options?: {
+    symbol?: string;
+    symbols?: string;
+    sector?: string;
+    timeframe?: 'short' | 'medium' | 'long';
+    trail_length?: number;
+}): Promise<MoneyFlowTrendResponse> {
+    return fetchAPI<MoneyFlowTrendResponse>('/market/money-flow-trend', { params: options });
+}
+
 export type ResearchRssSource = 'cafef' | 'vietstock' | 'vnexpress'
 
 export interface ResearchRssItem {

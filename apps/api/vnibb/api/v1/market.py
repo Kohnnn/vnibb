@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 from collections import defaultdict
 
 import httpx
+import numpy as np
+import pandas as pd
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -144,6 +146,35 @@ class SectorBoardResponse(BaseModel):
     sectors: List[SectorBoardSector]
     sort_by: str
     limit_per_sector: int
+    updated_at: Optional[str] = None
+
+
+class MoneyFlowTrailPoint(BaseModel):
+    date: str
+    s_trend: Optional[float] = None
+    s_strength: Optional[float] = None
+
+
+class MoneyFlowTrendStock(BaseModel):
+    symbol: str
+    name: Optional[str] = None
+    sector: Optional[str] = None
+    price: Optional[float] = None
+    change_pct: Optional[float] = None
+    s_trend: Optional[float] = None
+    s_strength: Optional[float] = None
+    quadrant: str
+    color: str
+    trail: List[MoneyFlowTrailPoint]
+
+
+class MoneyFlowTrendResponse(BaseModel):
+    timeframe: str
+    benchmark: str
+    center: List[float]
+    reference_symbol: Optional[str] = None
+    sector: Optional[str] = None
+    stocks: List[MoneyFlowTrendStock]
     updated_at: Optional[str] = None
 
 
@@ -337,6 +368,67 @@ def _resolve_board_color(change_pct: Optional[float]) -> str:
     if change_pct < 0:
         return "red"
     return "yellow"
+
+
+MONEY_FLOW_TRENDS = {
+    "short": {"lookback": 20, "momentum": 5, "step": 1},
+    "medium": {"lookback": 60, "momentum": 10, "step": 5},
+    "long": {"lookback": 120, "momentum": 20, "step": 20},
+}
+
+MONEY_FLOW_QUADRANT_COLORS = {
+    "bullish": "#22c55e",
+    "accumulation": "#38bdf8",
+    "weakening": "#eab308",
+    "bearish": "#ef4444",
+    "unknown": "#94a3b8",
+}
+
+
+def _classify_money_flow_quadrant(s_trend: float | None, s_strength: float | None) -> str:
+    if s_trend is None or s_strength is None:
+        return "unknown"
+    if s_trend >= 100 and s_strength >= 100:
+        return "bullish"
+    if s_trend < 100 and s_strength >= 100:
+        return "accumulation"
+    if s_trend >= 100 and s_strength < 100:
+        return "weakening"
+    return "bearish"
+
+
+def _compute_money_flow_metrics(
+    rs_series: pd.Series,
+    *,
+    ratio_lookback: int,
+    momentum_lookback: int,
+) -> tuple[float | None, float | None]:
+    series = pd.to_numeric(rs_series, errors="coerce").dropna()
+    if series.empty:
+        return None, None
+
+    ratio_window = series.tail(ratio_lookback)
+    ratio_mean = ratio_window.mean()
+    ratio_std = ratio_window.std(ddof=0)
+    if ratio_std and not np.isnan(ratio_std):
+        s_trend = 100 + ((series.iloc[-1] - ratio_mean) / ratio_std) * 10
+    else:
+        s_trend = 100.0
+
+    momentum_base = series.pct_change(momentum_lookback) * 100
+    momentum_window = momentum_base.dropna().tail(ratio_lookback)
+    if momentum_window.empty:
+        return round(float(s_trend), 2), 100.0
+
+    momentum_mean = momentum_window.mean()
+    momentum_std = momentum_window.std(ddof=0)
+    latest_momentum = momentum_window.iloc[-1]
+    if momentum_std and not np.isnan(momentum_std):
+        s_strength = 100 + ((latest_momentum - momentum_mean) / momentum_std) * 10
+    else:
+        s_strength = 100.0
+
+    return round(float(s_trend), 2), round(float(s_strength), 2)
 
 
 def _map_text_to_sector_name(value: Optional[str]) -> Optional[str]:
@@ -2171,6 +2263,222 @@ async def get_sector_board(
         sectors=sector_payloads,
         sort_by=sort_by,
         limit_per_sector=limit_per_sector,
+        updated_at=updated_at,
+    )
+
+
+@router.get("/money-flow-trend", response_model=MoneyFlowTrendResponse)
+@cached(ttl=300, key_prefix="money_flow_trend")
+async def get_money_flow_trend(
+    symbol: Optional[str] = Query(
+        default=None, description="Reference symbol to infer sector peers"
+    ),
+    symbols: Optional[str] = Query(default=None, description="Comma-separated symbol list"),
+    sector: Optional[str] = Query(default=None, description="Sector filter"),
+    timeframe: str = Query(default="medium", pattern=r"^(short|medium|long)$"),
+    trail_length: int = Query(default=8, ge=3, le=20),
+    db: AsyncSession = Depends(get_db),
+) -> MoneyFlowTrendResponse:
+    config = MONEY_FLOW_TRENDS[timeframe]
+    reference_symbol = _normalize_symbol(symbol) if symbol else None
+    manual_symbols = [
+        _normalize_symbol(item) for item in (symbols or "").split(",") if _normalize_symbol(item)
+    ]
+
+    screener_rows: List[dict[str, Any]] = []
+    cache_manager = CacheManager()
+    try:
+        cache_result = await cache_manager.get_screener_data(
+            symbol=None,
+            source=settings.vnstock_source,
+            allow_stale=True,
+        )
+        if cache_result.data:
+            screener_rows = [_normalize_screener_row(item) for item in cache_result.data]
+    except Exception as exc:
+        logger.warning("Money flow trend cache lookup failed: %s", exc)
+
+    try:
+        db_rows = await _load_latest_screener_rows_from_db(limit=500)
+        if db_rows:
+            merged_rows = {row["symbol"]: row for row in db_rows if row.get("symbol")}
+            for row in screener_rows:
+                ticker = row.get("symbol")
+                if ticker:
+                    merged_rows[ticker] = {**merged_rows.get(ticker, {}), **row}
+            screener_rows = list(merged_rows.values())
+    except Exception as exc:
+        logger.warning("Money flow trend DB screener fallback failed: %s", exc)
+
+    screener_rows = [row for row in screener_rows if row.get("symbol")]
+    symbols_in_screener = [row["symbol"] for row in screener_rows]
+    metadata_map = await _load_stock_metadata(symbols_in_screener)
+    change_map = await _load_change_pct_map(symbols_in_screener)
+    for row in screener_rows:
+        ticker = row["symbol"]
+        metadata = metadata_map.get(ticker) or {}
+        if not row.get("exchange") and metadata.get("exchange"):
+            row["exchange"] = metadata.get("exchange")
+        if not row.get("industry") and metadata.get("industry"):
+            row["industry"] = metadata.get("industry")
+        if not row.get("sector") and metadata.get("sector"):
+            row["sector"] = metadata.get("sector")
+        if row.get("change_pct") is None and ticker in change_map:
+            row["change_pct"] = change_map[ticker]
+
+    sector_name: Optional[str] = None
+    if manual_symbols:
+        universe_symbols = manual_symbols
+    else:
+        if sector:
+            sector_name = sector
+        elif reference_symbol:
+            reference_row = next(
+                (row for row in screener_rows if row.get("symbol") == reference_symbol), None
+            )
+            if reference_row is not None:
+                sector_name = _resolve_sector_name(
+                    reference_symbol,
+                    reference_row.get("industry"),
+                    reference_row.get("sector"),
+                )
+        if sector_name:
+            normalized_sector = _normalize_lookup_text(sector_name)
+            universe_symbols = [
+                row["symbol"]
+                for row in screener_rows
+                if _normalize_lookup_text(
+                    _resolve_sector_name(
+                        row.get("symbol", ""), row.get("industry"), row.get("sector")
+                    )
+                )
+                == normalized_sector
+            ]
+        else:
+            universe_symbols = sorted(VN30_SYMBOLS)
+
+    if reference_symbol and reference_symbol not in universe_symbols:
+        universe_symbols.append(reference_symbol)
+    universe_symbols = sorted({ticker for ticker in universe_symbols if ticker})
+    if not universe_symbols:
+        raise HTTPException(status_code=404, detail="No symbols available for money flow trend")
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=max(config["lookback"] * 3, 200))
+    prices_result = await db.execute(
+        select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+        .where(
+            StockPrice.symbol.in_(universe_symbols),
+            StockPrice.interval == "1D",
+            StockPrice.time >= start_date,
+            StockPrice.time <= end_date,
+        )
+        .order_by(StockPrice.symbol, StockPrice.time)
+    )
+    index_result = await db.execute(
+        select(StockIndex.time, StockIndex.close)
+        .where(
+            StockIndex.index_code == "VNINDEX",
+            StockIndex.time >= start_date,
+            StockIndex.time <= end_date,
+        )
+        .order_by(StockIndex.time)
+    )
+
+    price_frame = pd.DataFrame(prices_result.all(), columns=["symbol", "time", "close"])
+    index_frame = pd.DataFrame(index_result.all(), columns=["time", "close_index"])
+    if price_frame.empty or index_frame.empty:
+        return MoneyFlowTrendResponse(
+            timeframe=timeframe,
+            benchmark="VNINDEX",
+            center=[100, 100],
+            reference_symbol=reference_symbol,
+            sector=sector_name,
+            stocks=[],
+        )
+
+    price_frame["close"] = pd.to_numeric(price_frame["close"], errors="coerce")
+    price_frame = price_frame.dropna(subset=["close"])
+    index_frame["close_index"] = pd.to_numeric(index_frame["close_index"], errors="coerce")
+    index_frame = index_frame.dropna(subset=["close_index"])
+
+    screener_map = {row["symbol"]: row for row in screener_rows if row.get("symbol")}
+    trail_points_required = max(trail_length, 4)
+    stocks_payload: List[MoneyFlowTrendStock] = []
+
+    for ticker, group in price_frame.groupby("symbol"):
+        merged = group.merge(index_frame, on="time", how="inner")
+        if len(merged) < config["lookback"] + config["momentum"] + 10:
+            continue
+
+        rs_series = (merged["close"] / merged["close_index"]).replace([np.inf, -np.inf], np.nan)
+        rs_series = (rs_series.dropna() * 100).reset_index(drop=True)
+        if len(rs_series) < config["lookback"] + config["momentum"]:
+            continue
+
+        s_trend, s_strength = _compute_money_flow_metrics(
+            rs_series,
+            ratio_lookback=config["lookback"],
+            momentum_lookback=config["momentum"],
+        )
+        if s_trend is None or s_strength is None:
+            continue
+
+        merged = merged.iloc[-len(rs_series) :].reset_index(drop=True)
+        trail: List[MoneyFlowTrailPoint] = []
+        step = int(config["step"])
+        for idx in range(
+            max(0, len(rs_series) - trail_points_required * step), len(rs_series), step
+        ):
+            partial_series = rs_series.iloc[: idx + 1]
+            trail_trend, trail_strength = _compute_money_flow_metrics(
+                partial_series,
+                ratio_lookback=min(config["lookback"], len(partial_series)),
+                momentum_lookback=min(config["momentum"], max(1, len(partial_series) - 1)),
+            )
+            trail.append(
+                MoneyFlowTrailPoint(
+                    date=str(merged.iloc[idx]["time"]),
+                    s_trend=trail_trend,
+                    s_strength=trail_strength,
+                )
+            )
+        trail = trail[-trail_length:]
+
+        latest_meta = screener_map.get(ticker, {})
+        quadrant = _classify_money_flow_quadrant(s_trend, s_strength)
+        stocks_payload.append(
+            MoneyFlowTrendStock(
+                symbol=ticker,
+                name=str(latest_meta.get("name") or ticker),
+                sector=_resolve_sector_name(
+                    ticker, latest_meta.get("industry"), latest_meta.get("sector")
+                ),
+                price=_to_float(latest_meta.get("price")),
+                change_pct=_to_float(latest_meta.get("change_pct")),
+                s_trend=s_trend,
+                s_strength=s_strength,
+                quadrant=quadrant,
+                color=MONEY_FLOW_QUADRANT_COLORS.get(
+                    quadrant, MONEY_FLOW_QUADRANT_COLORS["unknown"]
+                ),
+                trail=trail,
+            )
+        )
+
+    stocks_payload.sort(
+        key=lambda item: (item.symbol != reference_symbol, item.s_trend or 0), reverse=False
+    )
+    updated_at = _latest_timestamp(
+        [point.date for stock in stocks_payload for point in stock.trail]
+    )
+    return MoneyFlowTrendResponse(
+        timeframe=timeframe,
+        benchmark="VNINDEX",
+        center=[100, 100],
+        reference_symbol=reference_symbol,
+        sector=sector_name,
+        stocks=stocks_payload,
         updated_at=updated_at,
     )
 

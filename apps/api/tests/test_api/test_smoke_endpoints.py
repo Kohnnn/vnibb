@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -1663,6 +1663,65 @@ async def test_sector_board_returns_grouped_sector_columns(client, monkeypatch):
     assert payload["sectors"][0]["name"] in {"Công nghệ", "Công nghệ - Truyền thông", "Chứng khoán"}
     first_stock = payload["sectors"][0]["stocks"][0]
     assert first_stock["color"] in {"green", "red", "yellow", "blue", "purple"}
+
+
+@pytest.mark.asyncio
+async def test_money_flow_trend_returns_rrg_like_points(client, test_db):
+    base_dates = [date(2025, 11, 15) + timedelta(days=offset) for offset in range(50)]
+    for index, trade_date in enumerate(base_dates, start=1):
+        test_db.add(
+            StockIndex(
+                id=3000 + index,
+                index_code="VNINDEX",
+                time=trade_date,
+                open=1000 + index * 2,
+                high=1002 + index * 2,
+                low=998 + index * 2,
+                close=1000 + index * 2,
+                volume=1_000_000,
+            )
+        )
+        test_db.add(
+            StockPrice(
+                id=4000 + index,
+                stock_id=1,
+                symbol="VCI",
+                time=trade_date,
+                open=20 + index * 0.4,
+                high=20.2 + index * 0.4,
+                low=19.8 + index * 0.4,
+                close=20 + index * 0.4,
+                volume=1_000_000,
+                interval="1D",
+            )
+        )
+        test_db.add(
+            StockPrice(
+                id=5000 + index,
+                stock_id=2,
+                symbol="SSI",
+                time=trade_date,
+                open=15 + index * 0.25,
+                high=15.2 + index * 0.25,
+                low=14.8 + index * 0.25,
+                close=15 + index * 0.25,
+                volume=900_000,
+                interval="1D",
+            )
+        )
+    await test_db.commit()
+
+    response = await client.get(
+        "/api/v1/market/money-flow-trend?symbols=VCI,SSI&timeframe=short&trail_length=5"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["timeframe"] == "short"
+    assert payload["center"] == [100, 100]
+    assert len(payload["stocks"]) == 2
+    assert payload["stocks"][0]["symbol"] in {"VCI", "SSI"}
+    assert len(payload["stocks"][0]["trail"]) >= 3
 
 
 @pytest.mark.asyncio
