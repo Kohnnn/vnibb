@@ -445,9 +445,13 @@ BANK_UNSUPPORTED_RATIO_FIELDS = (
 
 BANK_NATIVE_RATIO_FIELDS = (
     "loan_to_deposit",
+    "casa_ratio",
     "deposit_growth",
+    "nim",
     "equity_to_assets",
     "asset_yield",
+    "credit_cost",
+    "provision_coverage",
 )
 
 
@@ -2231,6 +2235,7 @@ async def _enrich_missing_ratio_metrics(
             IncomeStatement.interest_expense,
             IncomeStatement.ebitda,
             IncomeStatement.income_tax,
+            IncomeStatement.raw_data,
         )
         .where(IncomeStatement.symbol == symbol, IncomeStatement.period_type == normalized_period)
         .order_by(desc(IncomeStatement.fiscal_year), desc(IncomeStatement.fiscal_quarter))
@@ -2287,10 +2292,12 @@ async def _enrich_missing_ratio_metrics(
         interest_expense,
         ebitda,
         income_tax,
+        raw_data,
     ) in income_rows:
         if year is None:
             continue
         key = (int(year), int(quarter or 0))
+        raw_payload = raw_data if isinstance(raw_data, dict) else {}
         income_lookup[key] = {
             "revenue": _coerce_optional_float(revenue),
             "operating_income": _coerce_optional_float(operating_income),
@@ -2300,6 +2307,16 @@ async def _enrich_missing_ratio_metrics(
             "interest_expense": _coerce_optional_float(interest_expense),
             "ebitda": _coerce_optional_float(ebitda),
             "tax_expense": _coerce_optional_float(income_tax),
+            "net_interest_income": _pick_optional_float(
+                _lookup_financial_metric(raw_payload, "net_interest_income")
+            ),
+            "provision_for_credit_losses": _pick_optional_float(
+                _lookup_financial_metric(
+                    raw_payload,
+                    "provision_for_credit_losses",
+                    "credit_loss_provision",
+                )
+            ),
         }
 
     for (
@@ -2313,6 +2330,7 @@ async def _enrich_missing_ratio_metrics(
         _interest,
         _ebitda,
         _income_tax,
+        _raw_data,
     ) in income_rows:
         if year is None:
             continue
@@ -2394,6 +2412,51 @@ async def _enrich_missing_ratio_metrics(
                     "customer_deposits",
                     "deposits_from_customers",
                     "tien_gui_cua_khach_hang",
+                )
+            ),
+            "current_account_deposits": _pick_optional_float(
+                _lookup_financial_metric(
+                    raw_payload,
+                    "current_account_deposits",
+                    "current_accounts",
+                    "demand_deposits",
+                    "non_term_deposits",
+                    "casa",
+                )
+            ),
+            "gross_loans": _pick_optional_float(
+                _lookup_financial_metric(
+                    raw_payload,
+                    "loans_and_advances_to_customers",
+                    "loans_advances_and_finance_leases_to_customers",
+                    "gross_loans",
+                ),
+                _coerce_optional_float(receivables),
+            ),
+            "loan_loss_reserve": _pick_optional_float(
+                _lookup_financial_metric(
+                    raw_payload,
+                    "provisions_for_losses_on_loans_advances_and_finance_leases_to_customers",
+                    "less_provision_for_losses_on_loans_and_advances_to_customers",
+                    "provision_for_loan_losses",
+                    "loan_loss_reserve",
+                )
+            ),
+            "placements_with_banks": _pick_optional_float(
+                _lookup_financial_metric(
+                    raw_payload,
+                    "placements_at_and_loans_to_other_credit_institutions",
+                    "placements_with_and_loans_to_other_credit_institutions",
+                    "placements_at_other_credit_institutions",
+                    "loans_to_other_credit_institutions",
+                )
+            ),
+            "investment_securities_total": _pick_optional_float(
+                _lookup_financial_metric(
+                    raw_payload,
+                    "investment_securities",
+                    "available_for_sales_securities",
+                    "held_to_maturity_securities",
                 )
             ),
             "short_term_debt": _coerce_optional_float(short_term_debt),
@@ -2492,6 +2555,14 @@ async def _enrich_missing_ratio_metrics(
         interest_expense = (
             None if income is None else _coerce_optional_float(income.get("interest_expense"))
         )
+        net_interest_income = (
+            None if income is None else _coerce_optional_float(income.get("net_interest_income"))
+        )
+        provision_for_credit_losses = (
+            None
+            if income is None
+            else _coerce_optional_float(income.get("provision_for_credit_losses"))
+        )
         ebitda_reported = None if income is None else _coerce_optional_float(income.get("ebitda"))
         tax_expense = None if income is None else _coerce_optional_float(income.get("tax_expense"))
 
@@ -2523,6 +2594,27 @@ async def _enrich_missing_ratio_metrics(
         customer_deposits = (
             None if balance is None else _coerce_optional_float(balance.get("customer_deposits"))
         )
+        current_account_deposits = (
+            None
+            if balance is None
+            else _coerce_optional_float(balance.get("current_account_deposits"))
+        )
+        gross_loans = (
+            None if balance is None else _coerce_optional_float(balance.get("gross_loans"))
+        )
+        loan_loss_reserve = (
+            None if balance is None else _coerce_optional_float(balance.get("loan_loss_reserve"))
+        )
+        placements_with_banks = (
+            None
+            if balance is None
+            else _coerce_optional_float(balance.get("placements_with_banks"))
+        )
+        investment_securities_total = (
+            None
+            if balance is None
+            else _coerce_optional_float(balance.get("investment_securities_total"))
+        )
         short_term_debt = (
             None if balance is None else _coerce_optional_float(balance.get("short_term_debt"))
         )
@@ -2539,6 +2631,18 @@ async def _enrich_missing_ratio_metrics(
         )
         customer_deposits_prev = _coerce_optional_float(
             (prev_balance_values.get(key) or {}).get("customer_deposits")
+        )
+        current_account_deposits_prev = _coerce_optional_float(
+            (prev_balance_values.get(key) or {}).get("current_account_deposits")
+        )
+        gross_loans_prev = _coerce_optional_float(
+            (prev_balance_values.get(key) or {}).get("gross_loans")
+        )
+        placements_prev = _coerce_optional_float(
+            (prev_balance_values.get(key) or {}).get("placements_with_banks")
+        )
+        investments_prev = _coerce_optional_float(
+            (prev_balance_values.get(key) or {}).get("investment_securities_total")
         )
 
         operating_cash_flow = (
@@ -2686,8 +2790,31 @@ async def _enrich_missing_ratio_metrics(
             item.equity_multiplier = total_assets / total_equity
         if is_bank_like and total_assets not in (None, 0) and total_equity not in (None, 0):
             item.equity_to_assets = (total_equity / total_assets) * 100
-        if is_bank_like and receivables not in (None, 0) and customer_deposits not in (None, 0):
-            item.loan_to_deposit = receivables / customer_deposits
+
+        earning_assets = None
+        if is_bank_like:
+            current_earning_assets = sum(
+                value or 0.0
+                for value in (gross_loans, placements_with_banks, investment_securities_total)
+                if value is not None
+            )
+            prev_earning_assets_raw = [gross_loans_prev, placements_prev, investments_prev]
+            prev_earning_assets = sum(
+                value or 0.0 for value in prev_earning_assets_raw if value is not None
+            )
+            if current_earning_assets > 0 and prev_earning_assets > 0:
+                earning_assets = (current_earning_assets + prev_earning_assets) / 2
+            elif current_earning_assets > 0:
+                earning_assets = current_earning_assets
+
+        if is_bank_like and gross_loans not in (None, 0) and customer_deposits not in (None, 0):
+            item.loan_to_deposit = gross_loans / customer_deposits
+        if (
+            is_bank_like
+            and current_account_deposits not in (None, 0)
+            and customer_deposits not in (None, 0)
+        ):
+            item.casa_ratio = (current_account_deposits / customer_deposits) * 100
         if (
             is_bank_like
             and customer_deposits not in (None, 0)
@@ -2696,8 +2823,27 @@ async def _enrich_missing_ratio_metrics(
             item.deposit_growth = (
                 (customer_deposits - customer_deposits_prev) / customer_deposits_prev
             ) * 100
-        if is_bank_like and revenue not in (None, 0) and receivables not in (None, 0):
-            item.asset_yield = (revenue / receivables) * 100
+        if is_bank_like and revenue not in (None, 0) and earning_assets not in (None, 0):
+            item.asset_yield = (revenue / earning_assets) * 100
+        if (
+            is_bank_like
+            and net_interest_income not in (None, 0)
+            and earning_assets not in (None, 0)
+        ):
+            item.nim = (net_interest_income / earning_assets) * 100
+        average_gross_loans = None
+        if gross_loans not in (None, 0) and gross_loans_prev not in (None, 0):
+            average_gross_loans = (gross_loans + gross_loans_prev) / 2
+        elif gross_loans not in (None, 0):
+            average_gross_loans = gross_loans
+        if (
+            is_bank_like
+            and provision_for_credit_losses not in (None, 0)
+            and average_gross_loans not in (None, 0)
+        ):
+            item.credit_cost = (abs(provision_for_credit_losses) / average_gross_loans) * 100
+        if is_bank_like and loan_loss_reserve not in (None, 0) and gross_loans not in (None, 0):
+            item.provision_coverage = (abs(loan_loss_reserve) / gross_loans) * 100
 
         prev_revenue, prev_net_income, _prev_eps = prev_income_values.get(key, (None, None, None))
         if (

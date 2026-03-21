@@ -158,9 +158,13 @@ export interface FinancialRatioData {
   inventory_turnover?: number;
   receivables_turnover?: number;
   loan_to_deposit?: number;
+  casa_ratio?: number;
   deposit_growth?: number;
+  nim?: number;
   equity_to_assets?: number;
   asset_yield?: number;
+  credit_cost?: number;
+  provision_coverage?: number;
   gross_margin?: number;
   operating_margin?: number;
   net_margin?: number;

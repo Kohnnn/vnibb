@@ -296,6 +296,7 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 fiscal_year=2024,
                 revenue=120.0,
                 net_income=30.0,
+                raw_data={"Net Interest Income": 80.0, "Provision for credit losses": -10.0},
             ),
             IncomeStatement(
                 id=21,
@@ -305,6 +306,7 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 fiscal_year=2023,
                 revenue=100.0,
                 net_income=25.0,
+                raw_data={"Net Interest Income": 70.0, "Provision for credit losses": -8.0},
             ),
             BalanceSheet(
                 id=20,
@@ -316,7 +318,13 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 total_liabilities=850.0,
                 total_equity=150.0,
                 accounts_receivable=700.0,
-                raw_data={"Deposits from customers": 500.0},
+                raw_data={
+                    "Deposits from customers": 500.0,
+                    "Demand deposits": 150.0,
+                    "Placements with and loans to other credit institutions": 100.0,
+                    "Investment Securities": 200.0,
+                    "Less: Provision for losses on loans and advances to customers": -50.0,
+                },
             ),
             BalanceSheet(
                 id=21,
@@ -328,7 +336,13 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
                 total_liabilities=770.0,
                 total_equity=130.0,
                 accounts_receivable=630.0,
-                raw_data={"Deposits from customers": 400.0},
+                raw_data={
+                    "Deposits from customers": 400.0,
+                    "Demand deposits": 120.0,
+                    "Placements with and loans to other credit institutions": 80.0,
+                    "Investment Securities": 150.0,
+                    "Less: Provision for losses on loans and advances to customers": -45.0,
+                },
             ),
         ]
     )
@@ -339,6 +353,10 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
     item = enriched[0]
 
     assert item.loan_to_deposit == pytest.approx(700.0 / 500.0)
+    assert item.casa_ratio == pytest.approx((150.0 / 500.0) * 100)
     assert item.deposit_growth == pytest.approx((500.0 - 400.0) / 400.0 * 100)
     assert item.equity_to_assets == pytest.approx((150.0 / 1000.0) * 100)
-    assert item.asset_yield == pytest.approx((120.0 / 700.0) * 100)
+    assert item.asset_yield == pytest.approx((120.0 / 930.0) * 100)
+    assert item.nim == pytest.approx((80.0 / 930.0) * 100)
+    assert item.credit_cost == pytest.approx((10.0 / 665.0) * 100)
+    assert item.provision_coverage == pytest.approx((50.0 / 700.0) * 100)
