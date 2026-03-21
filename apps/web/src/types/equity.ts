@@ -221,6 +221,46 @@ export interface ForeignTradingResponse {
   data: ForeignTradingData[];
 }
 
+export interface TransactionFlowPoint {
+  date: string;
+  price?: number | null;
+  total_buy_value?: number | null;
+  total_sell_value?: number | null;
+  total_gross_value?: number | null;
+  total_net_value?: number | null;
+  total_buy_volume?: number | null;
+  total_sell_volume?: number | null;
+  total_volume?: number | null;
+  total_net_volume?: number | null;
+  foreign_net_value?: number | null;
+  foreign_net_volume?: number | null;
+  proprietary_net_value?: number | null;
+  proprietary_net_volume?: number | null;
+  domestic_net_value?: number | null;
+  domestic_net_volume?: number | null;
+  big_order_count?: number | null;
+  block_trade_count?: number | null;
+}
+
+export interface TransactionFlowPayload {
+  symbol: string;
+  days: number;
+  scopes: string[];
+  modes: string[];
+  note?: string | null;
+  data: TransactionFlowPoint[];
+}
+
+export interface TransactionFlowResponse {
+  data: TransactionFlowPayload;
+  meta?: {
+    count: number;
+    symbol?: string;
+    last_data_date?: string | null;
+  };
+  error?: string | null;
+}
+
 export interface SubsidiaryData {
   symbol: string;
   company_name?: string;

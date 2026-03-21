@@ -43,6 +43,7 @@ export const queryKeys = {
     financialRatios: (symbol: string, period: string) => ['financialRatios', symbol, period] as const,
     ratioHistory: (symbol: string, period: string, ratios: string[]) => ['ratioHistory', symbol, period, ratios] as const,
     foreignTrading: (symbol: string) => ['foreignTrading', symbol] as const,
+    transactionFlow: (symbol: string, days: number) => ['transactionFlow', symbol, days] as const,
     subsidiaries: (symbol: string) => ['subsidiaries', symbol] as const,
     balanceSheet: (symbol: string, period: string) => ['balanceSheet', symbol, period] as const,
     incomeStatement: (symbol: string, period: string) => ['incomeStatement', symbol, period] as const,
@@ -289,6 +290,19 @@ export function useForeignTrading(
         queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // 5 minutes
+    });
+}
+
+export function useTransactionFlow(
+    symbol: string,
+    options?: { days?: number; enabled?: boolean }
+) {
+    const days = options?.days || 30;
+    return useQuery({
+        queryKey: queryKeys.transactionFlow(symbol, days),
+        queryFn: () => api.getTransactionFlow(symbol, { days }),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 5 * 60 * 1000,
     });
 }
 

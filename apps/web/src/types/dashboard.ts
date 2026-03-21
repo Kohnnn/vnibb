@@ -47,6 +47,7 @@ export type WidgetType =
     | 'intraday_trades'
     | 'financial_ratios'
     | 'bank_metrics'
+    | 'transaction_flow'
     | 'foreign_trading'
     | 'subsidiaries'
     | 'balance_sheet'

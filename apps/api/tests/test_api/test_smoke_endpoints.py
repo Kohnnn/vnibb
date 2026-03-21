@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vnibb.models.trading import FinancialRatio
+from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 from vnibb.models.company import Company, Shareholder
 from vnibb.models.news import Dividend
@@ -1192,6 +1192,68 @@ async def test_foreign_trading_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload["meta"]["count"] == 1
     assert payload["data"][0]["net_volume"] == 40000
+
+
+@pytest.mark.asyncio
+async def test_transaction_flow_endpoint_returns_derived_domestic_flow(client, test_db):
+    test_db.add(Stock(id=1, symbol="VCI", exchange="HOSE"))
+    test_db.add(
+        StockPrice(
+            id=900,
+            stock_id=1,
+            symbol="VCI",
+            time=date(2026, 3, 20),
+            open=35.0,
+            high=36.0,
+            low=34.8,
+            close=35.7,
+            volume=1_000_000,
+            interval="1D",
+        )
+    )
+    test_db.add(
+        OrderFlowDaily(
+            id=900,
+            symbol="VCI",
+            trade_date=date(2026, 3, 20),
+            buy_volume=1_200_000,
+            sell_volume=900_000,
+            buy_value=42_840_000.0,
+            sell_value=32_130_000.0,
+            net_volume=300_000,
+            net_value=10_710_000.0,
+            foreign_net_volume=100_000,
+            proprietary_net_volume=50_000,
+            big_order_count=3,
+            block_trade_count=1,
+        )
+    )
+    test_db.add(
+        ForeignTrading(
+            id=900,
+            symbol="VCI",
+            trade_date=date(2026, 3, 20),
+            buy_volume=220_000,
+            sell_volume=120_000,
+            net_volume=100_000,
+            net_value=3_570_000.0,
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/VCI/transaction-flow?days=30")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["count"] == 1
+    assert payload["data"]["symbol"] == "VCI"
+    assert payload["data"]["scopes"] == ["total", "domestic", "foreign", "proprietary"]
+    row = payload["data"]["data"][0]
+    assert row["price"] == 35.7
+    assert row["foreign_net_value"] == 3_570_000.0
+    assert row["proprietary_net_value"] == pytest.approx(50_000 * 35.7)
+    assert row["domestic_net_volume"] == 150_000
+    assert row["domestic_net_value"] == pytest.approx(10_710_000.0 - 3_570_000.0 - (50_000 * 35.7))
 
 
 @pytest.mark.asyncio

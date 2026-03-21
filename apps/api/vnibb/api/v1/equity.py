@@ -39,7 +39,7 @@ from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.company import Company, Shareholder
 from vnibb.models.news import CompanyEvent, Dividend
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.trading import FinancialRatio, OrderbookSnapshot
+from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily, OrderbookSnapshot
 from vnibb.providers.vnstock.financials import (
     FinancialStatementData,
     StatementType,
@@ -91,6 +91,36 @@ VN30_PRIORITY_SYMBOLS = {
     for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
     if symbol
 }
+
+
+class TransactionFlowPoint(BaseModel):
+    date: str
+    price: Optional[float] = None
+    total_buy_value: Optional[float] = None
+    total_sell_value: Optional[float] = None
+    total_gross_value: Optional[float] = None
+    total_net_value: Optional[float] = None
+    total_buy_volume: Optional[int] = None
+    total_sell_volume: Optional[int] = None
+    total_volume: Optional[int] = None
+    total_net_volume: Optional[int] = None
+    foreign_net_value: Optional[float] = None
+    foreign_net_volume: Optional[int] = None
+    proprietary_net_value: Optional[float] = None
+    proprietary_net_volume: Optional[int] = None
+    domestic_net_value: Optional[float] = None
+    domestic_net_volume: Optional[int] = None
+    big_order_count: Optional[int] = None
+    block_trade_count: Optional[int] = None
+
+
+class TransactionFlowPayload(BaseModel):
+    symbol: str
+    days: int
+    scopes: List[str]
+    modes: List[str]
+    note: Optional[str] = None
+    data: List[TransactionFlowPoint]
 
 
 async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]]) -> None:
@@ -1183,6 +1213,15 @@ def _coerce_optional_float(value: Any) -> Optional[float]:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_optional_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(float(value))
     except (TypeError, ValueError):
         return None
 
@@ -4165,6 +4204,145 @@ async def get_intraday(symbol: str, limit: int = Query(200, ge=1, le=1000)):
         return StandardResponse(data=[], error="Request timed out")
     except Exception as e:
         return StandardResponse(data=[], error=str(e))
+
+
+@router.get(
+    "/{symbol}/transaction-flow",
+    response_model=StandardResponse[TransactionFlowPayload],
+)
+@cached(ttl=300, key_prefix="transaction_flow")
+async def get_transaction_flow(
+    symbol: str,
+    days: int = Query(30, ge=5, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    symbol_upper = symbol.upper()
+
+    flow_result = await db.execute(
+        select(OrderFlowDaily)
+        .where(OrderFlowDaily.symbol == symbol_upper)
+        .order_by(desc(OrderFlowDaily.trade_date))
+        .limit(days)
+    )
+    flow_rows = list(reversed(flow_result.scalars().all()))
+
+    if not flow_rows:
+        return StandardResponse(
+            data=TransactionFlowPayload(
+                symbol=symbol_upper,
+                days=days,
+                scopes=["total", "domestic", "foreign", "proprietary"],
+                modes=["value", "volume"],
+                note="Domestic flow is derived as total minus foreign minus proprietary.",
+                data=[],
+            ),
+            meta=MetaData(count=0, symbol=symbol_upper),
+        )
+
+    trade_dates = [row.trade_date for row in flow_rows]
+
+    foreign_result = await db.execute(
+        select(ForeignTrading).where(
+            ForeignTrading.symbol == symbol_upper,
+            ForeignTrading.trade_date.in_(trade_dates),
+        )
+    )
+    foreign_map = {row.trade_date: row for row in foreign_result.scalars().all()}
+
+    price_result = await db.execute(
+        select(StockPrice).where(
+            StockPrice.symbol == symbol_upper,
+            StockPrice.interval == "1D",
+            StockPrice.time.in_(trade_dates),
+        )
+    )
+    price_map = {row.time: row for row in price_result.scalars().all()}
+
+    def _estimate_value(net_volume: Optional[int], price_value: Optional[float]) -> Optional[float]:
+        if net_volume is None or price_value in (None, 0):
+            return None
+        return float(net_volume) * float(price_value)
+
+    points: List[TransactionFlowPoint] = []
+    for row in flow_rows:
+        price_row = price_map.get(row.trade_date)
+        foreign_row = foreign_map.get(row.trade_date)
+
+        price_value = _pick_optional_float(None if price_row is None else price_row.close)
+        total_buy_value = _pick_optional_float(row.buy_value)
+        total_sell_value = _pick_optional_float(row.sell_value)
+        total_net_value = _pick_optional_float(row.net_value)
+        total_buy_volume = _coerce_optional_int(row.buy_volume)
+        total_sell_volume = _coerce_optional_int(row.sell_volume)
+        total_net_volume = _coerce_optional_int(row.net_volume)
+
+        foreign_net_volume = _coerce_optional_int(
+            row.foreign_net_volume
+            if row.foreign_net_volume is not None
+            else (None if foreign_row is None else foreign_row.net_volume)
+        )
+        foreign_net_value = _pick_optional_float(
+            None if foreign_row is None else foreign_row.net_value,
+            _estimate_value(foreign_net_volume, price_value),
+        )
+
+        proprietary_net_volume = _coerce_optional_int(row.proprietary_net_volume)
+        proprietary_net_value = _pick_optional_float(
+            _estimate_value(proprietary_net_volume, price_value)
+        )
+
+        domestic_net_volume = None
+        if total_net_volume is not None:
+            domestic_net_volume = (
+                total_net_volume - (foreign_net_volume or 0) - (proprietary_net_volume or 0)
+            )
+
+        domestic_net_value = None
+        if total_net_value is not None:
+            domestic_net_value = (
+                total_net_value - (foreign_net_value or 0.0) - (proprietary_net_value or 0.0)
+            )
+
+        points.append(
+            TransactionFlowPoint(
+                date=row.trade_date.isoformat(),
+                price=price_value,
+                total_buy_value=total_buy_value,
+                total_sell_value=total_sell_value,
+                total_gross_value=(total_buy_value or 0.0) + (total_sell_value or 0.0)
+                if total_buy_value is not None or total_sell_value is not None
+                else None,
+                total_net_value=total_net_value,
+                total_buy_volume=total_buy_volume,
+                total_sell_volume=total_sell_volume,
+                total_volume=(total_buy_volume or 0) + (total_sell_volume or 0)
+                if total_buy_volume is not None or total_sell_volume is not None
+                else None,
+                total_net_volume=total_net_volume,
+                foreign_net_value=foreign_net_value,
+                foreign_net_volume=foreign_net_volume,
+                proprietary_net_value=proprietary_net_value,
+                proprietary_net_volume=proprietary_net_volume,
+                domestic_net_value=domestic_net_value,
+                domestic_net_volume=domestic_net_volume,
+                big_order_count=_coerce_optional_int(row.big_order_count),
+                block_trade_count=_coerce_optional_int(row.block_trade_count),
+            )
+        )
+
+    payload = TransactionFlowPayload(
+        symbol=symbol_upper,
+        days=days,
+        scopes=["total", "domestic", "foreign", "proprietary"],
+        modes=["value", "volume"],
+        note="Domestic flow is derived as total minus foreign minus proprietary.",
+        data=points,
+    )
+    last_data_date = points[-1].date if points else None
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(count=len(points), symbol=symbol_upper, last_data_date=last_data_date),
+    )
 
 
 @router.get("/{symbol}/foreign-trading", response_model=StandardResponse[List[Any]])
