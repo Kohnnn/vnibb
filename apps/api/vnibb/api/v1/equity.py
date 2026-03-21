@@ -415,6 +415,55 @@ def _sum_financial_metrics(raw_payload: Any, *aliases: str) -> Optional[float]:
     return sum(values)
 
 
+BANK_CLASSIFICATION_TERMS = (
+    "bank",
+    "banking",
+    "commercial bank",
+    "joint stock commercial bank",
+    "ngan hang",
+)
+
+BANK_UNSUPPORTED_RATIO_FIELDS = (
+    "ps",
+    "ev_ebitda",
+    "ev_sales",
+    "ebitda",
+    "roic",
+    "current_ratio",
+    "quick_ratio",
+    "cash_ratio",
+    "inventory_turnover",
+    "gross_margin",
+    "net_margin",
+    "operating_margin",
+    "debt_service_coverage",
+    "ocf_debt",
+    "ocf_sales",
+    "fcf_yield",
+    "debt_equity",
+)
+
+
+def _normalize_classification_text(value: Any) -> str:
+    return _normalize_financial_metric_key(value).replace("_", " ")
+
+
+def _is_bank_like_classification(*values: Any) -> bool:
+    for value in values:
+        normalized = _normalize_classification_text(value)
+        if not normalized:
+            continue
+        if any(term in normalized for term in BANK_CLASSIFICATION_TERMS):
+            return True
+    return False
+
+
+def _apply_bank_ratio_normalization(item: FinancialRatioData) -> FinancialRatioData:
+    for field_name in BANK_UNSUPPORTED_RATIO_FIELDS:
+        setattr(item, field_name, None)
+    return item
+
+
 def _statement_period_sort_key(period_value: Any) -> int:
     period_text = str(period_value or "").strip().upper()
     if not period_text:
@@ -440,6 +489,29 @@ def _sort_financial_statement_rows(
     return sorted(rows, key=lambda item: _statement_period_sort_key(item.period))
 
 
+async def _is_bank_like_symbol(db: AsyncSession, symbol: str) -> bool:
+    stock_row = (
+        await db.execute(
+            select(Stock.industry, Stock.sector).where(Stock.symbol == symbol).limit(1)
+        )
+    ).one_or_none()
+    if stock_row is not None and _is_bank_like_classification(stock_row.industry, stock_row.sector):
+        return True
+
+    screener_row = (
+        await db.execute(
+            select(ScreenerSnapshot.industry)
+            .where(ScreenerSnapshot.symbol == symbol)
+            .order_by(ScreenerSnapshot.snapshot_date.desc())
+            .limit(1)
+        )
+    ).one_or_none()
+    if screener_row is not None and _is_bank_like_classification(screener_row.industry):
+        return True
+
+    return False
+
+
 def _enrich_financial_statement_rows(
     rows: list[FinancialStatementData],
 ) -> list[FinancialStatementData]:
@@ -452,6 +524,50 @@ def _enrich_financial_statement_rows(
 
     for item in rows:
         raw_data = item.raw_data if isinstance(item.raw_data, dict) else {}
+
+        if item.total_equity is None:
+            item.total_equity = _pick_optional_float(
+                item.total_equity,
+                _lookup_financial_metric(
+                    raw_data,
+                    "total_equity",
+                    "equity",
+                    "shareholders_equity",
+                    "owners_equity_bn_vnd",
+                    "owners_equitybn_vnd",
+                    "capital_and_reserves_bn_vnd",
+                    "owner_s_equity_bn_vnd",
+                    "owner_s_equity",
+                ),
+            )
+            if (
+                item.total_equity is None
+                and item.total_assets not in (None, 0)
+                and item.total_liabilities not in (None, 0)
+            ):
+                item.total_equity = item.total_assets - item.total_liabilities
+
+        if item.cash_and_equivalents is None:
+            item.cash_and_equivalents = _lookup_financial_metric(
+                raw_data,
+                "cash_and_equivalents",
+                "cash_and_cash_equivalents",
+                "cash_and_cash_equivalents_bn_vnd",
+                "cash",
+                "balances_with_the_sbv",
+            )
+        if item.cash is None:
+            item.cash = item.cash_and_equivalents
+        if item.equity is None:
+            item.equity = item.total_equity
+
+        if item.customer_deposits is None:
+            item.customer_deposits = _lookup_financial_metric(
+                raw_data,
+                "customer_deposits",
+                "deposits_from_customers",
+                "tien_gui_cua_khach_hang",
+            )
 
         if item.selling_general_admin is None:
             selling_expense = _lookup_financial_metric(
@@ -2094,6 +2210,7 @@ async def _enrich_missing_ratio_metrics(
         return rows
 
     normalized_period = "year" if period in {"year", "FY"} else "quarter"
+    is_bank_like = await _is_bank_like_symbol(db, symbol)
 
     income_stmt = (
         select(
@@ -2408,7 +2525,12 @@ async def _enrich_missing_ratio_metrics(
             item.roe = (net_income / total_equity) * 100
         if item.roa is None and net_income is not None and total_assets not in (None, 0):
             item.roa = (net_income / total_assets) * 100
-        if item.roic is None and net_income is not None and total_equity not in (None, 0):
+        if (
+            not is_bank_like
+            and item.roic is None
+            and net_income is not None
+            and total_equity not in (None, 0)
+        ):
             invested_capital = total_equity + (long_term_debt or 0.0)
             if invested_capital not in (None, 0):
                 item.roic = (net_income / invested_capital) * 100
@@ -2442,9 +2564,19 @@ async def _enrich_missing_ratio_metrics(
             item.pe = price_vnd / item.eps
         if item.pb is None and price_vnd not in (None, 0) and item.bvps not in (None, 0):
             item.pb = price_vnd / item.bvps
-        if item.ps is None and market_cap not in (None, 0) and revenue not in (None, 0):
+        if (
+            not is_bank_like
+            and item.ps is None
+            and market_cap not in (None, 0)
+            and revenue not in (None, 0)
+        ):
             item.ps = market_cap / revenue
-        if item.ev_sales is None and revenue not in (None, 0) and market_cap not in (None, 0):
+        if (
+            not is_bank_like
+            and item.ev_sales is None
+            and revenue not in (None, 0)
+            and market_cap not in (None, 0)
+        ):
             total_debt = None
             if short_term_debt is not None or long_term_debt is not None:
                 total_debt = (short_term_debt or 0.0) + (long_term_debt or 0.0)
@@ -2560,7 +2692,12 @@ async def _enrich_missing_ratio_metrics(
         if item.ocf_sales is None and operating_cash_flow is not None and revenue not in (None, 0):
             item.ocf_sales = operating_cash_flow / revenue
 
-        if item.fcf_yield is None and free_cash_flow is not None and market_cap not in (None, 0):
+        if (
+            not is_bank_like
+            and item.fcf_yield is None
+            and free_cash_flow is not None
+            and market_cap not in (None, 0)
+        ):
             item.fcf_yield = free_cash_flow / market_cap
 
         if item.dps is None and dividends_paid is not None and outstanding_shares not in (None, 0):
@@ -2600,6 +2737,9 @@ async def _enrich_missing_ratio_metrics(
                 growth_base = growth_value if abs(growth_value) > 1 else growth_value * 100
                 if growth_base > 0:
                     item.peg_ratio = pe_value / growth_base
+
+        if is_bank_like:
+            _apply_bank_ratio_normalization(item)
 
     return rows
 

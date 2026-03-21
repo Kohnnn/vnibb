@@ -789,6 +789,8 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "shareholders_equity": "total_equity",
                     "owner_equity": "total_equity",
                     "owners_equity": "total_equity",
+                    "owners_equity_bn_vnd": "total_equity",
+                    "owners_equitybn_vnd": "total_equity",
                     "equity_total": "total_equity",
                     "total_owners_equity_and_liabilities": "total_assets",
                     "cash_and_equivalents": "cash_and_equivalents",
@@ -824,6 +826,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     "deposits_from_customers": "customer_deposits",
                     "goodwill": "goodwill",
                     "intangible_assets": "intangible_assets",
+                    "intagible_fixed_assets": "intangible_assets",
                     # VCI wide-frame English aliases
                     "total_assets_bn_vnd": "total_assets",
                     "total_resources_bn_vnd": "total_assets",

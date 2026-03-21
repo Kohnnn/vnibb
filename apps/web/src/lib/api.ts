@@ -118,13 +118,21 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
         controller.abort();
     }, timeout);
     const requestSignal = controller.signal;
+    const method = String(fetchOptions.method || 'GET').toUpperCase();
+    const hasBody = fetchOptions.body !== undefined && fetchOptions.body !== null;
+    const headers = new Headers(fetchOptions.headers || {});
+
+    if (hasBody && !headers.has('Content-Type')) {
+        headers.set('Content-Type', 'application/json');
+    }
+
+    if (!hasBody && (method === 'GET' || method === 'HEAD') && headers.get('Content-Type') === 'application/json') {
+        headers.delete('Content-Type');
+    }
 
     try {
         const response = await fetch(url, {
-            headers: {
-                'Content-Type': 'application/json',
-                ...fetchOptions.headers,
-            },
+            headers,
             signal: requestSignal,
             ...fetchOptions,
         });

@@ -270,6 +270,36 @@ def test_transform_data_maps_kbs_short_term_trade_accounts_payable_alias():
     assert data[0].intangible_assets == 1_030_797_450.0
 
 
+def test_transform_data_maps_bank_balance_aliases():
+    params = FinancialsQueryParams(
+        symbol="TCB", statement_type=StatementType.BALANCE, period="year", limit=1
+    )
+    rows = [
+        {
+            "item_id": "OWNER'S EQUITY(Bn.VND)",
+            "2025": 179_501_442_000.0,
+            "_source": "VCI",
+        },
+        {
+            "item_id": "Intagible fixed assets",
+            "2025": 5_779_202_000.0,
+            "_source": "VCI",
+        },
+        {
+            "item_id": "Deposits from customers",
+            "2025": 618_911_535_000.0,
+            "_source": "VCI",
+        },
+    ]
+
+    data = VnstockFinancialsFetcher.transform_data(params, rows)
+
+    assert len(data) == 1
+    assert data[0].total_equity == 179_501_442_000.0
+    assert data[0].intangible_assets == 5_779_202_000.0
+    assert data[0].customer_deposits == 618_911_535_000.0
+
+
 def test_transform_data_maps_kbs_income_aliases_and_scales_monetary_values():
     params = FinancialsQueryParams(
         symbol="VCI", statement_type=StatementType.INCOME, period="year", limit=2

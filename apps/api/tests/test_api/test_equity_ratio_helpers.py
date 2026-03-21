@@ -8,6 +8,7 @@ from vnibb.api.v1.equity import _enrich_missing_ratio_metrics
 from vnibb.models.company import Company
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock
 from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
 
 
@@ -174,3 +175,102 @@ async def test_enrich_missing_ratio_metrics_computes_extended_metrics(test_db):
     assert item.dividend_yield == pytest.approx(0.00000002)
     assert item.payout_ratio == pytest.approx((40.0 / 150.0) * 100)
     assert item.peg_ratio == pytest.approx(0.4)
+
+
+@pytest.mark.asyncio
+async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):
+    test_db.add(
+        Stock(
+            symbol="TCB",
+            exchange="HOSE",
+            industry="Banking",
+            sector="Banking",
+        )
+    )
+    test_db.add(
+        Company(
+            symbol="TCB",
+            outstanding_shares=1_000_000_000,
+        )
+    )
+    test_db.add(
+        ScreenerSnapshot(
+            symbol="TCB",
+            snapshot_date=date(2025, 1, 10),
+            price=30.0,
+            market_cap=1200.0,
+            industry="Banking",
+        )
+    )
+    test_db.add_all(
+        [
+            IncomeStatement(
+                id=10,
+                symbol="TCB",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                revenue=200.0,
+                operating_income=120.0,
+                net_income=100.0,
+                interest_expense=15.0,
+            ),
+            IncomeStatement(
+                id=11,
+                symbol="TCB",
+                period="2023",
+                period_type="year",
+                fiscal_year=2023,
+                revenue=150.0,
+                net_income=80.0,
+            ),
+            BalanceSheet(
+                id=10,
+                symbol="TCB",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                total_assets=1000.0,
+                total_liabilities=850.0,
+                total_equity=150.0,
+                cash_and_equivalents=100.0,
+            ),
+            CashFlow(
+                id=10,
+                symbol="TCB",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                operating_cash_flow=90.0,
+                free_cash_flow=80.0,
+                capital_expenditure=-10.0,
+                dividends_paid=-5.0,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    rows = [FinancialRatioData(symbol="TCB", period="2024", pe=8.0, pb=1.2)]
+    enriched = await _enrich_missing_ratio_metrics("TCB", "year", rows, test_db)
+    item = enriched[0]
+
+    assert item.roe == pytest.approx((100.0 / 150.0) * 100)
+    assert item.roa == pytest.approx(10.0)
+    assert item.equity_multiplier == pytest.approx(1000.0 / 150.0)
+    assert item.revenue_growth == pytest.approx((200.0 - 150.0) / 150.0 * 100)
+    assert item.ps is None
+    assert item.ev_sales is None
+    assert item.ebitda is None
+    assert item.roic is None
+    assert item.current_ratio is None
+    assert item.quick_ratio is None
+    assert item.cash_ratio is None
+    assert item.inventory_turnover is None
+    assert item.gross_margin is None
+    assert item.net_margin is None
+    assert item.operating_margin is None
+    assert item.debt_service_coverage is None
+    assert item.ocf_debt is None
+    assert item.ocf_sales is None
+    assert item.fcf_yield is None
+    assert item.debt_equity is None
