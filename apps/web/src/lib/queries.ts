@@ -44,6 +44,7 @@ export const queryKeys = {
     ratioHistory: (symbol: string, period: string, ratios: string[]) => ['ratioHistory', symbol, period, ratios] as const,
     foreignTrading: (symbol: string) => ['foreignTrading', symbol] as const,
     transactionFlow: (symbol: string, days: number) => ['transactionFlow', symbol, days] as const,
+    correlationMatrix: (symbol: string, days: number, topN: number) => ['correlationMatrix', symbol, days, topN] as const,
     subsidiaries: (symbol: string) => ['subsidiaries', symbol] as const,
     balanceSheet: (symbol: string, period: string) => ['balanceSheet', symbol, period] as const,
     incomeStatement: (symbol: string, period: string) => ['incomeStatement', symbol, period] as const,
@@ -307,6 +308,21 @@ export function useTransactionFlow(
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
     });
+}
+
+export function useCorrelationMatrix(
+    symbol: string,
+    options?: { days?: number; topN?: number; enabled?: boolean }
+) {
+    const days = options?.days || 60
+    const topN = options?.topN || 10
+    return useQuery({
+        queryKey: queryKeys.correlationMatrix(symbol, days, topN),
+        queryFn: () => api.getCorrelationMatrix(symbol, { days, top_n: topN }),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 10 * 60 * 1000,
+        retry: 2,
+    })
 }
 
 export function useSubsidiaries(symbol: string, enabled = true) {

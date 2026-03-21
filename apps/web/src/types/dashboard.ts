@@ -51,6 +51,7 @@ export type WidgetType =
     | 'industry_bubble'
     | 'sector_board'
     | 'money_flow_trend'
+    | 'correlation_matrix'
     | 'foreign_trading'
     | 'subsidiaries'
     | 'balance_sheet'
