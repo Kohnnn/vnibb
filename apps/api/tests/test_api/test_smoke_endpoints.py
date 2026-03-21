@@ -1725,6 +1725,56 @@ async def test_money_flow_trend_returns_rrg_like_points(client, test_db):
 
 
 @pytest.mark.asyncio
+async def test_correlation_matrix_returns_peer_matrix(client, test_db, monkeypatch):
+    async def fake_get_peers(symbol: str, limit: int = 10):
+        return SimpleNamespace(
+            symbol=symbol,
+            industry="Chung khoan",
+            count=2,
+            peers=[SimpleNamespace(symbol="SSI"), SimpleNamespace(symbol="HCM")],
+        )
+
+    monkeypatch.setattr("vnibb.api.v1.equity.comparison_service.get_peers", fake_get_peers)
+
+    base_dates = [date(2025, 11, 15) + timedelta(days=offset) for offset in range(50)]
+    for index, trade_date in enumerate(base_dates, start=1):
+        for stock_id, ticker, start_price, slope in [
+            (1, "VCI", 20.0, 0.30),
+            (2, "SSI", 18.0, 0.25),
+            (3, "HCM", 22.0, -0.10),
+        ]:
+            close = start_price + index * slope
+            test_db.add(
+                StockPrice(
+                    id=8000 + stock_id * 100 + index,
+                    stock_id=stock_id,
+                    symbol=ticker,
+                    time=trade_date,
+                    open=close,
+                    high=close + 0.2,
+                    low=close - 0.2,
+                    close=close,
+                    volume=1_000_000,
+                    interval="1D",
+                )
+            )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/VCI/correlation-matrix?days=40&top_n=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["symbol"] == "VCI"
+    assert payload["data"]["symbols"][0] == "VCI"
+    assert payload["data"]["returns_count"] >= 0
+    if payload["data"]["matrix"]:
+        diagonal = [cell for cell in payload["data"]["matrix"] if cell["x"] == cell["y"]]
+        assert all(
+            cell["value"] == pytest.approx(1.0) for cell in diagonal if cell["value"] is not None
+        )
+
+
+@pytest.mark.asyncio
 async def test_market_top_movers_smoke_returns_data(client, monkeypatch):
     async def fake_top_movers_fetch(*, type: str, index: str, limit: int):
         return [

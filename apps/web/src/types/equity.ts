@@ -261,6 +261,31 @@ export interface TransactionFlowResponse {
   error?: string | null;
 }
 
+export interface CorrelationMatrixCell {
+  x: string;
+  y: string;
+  value?: number | null;
+}
+
+export interface CorrelationMatrixPayload {
+  symbol: string;
+  sector?: string | null;
+  days: number;
+  symbols: string[];
+  matrix: CorrelationMatrixCell[];
+  returns_count: number;
+}
+
+export interface CorrelationMatrixResponse {
+  data: CorrelationMatrixPayload;
+  meta?: {
+    count: number;
+    symbol?: string;
+    last_data_date?: string | null;
+  };
+  error?: string | null;
+}
+
 export interface SubsidiaryData {
   symbol: string;
   company_name?: string;

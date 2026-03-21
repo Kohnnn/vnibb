@@ -154,7 +154,7 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { type: 'industry_bubble', layout: { x: 0, y: 0, w: 12, h: 8 } },
       { type: 'comparison_analysis', layout: { x: 12, y: 0, w: 12, h: 8 } },
       { type: 'financial_ratios', layout: { x: 0, y: 8, w: 8, h: 6 } },
-      { type: 'peer_comparison', layout: { x: 8, y: 8, w: 16, h: 6 } },
+      { type: 'correlation_matrix', layout: { x: 8, y: 8, w: 16, h: 6 } },
     ],
   },
   {
@@ -167,6 +167,18 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { type: 'financial_ratios', layout: { x: 10, y: 0, w: 14, h: 7 } },
       { type: 'balance_sheet', layout: { x: 0, y: 7, w: 12, h: 7 } },
       { type: 'comparison_analysis', layout: { x: 12, y: 7, w: 12, h: 7 } },
+    ],
+  },
+  {
+    id: 'correlation-lab',
+    name: 'Correlation Lab',
+    description: 'Analyze sector peer correlations alongside bubble and price context.',
+    category: 'analysis',
+    widgets: [
+      { type: 'correlation_matrix', layout: { x: 0, y: 0, w: 12, h: 7 } },
+      { type: 'industry_bubble', layout: { x: 12, y: 0, w: 12, h: 7 } },
+      { type: 'peer_comparison', layout: { x: 0, y: 7, w: 12, h: 7 } },
+      { type: 'price_chart', layout: { x: 12, y: 7, w: 12, h: 7 } },
     ],
   },
   {

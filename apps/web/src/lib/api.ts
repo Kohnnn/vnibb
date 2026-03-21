@@ -203,7 +203,7 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
 
 // ============ Equity API ============
 
-import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, AnalystEstimatesResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, TransactionFlowResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
+import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, AnalystEstimatesResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, TransactionFlowResponse, CorrelationMatrixResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
 import type { ScreenerResponse } from '@/types/screener';
 import type { Dashboard, DashboardCreate, DashboardUpdate, WidgetCreate } from '@/types/dashboard';
 import type { FullTechnicalAnalysis, SignalSummary, TechnicalIndicators } from '@/types/technical';
@@ -386,6 +386,15 @@ export async function getTransactionFlow(
 ): Promise<TransactionFlowResponse> {
     return fetchAPI<TransactionFlowResponse>(`/equity/${symbol}/transaction-flow`, {
         params: { days: options?.days },
+    });
+}
+
+export async function getCorrelationMatrix(
+    symbol: string,
+    options?: { days?: number; top_n?: number }
+): Promise<CorrelationMatrixResponse> {
+    return fetchAPI<CorrelationMatrixResponse>(`/equity/${symbol}/correlation-matrix`, {
+        params: { days: options?.days, top_n: options?.top_n },
     });
 }
 

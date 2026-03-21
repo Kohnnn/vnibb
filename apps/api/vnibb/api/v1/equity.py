@@ -10,6 +10,8 @@ from datetime import date, timedelta, datetime
 from typing import List, Optional, Literal, Any, Callable, Awaitable
 
 from fastapi import APIRouter, Query, Depends, Path
+import numpy as np
+import pandas as pd
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func
@@ -121,6 +123,21 @@ class TransactionFlowPayload(BaseModel):
     modes: List[str]
     note: Optional[str] = None
     data: List[TransactionFlowPoint]
+
+
+class CorrelationMatrixCell(BaseModel):
+    x: str
+    y: str
+    value: Optional[float] = None
+
+
+class CorrelationMatrixPayload(BaseModel):
+    symbol: str
+    sector: Optional[str] = None
+    days: int
+    symbols: List[str]
+    matrix: List[CorrelationMatrixCell]
+    returns_count: int
 
 
 async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]]) -> None:
@@ -3722,6 +3739,132 @@ async def get_equity_peers(
     peers = await comparison_service.get_peers(symbol=symbol.upper(), limit=limit)
     payload = peers.model_dump(mode="json") if hasattr(peers, "model_dump") else dict(peers)
     return payload
+
+
+@router.get(
+    "/{symbol}/correlation-matrix", response_model=StandardResponse[CorrelationMatrixPayload]
+)
+@cached(ttl=900, key_prefix="correlation_matrix")
+async def get_correlation_matrix(
+    symbol: str,
+    days: int = Query(default=60, ge=20, le=252),
+    top_n: int = Query(default=10, ge=5, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    symbol_upper = symbol.upper().strip()
+    peers = await comparison_service.get_peers(symbol=symbol_upper, limit=max(1, top_n - 1))
+    peer_symbols = [
+        str(item.symbol).upper() for item in peers.peers if getattr(item, "symbol", None)
+    ]
+    universe_symbols = [symbol_upper, *peer_symbols]
+    universe_symbols = list(dict.fromkeys(universe_symbols))[:top_n]
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=max(days * 2, days + 30))
+
+    prices_result = await db.execute(
+        select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+        .where(
+            StockPrice.symbol.in_(universe_symbols),
+            StockPrice.interval == "1D",
+            StockPrice.time >= start_date,
+            StockPrice.time <= end_date,
+        )
+        .order_by(StockPrice.symbol, StockPrice.time)
+    )
+    rows = prices_result.all()
+    if not rows:
+        return StandardResponse(
+            data=CorrelationMatrixPayload(
+                symbol=symbol_upper,
+                sector=peers.industry,
+                days=days,
+                symbols=universe_symbols,
+                matrix=[],
+                returns_count=0,
+            ),
+            meta=MetaData(count=0, symbol=symbol_upper),
+        )
+
+    frame = pd.DataFrame(rows, columns=["symbol", "time", "close"])
+    frame["time"] = pd.to_datetime(frame["time"], errors="coerce").dt.date
+    frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
+    frame = frame.dropna(subset=["time", "close"])
+    if frame.empty:
+        return StandardResponse(
+            data=CorrelationMatrixPayload(
+                symbol=symbol_upper,
+                sector=peers.industry,
+                days=days,
+                symbols=universe_symbols,
+                matrix=[],
+                returns_count=0,
+            ),
+            meta=MetaData(count=0, symbol=symbol_upper),
+        )
+
+    pivot = frame.pivot_table(index="time", columns="symbol", values="close", aggfunc="last")
+    pivot = pivot.sort_index().ffill().tail(days + 1)
+    returns = pivot.pct_change().replace([np.inf, -np.inf], np.nan).dropna(how="all")
+
+    valid_symbols = [
+        ticker
+        for ticker in universe_symbols
+        if ticker in returns.columns and returns[ticker].count() >= max(10, days // 3)
+    ]
+    if (
+        symbol_upper not in valid_symbols
+        and symbol_upper in returns.columns
+        and returns[symbol_upper].count() >= 5
+    ):
+        valid_symbols.insert(0, symbol_upper)
+    valid_symbols = list(dict.fromkeys(valid_symbols))
+
+    if not valid_symbols:
+        return StandardResponse(
+            data=CorrelationMatrixPayload(
+                symbol=symbol_upper,
+                sector=peers.industry,
+                days=days,
+                symbols=universe_symbols,
+                matrix=[],
+                returns_count=0,
+            ),
+            meta=MetaData(count=0, symbol=symbol_upper),
+        )
+
+    corr = returns[valid_symbols].corr(min_periods=max(10, days // 3))
+    matrix: List[CorrelationMatrixCell] = []
+    for row_symbol in valid_symbols:
+        for col_symbol in valid_symbols:
+            value = (
+                corr.loc[row_symbol, col_symbol]
+                if row_symbol in corr.index and col_symbol in corr.columns
+                else np.nan
+            )
+            matrix.append(
+                CorrelationMatrixCell(
+                    x=row_symbol,
+                    y=col_symbol,
+                    value=None if pd.isna(value) else round(float(value), 4),
+                )
+            )
+
+    return StandardResponse(
+        data=CorrelationMatrixPayload(
+            symbol=symbol_upper,
+            sector=peers.industry,
+            days=days,
+            symbols=valid_symbols,
+            matrix=matrix,
+            returns_count=int(len(returns.index)),
+        ),
+        meta=MetaData(
+            count=len(matrix),
+            symbol=symbol_upper,
+            last_data_date=str(returns.index.max()) if len(returns.index) else None,
+        ),
+    )
 
 
 @router.get("/{symbol}/ttm", response_model=StandardResponse[dict[str, Any]])
