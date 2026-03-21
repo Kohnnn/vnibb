@@ -431,6 +431,31 @@ def _compute_money_flow_metrics(
     return round(float(s_trend), 2), round(float(s_strength), 2)
 
 
+async def _fetch_benchmark_history_from_provider(start_date: date, end_date: date) -> pd.DataFrame:
+    def _load_history() -> pd.DataFrame:
+        stock_manager = get_vnstock()
+        stock = stock_manager.stock(symbol="VNINDEX", source=settings.vnstock_source)
+        history = stock.quote.history(
+            start=start_date.strftime("%Y-%m-%d"),
+            end=end_date.strftime("%Y-%m-%d"),
+            show_log=False,
+        )
+        if history is None or history.empty:
+            return pd.DataFrame(columns=["time", "close_index"])
+        frame = history.copy()
+        if "date" in frame.columns and "time" not in frame.columns:
+            frame = frame.rename(columns={"date": "time"})
+        if "close" not in frame.columns:
+            return pd.DataFrame(columns=["time", "close_index"])
+        return frame[["time", "close"]].rename(columns={"close": "close_index"})
+
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_load_history), timeout=20)
+    except Exception as exc:
+        logger.warning("Money flow trend benchmark provider fallback failed: %s", exc)
+        return pd.DataFrame(columns=["time", "close_index"])
+
+
 def _map_text_to_sector_name(value: Optional[str]) -> Optional[str]:
     normalized_value = _normalize_lookup_text(value)
     if not normalized_value:
@@ -2387,6 +2412,10 @@ async def get_money_flow_trend(
 
     price_frame = pd.DataFrame(prices_result.all(), columns=["symbol", "time", "close"])
     index_frame = pd.DataFrame(index_result.all(), columns=["time", "close_index"])
+    if index_frame.empty or len(index_frame.index) < config["lookback"] + 5:
+        provider_index_frame = await _fetch_benchmark_history_from_provider(start_date, end_date)
+        if not provider_index_frame.empty:
+            index_frame = provider_index_frame
     if price_frame.empty or index_frame.empty:
         return MoneyFlowTrendResponse(
             timeframe=timeframe,
