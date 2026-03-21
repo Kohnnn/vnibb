@@ -38,8 +38,10 @@ from vnibb.providers.vnstock.top_movers import VnstockTopMoversFetcher
 from vnibb.core.cache import cached
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.models.company import Company
+from vnibb.models.financials import IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.trading import FinancialRatio
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
 from vnibb.providers.vnstock import get_vnstock
@@ -88,6 +90,37 @@ class HeatmapResponse(BaseModel):
     size_metric: str
     sectors: List[SectorGroup]
     cached: bool = False
+    updated_at: Optional[str] = None
+
+
+class IndustryBubblePoint(BaseModel):
+    symbol: str
+    name: str
+    sector: str
+    industry: Optional[str] = None
+    x: float
+    y: float
+    size: float
+    price: Optional[float] = None
+    change_pct: Optional[float] = None
+    color: str
+    is_reference: bool = False
+
+
+class IndustryBubbleSectorAverage(BaseModel):
+    x: Optional[float] = None
+    y: Optional[float] = None
+
+
+class IndustryBubbleResponse(BaseModel):
+    sector: str
+    reference_symbol: str
+    x_metric: str
+    y_metric: str
+    size_metric: str
+    top_n: int
+    sector_average: IndustryBubbleSectorAverage
+    data: List[IndustryBubblePoint]
     updated_at: Optional[str] = None
 
 
@@ -256,6 +289,17 @@ INDUSTRY_TO_SECTOR_ID_LOOKUP: dict[str, str] = {
     _normalize_lookup_text(industry): sector_id
     for industry, sector_id in INDUSTRY_TO_SECTOR_ID.items()
 }
+
+INDUSTRY_BUBBLE_COLORS = [
+    "#f97316",
+    "#22c55e",
+    "#38bdf8",
+    "#eab308",
+    "#a855f7",
+    "#ef4444",
+    "#14b8a6",
+    "#f472b6",
+]
 
 
 def _map_text_to_sector_name(value: Optional[str]) -> Optional[str]:
@@ -445,6 +489,14 @@ def _first_non_none(*values: Any) -> Any:
     for value in values:
         if value is not None:
             return value
+    return None
+
+
+def _pick_optional_float(*values: Any) -> Optional[float]:
+    for value in values:
+        parsed = _to_float(value)
+        if parsed is not None:
+            return parsed
     return None
 
 
@@ -884,6 +936,117 @@ async def _load_latest_snapshot_metrics(
         return {}
 
     return metrics_map
+
+
+async def _load_latest_ratio_metrics(symbols: List[str]) -> Dict[str, dict[str, Optional[float]]]:
+    unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
+    if not unique_symbols:
+        return {}
+
+    async with async_session_maker() as session:
+        ranked_ratios = (
+            select(
+                FinancialRatio.symbol.label("symbol"),
+                FinancialRatio.pe_ratio.label("pe_ratio"),
+                FinancialRatio.pb_ratio.label("pb_ratio"),
+                FinancialRatio.ps_ratio.label("ps_ratio"),
+                FinancialRatio.roe.label("roe"),
+                FinancialRatio.roa.label("roa"),
+                FinancialRatio.roic.label("roic"),
+                FinancialRatio.debt_to_equity.label("debt_to_equity"),
+                FinancialRatio.revenue_growth.label("revenue_growth"),
+                FinancialRatio.earnings_growth.label("earnings_growth"),
+                func.row_number()
+                .over(
+                    partition_by=FinancialRatio.symbol,
+                    order_by=(
+                        FinancialRatio.fiscal_year.desc(),
+                        FinancialRatio.fiscal_quarter.desc(),
+                        FinancialRatio.updated_at.desc(),
+                    ),
+                )
+                .label("rn"),
+            )
+            .where(FinancialRatio.symbol.in_(unique_symbols))
+            .subquery()
+        )
+
+        rows = (
+            await session.execute(
+                select(ranked_ratios).where(ranked_ratios.c.rn == 1)
+            )
+        ).mappings().all()
+
+    return {
+        _normalize_symbol(row["symbol"]): {
+            "pe_ratio": _to_float(row.get("pe_ratio")),
+            "pb_ratio": _to_float(row.get("pb_ratio")),
+            "ps_ratio": _to_float(row.get("ps_ratio")),
+            "roe": _to_float(row.get("roe")),
+            "roa": _to_float(row.get("roa")),
+            "roic": _to_float(row.get("roic")),
+            "debt_to_equity": _to_float(row.get("debt_to_equity")),
+            "revenue_growth": _to_float(row.get("revenue_growth")),
+            "earnings_growth": _to_float(row.get("earnings_growth")),
+        }
+        for row in rows
+    }
+
+
+async def _load_latest_income_revenue(symbols: List[str]) -> Dict[str, Optional[float]]:
+    unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
+    if not unique_symbols:
+        return {}
+
+    async with async_session_maker() as session:
+        ranked_income = (
+            select(
+                IncomeStatement.symbol.label("symbol"),
+                IncomeStatement.revenue.label("revenue"),
+                func.row_number()
+                .over(
+                    partition_by=IncomeStatement.symbol,
+                    order_by=(
+                        IncomeStatement.fiscal_year.desc(),
+                        IncomeStatement.fiscal_quarter.desc(),
+                        IncomeStatement.updated_at.desc(),
+                    ),
+                )
+                .label("rn"),
+            )
+            .where(IncomeStatement.symbol.in_(unique_symbols))
+            .subquery()
+        )
+        rows = (
+            await session.execute(select(ranked_income).where(ranked_income.c.rn == 1))
+        ).mappings().all()
+
+    return {_normalize_symbol(row["symbol"]): _to_float(row.get("revenue")) for row in rows}
+
+
+def _resolve_industry_bubble_metric(
+    row: dict[str, Any],
+    ratio_metrics: dict[str, Optional[float]],
+    revenue_map: dict[str, Optional[float]],
+    metric: str,
+) -> Optional[float]:
+    metric = str(metric or "").strip().lower()
+    if metric == "market_cap":
+        return _to_float(row.get("market_cap"))
+    if metric == "volume":
+        return _to_float(row.get("volume"))
+    if metric == "revenue":
+        return _to_float(revenue_map.get(row.get("symbol", "")))
+
+    screener_map = {
+        "pe_ratio": "pe",
+        "pb_ratio": "pb",
+        "ps_ratio": "ps",
+    }
+    screener_key = screener_map.get(metric)
+    if screener_key:
+        return _pick_optional_float(row.get(screener_key), ratio_metrics.get(metric))
+    return _to_float(ratio_metrics.get(metric))
 
 
 def _apply_snapshot_metrics_to_movers(
@@ -1571,6 +1734,153 @@ async def get_market_indices(
                 error=str(e),
             )
         return MarketIndicesResponse(count=0, data=[], error=str(e))
+
+
+@router.get("/industry-bubble", response_model=IndustryBubbleResponse)
+@cached(ttl=300, key_prefix="industry_bubble")
+async def get_industry_bubble(
+    symbol: str = Query(..., description="Reference symbol used to determine sector"),
+    x_metric: str = Query(
+        default="pb_ratio",
+        pattern=r"^(pe_ratio|pb_ratio|ps_ratio|roe|roa|roic|debt_to_equity|revenue_growth|earnings_growth|market_cap)$",
+    ),
+    y_metric: str = Query(
+        default="pe_ratio",
+        pattern=r"^(pe_ratio|pb_ratio|ps_ratio|roe|roa|roic|debt_to_equity|revenue_growth|earnings_growth|market_cap)$",
+    ),
+    size_metric: str = Query(
+        default="market_cap",
+        pattern=r"^(market_cap|volume|revenue)$",
+    ),
+    top_n: int = Query(default=20, ge=5, le=50),
+) -> IndustryBubbleResponse:
+    reference_symbol = _normalize_symbol(symbol)
+    if not reference_symbol:
+        raise HTTPException(status_code=400, detail="Reference symbol is required")
+
+    cache_manager = CacheManager()
+    screener_rows: List[dict[str, Any]] = []
+
+    try:
+        cache_result = await cache_manager.get_screener_data(
+            symbol=None,
+            source=settings.vnstock_source,
+            allow_stale=True,
+        )
+        if cache_result.data:
+            screener_rows = [_normalize_screener_row(item) for item in cache_result.data]
+    except Exception as exc:
+        logger.warning("Industry bubble cache lookup failed: %s", exc)
+
+    if not screener_rows:
+        params = StockScreenerParams(symbol=None, exchange="ALL", limit=500, source=settings.vnstock_source)
+        try:
+            screener_data = await asyncio.wait_for(
+                VnstockScreenerFetcher.fetch(params),
+                timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
+        screener_rows = [_normalize_screener_row(item) for item in screener_data]
+
+    screener_rows = [row for row in screener_rows if row.get("symbol")]
+    symbols = [row["symbol"] for row in screener_rows]
+    metadata_map = await _load_stock_metadata(symbols)
+    change_map = await _load_change_pct_map(symbols)
+    ratio_map = await _load_latest_ratio_metrics(symbols)
+    revenue_map = await _load_latest_income_revenue(symbols)
+
+    for row in screener_rows:
+        ticker = row["symbol"]
+        metadata = metadata_map.get(ticker) or {}
+        if not row.get("exchange") and metadata.get("exchange"):
+            row["exchange"] = metadata.get("exchange")
+        if not row.get("industry") and metadata.get("industry"):
+            row["industry"] = metadata.get("industry")
+        if not row.get("sector") and metadata.get("sector"):
+            row["sector"] = metadata.get("sector")
+        if row.get("change_pct") is None and ticker in change_map:
+            row["change_pct"] = change_map[ticker]
+
+    reference_row = next((row for row in screener_rows if row.get("symbol") == reference_symbol), None)
+    if reference_row is None:
+        raise HTTPException(status_code=404, detail=f"Reference symbol {reference_symbol} not found")
+
+    sector_name = _resolve_sector_name(
+        reference_symbol,
+        reference_row.get("industry"),
+        reference_row.get("sector"),
+    )
+    reference_sector_match = _normalize_lookup_text(sector_name)
+
+    def _same_sector(row: dict[str, Any]) -> bool:
+        return _normalize_lookup_text(
+            _resolve_sector_name(
+                row.get("symbol", ""),
+                row.get("industry"),
+                row.get("sector"),
+            )
+        ) == reference_sector_match
+
+    sector_rows = [row for row in screener_rows if _same_sector(row)]
+
+    points: List[IndustryBubblePoint] = []
+    for index, row in enumerate(sector_rows):
+        ticker = row.get("symbol", "")
+        ratio_metrics = ratio_map.get(ticker, {})
+        x_value = _resolve_industry_bubble_metric(row, ratio_metrics, revenue_map, x_metric)
+        y_value = _resolve_industry_bubble_metric(row, ratio_metrics, revenue_map, y_metric)
+        size_value = _resolve_industry_bubble_metric(row, ratio_metrics, revenue_map, size_metric)
+
+        if x_value in (None,) or y_value in (None,) or size_value in (None,) or size_value <= 0:
+            continue
+
+        points.append(
+            IndustryBubblePoint(
+                symbol=ticker,
+                name=str(row.get("name") or ticker),
+                sector=sector_name,
+                industry=row.get("industry"),
+                x=float(x_value),
+                y=float(y_value),
+                size=float(size_value),
+                price=_to_float(row.get("price")),
+                change_pct=_to_float(row.get("change_pct")),
+                color=INDUSTRY_BUBBLE_COLORS[index % len(INDUSTRY_BUBBLE_COLORS)],
+                is_reference=ticker == reference_symbol,
+            )
+        )
+
+    if not points:
+        raise HTTPException(status_code=404, detail="No comparable sector data available for bubble chart")
+
+    points.sort(key=lambda item: item.size, reverse=True)
+    selected = points[:top_n]
+    if not any(item.is_reference for item in selected):
+        reference_point = next((item for item in points if item.is_reference), None)
+        if reference_point is not None:
+            selected = selected[:-1] + [reference_point]
+            selected.sort(key=lambda item: item.size, reverse=True)
+
+    x_values = [point.x for point in selected]
+    y_values = [point.y for point in selected]
+    sector_average = IndustryBubbleSectorAverage(
+        x=sum(x_values) / len(x_values) if x_values else None,
+        y=sum(y_values) / len(y_values) if y_values else None,
+    )
+
+    updated_at = _latest_timestamp([row.get("updated_at") for row in sector_rows])
+    return IndustryBubbleResponse(
+        sector=sector_name,
+        reference_symbol=reference_symbol,
+        x_metric=x_metric,
+        y_metric=y_metric,
+        size_metric=size_metric,
+        top_n=top_n,
+        sector_average=sector_average,
+        data=selected,
+        updated_at=updated_at,
+    )
 
 
 @router.get("/top-movers", response_model=MarketTopMoversResponse)

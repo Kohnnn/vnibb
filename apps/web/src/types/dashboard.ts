@@ -48,6 +48,7 @@ export type WidgetType =
     | 'financial_ratios'
     | 'bank_metrics'
     | 'transaction_flow'
+    | 'industry_bubble'
     | 'foreign_trading'
     | 'subsidiaries'
     | 'balance_sheet'

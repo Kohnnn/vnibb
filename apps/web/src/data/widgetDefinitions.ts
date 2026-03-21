@@ -252,6 +252,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
+        type: 'industry_bubble',
+        name: 'Industry Bubble',
+        description: 'Sector-relative bubble chart with configurable X/Y axes and market-cap or volume sizing',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
         type: 'foreign_trading',
         name: 'Foreign Trading',
         description: 'Foreign investor buy/sell volumes and net flow',

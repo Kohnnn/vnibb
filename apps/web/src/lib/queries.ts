@@ -49,6 +49,7 @@ export const queryKeys = {
     incomeStatement: (symbol: string, period: string) => ['incomeStatement', symbol, period] as const,
     cashFlow: (symbol: string, period: string) => ['cashFlow', symbol, period] as const,
     marketOverview: () => ['marketOverview'] as const,
+    industryBubble: (params?: Record<string, unknown>) => ['industryBubble', params] as const,
     worldIndices: () => ['worldIndices'] as const,
     forexRates: () => ['forexRates'] as const,
     commodities: () => ['commodities'] as const,
@@ -361,6 +362,22 @@ export function useMarketOverview(enabled = true) {
         queryFn: ({ signal }) => api.getMarketOverview(signal),
         enabled,
         staleTime: 60 * 1000, // 1 minute
+    });
+}
+
+export function useIndustryBubble(options: {
+    symbol: string;
+    x_metric?: string;
+    y_metric?: string;
+    size_metric?: string;
+    top_n?: number;
+    enabled?: boolean;
+}) {
+    return useQuery({
+        queryKey: queryKeys.industryBubble(options),
+        queryFn: () => api.getIndustryBubble(options),
+        enabled: options.enabled !== false && !!options.symbol,
+        staleTime: 5 * 60 * 1000,
     });
 }
 

@@ -115,8 +115,20 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { type: 'peer_comparison', layout: { x: 0, y: 0, w: 14, h: 8 } },
       { type: 'comparison_analysis', layout: { x: 14, y: 0, w: 10, h: 8 } },
       { type: 'rs_ranking', layout: { x: 0, y: 8, w: 8, h: 6 } },
-      { type: 'financial_ratios', layout: { x: 8, y: 8, w: 8, h: 6 } },
+      { type: 'industry_bubble', layout: { x: 8, y: 8, w: 8, h: 6 } },
       { type: 'price_chart', layout: { x: 16, y: 8, w: 8, h: 6 } },
+    ],
+  },
+  {
+    id: 'industry-explorer',
+    name: 'Industry Explorer',
+    description: 'Visualize sector peers across valuation, growth, and market-cap dimensions.',
+    category: 'analysis',
+    widgets: [
+      { type: 'industry_bubble', layout: { x: 0, y: 0, w: 12, h: 8 } },
+      { type: 'comparison_analysis', layout: { x: 12, y: 0, w: 12, h: 8 } },
+      { type: 'financial_ratios', layout: { x: 0, y: 8, w: 8, h: 6 } },
+      { type: 'peer_comparison', layout: { x: 8, y: 8, w: 16, h: 6 } },
     ],
   },
   {
