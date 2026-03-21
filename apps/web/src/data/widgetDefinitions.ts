@@ -236,6 +236,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 }
     },
     {
+        type: 'bank_metrics',
+        name: 'Bank Analytics',
+        description: 'Bank-specific funding, profitability, and risk analytics including NIM and credit cost proxies',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
+    },
+    {
         type: 'foreign_trading',
         name: 'Foreign Trading',
         description: 'Foreign investor buy/sell volumes and net flow',

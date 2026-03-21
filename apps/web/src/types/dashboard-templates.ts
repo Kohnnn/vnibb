@@ -120,6 +120,18 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     ],
   },
   {
+    id: 'bank-analyst',
+    name: 'Bank Analyst',
+    description: 'Bank-native funding, profitability, and risk analytics with balance-sheet context and peer support.',
+    category: 'analysis',
+    widgets: [
+      { type: 'bank_metrics', layout: { x: 0, y: 0, w: 10, h: 7 } },
+      { type: 'financial_ratios', layout: { x: 10, y: 0, w: 14, h: 7 } },
+      { type: 'balance_sheet', layout: { x: 0, y: 7, w: 12, h: 7 } },
+      { type: 'comparison_analysis', layout: { x: 12, y: 7, w: 12, h: 7 } },
+    ],
+  },
+  {
     id: 'custom',
     name: 'Custom',
     description: 'Start from an empty tab and assemble your own layout.',
