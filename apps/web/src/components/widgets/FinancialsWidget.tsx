@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { DenseFinancialTable, type DenseTableColumn, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import {
     TrendingUp, TrendingDown, Info,
     ArrowUpRight, BarChart3, LayoutGrid
@@ -253,6 +254,33 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
     }, [tableData, activeTab, unitConfig]);
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
+    const denseColumns = useMemo<DenseTableColumn[]>(() => {
+        if (!tableData) return []
+        return tableData.periods.map((periodLabel) => ({
+            key: periodLabel,
+            label: periodLabel,
+            align: 'right',
+        }))
+    }, [tableData])
+
+    const denseRows = useMemo<DenseTableRow[]>(() => {
+        if (!tableData) return []
+        return tableData.rows.map((row, index) => ({
+            id: `${activeTab}-${index}`,
+            label: row.label,
+            values: tableData.periods.reduce<Record<string, number | null>>((acc, periodLabel) => {
+                acc[periodLabel] = row.values[periodLabel]?.val ?? null
+                return acc
+            }, {}),
+        }))
+    }, [activeTab, tableData])
+
+    const denseRowMeta = useMemo(() => {
+        if (!tableData) return new Map<string, { isPct?: boolean }>()
+        return new Map(
+            tableData.rows.map((row, index) => [`${activeTab}-${index}`, { isPct: row.isPct }])
+        )
+    }, [activeTab, tableData])
 
     return (
         <WidgetContainer
@@ -341,80 +369,23 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                     {unitLegend} | Currency: VND | Reporting: VAS | Fiscal year end: Dec 31.
                                 </div>
                             )}
-                            <table className="data-table financial-dense freeze-first-col w-full text-[11px] border-collapse table-fixed">
-                                <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]">
-                                    <tr className="border-b border-[var(--border-color)] shadow-sm">
-                                            <th className="sticky left-0 z-30 w-[152px] bg-[var(--bg-secondary)] p-2 pl-2.5 text-left font-black uppercase tracking-widest text-muted-foreground shadow-[2px_0_5px_rgba(0,0,0,0.2)]">Metric</th>
-                                        {tableData?.periods.map(p => (
-                                            <th key={p} className="text-right p-2 text-muted-foreground font-black min-w-[96px]">{p}</th>
-                                        ))}
-                                        <th className="text-center p-2 text-muted-foreground font-black min-w-[84px]">Trend</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-[var(--border-subtle)]">
-                                    {tableData?.rows.map((row, i) => (
-                                        <tr
-                                            key={i}
-                                            className={cn(
-                                                "group hover:bg-[var(--bg-tertiary)]/40 transition-colors",
-                                                i % 2 === 1 && "bg-[var(--bg-secondary)]/40"
-                                            )}
-                                        >
-                                            <td className="sticky left-0 z-10 border-r border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2 pl-2.5 font-medium text-[var(--text-secondary)] shadow-[2px_0_5px_rgba(0,0,0,0.15)] transition-colors group-hover:text-blue-300">
-                                                {row.label}
-                                            </td>
-                                            {tableData.periods.map(p => {
-                                                const data = row.values[p];
-                                                const val = data?.val;
-                                                const growth = data?.growth;
-                                                const displayValue = row.isPct
-                                                    ? formatPct(val)
-                                                    : activeTab === 'ratios'
-                                                        ? formatRatio(val)
-                                                        : formatUnitValuePlain(val, tableScale, unitConfig);
-
-                                                return (
-                                                    <td key={p} data-type="number" className="p-2 text-right font-mono group-hover:bg-[var(--bg-tertiary)]/30">
-                                                        <div className="flex flex-col items-end">
-                                                            <span className={cn(
-                                                                "font-medium",
-                                                                val < 0 ? "text-red-400" : "text-[var(--text-primary)]"
-                                                            )}>
-                                                                {displayValue}
-                                                            </span>
-                                                            {growth !== null && Math.abs(growth) > 1 && (
-                                                                <span className={cn(
-                                                                    "text-[9px] font-bold flex items-center gap-0.5 mt-0.5 opacity-60 group-hover:opacity-100 transition-opacity",
-                                                                    growth > 0 ? "text-green-500" : "text-red-500"
-                                                                )}>
-                                                                    {growth > 0 ? '+' : ''}{growth.toFixed(0)}%
-                                                                    {growth > 0 ? <TrendingUp size={8} /> : <TrendingDown size={8} />}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                );
-                                            })}
-                                            <td className="p-2 text-center">
-                                                {(() => {
-                                                    const points = tableData.periods
-                                                        .slice()
-                                                        .map((p) => row.values[p]?.val)
-                                                        .filter((value): value is number =>
-                                                            typeof value === 'number' && Number.isFinite(value)
-                                                        );
-
-                                                    if (points.length < 2) {
-                                                        return <span className="text-[10px] text-muted-foreground">—</span>;
-                                                    }
-
-                                                    return <Sparkline data={points} width={70} height={18} />;
-                                                })()}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                            <DenseFinancialTable
+                                columns={denseColumns}
+                                rows={denseRows}
+                                maxYears={denseColumns.length || 1}
+                                storageKey={`financials:${symbol}:${activeTab}:${period}`}
+                                valueFormatter={(value, row) => {
+                                    const meta = denseRowMeta.get(row.id)
+                                    const numericValue = typeof value === 'number' ? value : Number(value)
+                                    if (meta?.isPct) {
+                                        return formatPct(Number.isFinite(numericValue) ? numericValue : null)
+                                    }
+                                    if (activeTab === 'ratios') {
+                                        return formatRatio(Number.isFinite(numericValue) ? numericValue : null)
+                                    }
+                                    return formatUnitValuePlain(Number.isFinite(numericValue) ? numericValue : null, tableScale, unitConfig)
+                                }}
+                            />
                         </div>
                     )}
                 </div>

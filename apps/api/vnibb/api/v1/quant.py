@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 SUPPORTED_METRICS = (
+    "seasonality",
     "volume_delta",
     "rsi_seasonal",
     "gap_stats",
@@ -47,6 +48,9 @@ DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
 ALLOWED_QUANT_PERIODS = ("6M", "1Y", "3Y", "5Y")
 QUANT_STALE_DAYS_THRESHOLD = 7
 METRIC_ALIASES = {
+    "seasonality": "seasonality",
+    "seasonality_heatmap": "seasonality",
+    "seasonality-heatmap": "seasonality",
     "volume_flow": "volume_delta",
     "volume-flow": "volume_delta",
     "rsi_seasonal": "rsi_seasonal",
@@ -150,6 +154,7 @@ def _normalize_metric_name(value: str) -> str:
 
 def _get_quant_calculators() -> Dict[str, Callable[[pd.DataFrame], Dict[str, Any]]]:
     return {
+        "seasonality": _compute_seasonality,
         "volume_delta": _compute_volume_delta,
         "rsi_seasonal": _compute_rsi_seasonal,
         "gap_stats": _compute_gap_stats,
@@ -320,6 +325,59 @@ async def _load_quant_frame_with_warning(
         _build_staleness_warning(frame, end_date),
         latest_quote_warning,
     )
+
+
+def _compute_seasonality(frame: pd.DataFrame) -> Dict[str, Any]:
+    enriched = frame.copy()
+    enriched["time"] = pd.to_datetime(enriched["time"], errors="coerce")
+    enriched = enriched.dropna(subset=["time", "close"]).sort_values("time")
+
+    monthly_returns: List[Dict[str, Any]] = []
+    for period_key, period_frame in enriched.groupby(enriched["time"].dt.to_period("M")):
+        closes = period_frame["close"].astype(float)
+        if closes.empty:
+            continue
+        first_close = closes.iloc[0]
+        last_close = closes.iloc[-1]
+        if not first_close or np.isnan(first_close):
+            continue
+        monthly_returns.append(
+            {
+                "year": int(period_key.year),
+                "month": int(period_key.month),
+                "label": MONTH_LABELS.get(int(period_key.month), str(period_key.month)),
+                "return_pct": _safe_float(((last_close - first_close) / first_close) * 100, 2),
+            }
+        )
+
+    monthly_df = pd.DataFrame(monthly_returns)
+    if monthly_df.empty:
+        return {
+            "monthly_returns": [],
+            "monthly_average_return_pct": _build_month_map(pd.Series(dtype=float), decimals=2),
+            "best_month": None,
+            "worst_month": None,
+            "hit_rate_pct": None,
+            "current_month": None,
+        }
+
+    avg_by_month = monthly_df.groupby("month")["return_pct"].mean()
+    hit_rate = (
+        float((monthly_df["return_pct"] > 0).sum()) / float(len(monthly_df)) * 100
+        if len(monthly_df)
+        else None
+    )
+    best_idx = avg_by_month.idxmax() if not avg_by_month.empty else None
+    worst_idx = avg_by_month.idxmin() if not avg_by_month.empty else None
+
+    return {
+        "monthly_returns": monthly_returns,
+        "monthly_average_return_pct": _build_month_map(avg_by_month, decimals=2),
+        "best_month": MONTH_LABELS.get(int(best_idx), None) if best_idx is not None else None,
+        "worst_month": MONTH_LABELS.get(int(worst_idx), None) if worst_idx is not None else None,
+        "hit_rate_pct": _safe_float(hit_rate, 2),
+        "current_month": monthly_returns[-1] if monthly_returns else None,
+    }
 
 
 async def _get_quant_metric_alias_response(
@@ -2081,6 +2139,22 @@ async def get_volume_flow_metric(
     return await _get_quant_metric_alias_response(
         symbol=symbol,
         metric_name="volume-flow",
+        period=period,
+        source=source,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/seasonality", response_model=StandardResponse[Dict[str, Any]])
+async def get_seasonality_metric(
+    symbol: str,
+    period: str = Query(default="5Y"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="seasonality",
         period=period,
         source=source,
         db=db,
