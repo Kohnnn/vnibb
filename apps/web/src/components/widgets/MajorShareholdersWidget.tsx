@@ -51,6 +51,7 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
     const treatOwnershipAsRatio =
         ownershipValues.length > 0 && ownershipValues.every((value) => Math.abs(value) <= 1);
     const hasData = shareholders.length > 0;
+    const hasMeaningfulData = shareholders.length >= 2;
     const isFallback = Boolean(error && hasData);
 
     if (!symbol) {
@@ -79,6 +80,10 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
                     <WidgetError error={error as Error} onRetry={() => refetch()} />
                 ) : !hasData ? (
                     <WidgetEmpty message="No shareholders data" icon={<Users size={18} />} />
+                ) : !hasMeaningfulData ? (
+                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-4 text-center text-xs text-[var(--text-muted)]">
+                        No meaningful ownership data available yet.
+                    </div>
                 ) : (
                     <table className="data-table w-full text-xs">
                         <thead className="text-[var(--text-muted)]">

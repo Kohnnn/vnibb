@@ -88,7 +88,7 @@ async def get_price_board(
     sorted_symbols = ",".join(sorted(symbol_list))
     cache_key = build_cache_key("vnibb", "priceboard", sorted_symbols, source)
 
-    # Check cache first (1 minute TTL)
+    # Check cache first (15 minute TTL)
     try:
         cached = await redis_client.get_json(cache_key)
         if cached:
@@ -164,11 +164,11 @@ async def get_top_movers(
 
         logger.info(f"Top movers fetch returned {len(data)} items")
 
-        # Store in cache with 1 minute TTL
+        # Store in cache with 15 minute TTL for slower market-wide payloads
         if data:
             try:
                 await redis_client.set_json(
-                    cache_key, [d.model_dump(mode="json") for d in data], ttl=60
+                    cache_key, [d.model_dump(mode="json") for d in data], ttl=900
                 )
             except Exception as e:
                 logger.debug(f"Cache write failed: {e}")
@@ -229,7 +229,7 @@ async def get_sector_top_movers(
         if data:
             try:
                 await redis_client.set_json(
-                    cache_key, [d.model_dump(mode="json") for d in data], ttl=60
+                    cache_key, [d.model_dump(mode="json") for d in data], ttl=900
                 )
             except Exception:
                 pass

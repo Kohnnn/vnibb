@@ -9,6 +9,9 @@ import {
   X,
   MoreHorizontal,
   Settings2,
+  LayoutGrid,
+  Lock,
+  Unlock,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react'
@@ -70,21 +73,6 @@ function normalizeIndexName(value: string | null | undefined): string {
     .replace(/[^A-Z0-9]/g, '')
 }
 
-function getSparklinePoints(values: number[]): string {
-  if (values.length < 2) return ''
-  const max = Math.max(...values)
-  const min = Math.min(...values)
-  const range = max - min || 1
-
-  return values
-    .map((value, index) => {
-      const x = (index / (values.length - 1)) * 100
-      const y = 100 - ((value - min) / range) * 100
-      return `${x.toFixed(2)},${y.toFixed(2)}`
-    })
-    .join(' ')
-}
-
 function getVietnamMarketStatus(reference = new Date()): { label: string; isOpen: boolean } {
   const formatter = new Intl.DateTimeFormat('en-GB', {
     timeZone: MARKET_TIMEZONE,
@@ -142,7 +130,7 @@ export function Header({
   const [isSearching, setIsSearching] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const hasActionMenu = Boolean(
-    onAutoFitLayout || onResetLayout || onCollapseAll || onExpandAll || onEditToggle
+    onResetLayout || onCollapseAll || onExpandAll || onAIClick
   )
   const { resolvedTheme, setTheme } = useTheme()
   const [marketClock, setMarketClock] = useState(() => Date.now())
@@ -156,15 +144,6 @@ export function Header({
   })
 
   const quote = quoteQuery.data
-  const sparklineValues = useMemo(() => {
-    const points = historyQuery.data?.data || []
-    return points
-      .slice(-20)
-      .map((point) => point.close)
-      .filter((value): value is number => Number.isFinite(value))
-  }, [historyQuery.data])
-
-  const sparklinePoints = useMemo(() => getSparklinePoints(sparklineValues), [sparklineValues])
   const displayQuoteChangePct = useMemo(() => {
     if (quote?.changePct != null) return quote.changePct
 
@@ -351,16 +330,6 @@ export function Header({
                   </span>
                 </div>
               </div>
-              {sparklinePoints && (
-                <svg viewBox="0 0 100 28" className="h-7 w-20 shrink-0" aria-hidden="true">
-                  <polyline
-                    fill="none"
-                    stroke={quoteIsPositive ? '#34d399' : '#f87171'}
-                    strokeWidth="2"
-                    points={sparklinePoints}
-                  />
-                </svg>
-              )}
             </div>
 
             <div className="hidden min-w-0 items-center gap-2 xl:flex">
@@ -505,6 +474,37 @@ export function Header({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {onAutoFitLayout && (
+            <button
+              type="button"
+              onClick={onAutoFitLayout}
+              className="inline-flex items-center gap-1.5 rounded-md border border-sky-500/30 bg-sky-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-sky-200 transition-colors hover:bg-sky-500/20 hover:text-sky-100"
+              title="Automatically arrange widgets to fill gaps"
+              aria-label="Auto-fit layout"
+            >
+              <LayoutGrid size={13} />
+              <span className="hidden sm:inline">Auto-Fit</span>
+            </button>
+          )}
+
+          {onEditToggle && (
+            <button
+              type="button"
+              onClick={onEditToggle}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-semibold transition-colors',
+                isEditing
+                  ? 'border-amber-400/40 bg-amber-500/15 text-amber-100 shadow-[0_0_0_1px_rgba(251,191,36,0.18)]'
+                  : 'border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              )}
+              title="Lock or unlock dashboard layout for editing"
+              aria-label={isEditing ? 'Editing enabled' : 'Layout locked'}
+            >
+              {isEditing ? <Unlock size={13} className="animate-pulse" /> : <Lock size={13} />}
+              <span className="hidden sm:inline">{isEditing ? 'Editing' : 'Layout Locked'}</span>
+            </button>
+          )}
+
           {hasActionMenu && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -516,11 +516,6 @@ export function Header({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[180px]">
-                {onAutoFitLayout && (
-                  <DropdownMenuItem onClick={onAutoFitLayout} className="text-xs">
-                    Auto-fit layout
-                  </DropdownMenuItem>
-                )}
                 {onResetLayout && (
                   <DropdownMenuItem onClick={onResetLayout} className="text-xs">
                     Reset layout
@@ -546,14 +541,6 @@ export function Header({
                   <DropdownMenuItem onClick={onExpandAll} className="text-xs">
                     Expand all widgets
                   </DropdownMenuItem>
-                )}
-                {onEditToggle && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={onEditToggle} className="text-xs">
-                      {isEditing ? 'Lock Editing' : 'Unlock Editing'}
-                    </DropdownMenuItem>
-                  </>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>

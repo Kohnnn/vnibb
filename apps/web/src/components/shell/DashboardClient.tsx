@@ -520,6 +520,7 @@ function DashboardContent() {
                                                 <WidgetWrapper
                                                     id={widget.id}
                                                     title={widgetTitle}
+                                                    widgetType={widgetType}
                                                     symbol={globalSymbol}
                                                     tabId={activeTab.id}
                                                     dashboardId={activeDashboard.id}

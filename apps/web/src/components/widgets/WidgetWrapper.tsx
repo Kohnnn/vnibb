@@ -23,6 +23,7 @@ import {
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { WidgetGroupId } from '@/types/widget';
+import type { WidgetType } from '@/types/dashboard';
 import { TickerCombobox } from './TickerCombobox';
 import {
     WidgetParameterDropdown,
@@ -60,6 +61,7 @@ export interface WidgetMultiSelectParam {
 export interface WidgetWrapperProps {
     id: string; // Widget Instance ID
     title: string;
+    widgetType: WidgetType;
     children: ReactNode;
     symbol?: string; // Current symbol passed to child
     tabId: string;
@@ -87,6 +89,7 @@ export interface WidgetWrapperProps {
 export function WidgetWrapper({
     id,
     title,
+    widgetType,
     children,
     symbol,
     tabId,
@@ -324,6 +327,7 @@ export function WidgetWrapper({
             >
                 <WidgetToolbar
                     title={title}
+                    widgetType={widgetType}
                     symbol={displaySymbol}
                     isEditing={isEditing}
                     showSymbolSelector={showTickerSelector}

@@ -206,3 +206,32 @@ docker system df
 - Reference:
   - [Oracle Cloud Free Tier](https://www.oracle.com/cloud/free/)
   - [Oracle Compute shapes documentation](https://docs.oracle.com/iaas/Content/Compute/References/computeshapes.htm)
+
+### Cost overrun quick check (Always Free)
+
+Use this checklist before and after each deployment to confirm OCI usage remains in Always Free.
+
+Official Always Free thresholds (home region):
+- Compute (A1 Flex): up to 4 OCPUs and 24 GB RAM equivalent usage
+- Block + boot volumes combined: up to 200 GB
+- Outbound data transfer: up to 10 TB/month
+
+Console path for all checks:
+- `Governance & Administration -> Limits, Quotas and Usage`
+
+What to verify:
+1. Compute usage is below A1 Always Free limits (OCPU + memory)
+2. No accidental paid shapes are running (non-Always-Free compute)
+3. Boot + block volumes combined remain <= 200 GB
+4. Monthly outbound data transfer remains <= 10 TB
+5. Resources are provisioned in the tenancy home region when required by Always Free
+
+Recommended VNIBB guardrails:
+- Keep one primary `VM.Standard.A1.Flex` backend host
+- Keep default/lean boot volumes and avoid extra block volumes
+- Use one reserved public IP for stable DNS cutover
+- Treat additional compute nodes, larger volumes, and managed OCI add-ons as potential paid expansion
+
+Pass/fail rule:
+- PASS: all five checks are within thresholds
+- FAIL: any single threshold is exceeded or paid shape usage appears

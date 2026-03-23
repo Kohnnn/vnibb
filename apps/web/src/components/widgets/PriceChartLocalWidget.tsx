@@ -9,7 +9,7 @@ import { getChartData } from '@/lib/api';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 
 // Period options for the chart
-const PERIODS = ['1M', '3M', '6M', '1Y', '3Y', '5Y', '10Y'] as const;
+const PERIODS = ['1M', '3M', '6M', '1Y', '3Y', '5Y'] as const;
 type Period = (typeof PERIODS)[number];
 
 // Chart display types
@@ -71,7 +71,7 @@ export function PriceChartLocalWidget({
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const requestTimeoutRef = useRef<number | null>(null);
 
-  const [period, setPeriod] = useState<Period>('10Y');
+  const [period, setPeriod] = useState<Period>('1Y');
   const [chartType, setChartType] = useState<ChartType>('Candlestick');
   const [data, setData] = useState<ChartDataPoint[]>([]);
   const [isLoading, setIsLoading] = useState(false);

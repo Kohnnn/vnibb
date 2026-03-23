@@ -43,6 +43,7 @@ export function ExampleWidget({
         <WidgetWrapper
             id={id}
             title="Example Widget"
+            widgetType="ticker_info"
             symbol={symbol}
             tabId={tabId}
             dashboardId={dashboardId}

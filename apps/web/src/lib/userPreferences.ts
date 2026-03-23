@@ -5,9 +5,12 @@ export const USER_PREFERENCES_STORAGE_KEY = 'vnibb-user-preferences'
 export type DefaultTabPreference =
   | 'overview'
   | 'equity-analysis'
-  | 'quant-technical'
+  | 'quant'
+  | 'technical'
+  | 'trading'
   | 'comparison'
   | 'fundamentals'
+  | 'market'
   | 'news-events'
 
 export interface UserPreferences {
@@ -20,9 +23,12 @@ export const DEFAULT_TAB: DefaultTabPreference = 'overview'
 export const DEFAULT_TAB_OPTIONS: Array<{ value: DefaultTabPreference; label: string }> = [
   { value: 'overview', label: 'Overview' },
   { value: 'equity-analysis', label: 'Equity Analysis' },
-  { value: 'quant-technical', label: 'Quant & Technical' },
+  { value: 'quant', label: 'Quant' },
+  { value: 'technical', label: 'Technical' },
+  { value: 'trading', label: 'Trading' },
   { value: 'comparison', label: 'Comparison' },
   { value: 'fundamentals', label: 'Fundamentals' },
+  { value: 'market', label: 'Market' },
   { value: 'news-events', label: 'News & Events' },
 ]
 
@@ -45,13 +51,21 @@ function normalizeTabKey(rawValue: string | null | undefined): DefaultTabPrefere
     case 'quant-technical':
     case 'quant-and-technical':
     case 'quant':
+      return 'quant'
     case 'technical':
-      return 'quant-technical'
+      return 'technical'
+    case 'trading':
+    case 'trade':
+      return 'trading'
     case 'comparison':
       return 'comparison'
     case 'fundamentals':
     case 'fundamental':
       return 'fundamentals'
+    case 'market':
+    case 'market-analysis':
+    case 'macro':
+      return 'market'
     case 'news-events':
     case 'news-and-events':
     case 'news':

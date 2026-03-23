@@ -645,6 +645,30 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultConfig: {},
         defaultLayout: { w: 5, h: 6, minW: 4, minH: 5 }
     },
+    {
+        type: 'signal_summary',
+        name: 'Signal Summary',
+        description: 'Unified BUY/SELL/HOLD view with confidence and key trade levels',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'ichimoku',
+        name: 'Ichimoku Cloud',
+        description: 'Cloud structure, trend state, and conversion/base-line behavior',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 }
+    },
+    {
+        type: 'fibonacci',
+        name: 'Fibonacci Retracement',
+        description: 'Recent swing map with retracement and extension levels',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 }
+    },
 
     // Global & Utility
     {
