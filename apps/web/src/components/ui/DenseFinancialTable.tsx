@@ -59,6 +59,13 @@ function defaultFormatter(value: number | string | null | undefined): string {
   return String(value)
 }
 
+function isEmphasisRow(row: DenseTableRow): boolean {
+  if (row.isGroup) return true
+  return /^(total|net income|gross profit|operating income|ebit|ebitda|shareholders'? equity|owners'? equity|cash and cash equivalents)/i.test(
+    row.label.trim()
+  )
+}
+
 function sortRowsByColumn(
   rowItems: DenseTableRow[],
   columnKey: string,
@@ -261,11 +268,15 @@ export function DenseFinancialTable({
                 className={cn(
                   'border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-hover)]',
                   rowIndex % 2 === 1 && !row.isGroup ? 'bg-[var(--bg-secondary)]/30' : '',
-                  row.isGroup ? 'bg-[var(--bg-surface)] font-semibold' : ''
+                  row.isGroup ? 'bg-[var(--bg-surface)] font-semibold' : '',
+                  isEmphasisRow(row) && !row.isGroup ? 'border-t border-[var(--border-default)] bg-[var(--bg-surface)]/55 font-semibold' : ''
                 )}
               >
                 <td
-                  className="px-2 py-1.5 text-[var(--text-secondary)]"
+                  className={cn(
+                    'px-2 py-1 text-[var(--text-secondary)]',
+                    isEmphasisRow(row) ? 'text-[var(--text-primary)]' : ''
+                  )}
                   style={row.indent ? { paddingLeft: `${8 + row.indent}px` } : undefined}
                 >
                   {row.isGroup ? (
@@ -315,7 +326,7 @@ export function DenseFinancialTable({
                       key={`${row.id}:${column.key}`}
                       data-type="number"
                         className={cn(
-                          'px-2 py-1.5 font-mono text-[var(--text-primary)]',
+                          'px-2 py-1 font-mono text-[var(--text-primary)]',
                           column.align === 'left' ? 'text-left' : 'text-right'
                         )}
                     >
@@ -338,7 +349,7 @@ export function DenseFinancialTable({
                 })}
 
                 {showTrend ? (
-                  <td className="px-2 py-1.5 text-center">
+                  <td className="px-2 py-1 text-center">
                     {trendValues.length < 2 ? (
                       <span className="text-[10px] text-[var(--text-muted)]">-</span>
                     ) : (

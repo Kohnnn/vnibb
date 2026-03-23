@@ -20,6 +20,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { CompanyLogo } from '@/components/ui/CompanyLogo'
 import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { Sparkline } from '@/components/ui/Sparkline'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import {
   compareStocks,
@@ -69,6 +70,24 @@ const COLOR_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#14b8a6', '#
 const PERFORMANCE_PERIODS = ['1M', '3M', '6M', '1Y', '3Y', '5Y', 'YTD', 'ALL'] as const
 const MAX_SYMBOLS = 5
 const MIN_SYMBOLS = 2
+const LOWER_IS_BETTER_METRICS = new Set([
+  'pe',
+  'pe_ratio',
+  'pb',
+  'pb_ratio',
+  'ps',
+  'ps_ratio',
+  'ev_ebitda',
+  'ev_sales',
+  'peg_ratio',
+  'debt_equity',
+  'debt_assets',
+  'equity_multiplier',
+])
+
+function isLowerBetterMetric(metricId: string): boolean {
+  return LOWER_IS_BETTER_METRICS.has(metricId)
+}
 
 type PerformancePeriod = (typeof PERFORMANCE_PERIODS)[number]
 
@@ -261,6 +280,16 @@ function ComparisonAnalysisWidgetComponent({
     () => normalizePerformanceData(performanceQuery.data),
     [performanceQuery.data]
   )
+  const symbolTrendMap = useMemo(() => {
+    return symbols.reduce<Record<string, number[]>>((acc, ticker) => {
+      const series = performanceSeries
+        .map((row) => row[ticker])
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+        .slice(-12)
+      acc[ticker] = series
+      return acc
+    }, {})
+  }, [performanceSeries, symbols])
   const hasPerformanceData = performanceSeries.length > 0
   const { timedOut: comparisonTimedOut, resetTimeout: resetComparisonTimeout } =
     useLoadingTimeout(comparisonQuery.isLoading && !hasData)
@@ -311,6 +340,9 @@ function ComparisonAnalysisWidgetComponent({
       .filter((value: unknown): value is number => typeof value === 'number' && Number.isFinite(value))
 
     if (values.length === 0) return { best: null, worst: null }
+    if (isLowerBetterMetric(metricId)) {
+      return { best: Math.min(...values), worst: Math.max(...values) }
+    }
     return { best: Math.max(...values), worst: Math.min(...values) }
   }
 
@@ -611,7 +643,7 @@ function ComparisonAnalysisWidgetComponent({
                             )}
                           >
                             <div className="inline-flex items-center gap-1">
-                              <span>{label}</span>
+                              <span className="font-semibold">{label}</span>
                               {!isMissing && isBest && <TrendingUp size={10} className="opacity-70" />}
                               {!isMissing && isWorst && <TrendingDown size={10} className="opacity-70" />}
                             </div>
@@ -683,8 +715,16 @@ function ComparisonAnalysisWidgetComponent({
                     const numericValues = symbols
                       .map((ticker) => ratioRowBySymbol[ticker]?.[column.key])
                       .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-                    const best = numericValues.length ? Math.max(...numericValues) : null
-                    const worst = numericValues.length ? Math.min(...numericValues) : null
+                    const best = numericValues.length
+                      ? isLowerBetterMetric(String(column.key))
+                        ? Math.min(...numericValues)
+                        : Math.max(...numericValues)
+                      : null
+                    const worst = numericValues.length
+                      ? isLowerBetterMetric(String(column.key))
+                        ? Math.max(...numericValues)
+                        : Math.min(...numericValues)
+                      : null
 
                     return (
                       <tr
@@ -704,6 +744,7 @@ function ComparisonAnalysisWidgetComponent({
                           const label = formatRatioGridValue(numericValue, column.format)
                           const isBest = numericValue !== null && best !== null && numericValue === best
                           const isWorst = numericValue !== null && worst !== null && numericValue === worst
+                          const trendSeries = symbolTrendMap[ticker] || []
 
                           return (
                             <td
@@ -720,10 +761,11 @@ function ComparisonAnalysisWidgetComponent({
                                       : 'text-[var(--text-primary)]'
                               )}
                             >
-                              <div className="inline-flex items-center gap-1">
-                                <span>{label}</span>
+                              <div className="inline-flex items-center gap-2">
+                                <span className="font-semibold">{label}</span>
                                 {label !== EMPTY_VALUE && isBest && <TrendingUp size={10} className="opacity-70" />}
                                 {label !== EMPTY_VALUE && isWorst && <TrendingDown size={10} className="opacity-70" />}
+                                {trendSeries.length >= 2 ? <Sparkline data={trendSeries} width={48} height={14} /> : null}
                               </div>
                             </td>
                           )

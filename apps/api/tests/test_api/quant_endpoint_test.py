@@ -308,6 +308,51 @@ async def test_load_price_frame_refreshes_stale_db_rows_with_provider_data(
 
 
 @pytest.mark.asyncio
+async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_db, monkeypatch):
+    async def fake_load_price_frame(*_args, **_kwargs):
+        return pd.DataFrame(
+            [
+                {
+                    "time": pd.Timestamp("2026-03-20"),
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.5,
+                    "close": 100.5,
+                    "volume": 1_000_000,
+                }
+            ]
+        )
+
+    class DummyQuote:
+        price = 103.2
+        open = 101.2
+        high = 104.0
+        low = 100.8
+        volume = 1_250_000
+        updated_at = pd.Timestamp("2026-03-21 10:15:00")
+
+    async def fake_fetch_quote(*_args, **_kwargs):
+        return DummyQuote(), False
+
+    monkeypatch.setattr(quant, "_load_price_frame", fake_load_price_frame)
+    monkeypatch.setattr(quant.VnstockStockQuoteFetcher, "fetch", fake_fetch_quote)
+
+    frame, warning = await quant._load_quant_frame_with_warning(
+        db=test_db,
+        symbol="VCI",
+        start_date=date(2026, 3, 1),
+        end_date=date(2026, 3, 21),
+        source="KBS",
+        period="1Y",
+    )
+
+    assert frame["close"].tolist()[-1] == 103.2
+    assert frame["time"].dt.date.tolist()[-1] == date(2026, 3, 21)
+    assert warning is not None
+    assert "latest quote" in warning.lower()
+
+
+@pytest.mark.asyncio
 async def test_smart_money_endpoint_survives_price_frame_loader_failure(
     client,
     test_db,

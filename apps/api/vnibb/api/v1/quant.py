@@ -25,6 +25,7 @@ from vnibb.providers.vnstock.equity_historical import (
     EquityHistoricalQueryParams,
     VnstockEquityHistoricalFetcher,
 )
+from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -232,6 +233,67 @@ def _merge_warnings(*warnings: str | None) -> str | None:
     return " ".join(parts) if parts else None
 
 
+async def _merge_latest_quote_into_frame(
+    frame: pd.DataFrame,
+    *,
+    symbol: str,
+    source: str,
+) -> tuple[pd.DataFrame, str | None]:
+    if frame.empty:
+        return frame, None
+
+    try:
+        quote, _ = await VnstockStockQuoteFetcher.fetch(symbol=symbol, source=source)
+    except Exception as exc:
+        logger.debug("Quant latest quote merge skipped for %s: %s", symbol, exc)
+        return frame, None
+
+    quote_price = getattr(quote, "price", None)
+    quote_time = getattr(quote, "updated_at", None)
+    if quote_price is None or quote_time is None:
+        return frame, None
+
+    quote_timestamp = pd.to_datetime(quote_time, errors="coerce")
+    if pd.isna(quote_timestamp):
+        return frame, None
+    if getattr(quote_timestamp, "tzinfo", None) is not None:
+        quote_timestamp = quote_timestamp.tz_localize(None)
+
+    merged = frame.copy().sort_values("time").reset_index(drop=True)
+    last_row = merged.iloc[-1]
+    quote_date = quote_timestamp.normalize()
+    last_date = pd.to_datetime(last_row["time"], errors="coerce")
+    if pd.isna(last_date):
+        return frame, None
+    last_date = last_date.normalize()
+
+    if quote_date < last_date:
+        return frame, None
+
+    fallback_open = float(last_row.get("close") or quote_price)
+    latest_row = {
+        "time": quote_timestamp,
+        "open": float(getattr(quote, "open", None) or fallback_open),
+        "high": float(
+            getattr(quote, "high", None)
+            or max(float(last_row.get("high") or quote_price), float(quote_price))
+        ),
+        "low": float(
+            getattr(quote, "low", None)
+            or min(float(last_row.get("low") or quote_price), float(quote_price))
+        ),
+        "close": float(quote_price),
+        "volume": float(getattr(quote, "volume", None) or last_row.get("volume") or 0),
+    }
+
+    if quote_date == last_date:
+        merged.loc[merged.index[-1], list(latest_row.keys())] = list(latest_row.values())
+        return merged, "Merged latest quote into current session calculations."
+
+    merged = pd.concat([merged, pd.DataFrame([latest_row])], ignore_index=True)
+    return merged, "Appended latest quote snapshot to quant calculations."
+
+
 async def _load_quant_frame_with_warning(
     *,
     db: AsyncSession,
@@ -248,9 +310,15 @@ async def _load_quant_frame_with_warning(
         end_date=end_date,
         source=source,
     )
+    frame, latest_quote_warning = await _merge_latest_quote_into_frame(
+        frame,
+        symbol=symbol,
+        source=source,
+    )
     return frame, _merge_warnings(
         _build_period_warning(frame, start_date, period),
         _build_staleness_warning(frame, end_date),
+        latest_quote_warning,
     )
 
 

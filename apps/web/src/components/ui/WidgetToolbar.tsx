@@ -84,8 +84,8 @@ export function WidgetToolbar({
             >
               <Info size={12} />
             </button>
-            <div className="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden w-72 rounded-xl border border-[var(--border-default)] bg-[rgba(10,15,26,0.96)] p-3 text-left shadow-2xl group-hover:block group-focus-within:block">
-              <div className="space-y-2 text-[11px] leading-5 text-slate-100">
+            <div className="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden w-[26rem] rounded-xl border border-[var(--border-default)] bg-[rgba(10,15,26,0.97)] p-3 text-left shadow-2xl group-hover:block group-focus-within:block">
+              <div className="max-h-[26rem] space-y-3 overflow-y-auto pr-1 text-[11px] leading-5 text-slate-100">
                 <div>
                   <div className="mb-0.5 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">Purpose</div>
                   <p className="text-slate-100/90">{description.purpose}</p>
@@ -98,6 +98,36 @@ export function WidgetToolbar({
                   <div className="mb-0.5 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">Interpretation</div>
                   <p className="text-slate-100/82">{description.interpretation}</p>
                 </div>
+                {description.advanced_insights?.length ? (
+                  <div>
+                    <div className="mb-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-200/80">Advanced Insights</div>
+                    <div className="space-y-1.5 text-slate-100/84">
+                      {description.advanced_insights.map((item) => (
+                        <p key={item}>- {item}</p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {description.limitations?.length ? (
+                  <div>
+                    <div className="mb-1 text-[10px] font-black uppercase tracking-[0.18em] text-amber-200/85">Limitations</div>
+                    <div className="space-y-1.5 text-slate-100/78">
+                      {description.limitations.map((item) => (
+                        <p key={item}>- {item}</p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {description.pro_tips?.length ? (
+                  <div>
+                    <div className="mb-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-200/85">Pro Tips</div>
+                    <div className="space-y-1.5 text-slate-100/82">
+                      {description.pro_tips.map((item) => (
+                        <p key={item}>- {item}</p>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
