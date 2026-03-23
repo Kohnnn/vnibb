@@ -39,13 +39,20 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 9;
+const CURRENT_MIGRATION_VERSION = 10;
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
 const LEGACY_STALE_TAB_RE = /^new\s+tab(?:\s+\d+)?$/i;
-const MAIN_DASHBOARD_ID = 'main-default';
-const MAIN_DASHBOARD_NAME = 'Main System Dashboard';
+const LEGACY_MAIN_DASHBOARD_ID = 'main-default';
+const LEGACY_MAIN_DASHBOARD_NAME = 'Main System Dashboard';
+const INITIAL_FOLDER_ID = 'folder-initial';
+const INITIAL_FOLDER_NAME = 'Initial';
+const MAIN_DASHBOARD_ID = 'default-fundamental';
+const MAIN_DASHBOARD_NAME = 'Fundamental';
+const TECHNICAL_DASHBOARD_ID = 'default-technical';
+const QUANT_DASHBOARD_ID = 'default-quant';
+const SYSTEM_DASHBOARD_IDS = new Set([MAIN_DASHBOARD_ID, TECHNICAL_DASHBOARD_ID, QUANT_DASHBOARD_ID]);
 
 // ============================================================================
 // Default Data & Templates
@@ -118,7 +125,7 @@ const QUANT_TEMPLATE: TemplateWidget[] = [
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 24, h: 6, minW: 12, minH: 5 }
+        layout: { x: 0, y: 34, w: 24, h: 6, minW: 12, minH: 5 }
     },
     {
         type: 'seasonality_heatmap',
@@ -194,7 +201,7 @@ const TECHNICAL_TEMPLATE: TemplateWidget[] = [
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 24, h: 6, minW: 12, minH: 5 }
+        layout: { x: 0, y: 35, w: 24, h: 6, minW: 12, minH: 5 }
     },
     {
         type: 'ichimoku',
@@ -402,7 +409,7 @@ const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 24, h: 6, minW: 12, minH: 5 }
+        layout: { x: 0, y: 34, w: 24, h: 6, minW: 12, minH: 5 }
     },
     {
         type: 'seasonality_heatmap',
@@ -477,7 +484,7 @@ const MAIN_TECHNICAL_TEMPLATE: TemplateWidget[] = [
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 24, h: 6, minW: 12, minH: 5 }
+        layout: { x: 0, y: 35, w: 24, h: 6, minW: 12, minH: 5 }
     },
     {
         type: 'ichimoku',
@@ -703,6 +710,141 @@ const MAIN_NEWS_TEMPLATE: TemplateWidget[] = [
         syncGroupId: 1,
         config: {},
         layout: { x: 12, y: 8, w: 12, h: 6, minW: 8, minH: 4 }
+    },
+];
+
+const INITIAL_FUNDAMENTAL_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'ticker_info',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 8, h: 3, minW: 6, minH: 2 }
+    },
+    {
+        type: 'ticker_profile',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 0, w: 8, h: 6, minW: 6, minH: 4 }
+    },
+    {
+        type: 'institutional_ownership',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 0, w: 8, h: 6, minW: 6, minH: 4 }
+    },
+    {
+        type: 'financial_ratios',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 6, w: 24, h: 8, minW: 12, minH: 6 }
+    },
+    {
+        type: 'income_statement',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 14, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'balance_sheet',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 14, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'cash_flow',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 22, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'major_shareholders',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 22, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+];
+
+const INITIAL_TECHNICAL_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'price_chart',
+        syncGroupId: 1,
+        config: { timeframe: '1Y', chartType: 'candle' },
+        layout: { x: 0, y: 0, w: 24, h: 8, minW: 12, minH: 6 }
+    },
+    {
+        type: 'ichimoku',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 8, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'fibonacci',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 8, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'macd_crossovers',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 16, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'technical_snapshot',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 16, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'bollinger_squeeze',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 16, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'signal_summary',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 23, w: 24, h: 6, minW: 12, minH: 5 }
+    },
+];
+
+const INITIAL_QUANT_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'seasonality_heatmap',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'sortino_monthly',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 0, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'drawdown_recovery',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 8, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'gap_analysis',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 8, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'correlation_matrix',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 8, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'signal_summary',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 15, w: 24, h: 6, minW: 12, minH: 5 }
     },
 ];
 
@@ -1091,18 +1233,41 @@ const createMainDashboardTabs = (): DashboardTab[] => {
     ];
 };
 
-const createMainSystemDashboard = (): Dashboard => {
+const createInitialFolder = (): DashboardFolder => ({
+    id: INITIAL_FOLDER_ID,
+    name: INITIAL_FOLDER_NAME,
+    order: 0,
+    isExpanded: true,
+});
+
+const createSystemDashboard = (
+    id: string,
+    name: string,
+    template: TemplateWidget[],
+    order: number,
+    description: string,
+): Dashboard => {
     const timestamp = new Date().toISOString();
+    const tabId = `tab-${id}-primary`;
+
     return {
-        id: MAIN_DASHBOARD_ID,
-        name: MAIN_DASHBOARD_NAME,
-        description: 'Read-only system dashboard showcasing VNIBB core capabilities.',
-        order: 0,
-        isDefault: true,
+        id,
+        name,
+        description,
+        folderId: INITIAL_FOLDER_ID,
+        order,
+        isDefault: order === 0,
         isEditable: false,
         isDeletable: false,
         showGroupLabels: true,
-        tabs: createMainDashboardTabs(),
+        tabs: [
+            {
+                id: tabId,
+                name,
+                order: 0,
+                widgets: createWidgetsFromTemplate(template, tabId),
+            },
+        ],
         syncGroups: [
             { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: DEFAULT_TICKER },
         ],
@@ -1111,13 +1276,60 @@ const createMainSystemDashboard = (): Dashboard => {
     };
 };
 
+const createMainSystemDashboard = (): Dashboard => {
+    return createSystemDashboard(
+        MAIN_DASHBOARD_ID,
+        MAIN_DASHBOARD_NAME,
+        INITIAL_FUNDAMENTAL_TEMPLATE,
+        0,
+        'Default fundamental workspace with ownership and financial statement context.',
+    );
+};
+
+const createTechnicalSystemDashboard = (): Dashboard => {
+    return createSystemDashboard(
+        TECHNICAL_DASHBOARD_ID,
+        'Technical',
+        INITIAL_TECHNICAL_TEMPLATE,
+        1,
+        'Default technical workspace with chart structure, momentum, and conclusion signal.',
+    );
+};
+
+const createQuantSystemDashboard = (): Dashboard => {
+    return createSystemDashboard(
+        QUANT_DASHBOARD_ID,
+        'Quant',
+        INITIAL_QUANT_TEMPLATE,
+        2,
+        'Default quant workspace focused on seasonality, drawdown, and cross-metric context.',
+    );
+};
+
+const ensureInitialFolderPresent = (folders: DashboardFolder[]): DashboardFolder[] => {
+    const validFolders = Array.isArray(folders) ? folders.filter(Boolean) : [];
+    const existingInitial = validFolders.find(
+        (folder) => folder.id === INITIAL_FOLDER_ID || folder.name.trim().toLowerCase() === INITIAL_FOLDER_NAME.toLowerCase()
+    );
+    const initialFolder = existingInitial
+        ? { ...existingInitial, id: INITIAL_FOLDER_ID, name: INITIAL_FOLDER_NAME, order: 0, isExpanded: true }
+        : createInitialFolder();
+
+    const otherFolders = validFolders
+        .filter((folder) => folder.id !== existingInitial?.id && folder.id !== INITIAL_FOLDER_ID)
+        .sort((a, b) => a.order - b.order)
+        .map((folder, index) => ({ ...folder, order: index + 1 }));
+
+    return [initialFolder, ...otherFolders];
+};
+
 const migrateDashboardPermissions = (dashboards: Dashboard[]): Dashboard[] => {
     return dashboards.map((dashboard) => {
-        const isMain = dashboard.id === MAIN_DASHBOARD_ID;
+        const isSystem = SYSTEM_DASHBOARD_IDS.has(dashboard.id) || dashboard.name === LEGACY_MAIN_DASHBOARD_NAME;
         return {
             ...dashboard,
-            isEditable: isMain ? false : dashboard.isEditable ?? true,
-            isDeletable: isMain ? false : dashboard.isDeletable ?? true,
+            isEditable: isSystem ? false : dashboard.isEditable ?? true,
+            isDeletable: isSystem ? false : dashboard.isDeletable ?? true,
         };
     });
 };
@@ -1126,39 +1338,55 @@ const ensureMainDashboardPresent = (dashboards: Dashboard[]): Dashboard[] => {
     const validDashboards = Array.isArray(dashboards) ? dashboards.filter(Boolean) : [];
     const permissionsMigrated = migrateDashboardPermissions(validDashboards);
 
-    const existingMain = permissionsMigrated.find((dashboard) => dashboard.id === MAIN_DASHBOARD_ID);
-    const fallbackMain = createMainSystemDashboard();
+    const fallbackFundamental = createMainSystemDashboard();
+    const fallbackTechnical = createTechnicalSystemDashboard();
+    const fallbackQuant = createQuantSystemDashboard();
 
-    const mainDashboard: Dashboard = existingMain
-        ? {
-            ...existingMain,
-            id: MAIN_DASHBOARD_ID,
-            name: MAIN_DASHBOARD_NAME,
-            folderId: undefined,
-            order: 0,
-            isDefault: true,
-            isEditable: false,
-            isDeletable: false,
-            tabs: fallbackMain.tabs,
-            syncGroups: Array.isArray(existingMain.syncGroups) && existingMain.syncGroups.length > 0
-                ? existingMain.syncGroups
-                : fallbackMain.syncGroups,
-            createdAt: existingMain.createdAt || fallbackMain.createdAt,
-            updatedAt: new Date().toISOString(),
-        }
-        : fallbackMain;
+    const existingFundamental = permissionsMigrated.find(
+        (dashboard) =>
+            dashboard.id === MAIN_DASHBOARD_ID ||
+            dashboard.id === LEGACY_MAIN_DASHBOARD_ID ||
+            dashboard.name === LEGACY_MAIN_DASHBOARD_NAME ||
+            dashboard.name === MAIN_DASHBOARD_NAME
+    );
+    const existingTechnical = permissionsMigrated.find((dashboard) => dashboard.id === TECHNICAL_DASHBOARD_ID || dashboard.name === 'Technical');
+    const existingQuant = permissionsMigrated.find((dashboard) => dashboard.id === QUANT_DASHBOARD_ID || dashboard.name === 'Quant');
 
-    const nonMainDashboards = permissionsMigrated
-        .filter((dashboard) => dashboard.id !== MAIN_DASHBOARD_ID)
+    const buildSystemDashboard = (existing: Dashboard | undefined, fallback: Dashboard, order: number): Dashboard => ({
+        ...(existing || fallback),
+        id: fallback.id,
+        name: fallback.name,
+        description: fallback.description,
+        folderId: INITIAL_FOLDER_ID,
+        order,
+        isDefault: order === 0,
+        isEditable: false,
+        isDeletable: false,
+        tabs: fallback.tabs,
+        syncGroups: Array.isArray(existing?.syncGroups) && existing.syncGroups.length > 0
+            ? existing.syncGroups
+            : fallback.syncGroups,
+        createdAt: existing?.createdAt || fallback.createdAt,
+        updatedAt: new Date().toISOString(),
+    });
+
+    const systemDashboards = [
+        buildSystemDashboard(existingFundamental, fallbackFundamental, 0),
+        buildSystemDashboard(existingTechnical, fallbackTechnical, 1),
+        buildSystemDashboard(existingQuant, fallbackQuant, 2),
+    ];
+
+    const nonSystemDashboards = permissionsMigrated
+        .filter((dashboard) => !SYSTEM_DASHBOARD_IDS.has(dashboard.id) && dashboard.name !== LEGACY_MAIN_DASHBOARD_NAME)
         .sort((a, b) => a.order - b.order)
         .map((dashboard, index) => ({
             ...dashboard,
-            order: index + 1,
+            order: index + systemDashboards.length,
             isEditable: dashboard.isEditable ?? true,
             isDeletable: dashboard.isDeletable ?? true,
         }));
 
-    return [{ ...mainDashboard, order: 0 }, ...nonMainDashboards];
+    return [...systemDashboards, ...nonSystemDashboards];
 };
 
 const canEditDashboard = (dashboard?: Dashboard | null): boolean => {
@@ -1321,6 +1549,16 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
             };
 
         case 'UPDATE_FOLDER':
+            if (action.payload.id === INITIAL_FOLDER_ID) {
+                return {
+                    ...state,
+                    folders: state.folders.map((f) =>
+                        f.id === action.payload.id
+                            ? { ...f, isExpanded: action.payload.updates.isExpanded ?? f.isExpanded }
+                            : f
+                    ),
+                };
+            }
             return {
                 ...state,
                 folders: state.folders.map((f) =>
@@ -1329,6 +1567,9 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
             };
 
         case 'DELETE_FOLDER':
+            if (action.payload === INITIAL_FOLDER_ID) {
+                return state;
+            }
             return {
                 ...state,
                 folders: state.folders.filter((f) => f.id !== action.payload),
@@ -1629,12 +1870,16 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
 
         case 'REORDER_DASHBOARDS': {
             const { dashboardIds, folderId } = action.payload;
-            const orderedEditableIds = dashboardIds.filter((dashboardId) => dashboardId !== MAIN_DASHBOARD_ID);
+            const orderedEditableIds = dashboardIds.filter((dashboardId) => !SYSTEM_DASHBOARD_IDS.has(dashboardId));
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) => {
                     if (!canEditDashboard(d)) {
-                        return { ...d, folderId: undefined, order: 0 };
+                        return {
+                            ...d,
+                            folderId: INITIAL_FOLDER_ID,
+                            order: d.id === MAIN_DASHBOARD_ID ? 0 : d.id === TECHNICAL_DASHBOARD_ID ? 1 : 2,
+                        };
                     }
 
                     const newIndex = orderedEditableIds.indexOf(d.id);
@@ -1753,6 +1998,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             // Ensure permanent immutable main dashboard exists
             if (dashboards.length === 0) {
                 dashboards = [createMainSystemDashboard()];
+                folders = [createInitialFolder()];
             } else if (migrationVersion < CURRENT_MIGRATION_VERSION) {
                 if (migrationVersion < 2) {
                     dashboards = migrateEmptyTabs(dashboards);
@@ -1788,6 +2034,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     dashboards = migrateDashboardPermissions(dashboards);
                 }
 
+                if (migrationVersion < 10) {
+                    folders = ensureInitialFolderPresent(folders);
+                }
+
                 // Final safety validation for all widgets
                 dashboards = dashboards.map(d => ({
                     ...d,
@@ -1812,6 +2062,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             const cleanedSidebar = migrateSidebarClutter(dashboards, folders);
             dashboards = cleanedSidebar.dashboards;
             folders = cleanedSidebar.folders;
+            folders = ensureInitialFolderPresent(folders);
             dashboards = ensureMainDashboardPresent(dashboards);
             const preferredSymbol = readStoredTicker();
             dashboards = dashboards.map((dashboard) => ({
@@ -1827,7 +2078,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
             if (dashboards.length === 0) {
                 dashboards = [createMainSystemDashboard()];
-                folders = [];
+                folders = [createInitialFolder()];
             }
 
             const activeDashboardId = dashboards[0]?.id || null;
@@ -1844,7 +2095,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 type: 'SET_STATE',
                 payload: {
                     dashboards: [defaultDashboard],
-                    folders: [],
+                    folders: [createInitialFolder()],
                     activeDashboardId: defaultDashboard.id,
                     activeTabId: getPreferredActiveTabId(defaultDashboard),
                 },

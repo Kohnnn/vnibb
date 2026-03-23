@@ -21,6 +21,7 @@ from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 
 from vnibb.models.technical_indicator import TechnicalIndicator
+from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +340,66 @@ class TechnicalAnalysisService:
                 logger.error(f"Failed to fetch OHLCV for {symbol}: {e}")
                 return None
 
-        return await asyncio.to_thread(_fetch)
+        frame = await asyncio.to_thread(_fetch)
+        if frame is None or frame.empty:
+            return frame
+
+        try:
+            quote, _ = await VnstockStockQuoteFetcher.fetch(
+                symbol=symbol, source=settings.vnstock_source
+            )
+        except Exception as exc:
+            logger.debug("Technical latest quote merge skipped for %s: %s", symbol, exc)
+            return frame
+
+        quote_price = getattr(quote, "price", None)
+        quote_time = getattr(quote, "updated_at", None)
+        if quote_price is None or quote_time is None:
+            return frame
+
+        merged = frame.copy()
+        merged["time"] = pd.to_datetime(merged["time"], errors="coerce")
+        merged = merged.dropna(subset=["time", "close"]).sort_values("time").reset_index(drop=True)
+        if merged.empty:
+            return frame
+
+        quote_timestamp = pd.to_datetime(quote_time, errors="coerce")
+        if pd.isna(quote_timestamp):
+            return merged
+        if getattr(quote_timestamp, "tzinfo", None) is not None:
+            quote_timestamp = quote_timestamp.tz_localize(None)
+
+        last_row = merged.iloc[-1]
+        last_timestamp = pd.to_datetime(last_row["time"], errors="coerce")
+        if pd.isna(last_timestamp):
+            return merged
+
+        quote_day = quote_timestamp.normalize()
+        last_day = last_timestamp.normalize()
+        if quote_day < last_day:
+            return merged
+
+        appended_row = {
+            "time": quote_timestamp,
+            "open": float(getattr(quote, "open", None) or last_row.get("close") or quote_price),
+            "high": float(
+                getattr(quote, "high", None)
+                or max(float(last_row.get("high") or quote_price), float(quote_price))
+            ),
+            "low": float(
+                getattr(quote, "low", None)
+                or min(float(last_row.get("low") or quote_price), float(quote_price))
+            ),
+            "close": float(quote_price),
+            "volume": float(getattr(quote, "volume", None) or last_row.get("volume") or 0),
+        }
+
+        if quote_day == last_day:
+            merged.loc[merged.index[-1], list(appended_row.keys())] = list(appended_row.values())
+        else:
+            merged = pd.concat([merged, pd.DataFrame([appended_row])], ignore_index=True)
+
+        return merged
 
     async def get_moving_averages(
         self,
@@ -923,103 +983,177 @@ class TechnicalAnalysisService:
             ma_task, rsi_task, macd_task, bb_task, stoch_task, adx_task, volume_task
         )
 
-        # Collect all signals
-        signals = []
+        indicator_signals: List[str] = []
+        weighted_signals: List[tuple[str, float]] = []
         indicator_details = []
 
-        # Moving Average signals
+        current_price = ma.get("current_price")
+        sma_values = ma.get("sma", {})
+        ema_values = ma.get("ema", {})
+        long_term_anchor = sma_values.get("sma_200") or ema_values.get("ema_200")
+        mid_term_anchor = sma_values.get("sma_50") or ema_values.get("ema_50")
+        long_term_bullish = bool(
+            current_price is not None
+            and long_term_anchor is not None
+            and current_price >= long_term_anchor
+            and (mid_term_anchor is None or mid_term_anchor >= long_term_anchor * 0.98)
+        )
+        long_term_bearish = bool(
+            current_price is not None
+            and long_term_anchor is not None
+            and current_price <= long_term_anchor
+            and (mid_term_anchor is None or mid_term_anchor <= long_term_anchor * 1.02)
+        )
+
+        def add_indicator(
+            *,
+            name: str,
+            value: Any,
+            signal: str,
+            weight: float | None = None,
+        ) -> None:
+            indicator_details.append({"name": name, "value": value, "signal": signal})
+            indicator_signals.append(signal)
+            if weight is not None:
+                weighted_signals.append((signal, weight))
+
+        def contextualize_signal(
+            *,
+            signal: str,
+            bullish_fade_threshold: float | None = None,
+            bearish_fade_threshold: float | None = None,
+            raw_value: float | None = None,
+        ) -> str:
+            if signal == "sell" and long_term_bullish:
+                if (
+                    raw_value is None
+                    or bullish_fade_threshold is None
+                    or raw_value <= bullish_fade_threshold
+                ):
+                    return "neutral"
+            if signal == "buy" and long_term_bearish:
+                if (
+                    raw_value is None
+                    or bearish_fade_threshold is None
+                    or raw_value >= bearish_fade_threshold
+                ):
+                    return "neutral"
+            return signal
+
         for key, signal in ma.get("signals", {}).items():
-            signals.append(signal)
-            indicator_details.append(
-                {
-                    "name": key.upper().replace("_", " "),
-                    "value": ma.get("sma" if "sma" in key else "ema", {}).get(key),
-                    "signal": signal,
-                }
+            adjusted_signal = signal
+            weight = 1.15 if key.endswith("200") else 0.95 if key.endswith("50") else 0.55
+            if key.endswith(("10", "20", "50")):
+                adjusted_signal = contextualize_signal(signal=signal)
+
+            add_indicator(
+                name=key.upper().replace("_", " "),
+                value=ma.get("sma" if "sma" in key else "ema", {}).get(key),
+                signal=adjusted_signal,
+                weight=weight,
             )
 
-        # RSI
-        if rsi.get("value"):
-            signals.append(rsi["signal"])
-            indicator_details.append(
-                {
-                    "name": f"RSI ({rsi.get('period', 14)})",
-                    "value": rsi["value"],
-                    "signal": rsi["signal"],
-                }
+        if rsi.get("value") is not None:
+            adjusted_rsi_signal = contextualize_signal(
+                signal=rsi["signal"],
+                bullish_fade_threshold=72,
+                bearish_fade_threshold=28,
+                raw_value=float(rsi["value"]),
+            )
+            add_indicator(
+                name=f"RSI ({rsi.get('period', 14)})",
+                value=rsi["value"],
+                signal=adjusted_rsi_signal,
+                weight=0.4,
             )
 
-        # MACD
-        if macd.get("macd"):
-            signals.append(macd["signal"])
-            indicator_details.append(
-                {
-                    "name": "MACD",
-                    "value": macd["histogram"],
-                    "signal": macd["signal"],
-                }
+        if macd.get("macd") is not None:
+            histogram_value = macd.get("histogram")
+            adjusted_macd_signal = contextualize_signal(
+                signal=macd["signal"],
+                bullish_fade_threshold=-0.35,
+                bearish_fade_threshold=0.35,
+                raw_value=float(histogram_value) if histogram_value is not None else None,
+            )
+            add_indicator(
+                name="MACD",
+                value=histogram_value,
+                signal=adjusted_macd_signal,
+                weight=0.45,
             )
 
-        # Bollinger Bands
-        if bb.get("upper"):
-            signals.append(bb["signal"])
-            indicator_details.append(
-                {
-                    "name": "Bollinger Bands",
-                    "value": f"{bb['percent_b']:.2%}",
-                    "signal": bb["signal"],
-                }
+        if bb.get("upper") is not None:
+            add_indicator(
+                name="Bollinger Bands",
+                value=f"{bb['percent_b']:.2%}",
+                signal=bb["signal"],
+                weight=0.35,
             )
 
-        # Stochastic
-        if stoch.get("k"):
-            signals.append(stoch["signal"])
-            indicator_details.append(
-                {
-                    "name": "Stochastic",
-                    "value": stoch["k"],
-                    "signal": stoch["signal"],
-                }
+        if stoch.get("k") is not None:
+            adjusted_stoch_signal = contextualize_signal(
+                signal=stoch["signal"],
+                bullish_fade_threshold=88,
+                bearish_fade_threshold=12,
+                raw_value=float(stoch["k"]),
+            )
+            add_indicator(
+                name="Stochastic",
+                value=stoch["k"],
+                signal=adjusted_stoch_signal,
+                weight=0.35,
             )
 
-        # ADX
-        if adx.get("adx"):
-            signals.append(adx["signal"])
-            indicator_details.append(
-                {
-                    "name": "ADX",
-                    "value": adx["adx"],
-                    "signal": adx["signal"],
-                }
+        if adx.get("adx") is not None:
+            adx_weight = 0.7 if adx.get("trend_strength") in {"strong", "very_strong"} else 0.45
+            add_indicator(
+                name="ADX",
+                value=adx["adx"],
+                signal=adx["signal"],
+                weight=adx_weight,
             )
 
-        # Volume
-        if vol.get("volume"):
-            signals.append(vol["signal"])
-            indicator_details.append(
-                {
-                    "name": "Volume",
-                    "value": f"{vol['relative_volume']}x",
-                    "signal": vol["signal"],
-                }
+        if vol.get("volume") is not None:
+            add_indicator(
+                name="Volume",
+                value=f"{vol['relative_volume']}x",
+                signal=vol["signal"],
+                weight=None,
             )
 
-        # Aggregate signals
-        buy_count = signals.count("buy")
-        sell_count = signals.count("sell")
-        neutral_count = signals.count("neutral")
-        total = len(signals)
+        buy_count = indicator_signals.count("buy")
+        sell_count = indicator_signals.count("sell")
+        neutral_count = indicator_signals.count("neutral")
+        total = len(indicator_signals)
 
-        # Determine overall signal
-        if total == 0:
+        total_weight = sum(weight for _, weight in weighted_signals)
+        weighted_score = 0.0
+        for signal, weight in weighted_signals:
+            if signal == "buy":
+                weighted_score += weight
+            elif signal == "sell":
+                weighted_score -= weight
+
+        volume_signal = vol.get("signal")
+        if volume_signal in {"buy", "sell"} and weighted_score != 0:
+            relative_volume = float(vol.get("relative_volume") or 1.0)
+            same_direction = (volume_signal == "buy" and weighted_score > 0) or (
+                volume_signal == "sell" and weighted_score < 0
+            )
+            impact = 1.0 + min(max(relative_volume - 1.0, 0.0), 1.5) * 0.18
+            weighted_score = weighted_score * impact if same_direction else weighted_score / impact
+
+        normalized_score = ((weighted_score / total_weight) + 1) * 50 if total_weight > 0 else 50.0
+
+        if 40 <= normalized_score <= 60:
             overall_signal = "neutral"
-        elif buy_count >= total * 0.7:
+        elif normalized_score >= 78:
             overall_signal = "strong_buy"
-        elif buy_count > sell_count:
+        elif normalized_score > 60:
             overall_signal = "buy"
-        elif sell_count >= total * 0.7:
+        elif normalized_score <= 22:
             overall_signal = "strong_sell"
-        elif sell_count > buy_count:
+        elif normalized_score < 40:
             overall_signal = "sell"
         else:
             overall_signal = "neutral"

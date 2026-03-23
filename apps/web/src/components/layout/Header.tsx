@@ -435,7 +435,7 @@ export function Header({
           )}
           </div>
 
-          <div className="flex items-center gap-1 justify-self-end">
+          <div className="flex items-center gap-2 justify-self-end">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -474,35 +474,39 @@ export function Header({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {onAutoFitLayout && (
-            <button
-              type="button"
-              onClick={onAutoFitLayout}
-              className="inline-flex items-center gap-1.5 rounded-md border border-sky-500/30 bg-sky-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-sky-200 transition-colors hover:bg-sky-500/20 hover:text-sky-100"
-              title="Automatically arrange widgets to fill gaps"
-              aria-label="Auto-fit layout"
-            >
-              <LayoutGrid size={13} />
-              <span className="hidden sm:inline">Auto-Fit</span>
-            </button>
-          )}
-
-          {onEditToggle && (
-            <button
-              type="button"
-              onClick={onEditToggle}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-semibold transition-colors',
-                isEditing
-                  ? 'border-amber-400/40 bg-amber-500/15 text-amber-100 shadow-[0_0_0_1px_rgba(251,191,36,0.18)]'
-                  : 'border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+          {(onAutoFitLayout || onEditToggle) && (
+            <div className="inline-flex items-center gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/95 p-1 shadow-[0_10px_24px_rgba(2,6,23,0.18)]">
+              {onAutoFitLayout && (
+                <button
+                  type="button"
+                  onClick={onAutoFitLayout}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-sky-400/40 bg-gradient-to-r from-sky-500/18 to-cyan-500/12 px-3 py-1.5 text-[11px] font-semibold text-sky-100 transition-colors hover:from-sky-500/28 hover:to-cyan-500/18"
+                  title="Automatically arrange widgets to fill gaps"
+                  aria-label="Auto-fit layout"
+                >
+                  <LayoutGrid size={13} />
+                  <span className="hidden sm:inline">Auto-Fit</span>
+                </button>
               )}
-              title="Lock or unlock dashboard layout for editing"
-              aria-label={isEditing ? 'Editing enabled' : 'Layout locked'}
-            >
-              {isEditing ? <Unlock size={13} className="animate-pulse" /> : <Lock size={13} />}
-              <span className="hidden sm:inline">{isEditing ? 'Editing' : 'Layout Locked'}</span>
-            </button>
+
+              {onEditToggle && (
+                <button
+                  type="button"
+                  onClick={onEditToggle}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors',
+                    isEditing
+                      ? 'border-amber-300/60 bg-gradient-to-r from-amber-500/22 to-orange-500/16 text-amber-50 shadow-[0_0_0_1px_rgba(251,191,36,0.22)]'
+                      : 'border-slate-400/20 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                  )}
+                  title="Lock or unlock dashboard layout for editing"
+                  aria-label={isEditing ? 'Editing enabled' : 'Layout locked'}
+                >
+                  {isEditing ? <Unlock size={13} className="animate-pulse" /> : <Lock size={13} />}
+                  <span className="hidden sm:inline">{isEditing ? 'Editing' : 'Layout Locked'}</span>
+                </button>
+              )}
+            </div>
           )}
 
           {hasActionMenu && (

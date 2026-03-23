@@ -4,6 +4,9 @@ export interface WidgetDescription {
   purpose: string
   calculation: string
   interpretation: string
+  advanced_insights?: string[]
+  limitations?: string[]
+  pro_tips?: string[]
 }
 
 export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>> = {
@@ -11,16 +14,49 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     purpose: 'Provides a full-featured price chart for the selected ticker with drawing tools, indicator overlays, and timeframe switching.',
     calculation: 'Uses TradingView advanced charting by default, with an optional VNIBB local-history mode for supported Vietnamese exchanges.',
     interpretation: 'Use TradingView mode for annotation and indicator work. Use local mode when you want a lightweight clean price-history view from VNIBB data.',
+    advanced_insights: [
+      'TradingView mode is best for scenario work because drawings and indicators stay tied to the active symbol and timeframe.',
+      'Local mode is useful when you want a fast sanity-check against VNIBB history without external chart rendering latency.',
+    ],
+    limitations: [
+      'TradingView symbol mapping can fail for thinly supported tickers, in which case the fallback open link is the fastest escape hatch.',
+      'Local mode is intentionally simpler and does not include the full indicator and drawing toolbox.',
+    ],
+    pro_tips: [
+      'Use 1Y or 3Y for structure work, then drop to 1M or 3M when drawing tactical entries.',
+    ],
   },
   seasonality_heatmap: {
     purpose: 'Shows how the stock has historically performed by month so you can spot recurring seasonal strength and weakness.',
     calculation: 'Groups daily price history by month and year, then calculates each month\'s return and the long-run monthly averages.',
     interpretation: 'Greener months have historically been stronger. Redder months have historically been weaker. Use it as context, not a standalone trigger.',
+    advanced_insights: [
+      'In Vietnam, some stronger seasonal windows can cluster around AGM season, dividend announcements, and post-Tet liquidity normalization.',
+      'The current month is often the most valuable row because it shows how the live month is tracking versus its long-run tendency.',
+    ],
+    limitations: [
+      'Seasonality is descriptive, not predictive. One regime change can overwhelm a long-run monthly average.',
+      'Small-cap names with short histories can show noisy month effects that do not persist.',
+    ],
+    pro_tips: [
+      'Use seasonality as a context layer with support/resistance and signal confirmation, not as a standalone timing rule.',
+    ],
   },
   sortino_monthly: {
     purpose: 'Highlights which months have delivered the best downside-adjusted return profile.',
     calculation: 'Computes monthly return quality using downside deviation instead of total volatility, so only harmful downside moves are penalized.',
     interpretation: 'Higher Sortino values suggest cleaner upside with less downside noise. Negative or weak readings signal poor reward for risk.',
+    advanced_insights: [
+      'Sortino is often more useful than Sharpe for equities because upside volatility is not treated as a penalty.',
+      'A month with fewer but deeper negative returns can look much worse on Sortino even if the average return still appears respectable.',
+    ],
+    limitations: [
+      'A small sample of monthly observations can produce unstable ratios, especially in young listings.',
+      'The metric can look artificially strong when downside deviations are very sparse in a trending sample.',
+    ],
+    pro_tips: [
+      'Compare Sortino with the Sharpe companion series to detect months where tail risk is doing most of the damage.',
+    ],
   },
   macd_crossovers: {
     purpose: 'Tracks MACD crossover behavior and how price usually responds after momentum flips.',
@@ -56,6 +92,16 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     purpose: 'Shows how deep the stock usually falls from peaks and how long recoveries tend to take.',
     calculation: 'Builds an underwater curve from rolling peaks, then measures drawdown depth and recovery duration statistics.',
     interpretation: 'Shallow drawdowns with fast recoveries suggest resilience. Deep, persistent drawdowns signal weaker trend quality.',
+    advanced_insights: [
+      'Time underwater is often the harder behavioral burden than drawdown depth because capital and conviction stay trapped for longer.',
+      'A stock that recovers quickly from pullbacks can sustain higher momentum multiples because holders are rewarded faster.',
+    ],
+    limitations: [
+      'Past recovery speed does not guarantee future recoveries, especially after business-model or credit-quality breaks.',
+    ],
+    pro_tips: [
+      'Pair this widget with support/resistance and signal summary to judge whether a fresh drawdown looks normal or regime-breaking.',
+    ],
   },
   gap_analysis: {
     purpose: 'Summarizes how often the stock gaps and whether those gaps tend to fill.',
@@ -96,6 +142,16 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     purpose: 'Condenses the main technical evidence into a single actionable view for buying, selling, or waiting.',
     calculation: 'Uses the existing technical summary counts, nearest support and resistance, and momentum regime to estimate confidence and trade context.',
     interpretation: 'Treat it as a decision aid, not a guarantee. Higher confidence matters most when the key levels and indicator details agree.',
+    advanced_insights: [
+      'The best signal summaries are rarely the loudest ones. Balanced evidence with clear trend context is usually more durable than a fast oscillator spike.',
+      'Volume confirmation matters most when the directional score is already positive or negative; it should confirm, not dominate, the call.',
+    ],
+    limitations: [
+      'This is still a compression layer over multiple indicators, so it can understate nuance around major events or sudden regime shifts.',
+    ],
+    pro_tips: [
+      'Read this widget last. It works best as the conclusion after checking structure, trend, and risk levels above it.',
+    ],
   },
   ichimoku: {
     purpose: 'Maps trend direction, support zones, and momentum structure using the Ichimoku cloud framework.',
@@ -111,11 +167,31 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     purpose: 'Organizes valuation, profitability, liquidity, leverage, and cash-flow ratios into one table.',
     calculation: 'Uses reported financial statement data and derived ratios across yearly, quarterly, or TTM views.',
     interpretation: 'Focus on trend direction and peer context, not a single point reading. Improving multi-period trends usually matter most.',
+    advanced_insights: [
+      'Ratios become far more useful when you read them by cluster: valuation with profitability, liquidity with leverage, and growth with efficiency.',
+      'Banking and non-banking names should not be interpreted with identical ratio priorities.',
+    ],
+    limitations: [
+      'Accounting changes, restructuring years, and one-off asset sales can distort a single-period ratio view.',
+    ],
+    pro_tips: [
+      'OpenBB-style reading starts with row emphasis on totals, then uses the trend column to separate temporary noise from structural change.',
+    ],
   },
   comparison_analysis: {
     purpose: 'Compares the selected stock against its peers on the same analytical canvas.',
     calculation: 'Aligns peer fundamentals and market metrics so valuation, quality, and growth differences are directly comparable.',
     interpretation: 'Use it to find relative outliers such as cheaper valuations, stronger profitability, or weaker balance-sheet quality.',
+    advanced_insights: [
+      'A stock can be cheap for good reason, so valuation outliers should always be read together with profitability and leverage outliers.',
+      'Mini trend context matters because a single cheap multiple can be much less interesting if the price trend is structurally deteriorating.',
+    ],
+    limitations: [
+      'Peer sets can drift if sector classification is broad or the company is transitioning across business lines.',
+    ],
+    pro_tips: [
+      'Look for repeated green cells across several categories rather than one isolated best-in-class metric.',
+    ],
   },
   market_news: {
     purpose: 'Surfaces broad market headlines that can affect sector and ticker context.',

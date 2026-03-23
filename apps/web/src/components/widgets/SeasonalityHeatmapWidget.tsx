@@ -1,7 +1,7 @@
 'use client'
 
 import { CalendarDays } from 'lucide-react'
-import { useHistoricalPrices } from '@/lib/queries'
+import { useHistoricalPrices, useStockQuote } from '@/lib/queries'
 import type { OHLCData } from '@/lib/chartUtils'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
@@ -51,6 +51,38 @@ function parseCandleTime(rawTime: number | string): Date | null {
 
   const parsed = new Date(text)
   return Number.isFinite(parsed.getTime()) ? parsed : null
+}
+
+function mergeLatestQuote(candles: OHLCData[], quote: { price?: number | null; updatedAt?: string | Date | null } | null | undefined): OHLCData[] {
+  if (!quote?.price || !quote?.updatedAt) return candles
+
+  const quoteDate = parseCandleTime(typeof quote.updatedAt === 'string' ? quote.updatedAt : new Date(quote.updatedAt).toISOString())
+  if (!quoteDate) return candles
+
+  const merged = [...candles]
+  const latestIndex = merged.length - 1
+  const latestCandleDate = latestIndex >= 0 ? parseCandleTime(merged[latestIndex].time) : null
+  const nextPoint: OHLCData = {
+    ...(merged[latestIndex] || {}),
+    time: quoteDate.toISOString(),
+    close: quote.price,
+    open: (merged[latestIndex] as any)?.open ?? quote.price,
+    high: Math.max(Number((merged[latestIndex] as any)?.high ?? quote.price), quote.price),
+    low: Math.min(Number((merged[latestIndex] as any)?.low ?? quote.price), quote.price),
+    volume: Number((merged[latestIndex] as any)?.volume ?? 0),
+  }
+
+  if (latestCandleDate && toMonthKey(latestCandleDate) === toMonthKey(quoteDate) && latestCandleDate.getUTCDate() === quoteDate.getUTCDate()) {
+    merged[latestIndex] = nextPoint
+    return merged
+  }
+
+  if (latestCandleDate && quoteDate.getTime() < latestCandleDate.getTime()) {
+    return merged
+  }
+
+  merged.push(nextPoint)
+  return merged
 }
 
 function computeMonthlyReturns(candles: OHLCData[]): MonthlyReturn[] {
@@ -153,6 +185,7 @@ function getBestAndWorstMonth(monthlyAverages: Array<number | null>): {
 
 export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
+  const quoteQuery = useStockQuote(upperSymbol, Boolean(upperSymbol))
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useHistoricalPrices(
     upperSymbol,
@@ -164,7 +197,10 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
     }
   )
 
-  const candles = (data?.data || []) as OHLCData[]
+  const candles = mergeLatestQuote(
+    (data?.data || []) as OHLCData[],
+    quoteQuery.data ? { price: quoteQuery.data.price, updatedAt: new Date().toISOString() } : null
+  )
   const monthlyReturns = computeMonthlyReturns(candles)
   const hasData = monthlyReturns.length >= 12
   const isFallback = Boolean(error && hasData)
@@ -194,7 +230,7 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
           updatedAt={dataUpdatedAt}
           isFetching={isFetching && hasData}
           isCached={isFallback}
-          note="Year x Month"
+          note="Year x Month incl. latest quote"
           align="right"
         />
       </div>

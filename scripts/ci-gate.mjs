@@ -3,7 +3,6 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 const isWindows = process.platform === 'win32'
-const pythonCommand = process.env.PYTHON || 'python'
 const npmCommand = isWindows ? 'npm.cmd' : 'npm'
 
 const frontendEnv = {
@@ -92,7 +91,37 @@ function resolvePnpmCommand() {
   return isWindows ? 'pnpm.cmd' : 'pnpm'
 }
 
+function supportsPytest(command) {
+  const probe = spawnSync(command, ['-c', 'import pytest'], {
+    stdio: 'ignore',
+    shell: isWindows && /\.(cmd|bat)$/i.test(command),
+  })
+
+  return probe.status === 0
+}
+
+function resolvePythonCommand() {
+  const candidates = [
+    process.env.PYTHON,
+    process.env.PYTHON_BIN,
+    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Python', 'bin', 'python.exe'),
+    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python312', 'python.exe'),
+    process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python311', 'python.exe'),
+    'python',
+  ].filter(Boolean)
+
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    if (candidate.includes('python') && supportsPytest(candidate)) {
+      return candidate
+    }
+  }
+
+  return process.env.PYTHON || 'python'
+}
+
 const pnpmCommand = resolvePnpmCommand()
+const pythonCommand = resolvePythonCommand()
 
 runStep('Frontend Lint', pnpmCommand, ['--filter', 'frontend', 'lint'], frontendEnv)
 runStep('Frontend Build', pnpmCommand, ['--filter', 'frontend', 'build'], frontendEnv)
