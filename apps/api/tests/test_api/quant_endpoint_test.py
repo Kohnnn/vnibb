@@ -107,6 +107,28 @@ async def test_quant_endpoint_returns_requested_metrics(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_quant_endpoint_includes_backend_seasonality_metric(client, monkeypatch):
+    async def fake_load_price_frame(*_args, **_kwargs):
+        return _build_price_frame(260)
+
+    monkeypatch.setattr("vnibb.api.v1.quant._load_price_frame", fake_load_price_frame)
+
+    response = await client.get(
+        "/api/v1/quant/VCI",
+        params={
+            "metrics": "seasonality",
+            "period": "5Y",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    metric = payload["data"]["metrics"]["seasonality"]
+    assert len(metric["monthly_returns"]) > 0
+    assert "Mar" in metric["monthly_average_return_pct"]
+
+
+@pytest.mark.asyncio
 async def test_smart_money_endpoint_recovers_from_legacy_block_trade_schema(
     client,
     test_db,

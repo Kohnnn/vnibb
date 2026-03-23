@@ -48,9 +48,11 @@ export function Sidebar({
     onOpenTemplateSelector,
     mobileMode = false,
 }: SidebarProps) {
+    const INITIAL_FOLDER_ID = 'folder-initial';
 
     const [collapsed, setCollapsed] = useState(false);
     const [showCreateMenu, setShowCreateMenu] = useState(false);
+    const [showWorkspaceTools, setShowWorkspaceTools] = useState(false);
     const [contextMenu, setContextMenu] = useState<{ id: string; type: 'dashboard' | 'folder'; x: number; y: number } | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
@@ -126,6 +128,12 @@ export function Sidebar({
     // Sort dashboards and folders by order
     const sortedFolders = [...state.folders].sort((a, b) => a.order - b.order);
     const rootDashboards = (dashboardsByFolder.get(undefined) || []).sort((a, b) => a.order - b.order);
+    const initialFolders = sortedFolders.filter(
+        (folder) => folder.id === INITIAL_FOLDER_ID || folder.name.trim().toLowerCase() === 'initial'
+    );
+    const customFolders = sortedFolders.filter(
+        (folder) => folder.id !== INITIAL_FOLDER_ID && folder.name.trim().toLowerCase() !== 'initial'
+    );
 
     const nextDashboardName = () => {
         const existing = new Set(
@@ -443,7 +451,7 @@ export function Sidebar({
                         {!isEditableDashboard && (
                             <span className="inline-flex items-center rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">
                                 <Lock size={9} className="mr-1" />
-                                Main
+                                System
                             </span>
                         )}
                         <button
@@ -569,78 +577,85 @@ export function Sidebar({
                     )}
                 </div>
 
-                {/* Library Section */}
-                {!collapsed && (
-                    <div className="px-2 py-1 border-b border-[var(--border-color)] shrink-0">
-                        <h3 className="px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
-                            Library
-                        </h3>
-                        <button
-                            onClick={onOpenTemplateSelector}
-                            className="w-full flex items-center gap-2 px-2 py-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60 transition-colors text-xs"
-                        >
-                            <AppWindow size={14} />
-                            <span>Templates</span>
-                        </button>
-
-                        <button
-                            onClick={onOpenWidgetLibrary}
-                            className="w-full flex items-center gap-2 px-2 py-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60 transition-colors text-xs"
-                        >
-                            <Grid3X3 size={14} />
-                            <span>Widgets</span>
-                        </button>
-                        <button
-                            onClick={onOpenPromptsLibrary}
-                            className="w-full flex items-center gap-2 px-2 py-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60 transition-colors text-xs"
-                        >
-                            <MessageSquareText size={14} />
-                            <span>Prompts</span>
-                        </button>
-                    </div>
-                )}
-
                 {/* Dashboards Section */}
                 <div className="flex-1 overflow-y-auto px-2 py-1">
                     {!collapsed && (
                         <>
-                            <div className="flex items-center justify-between px-1.5 py-0.5 mb-0.5">
-                                <h3 className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
-                                    My Dashboards
-                                </h3>
-                                <div ref={createMenuRef} className="relative">
+                            <div className="space-y-0.5">
+                                <div className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                                    Initial Workspaces
+                                </div>
+                                {initialFolders.map(renderFolderItem)}
+
+                                <div className="mt-3 flex items-center justify-between px-1.5 py-0.5">
+                                    <h3 className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
+                                        Custom Workspaces
+                                    </h3>
+                                    <div ref={createMenuRef} className="relative">
+                                        <button
+                                            onClick={() => setShowCreateMenu(!showCreateMenu)}
+                                            className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                                        >
+                                            <Plus size={14} />
+                                        </button>
+                                        {showCreateMenu && (
+                                            <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] py-1 shadow-xl">
+                                                <button
+                                                    onClick={() => handleCreateDashboard()}
+                                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                                >
+                                                    <LayoutDashboard size={14} />
+                                                    <span>Create Dashboard</span>
+                                                </button>
+                                                <button
+                                                    onClick={handleCreateFolder}
+                                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                                >
+                                                    <Folder size={14} />
+                                                    <span>New Folder</span>
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {customFolders.map(renderFolderItem)}
+                                {rootDashboards.map(d => renderDashboardItem(d))}
+
+                                <div className="mt-3 rounded-lg border border-[var(--border-color)]/70 bg-[var(--bg-tertiary)]/35 p-1">
                                     <button
-                                        onClick={() => setShowCreateMenu(!showCreateMenu)}
-                                        className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                                        onClick={() => setShowWorkspaceTools((prev) => !prev)}
+                                        className="flex w-full items-center justify-between rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
                                     >
-                                        <Plus size={14} />
+                                        <span>Customize</span>
+                                        {showWorkspaceTools ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                                     </button>
-                                    {showCreateMenu && (
-                                        <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] py-1 shadow-xl">
+                                    {showWorkspaceTools && (
+                                        <div className="mt-1 space-y-0.5">
                                             <button
-                                                onClick={() => handleCreateDashboard()}
-                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                                onClick={onOpenTemplateSelector}
+                                                className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
                                             >
-                                                <LayoutDashboard size={14} />
-                                                <span>Create Dashboard</span>
+                                                <AppWindow size={14} />
+                                                <span>Templates</span>
                                             </button>
                                             <button
-                                                onClick={handleCreateFolder}
-                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                                onClick={onOpenWidgetLibrary}
+                                                className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
                                             >
-                                                <Folder size={14} />
-                                                <span>New Folder</span>
+                                                <Grid3X3 size={14} />
+                                                <span>Widgets</span>
+                                            </button>
+                                            <button
+                                                onClick={onOpenPromptsLibrary}
+                                                className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
+                                            >
+                                                <MessageSquareText size={14} />
+                                                <span>Prompts</span>
                                             </button>
                                         </div>
                                     )}
                                 </div>
-                            </div>
-
-                            <div className="space-y-0.5">
-                                {/* Render folders first */}
-                                {sortedFolders.map(renderFolderItem)}
-                                {/* Render root-level dashboards */}
-                                {rootDashboards.map(d => renderDashboardItem(d))}
                             </div>
                         </>
                     )}

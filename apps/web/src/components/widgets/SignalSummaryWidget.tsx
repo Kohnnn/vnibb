@@ -44,25 +44,30 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
     if (!data) return null
     const total = Math.max(data.signals.total_indicators || 0, 1)
     const strongest = Math.max(data.signals.buy_count, data.signals.sell_count, data.signals.neutral_count)
-    const confidence = Math.round((strongest / total) * 100)
+    const consensus = Math.round((strongest / total) * 100)
     const support = data.levels.support_resistance.support[0] ?? data.levels.support_resistance.nearest_support ?? null
     const support2 = data.levels.support_resistance.support[1] ?? null
     const resistance = data.levels.support_resistance.resistance[0] ?? data.levels.support_resistance.nearest_resistance ?? null
     const resistance2 = data.levels.support_resistance.resistance[1] ?? null
-    const stopLoss = support ? Number((support * 0.98).toFixed(2)) : null
-    const riskPct = support && data.levels.support_resistance.current_price
-      ? Math.abs((data.levels.support_resistance.current_price - support) / data.levels.support_resistance.current_price) * 100
+    const price = data.levels.support_resistance.current_price ?? null
+    const supportDistancePct = support && price
+      ? Math.abs((price - support) / price) * 100
       : null
-    const conservativeSize = riskPct ? Math.max(10, Math.min(100, Math.round(2 / Math.max(riskPct, 0.5) * 100))) : null
+    const resistanceDistancePct = resistance && price
+      ? Math.abs((resistance - price) / price) * 100
+      : null
+    const balance = data.signals.buy_count - data.signals.sell_count
 
     return {
-      confidence,
+      consensus,
+      price,
       support,
       support2,
       resistance,
       resistance2,
-      stopLoss,
-      conservativeSize,
+      supportDistancePct,
+      resistanceDistancePct,
+      balance,
     }
   }, [data])
 
@@ -118,11 +123,11 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-[var(--text-muted)]">
-                <span>Confidence</span>
-                <span>{derived.confidence}%</span>
+                <span>Consensus</span>
+                <span>{derived.consensus}%</span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
-                <div className="h-full rounded-full bg-gradient-to-r from-amber-400 via-sky-400 to-emerald-400" style={{ width: `${derived.confidence}%` }} />
+                <div className="h-full rounded-full bg-gradient-to-r from-amber-400 via-sky-400 to-emerald-400" style={{ width: `${derived.consensus}%` }} />
               </div>
             </div>
           </div>
@@ -146,6 +151,7 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
             <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Entry Zones</div>
               <div className="mt-1 space-y-1 text-[var(--text-primary)]">
+                <div>Current: {derived.price?.toLocaleString() || '--'}</div>
                 <div>Support 1: {derived.support?.toLocaleString() || '--'}</div>
                 <div>Support 2: {derived.support2?.toLocaleString() || '--'}</div>
                 <div>Resistance 1: {derived.resistance?.toLocaleString() || '--'}</div>
@@ -153,11 +159,12 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
               </div>
             </div>
             <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-              <div className="uppercase tracking-widest text-[var(--text-muted)]">Risk Framing</div>
+              <div className="uppercase tracking-widest text-[var(--text-muted)]">Context</div>
               <div className="mt-1 space-y-1 text-[var(--text-primary)]">
-                <div>Stop loss: {derived.stopLoss?.toLocaleString() || '--'}</div>
                 <div>Trend strength: {data.signals.trend_strength.replace(/_/g, ' ')}</div>
-                <div>Conservative size: {derived.conservativeSize ? `${derived.conservativeSize}% of planned capital` : '--'}</div>
+                <div>Signal balance: {derived.balance > 0 ? `+${derived.balance} bullish` : derived.balance < 0 ? `${derived.balance} bearish` : 'Even'}</div>
+                <div>To support: {derived.supportDistancePct ? `${derived.supportDistancePct.toFixed(2)}%` : '--'}</div>
+                <div>To resistance: {derived.resistanceDistancePct ? `${derived.resistanceDistancePct.toFixed(2)}%` : '--'}</div>
               </div>
             </div>
           </div>
@@ -180,7 +187,7 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
           </div>
 
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[10px] text-amber-100/85">
-            This is not financial advice. Signals summarize technical indicators and should be confirmed with price action, liquidity, and risk limits.
+            Evidence only, not advice. Use this widget as a closing read after checking trend, structure, volume, and support or resistance behavior above it.
           </div>
         </>
       )}

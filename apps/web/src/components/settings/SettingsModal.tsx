@@ -14,6 +14,7 @@ import { DEFAULT_TICKER, normalizeTickerSymbol } from '@/lib/defaultTicker';
 import {
   DEFAULT_TAB_OPTIONS,
   type DefaultTabPreference,
+  findPreferredDashboardId,
   findPreferredTabId,
   readStoredUserPreferences,
   writeStoredUserPreferences,
@@ -39,7 +40,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
   const { globalSymbol, setGlobalSymbol } = useSymbolLink();
   const { setGlobalSymbol: setWidgetGroupGlobalSymbol } = useWidgetGroups();
-  const { activeDashboard, setActiveTab: setDashboardActiveTab } = useDashboard();
+  const { state, activeDashboard, setActiveDashboard, setActiveTab: setDashboardActiveTab } = useDashboard();
 
   const tickerSuggestions = useMemo(() => searchStocks(defaultTickerInput, 6), [defaultTickerInput]);
 
@@ -80,8 +81,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setDefaultTickerError(null);
     setIsTickerMenuOpen(false);
 
-    const preferredTabId = activeDashboard
-      ? findPreferredTabId(activeDashboard.tabs, nextPreferences.defaultTab)
+    const preferredDashboardId = findPreferredDashboardId(state.dashboards, nextPreferences.defaultTab)
+    if (preferredDashboardId) {
+      setActiveDashboard(preferredDashboardId)
+    }
+
+    const targetDashboard =
+      state.dashboards.find((dashboard) => dashboard.id === preferredDashboardId) || activeDashboard
+    const preferredTabId = targetDashboard
+      ? findPreferredTabId(targetDashboard.tabs, nextPreferences.defaultTab)
       : null;
     if (preferredTabId) {
       setDashboardActiveTab(preferredTabId);
@@ -231,7 +239,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     htmlFor="settings-default-tab"
                     className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]"
                   >
-                    Default View
+                    Default Workspace
                   </label>
                   <select
                     id="settings-default-tab"
@@ -249,7 +257,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     ))}
                   </select>
                   <p className="mt-2 text-[10px] text-[var(--text-muted)]">
-                    Applies when the selected dashboard already contains the chosen tab.
+                    Controls which default workspace or matching view opens first.
                   </p>
                 </div>
                 <div>

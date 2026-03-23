@@ -1,8 +1,8 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import { CalendarDays } from 'lucide-react'
-import { useHistoricalPrices, useStockQuote } from '@/lib/queries'
-import type { OHLCData } from '@/lib/chartUtils'
+import { useQuantMetrics } from '@/lib/queries'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -11,145 +11,20 @@ interface SeasonalityHeatmapWidgetProps {
   symbol: string
 }
 
-interface MonthlyReturn {
+interface MonthlyReturnRow {
   year: number
   month: number
-  returnPct: number
+  label: string
+  return_pct: number | null
 }
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const PERIOD_OPTIONS = ['1Y', '3Y', '5Y'] as const
+type PeriodOption = (typeof PERIOD_OPTIONS)[number]
 
-function formatPct(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return '-'
+function formatPct(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '-'
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
-}
-
-function toMonthKey(date: Date): string {
-  const year = date.getUTCFullYear()
-  const month = date.getUTCMonth() + 1
-  return `${year}-${String(month).padStart(2, '0')}`
-}
-
-function parseCandleTime(rawTime: number | string): Date | null {
-  if (typeof rawTime === 'number' && Number.isFinite(rawTime)) {
-    const millis = rawTime > 1e12 ? rawTime : rawTime * 1000
-    const parsed = new Date(millis)
-    return Number.isFinite(parsed.getTime()) ? parsed : null
-  }
-
-  const text = String(rawTime ?? '').trim()
-  if (!text) return null
-
-  const numeric = Number(text)
-  if (Number.isFinite(numeric)) {
-    const millis = numeric > 1e12 ? numeric : numeric * 1000
-    const parsedFromNumber = new Date(millis)
-    if (Number.isFinite(parsedFromNumber.getTime())) {
-      return parsedFromNumber
-    }
-  }
-
-  const parsed = new Date(text)
-  return Number.isFinite(parsed.getTime()) ? parsed : null
-}
-
-function mergeLatestQuote(candles: OHLCData[], quote: { price?: number | null; updatedAt?: string | Date | null } | null | undefined): OHLCData[] {
-  if (!quote?.price || !quote?.updatedAt) return candles
-
-  const quoteDate = parseCandleTime(typeof quote.updatedAt === 'string' ? quote.updatedAt : new Date(quote.updatedAt).toISOString())
-  if (!quoteDate) return candles
-
-  const merged = [...candles]
-  const latestIndex = merged.length - 1
-  const latestCandleDate = latestIndex >= 0 ? parseCandleTime(merged[latestIndex].time) : null
-  const nextPoint: OHLCData = {
-    ...(merged[latestIndex] || {}),
-    time: quoteDate.toISOString(),
-    close: quote.price,
-    open: (merged[latestIndex] as any)?.open ?? quote.price,
-    high: Math.max(Number((merged[latestIndex] as any)?.high ?? quote.price), quote.price),
-    low: Math.min(Number((merged[latestIndex] as any)?.low ?? quote.price), quote.price),
-    volume: Number((merged[latestIndex] as any)?.volume ?? 0),
-  }
-
-  if (latestCandleDate && toMonthKey(latestCandleDate) === toMonthKey(quoteDate) && latestCandleDate.getUTCDate() === quoteDate.getUTCDate()) {
-    merged[latestIndex] = nextPoint
-    return merged
-  }
-
-  if (latestCandleDate && quoteDate.getTime() < latestCandleDate.getTime()) {
-    return merged
-  }
-
-  merged.push(nextPoint)
-  return merged
-}
-
-function computeMonthlyReturns(candles: OHLCData[]): MonthlyReturn[] {
-  const grouped = new Map<string, { year: number; month: number; first: number; last: number }>()
-
-  const sorted = candles
-    .filter((candle) => Number.isFinite(candle.close))
-    .slice()
-    .sort((a, b) => {
-      const aTime = parseCandleTime(a.time)?.getTime() ?? 0
-      const bTime = parseCandleTime(b.time)?.getTime() ?? 0
-      return aTime - bTime
-    })
-
-  for (const candle of sorted) {
-    const parsed = parseCandleTime(candle.time)
-    if (!parsed) continue
-
-    const key = toMonthKey(parsed)
-    const close = Number(candle.close)
-    const year = parsed.getUTCFullYear()
-    const month = parsed.getUTCMonth()
-
-    const existing = grouped.get(key)
-    if (!existing) {
-      grouped.set(key, { year, month, first: close, last: close })
-      continue
-    }
-
-    existing.last = close
-  }
-
-  return [...grouped.values()]
-    .map((entry) => ({
-      year: entry.year,
-      month: entry.month,
-      returnPct: entry.first > 0 ? ((entry.last - entry.first) / entry.first) * 100 : 0,
-    }))
-    .sort((a, b) => (a.year === b.year ? a.month - b.month : a.year - b.year))
-}
-
-function buildHeatmap(rows: MonthlyReturn[]) {
-  const years = [...new Set(rows.map((row) => row.year))].sort((a, b) => b - a)
-  const matrix = new Map<number, Array<number | null>>()
-
-  for (const year of years) {
-    matrix.set(year, Array.from({ length: 12 }, () => null))
-  }
-
-  for (const row of rows) {
-    const yearRow = matrix.get(row.year)
-    if (!yearRow) continue
-    yearRow[row.month] = row.returnPct
-  }
-
-  return { years, matrix }
-}
-
-function computeMonthlyAverages(rows: MonthlyReturn[]): Array<number | null> {
-  const grouped = Array.from({ length: 12 }, () => ({ sum: 0, count: 0 }))
-
-  for (const row of rows) {
-    grouped[row.month].sum += row.returnPct
-    grouped[row.month].count += 1
-  }
-
-  return grouped.map((month) => (month.count > 0 ? month.sum / month.count : null))
 }
 
 function getCellClass(value: number | null): string {
@@ -157,100 +32,109 @@ function getCellClass(value: number | null): string {
   if (value >= 8) return 'bg-emerald-500/60 text-emerald-100'
   if (value >= 4) return 'bg-emerald-500/40 text-emerald-100'
   if (value > 0) return 'bg-emerald-500/20 text-emerald-200'
-  if (value <= -8) return 'bg-red-500/60 text-red-100'
-  if (value <= -4) return 'bg-red-500/40 text-red-100'
-  return 'bg-red-500/20 text-red-200'
-}
-
-function getBestAndWorstMonth(monthlyAverages: Array<number | null>): {
-  best: { month: number; value: number } | null
-  worst: { month: number; value: number } | null
-} {
-  let best: { month: number; value: number } | null = null
-  let worst: { month: number; value: number } | null = null
-
-  monthlyAverages.forEach((value, month) => {
-    if (value === null) return
-
-    if (!best || value > best.value) {
-      best = { month, value }
-    }
-    if (!worst || value < worst.value) {
-      worst = { month, value }
-    }
-  })
-
-  return { best, worst }
+  if (value <= -8) return 'bg-rose-500/60 text-rose-100'
+  if (value <= -4) return 'bg-rose-500/40 text-rose-100'
+  return 'bg-rose-500/20 text-rose-200'
 }
 
 export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
-  const quoteQuery = useStockQuote(upperSymbol, Boolean(upperSymbol))
+  const [period, setPeriod] = useState<PeriodOption>('5Y')
+  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
+    period,
+    metrics: ['seasonality'],
+    enabled: Boolean(upperSymbol),
+  })
 
-  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useHistoricalPrices(
-    upperSymbol,
-    {
-      startDate: new Date(Date.now() - 9 * 365 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split('T')[0],
-      enabled: Boolean(upperSymbol),
-    }
-  )
+  const metric = data?.data?.metrics?.seasonality as
+    | {
+        monthly_returns?: MonthlyReturnRow[]
+        monthly_average_return_pct?: Record<string, number | null>
+        best_month?: string | null
+        worst_month?: string | null
+        hit_rate_pct?: number | null
+        current_month?: MonthlyReturnRow | null
+      }
+    | undefined
 
-  const candles = mergeLatestQuote(
-    (data?.data || []) as OHLCData[],
-    quoteQuery.data ? { price: quoteQuery.data.price, updatedAt: new Date().toISOString() } : null
-  )
-  const monthlyReturns = computeMonthlyReturns(candles)
-  const hasData = monthlyReturns.length >= 12
+  const monthlyReturns = metric?.monthly_returns || []
+  const hasData = monthlyReturns.length >= 3
   const isFallback = Boolean(error && hasData)
 
-  const { years, matrix } = buildHeatmap(monthlyReturns)
-  const monthlyAverages = computeMonthlyAverages(monthlyReturns)
-  const { best, worst } = getBestAndWorstMonth(monthlyAverages)
+  const years = useMemo(
+    () => [...new Set(monthlyReturns.map((row) => row.year))].sort((a, b) => b - a),
+    [monthlyReturns]
+  )
 
-  const positiveCount = monthlyAverages.filter((value) => value !== null && value > 0).length
-  const totalMonths = monthlyAverages.filter((value) => value !== null).length
-  const hitRate = totalMonths > 0 ? (positiveCount / totalMonths) * 100 : 0
+  const matrix = useMemo(() => {
+    const next = new Map<number, Array<number | null>>()
+    years.forEach((year) => next.set(year, Array.from({ length: 12 }, () => null)))
+    monthlyReturns.forEach((row) => {
+      const yearRow = next.get(row.year)
+      if (!yearRow) return
+      yearRow[row.month - 1] = row.return_pct ?? null
+    })
+    return next
+  }, [monthlyReturns, years])
+
+  const monthlyAverages = MONTH_LABELS.map((month) => metric?.monthly_average_return_pct?.[month] ?? null)
 
   if (!upperSymbol) {
-    return (
-      <WidgetEmpty message="Select a symbol to view seasonality heatmap" icon={<CalendarDays size={18} />} />
-    )
+    return <WidgetEmpty message="Select a symbol to view seasonality heatmap" icon={<CalendarDays size={18} />} />
   }
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between px-1 py-1 mb-2">
+    <div className="flex h-full flex-col">
+      <div className="mb-2 flex items-center justify-between px-1 py-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <CalendarDays size={12} className="text-cyan-400" />
           <span>Monthly Seasonality</span>
         </div>
-        <WidgetMeta
-          updatedAt={dataUpdatedAt}
-          isFetching={isFetching && hasData}
-          isCached={isFallback}
-          note="Year x Month incl. latest quote"
-          align="right"
-        />
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {PERIOD_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setPeriod(option)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                  period === option
+                    ? 'bg-blue-600 text-white'
+                    : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]'
+                }`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <WidgetMeta
+            updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt}
+            isFetching={isFetching && hasData}
+            isCached={isFallback}
+            note={`${period} backend seasonality`}
+            align="right"
+          />
+        </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
+      <div className="mb-2 grid grid-cols-4 gap-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Best Avg</div>
-          <div className="text-emerald-300 font-mono">
-            {best ? `${MONTH_LABELS[best.month]} ${formatPct(best.value)}` : '-'}
-          </div>
+          <div className="font-mono text-emerald-300">{metric?.best_month || '-'}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Worst Avg</div>
-          <div className="text-red-300 font-mono">
-            {worst ? `${MONTH_LABELS[worst.month]} ${formatPct(worst.value)}` : '-'}
-          </div>
+          <div className="font-mono text-rose-300">{metric?.worst_month || '-'}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Hit Rate</div>
-          <div className="text-cyan-300 font-mono">{hitRate.toFixed(0)}%</div>
+          <div className="font-mono text-cyan-300">{formatPct(metric?.hit_rate_pct)}</div>
+        </div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Current Month</div>
+          <div className="font-mono text-[var(--text-primary)]">
+            {metric?.current_month ? `${metric.current_month.label} ${formatPct(metric.current_month.return_pct)}` : '-'}
+          </div>
         </div>
       </div>
 
@@ -260,7 +144,7 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty message="Not enough historical months for heatmap" icon={<CalendarDays size={18} />} />
+          <WidgetEmpty message="Not enough backend seasonality data yet" icon={<CalendarDays size={18} />} />
         ) : (
           <div className="min-w-[520px] space-y-2">
             <div className="grid grid-cols-[56px_repeat(12,minmax(0,1fr))] gap-1 text-[10px] text-[var(--text-muted)]">
@@ -274,13 +158,11 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
 
             {years.map((year) => (
               <div key={year} className="grid grid-cols-[56px_repeat(12,minmax(0,1fr))] gap-1 text-[10px]">
-                <div className="text-[var(--text-secondary)] font-medium flex items-center">{year}</div>
+                <div className="flex items-center font-medium text-[var(--text-secondary)]">{year}</div>
                 {(matrix.get(year) ?? []).map((value, monthIdx) => (
                   <div
                     key={`${year}-${monthIdx}`}
-                    className={`h-7 rounded border border-[var(--border-subtle)] flex items-center justify-center font-mono ${getCellClass(
-                      value
-                    )}`}
+                    className={`flex h-7 items-center justify-center rounded border border-[var(--border-subtle)] font-mono ${getCellClass(value)}`}
                     title={`${year} ${MONTH_LABELS[monthIdx]}: ${formatPct(value)}`}
                   >
                     {value === null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}
@@ -290,16 +172,16 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
             ))}
 
             <div className="grid grid-cols-[56px_repeat(12,minmax(0,1fr))] gap-1 text-[10px]">
-              <div className="text-cyan-300 font-semibold flex items-center">Avg</div>
+              <div className="flex items-center font-semibold text-cyan-300">Avg</div>
               {monthlyAverages.map((value, monthIdx) => (
                 <div
                   key={`avg-${monthIdx}`}
-                  className={`h-7 rounded border border-cyan-500/20 flex items-center justify-center font-mono ${
+                  className={`flex h-7 items-center justify-center rounded border border-cyan-500/20 font-mono ${
                     value === null
                       ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
                       : value >= 0
                         ? 'bg-emerald-500/20 text-emerald-200'
-                        : 'bg-red-500/20 text-red-200'
+                        : 'bg-rose-500/20 text-rose-200'
                   }`}
                 >
                   {value === null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}

@@ -40,24 +40,24 @@ const CATEGORY_DEFINITIONS = [
     metricIds: ['pe_ratio', 'pb_ratio', 'ps_ratio', 'ev_ebitda', 'ev_sales', 'peg_ratio'],
   },
   {
-    id: 'profitability',
-    name: 'Profitability',
-    metricIds: ['roe', 'roa', 'roic', 'gross_margin', 'net_margin', 'operating_margin'],
-  },
-  {
     id: 'liquidity',
     name: 'Liquidity',
     metricIds: ['current_ratio', 'quick_ratio', 'cash_ratio'],
   },
   {
-    id: 'leverage',
-    name: 'Leverage',
-    metricIds: ['debt_equity', 'debt_assets', 'interest_coverage', 'equity_multiplier'],
-  },
-  {
     id: 'efficiency',
     name: 'Efficiency',
     metricIds: ['asset_turnover', 'inventory_turnover', 'receivables_turnover'],
+  },
+  {
+    id: 'profitability',
+    name: 'Profitability',
+    metricIds: ['roe', 'roa', 'roic', 'gross_margin', 'net_margin', 'operating_margin'],
+  },
+  {
+    id: 'leverage',
+    name: 'Leverage',
+    metricIds: ['debt_equity', 'debt_assets', 'interest_coverage', 'equity_multiplier'],
   },
   {
     id: 'growth',

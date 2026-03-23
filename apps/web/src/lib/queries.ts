@@ -914,6 +914,7 @@ export interface StockQuoteView {
     high: number | null;
     low: number | null;
     open: number | null;
+    updatedAt: string | null;
     cached: boolean;
 }
 
@@ -940,6 +941,7 @@ export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Pro
         high: quoteData.high ?? null,
         low: quoteData.low ?? null,
         open: quoteData.open ?? null,
+        updatedAt: quoteData.updatedAt ?? quoteData.updated_at ?? null,
         cached: response.cached,
     };
 }

@@ -18,17 +18,17 @@ export interface UserPreferences {
   defaultTab: DefaultTabPreference
 }
 
-export const DEFAULT_TAB: DefaultTabPreference = 'overview'
+export const DEFAULT_TAB: DefaultTabPreference = 'fundamentals'
 
 export const DEFAULT_TAB_OPTIONS: Array<{ value: DefaultTabPreference; label: string }> = [
+  { value: 'fundamentals', label: 'Fundamentals' },
+  { value: 'technical', label: 'Technical' },
+  { value: 'quant', label: 'Quant' },
+  { value: 'trading', label: 'Trading' },
+  { value: 'market', label: 'Market' },
   { value: 'overview', label: 'Overview' },
   { value: 'equity-analysis', label: 'Equity Analysis' },
-  { value: 'quant', label: 'Quant' },
-  { value: 'technical', label: 'Technical' },
-  { value: 'trading', label: 'Trading' },
   { value: 'comparison', label: 'Comparison' },
-  { value: 'fundamentals', label: 'Fundamentals' },
-  { value: 'market', label: 'Market' },
   { value: 'news-events', label: 'News & Events' },
 ]
 
@@ -124,4 +124,15 @@ export function findPreferredTabId<T extends { id: string; name: string }>(
   const resolvedPreference = normalizeTabKey(preferredTab) || readStoredUserPreferences().defaultTab
   const preferredTabMatch = tabs.find((tab) => normalizeTabKey(tab.name) === resolvedPreference)
   return preferredTabMatch?.id || null
+}
+
+export function findPreferredDashboardId<T extends { id: string; name: string }>(
+  dashboards: T[],
+  preferredTab?: DefaultTabPreference
+): string | null {
+  const resolvedPreference = normalizeTabKey(preferredTab) || readStoredUserPreferences().defaultTab
+  const preferredDashboardMatch = dashboards.find(
+    (dashboard) => normalizeTabKey(dashboard.name) === resolvedPreference
+  )
+  return preferredDashboardMatch?.id || null
 }

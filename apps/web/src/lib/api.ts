@@ -266,6 +266,7 @@ export interface QuoteData {
     volume: number | null;
     value: number | null;
     updatedAt: string | null;
+    updated_at?: string | null;
 }
 
 export interface QuoteResponse {
@@ -1377,6 +1378,7 @@ export async function getPeerCompanies(symbol: string, limit = 5): Promise<Peers
 export type QuantPeriod = '6M' | '1Y' | '3Y' | '5Y'
 
 export type QuantMetric =
+    | 'seasonality'
     | 'volume_delta'
     | 'rsi_seasonal'
     | 'gap_stats'

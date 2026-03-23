@@ -25,7 +25,7 @@ import type {
 } from '@/types/dashboard';
 import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
-import { findPreferredTabId } from '@/lib/userPreferences';
+import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync } from '@/lib/useDashboardSync';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
@@ -790,7 +790,7 @@ const INITIAL_TECHNICAL_TEMPLATE: TemplateWidget[] = [
         layout: { x: 0, y: 16, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'technical_snapshot',
+        type: 'rsi_seasonal',
         syncGroupId: 1,
         config: {},
         layout: { x: 8, y: 16, w: 8, h: 7, minW: 6, minH: 5 }
@@ -2081,8 +2081,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 folders = [createInitialFolder()];
             }
 
-            const activeDashboardId = dashboards[0]?.id || null;
-            const activeTabId = getPreferredActiveTabId(dashboards[0]);
+            const preferredView = readStoredUserPreferences().defaultTab;
+            const activeDashboardId =
+                findPreferredDashboardId(dashboards, preferredView) || dashboards[0]?.id || null;
+            const activeDashboard = dashboards.find((dashboard) => dashboard.id === activeDashboardId) || dashboards[0];
+            const activeTabId = getPreferredActiveTabId(activeDashboard);
 
             dispatch({
                 type: 'SET_STATE',
