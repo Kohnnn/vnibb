@@ -15,10 +15,6 @@ from pydantic import BaseModel, Field
 from vnibb.core.config import settings
 from vnibb.services.news_crawler import news_crawler
 from vnibb.services.sentiment_analyzer import sentiment_analyzer
-from vnibb.providers.vnstock.company_news import (
-    VnstockCompanyNewsFetcher,
-    CompanyNewsQueryParams,
-)
 from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
     StockScreenerParams,
@@ -52,6 +48,10 @@ class NewsArticle(BaseModel):
     ai_summary: Optional[str] = None
     read_count: int = 0
     bookmarked: bool = False
+    relevance_score: Optional[float] = None
+    matched_symbols: List[str] = []
+    match_reason: Optional[str] = None
+    is_market_wide_fallback: bool = False
 
 
 class NewsFeed(BaseModel):
@@ -60,6 +60,8 @@ class NewsFeed(BaseModel):
     articles: List[NewsArticle]
     total: int
     source: Optional[str] = None
+    mode: str = "all"
+    fallback_used: bool = False
 
 
 async def get_news_feed(
@@ -68,18 +70,24 @@ async def get_news_feed(
     symbol: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
+    mode: str = "all",
 ) -> NewsFeed:
     """Fetch latest news and normalize into NewsFeed."""
-    articles = await news_crawler.get_latest_news(
+    articles, fallback_used = await get_ranked_news_rows(
         source=source,
         sentiment=sentiment,
         symbol=symbol,
         limit=limit,
         offset=offset,
+        mode=mode,
     )
 
     normalized: List[NewsArticle] = []
     for item in articles:
+        published_date = item.get("published_date") or item.get("published_at")
+        if hasattr(published_date, "isoformat"):
+            published_date = published_date.isoformat()
+
         related_symbols = item.get("related_symbols", [])
         if isinstance(related_symbols, str):
             related_symbols = [s.strip() for s in related_symbols.split(",") if s.strip()]
@@ -99,7 +107,7 @@ async def get_news_feed(
                 author=item.get("author"),
                 image_url=item.get("image_url"),
                 category=item.get("category"),
-                published_date=item.get("published_date"),
+                published_date=published_date,
                 related_symbols=related_symbols,
                 sectors=sectors,
                 sentiment=item.get("sentiment"),
@@ -107,58 +115,20 @@ async def get_news_feed(
                 ai_summary=item.get("ai_summary"),
                 read_count=item.get("read_count", 0),
                 bookmarked=item.get("bookmarked", False),
+                relevance_score=item.get("relevance_score"),
+                matched_symbols=item.get("matched_symbols", []),
+                match_reason=item.get("match_reason"),
+                is_market_wide_fallback=bool(item.get("is_market_wide_fallback", False)),
             )
         )
 
-    if not normalized and symbol:
-        try:
-            company_news = await VnstockCompanyNewsFetcher.fetch(
-                CompanyNewsQueryParams(symbol=symbol.upper(), limit=limit)
-            )
-            for idx, item in enumerate(company_news):
-                normalized.append(
-                    NewsArticle(
-                        id=idx,
-                        title=item.title,
-                        summary=item.summary,
-                        source=item.source or "vnstock",
-                        url=item.url,
-                        category=item.category,
-                        published_date=item.published_at,
-                        related_symbols=[symbol.upper()],
-                    )
-                )
-        except Exception as fallback_error:
-            logger.debug(f"Company news fallback failed for {symbol}: {fallback_error}")
-
-    if not normalized and not symbol:
-        fallback_symbols = ["VNM", "FPT", "VCB", "HPG", "VIC"]
-        for fallback_symbol in fallback_symbols:
-            if len(normalized) >= limit:
-                break
-            try:
-                company_news = await VnstockCompanyNewsFetcher.fetch(
-                    CompanyNewsQueryParams(symbol=fallback_symbol, limit=max(1, limit // 2))
-                )
-                for item in company_news:
-                    normalized.append(
-                        NewsArticle(
-                            id=None,
-                            title=item.title,
-                            summary=item.summary,
-                            source=item.source or "vnstock",
-                            url=item.url,
-                            category=item.category,
-                            published_date=item.published_at,
-                            related_symbols=[fallback_symbol],
-                        )
-                    )
-                    if len(normalized) >= limit:
-                        break
-            except Exception:
-                continue
-
-    return NewsFeed(articles=normalized, total=len(normalized), source=source)
+    return NewsFeed(
+        articles=normalized,
+        total=len(normalized),
+        source=source,
+        mode=mode,
+        fallback_used=fallback_used,
+    )
 
 
 class MarketSentiment(BaseModel):
@@ -234,7 +204,11 @@ class HeatmapResponse(BaseModel):
 # NEWS ENDPOINTS
 # ============================================================================
 
-from vnibb.services.news_service import get_news_flow, NewsResponse, NewsSentiment
+from vnibb.services.news_service import (
+    NewsResponse,
+    get_news_flow,
+    get_ranked_news_rows,
+)
 
 
 @router.get(
@@ -248,6 +222,7 @@ async def get_news_feed_api(
     source: Optional[str] = Query(default=None, description="Filter by source"),
     sentiment: Optional[str] = Query(default=None, description="Filter by sentiment"),
     symbol: Optional[str] = Query(default=None, description="Filter by symbol"),
+    mode: str = Query(default="all", pattern=r"^(all|related)$", description="Feed mode"),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> NewsFeed:
@@ -255,6 +230,7 @@ async def get_news_feed_api(
         source=source,
         sentiment=sentiment,
         symbol=symbol,
+        mode=mode if symbol else "all",
         limit=limit,
         offset=offset,
     )
@@ -282,6 +258,7 @@ async def get_news_flow_api(
     sentiment: Optional[str] = Query(
         None, pattern=r"^(bullish|neutral|bearish|positive|negative)$"
     ),
+    mode: str = Query(default="related", pattern=r"^(all|related)$"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
@@ -294,6 +271,7 @@ async def get_news_flow_api(
         symbols=symbol_list,
         sector=sector,
         sentiment=sentiment,
+        mode=mode,
         limit=limit,
         offset=offset,
     )

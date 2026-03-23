@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { ExternalLink, MoveDiagonal, PenTool, Sigma } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -20,19 +21,25 @@ import {
   YAxis,
 } from 'recharts';
 
-export type TimeframeType = '1D' | '5D' | '1M' | '3M' | '6M' | '1Y' | '5Y' | 'ALL';
+export type TimeframeType = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y';
 type ChartSourceMode = 'tradingview' | 'local';
 
+const TIMEFRAME_OPTIONS: readonly TimeframeType[] = ['1M', '3M', '6M', '1Y', '3Y', '5Y'];
+
 const TIMEFRAME_INTERVAL_MAP: Record<TimeframeType, string> = {
-  '1D': 'D',
-  '5D': 'D',
   '1M': 'D',
   '3M': 'D',
   '6M': 'D',
   '1Y': 'W',
+  '3Y': 'W',
   '5Y': 'M',
-  'ALL': 'M',
 };
+
+function normalizeChartTimeframe(value: string | undefined): TimeframeType {
+  return TIMEFRAME_OPTIONS.includes((value || '') as TimeframeType)
+    ? (value as TimeframeType)
+    : '1Y';
+}
 
 interface PriceChartWidgetProps {
   id: string;
@@ -47,7 +54,7 @@ interface PriceChartWidgetProps {
 export function PriceChartWidget({
   id,
   symbol,
-  timeframe = '1M',
+  timeframe = '1Y',
   onRemove,
 }: PriceChartWidgetProps) {
   const { data: profileData } = useProfile(symbol, !!symbol);
@@ -76,6 +83,10 @@ export function PriceChartWidget({
     `vnibb_price_chart_source_${id}`,
     'tradingview'
   );
+  const [selectedTimeframe, setSelectedTimeframe] = useLocalStorage<TimeframeType>(
+    `vnibb_price_chart_timeframe_${id}`,
+    normalizeChartTimeframe(timeframe)
+  );
   const shouldUseLocalHistory = isVietnamExchange && sourceMode === 'local';
 
   const tvSymbol = useMemo(() => {
@@ -83,21 +94,19 @@ export function PriceChartWidget({
   }, [symbol, exchange]);
 
   const interval = useMemo(() => {
-    const tf = (timeframe || '1M') as TimeframeType;
+    const tf = normalizeChartTimeframe(selectedTimeframe);
     return TIMEFRAME_INTERVAL_MAP[tf] || 'D';
-  }, [timeframe]);
+  }, [selectedTimeframe]);
 
   const dateRange = useMemo(() => {
-    const tf = (timeframe || '1M') as TimeframeType;
+    const tf = normalizeChartTimeframe(selectedTimeframe);
     const daysMap: Record<TimeframeType, number> = {
-      '1D': 7,
-      '5D': 10,
       '1M': 30,
       '3M': 90,
       '6M': 180,
       '1Y': 365,
+      '3Y': 365 * 3,
       '5Y': 365 * 5,
-      'ALL': 365 * 10,
     };
     const days = daysMap[tf] || 30;
     const end = new Date();
@@ -105,7 +114,7 @@ export function PriceChartWidget({
     start.setDate(end.getDate() - days);
     const toDate = (value: Date) => value.toISOString().split('T')[0];
     return { startDate: toDate(start), endDate: toDate(end) };
-  }, [timeframe]);
+  }, [selectedTimeframe]);
 
   const historicalQuery = useHistoricalPrices(symbol, {
     startDate: dateRange.startDate,
@@ -127,6 +136,12 @@ export function PriceChartWidget({
       })),
     [historicalData]
   );
+  const tradingViewUrl = tvSymbol
+    ? `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol)}`
+    : 'https://www.tradingview.com/';
+  const featureChips = shouldUseLocalHistory
+    ? ['VNIBB price history', 'Fast local reloads', 'Clean trend view']
+    : ['Drawing tools', 'Fibonacci', 'Indicators'];
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view the chart" />;
@@ -141,37 +156,83 @@ export function PriceChartWidget({
       widgetId={id}
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setSourceMode('tradingview')}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  !shouldUseLocalHistory
-                    ? 'border-blue-500/50 bg-blue-500/15 text-blue-200'
-                    : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-                }`}
-              >
-                TradingView
-              </button>
-              <button
-                type="button"
-                disabled={!isVietnamExchange}
-                onClick={() => setSourceMode('local')}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  shouldUseLocalHistory
-                    ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
-                    : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
-                } disabled:cursor-not-allowed disabled:opacity-50`}
-                title={isVietnamExchange ? 'Use VNIBB historical prices' : 'Local mode is available for VN exchanges only'}
-              >
-                Local
-              </button>
+        <div className="border-b border-[var(--border-subtle)] px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5">
+                {TIMEFRAME_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setSelectedTimeframe(option)}
+                    className={`rounded px-2 py-1 text-[10px] font-semibold transition-colors ${
+                      selectedTimeframe === option
+                        ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSourceMode('tradingview')}
+                  className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                    !shouldUseLocalHistory
+                      ? 'border-blue-500/50 bg-blue-500/15 text-blue-200'
+                      : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                  }`}
+                >
+                  TradingView
+                </button>
+                <button
+                  type="button"
+                  disabled={!isVietnamExchange}
+                  onClick={() => setSourceMode('local')}
+                  className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                    shouldUseLocalHistory
+                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
+                      : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                  title={isVietnamExchange ? 'Use VNIBB historical prices' : 'Local mode is available for VN exchanges only'}
+                >
+                  Local
+                </button>
+              </div>
+
+              {!shouldUseLocalHistory && (
+                <a
+                  href={tradingViewUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-200 transition-colors hover:bg-blue-500/20"
+                >
+                  <ExternalLink size={11} />
+                  Open
+                </a>
+              )}
+
+              <div className="hidden items-center gap-1 md:flex">
+                {featureChips.map((feature) => {
+                  const Icon = feature === 'Drawing tools' ? PenTool : feature === 'Fibonacci' ? MoveDiagonal : feature === 'Indicators' ? Sigma : null;
+                  return (
+                    <span
+                      key={feature}
+                      className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1 text-[9px] font-bold uppercase tracking-wide text-[var(--text-muted)]"
+                    >
+                      {Icon ? <Icon size={10} /> : null}
+                      {feature}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
             <WidgetMeta
               sourceLabel={shouldUseLocalHistory ? 'VNIBB' : 'TradingView'}
-              note={shouldUseLocalHistory ? 'Local historical data (optional)' : 'TradingView data (default)'}
+              note={shouldUseLocalHistory ? `${selectedTimeframe} local history` : `${selectedTimeframe} advanced chart`}
               updatedAt={shouldUseLocalHistory ? historyUpdatedAt : undefined}
               isFetching={shouldUseLocalHistory ? historicalQuery.isFetching && hasHistory : undefined}
               align="right"
@@ -221,9 +282,9 @@ export function PriceChartWidget({
             )
           ) : (
             <div className="relative h-full w-full">
-              <TradingViewAdvancedChart symbol={tvSymbol || symbol} interval={interval} />
+              <TradingViewAdvancedChart symbol={tvSymbol || symbol} exchange={exchange} interval={interval} />
               <div className="pointer-events-none absolute bottom-1 left-2 text-[9px] text-[var(--text-muted)]">
-                Powered by TradingView
+                TradingView toolbar includes drawing tools, Fibonacci, and indicator overlays
               </div>
             </div>
           )}

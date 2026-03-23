@@ -87,6 +87,14 @@ export function DenseFinancialTable({
 }: DenseFinancialTableProps) {
   const visibleColumns = useMemo(() => columns.slice(0, Math.max(1, maxYears)), [columns, maxYears])
   const hasGroups = useMemo(() => rows.some((row) => row.isGroup), [rows])
+  const groupChildCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const row of rows) {
+      if (!row.parentId) continue
+      counts[row.parentId] = (counts[row.parentId] || 0) + 1
+    }
+    return counts
+  }, [rows])
 
   const [sortKey, setSortKey] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
@@ -165,7 +173,8 @@ export function DenseFinancialTable({
 
       const childRows = childrenByParent.get(row.id) ?? []
       if (!childRows.length) continue
-      if (expandedGroups[row.id] === false) continue
+      const isCollapsibleGroup = (groupChildCounts[row.id] || 0) > 3
+      if (isCollapsibleGroup && expandedGroups[row.id] === false) continue
 
       if (sortable && sortKey) {
         result.push(...sortRowsByColumn(childRows, sortKey, sortDirection))
@@ -184,7 +193,7 @@ export function DenseFinancialTable({
     }
 
     return result
-  }, [rows, expandedGroups, sortable, sortKey, hasGroups, sortDirection])
+  }, [rows, expandedGroups, sortable, sortKey, hasGroups, sortDirection, groupChildCounts])
 
   const onSort = (columnKey: string) => {
     if (!sortable) return
@@ -260,6 +269,7 @@ export function DenseFinancialTable({
                   style={row.indent ? { paddingLeft: `${8 + row.indent}px` } : undefined}
                 >
                   {row.isGroup ? (
+                    (groupChildCounts[row.id] || 0) > 3 ? (
                     <button
                       className="inline-flex items-center gap-2 text-[var(--text-primary)]"
                       onClick={() => toggleGroup(row.id)}
@@ -268,6 +278,11 @@ export function DenseFinancialTable({
                       <span>{expandedGroups[row.id] === false ? '▸' : '▾'}</span>
                       <span>{row.label}</span>
                     </button>
+                    ) : (
+                      <span className="inline-flex items-center gap-2 text-[var(--text-primary)]">
+                        <span>{row.label}</span>
+                      </span>
+                    )
                   ) : (
                     row.label
                   )}

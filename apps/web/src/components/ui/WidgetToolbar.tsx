@@ -1,10 +1,13 @@
 'use client';
 
 import React from 'react';
-import { Settings, Maximize2, Minimize2, Download, X, RefreshCw, Sparkles, Move, Users } from 'lucide-react';
+import { Settings, Maximize2, Minimize2, Download, X, RefreshCw, Sparkles, Move, Users, Info } from 'lucide-react';
+import { WIDGET_DESCRIPTIONS } from '@/lib/widgetDescriptions';
+import type { WidgetType } from '@/types/dashboard';
 
 interface WidgetToolbarProps {
   title: string;
+  widgetType?: WidgetType;
   symbol?: string;
   onSymbolChange?: (symbol: string) => void;
   period?: string;
@@ -30,6 +33,7 @@ interface WidgetToolbarProps {
 
 export function WidgetToolbar({
   title,
+  widgetType,
   symbol,
   onSymbolChange,
   isMaximized = false,
@@ -47,6 +51,8 @@ export function WidgetToolbar({
   parameters,
   actions,
 }: WidgetToolbarProps) {
+  const description = widgetType ? WIDGET_DESCRIPTIONS[widgetType] : undefined;
+
   return (
     <div className="flex items-center justify-between h-9 px-2 border-b border-[var(--border-default)] bg-[var(--bg-widget-header)]/80 select-none">
       {/* Left: Sync, Symbol, Title, Parameters */}
@@ -67,6 +73,35 @@ export function WidgetToolbar({
         <span className="text-[11px] font-medium text-[var(--text-secondary)] truncate max-w-[120px]" title={title}>
           {title}
         </span>
+
+        {description && (
+          <div className="group relative flex items-center">
+            <button
+              type="button"
+              className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              title="Widget guide"
+              aria-label={`About ${title}`}
+            >
+              <Info size={12} />
+            </button>
+            <div className="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden w-72 rounded-xl border border-[var(--border-default)] bg-[rgba(10,15,26,0.96)] p-3 text-left shadow-2xl group-hover:block group-focus-within:block">
+              <div className="space-y-2 text-[11px] leading-5 text-slate-100">
+                <div>
+                  <div className="mb-0.5 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">Purpose</div>
+                  <p className="text-slate-100/90">{description.purpose}</p>
+                </div>
+                <div>
+                  <div className="mb-0.5 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">Calculation</div>
+                  <p className="text-slate-100/82">{description.calculation}</p>
+                </div>
+                <div>
+                  <div className="mb-0.5 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">Interpretation</div>
+                  <p className="text-slate-100/82">{description.interpretation}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {parameters && (
           <div className="flex items-center gap-1 ml-1">

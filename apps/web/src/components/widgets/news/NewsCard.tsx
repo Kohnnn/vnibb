@@ -15,6 +15,9 @@ interface NewsCardProps {
     url: string;
     symbols: string[];
     sentiment: 'positive' | 'negative' | 'neutral' | 'bullish' | 'bearish';
+    matched_symbols?: string[];
+    relevance_score?: number | null;
+    is_market_wide_fallback?: boolean;
   };
 }
 
@@ -49,6 +52,24 @@ function NewsCardComponent({ news }: NewsCardProps) {
           <h4 className="text-sm text-[var(--text-primary)] font-medium line-clamp-2 mb-1 group-hover:text-blue-400 transition-colors leading-snug">
             {news.title}
           </h4>
+
+          {news.matched_symbols && news.matched_symbols.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap gap-1">
+              {news.matched_symbols.slice(0, 3).map((symbol) => (
+                <span
+                  key={`${news.id}-${symbol}`}
+                  className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-blue-300"
+                >
+                  {symbol}
+                </span>
+              ))}
+              {typeof news.relevance_score === 'number' && !news.is_market_wide_fallback && (
+                <span className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-300">
+                  {(news.relevance_score * 100).toFixed(0)}% match
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Summary */}
           {news.summary && (

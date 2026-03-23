@@ -56,7 +56,7 @@ class NewsCrawlerService:
             self._news_available = True
             logger.info("vnstock_news premium package detected")
         except ImportError:
-            logger.warning("vnstock_news not installed. Market news crawling disabled.")
+            logger.info("News crawler disabled - vnstock_news not configured")
 
     async def crawl_market_news(
         self,
@@ -87,7 +87,7 @@ class NewsCrawlerService:
 
             return count
         else:
-            logger.info("vnstock_news not available. Skipping market news crawl.")
+            logger.info("News crawler disabled - vnstock_news not configured")
             return 0
 
     async def _crawl_with_vnstock_news(

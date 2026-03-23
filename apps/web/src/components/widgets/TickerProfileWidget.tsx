@@ -41,6 +41,17 @@ function formatDividendValue(row: DividendRecord): string {
     return '-';
 }
 
+function cleanText(value: string | null | undefined): string | null {
+    const trimmed = String(value ?? '').trim()
+    return trimmed || null
+}
+
+function formatDateOnly(value: string | number | Date | null | undefined): string {
+    const stamp = formatTimestamp(value)
+    if (stamp === '-') return '-'
+    return stamp.split(' ')[0] || stamp
+}
+
 export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useProfile(symbol);
     const {
@@ -115,6 +126,14 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     // TODO V200+: wire in CAFEF/vietstock dividend scraper.
     const showCorporateActions = showDividendsSection || showInsiderDealsSection;
 
+    const companyName = cleanText(profileData.company_name) || symbol
+    const shortName = cleanText(profileData.short_name)
+    const industry = cleanText(profileData.industry)
+    const exchange = cleanText(profileData.exchange)
+    const website = cleanText(profileData.website)
+    const companyType = cleanText(profileData.company_type) || 'Company information'
+    const listedDate = cleanText(profileData.listed_date)
+
     return (
         <div className="space-y-4">
             <WidgetMeta
@@ -129,47 +148,47 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
                 <div className="flex items-center gap-3">
                     <CompanyLogo
                         symbol={symbol}
-                        name={profileData.company_name || profileData.short_name || symbol}
-                        website={profileData.website}
+                        name={companyName}
+                        website={website || undefined}
                         size={34}
                     />
                     <div>
                         <h3 className="text-lg font-semibold text-[var(--text-primary)]">
-                            {profileData.company_name || symbol}
+                            {companyName}
                         </h3>
-                        {profileData.short_name && (
-                            <p className="text-sm text-[var(--text-muted)]">{profileData.short_name}</p>
+                        {shortName && (
+                            <p className="text-sm text-[var(--text-muted)]">{shortName}</p>
                         )}
                     </div>
                 </div>
-                {profileData.short_name && (
-                    <p className="text-sm text-[var(--text-muted)] sr-only">{profileData.short_name}</p>
+                {shortName && (
+                    <p className="text-sm text-[var(--text-muted)] sr-only">{shortName}</p>
                 )}
             </div>
 
             <div className="grid grid-cols-2 gap-3 text-sm">
-                {profileData.industry && (
+                {industry && (
                     <div className="flex items-center gap-2 text-[var(--text-muted)]">
                         <Building2 size={14} className="text-blue-400" />
-                        <span>{profileData.industry}</span>
+                        <span>{industry}</span>
                     </div>
                 )}
-                {profileData.exchange && (
+                {exchange && (
                     <div className="flex items-center gap-2 text-[var(--text-muted)]">
                         <MapPin size={14} className="text-blue-400" />
-                        <span>{profileData.exchange}</span>
+                        <span>{exchange}</span>
                     </div>
                 )}
-                {profileData.website && (
+                {website && (
                     <div className="flex items-center gap-2 text-[var(--text-muted)]">
                         <Globe size={14} className="text-blue-400" />
                         <a
-                            href={profileData.website}
+                            href={website}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="hover:text-blue-400 truncate"
                         >
-                            {profileData.website.replace(/^https?:\/\//, '')}
+                            {website.replace(/^https?:\/\//, '')}
                         </a>
                     </div>
                 )}
@@ -195,8 +214,8 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
 
             <div className="pt-2 border-t border-[var(--border-color)] space-y-3">
                 <p className="text-sm text-[var(--text-muted)] leading-relaxed">
-                    {profileData.company_type || 'Company information'} operating in {profileData.industry || 'various sectors'}.
-                    {profileData.listed_date && ` Listed since ${profileData.listed_date}.`}
+                    {companyType} operating in {industry || 'various sectors'}.
+                    {listedDate && ` Listed since ${formatDateOnly(listedDate)}.`}
                 </p>
 
                 {showCorporateActions && (
@@ -228,11 +247,11 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
                                                         {dividend.dividend_yield !== null && dividend.dividend_yield !== undefined
                                                             ? ` • ${formatPercent(dividend.dividend_yield)}`
                                                             : ''}
-                                                        {dividend.ex_date ? ` • Ex ${formatTimestamp(dividend.ex_date)}` : ''}
+                                                        {dividend.ex_date ? ` • Ex ${formatDateOnly(dividend.ex_date)}` : ''}
                                                     </div>
                                                 </div>
                                                 {dividend.payment_date && (
-                                                    <div className="text-[10px] text-[var(--text-muted)]">Pay {formatTimestamp(dividend.payment_date)}</div>
+                                                    <div className="text-[10px] text-[var(--text-muted)]">Pay {formatDateOnly(dividend.payment_date)}</div>
                                                 )}
                                             </div>
                                         ))}
@@ -277,7 +296,7 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
                                                         <div className="text-[10px] text-[var(--text-muted)]">
                                                             {formatNumber(deal.deal_quantity)} @ {formatVND(deal.deal_price)}
                                                         </div>
-                                                        <div className="text-[10px] text-[var(--text-muted)]">{formatTimestamp(deal.announce_date)}</div>
+                                                        <div className="text-[10px] text-[var(--text-muted)]">{formatDateOnly(deal.announce_date)}</div>
                                                     </div>
                                                 </div>
                                             );

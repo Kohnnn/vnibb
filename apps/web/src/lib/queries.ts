@@ -98,6 +98,9 @@ export const queryKeys = {
     // Technical Analysis
     taFull: (symbol: string, timeframe: string) => ['taFull', symbol, timeframe] as const,
     taHistory: (symbol: string, days: number) => ['taHistory', symbol, days] as const,
+    taIchimoku: (symbol: string, period: string) => ['taIchimoku', symbol, period] as const,
+    taFibonacci: (symbol: string, lookbackDays: number, direction: string) =>
+        ['taFibonacci', symbol, lookbackDays, direction] as const,
     // RS Rating System (Phase 2)
     rsLeaders: (limit: number, sector?: string) => ['rsLeaders', limit, sector] as const,
     rsLaggards: (limit: number, sector?: string) => ['rsLaggards', limit, sector] as const,
@@ -1127,6 +1130,35 @@ export function useTechnicalHistory(
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // 5 minutes
     });
+}
+
+export function useIchimokuSeries(
+    symbol: string,
+    options?: { period?: '6M' | '1Y' | '3Y' | '5Y'; enabled?: boolean }
+) {
+    const period = options?.period || '1Y'
+    return useQuery({
+        queryKey: queryKeys.taIchimoku(symbol, period),
+        queryFn: () => api.getIchimokuSeries(symbol, { period }),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 5 * 60 * 1000,
+        retry: 2,
+    })
+}
+
+export function useFibonacciRetracement(
+    symbol: string,
+    options?: { lookbackDays?: number; direction?: 'auto' | 'up' | 'down'; enabled?: boolean }
+) {
+    const lookbackDays = options?.lookbackDays ?? 252
+    const direction = options?.direction || 'auto'
+    return useQuery({
+        queryKey: queryKeys.taFibonacci(symbol, lookbackDays, direction),
+        queryFn: () => api.getFibonacciRetracement(symbol, { lookbackDays, direction }),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 5 * 60 * 1000,
+        retry: 2,
+    })
 }
 
 // ============ Quant Queries ============

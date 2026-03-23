@@ -10,6 +10,18 @@ import { formatNumber } from '@/lib/formatters';
 import { TrendingUp, TrendingDown, Info, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+const priceFormatter = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+function formatPriceValue(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return '--'
+  }
+  return priceFormatter.format(value)
+}
+
 function toPositiveNumber(value: unknown): number | null {
   const parsed = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -152,7 +164,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
         <div className="flex items-baseline justify-between animate-in fade-in duration-500">
           <div className="flex flex-col gap-1">
             <span className="text-3xl font-black font-mono tracking-tighter text-[var(--text-primary)] tabular-nums drop-shadow-lg">
-              {price !== null && price !== undefined ? price.toLocaleString() : '--'}
+              {formatPriceValue(price)}
             </span>
             <div
               className={cn(
@@ -177,11 +189,11 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
 
         <div className="grid grid-cols-2 gap-2">
           {[
-            { label: 'High', value: quote?.high?.toLocaleString() },
-            { label: 'Low', value: quote?.low?.toLocaleString() },
+            { label: 'High', value: formatPriceValue(quote?.high) },
+            { label: 'Low', value: formatPriceValue(quote?.low) },
             { label: 'Volume', value: formatNumber(quote?.volume) },
-            { label: 'Prev Close', value: quote?.prevClose?.toLocaleString() },
-            { label: 'Open', value: quote?.open?.toLocaleString() },
+            { label: 'Prev Close', value: formatPriceValue(quote?.prevClose) },
+            { label: 'Open', value: formatPriceValue(quote?.open) },
             {
               label: 'Mkt Cap',
               value: formatNumber(marketCap),
@@ -190,12 +202,12 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
           ].map((item, i) => (
             <div
               key={i}
-              className="group flex flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2.5 transition-colors hover:border-[var(--border-color)]"
+              className="group flex min-h-[66px] flex-col justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2.5 transition-colors hover:border-[var(--border-color)]"
             >
-              <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest mb-1 group-hover:text-blue-400 transition-colors">
+              <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest group-hover:text-blue-400 transition-colors">
                 {item.label}
               </div>
-              <div className="text-xs font-mono font-medium text-[var(--text-secondary)]">
+              <div className="mt-1 text-sm font-mono font-semibold text-[var(--text-secondary)] tabular-nums">
                 {item.value || '--'}
               </div>
               {item.source && (

@@ -206,7 +206,13 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
 import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, AnalystEstimatesResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, TransactionFlowResponse, CorrelationMatrixResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
 import type { ScreenerResponse } from '@/types/screener';
 import type { Dashboard, DashboardCreate, DashboardUpdate, WidgetCreate } from '@/types/dashboard';
-import type { FullTechnicalAnalysis, SignalSummary, TechnicalIndicators } from '@/types/technical';
+import type {
+    FibonacciRetracementResponse,
+    FullTechnicalAnalysis,
+    IchimokuSeriesResponse,
+    SignalSummary,
+    TechnicalIndicators,
+} from '@/types/technical';
 import type {
     InsiderTrade,
     BlockTrade,
@@ -1745,6 +1751,27 @@ export async function getTechnicalHistory(
     options?: { days?: number }
 ): Promise<{ symbol: string; indicators: any[] }> {
     return fetchAPI<{ symbol: string; indicators: any[] }>(`/analysis/ta/${symbol}/history`, { params: options });
+}
+
+export async function getIchimokuSeries(
+    symbol: string,
+    options?: { period?: '6M' | '1Y' | '3Y' | '5Y' }
+): Promise<IchimokuSeriesResponse> {
+    return fetchAPI<IchimokuSeriesResponse>(`/analysis/ta/${symbol}/ichimoku`, {
+        params: { period: options?.period || '1Y' },
+    });
+}
+
+export async function getFibonacciRetracement(
+    symbol: string,
+    options?: { lookbackDays?: number; direction?: 'auto' | 'up' | 'down' }
+): Promise<FibonacciRetracementResponse> {
+    return fetchAPI<FibonacciRetracementResponse>(`/analysis/ta/${symbol}/fibonacci`, {
+        params: {
+            lookback_days: options?.lookbackDays,
+            direction: options?.direction || 'auto',
+        },
+    });
 }
 
 // ============ Market Heatmap API ============

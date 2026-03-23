@@ -80,6 +80,9 @@ import { InsiderDealTimelineWidget } from './InsiderDealTimelineWidget';
 import { SectorRotationRadarWidget } from './SectorRotationRadarWidget';
 import { MarketBreadthWidget } from './MarketBreadthWidget';
 import { TechnicalSnapshotWidget } from './TechnicalSnapshotWidget';
+import { SignalSummaryWidget } from './SignalSummaryWidget';
+import { IchimokuWidget } from './IchimokuWidget';
+import { FibonacciWidget } from './FibonacciWidget';
 import { OwnershipChangesWidget } from './OwnershipChangesWidget';
 import { VolumeFlowWidget } from './VolumeFlowWidget';
 import { RSISeasonalWidget } from './RSISeasonalWidget';
@@ -107,10 +110,13 @@ export interface WidgetProps {
     widgetGroup?: WidgetGroupId;
 }
 
-const PriceChartLocalWidget = dynamic(() => import('./PriceChartLocalWidget'), {
-    ssr: false,
-    loading: () => null,
-}) as ComponentType<WidgetProps>;
+const PriceChartWidget = dynamic(
+    () => import('./PriceChartWidget').then((m) => m.PriceChartWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
 
 const FinancialsWidget = dynamic(
     () => import('./FinancialsWidget').then((m) => m.FinancialsWidget as any),
@@ -138,8 +144,8 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     // Core widgets
     ticker_info: TickerInfoWidget as ComponentType<WidgetProps>,
     ticker_profile: TickerProfileWidget as ComponentType<WidgetProps>,
-    price_chart: PriceChartLocalWidget as ComponentType<WidgetProps>,
-    tradingview_chart: PriceChartLocalWidget as ComponentType<WidgetProps>,
+    price_chart: PriceChartWidget as ComponentType<WidgetProps>,
+    tradingview_chart: PriceChartWidget as ComponentType<WidgetProps>,
     key_metrics: KeyMetricsWidget as ComponentType<WidgetProps>,
     share_statistics: ShareStatisticsWidget as ComponentType<WidgetProps>,
     screener: ScreenerWidget as ComponentType<WidgetProps>,
@@ -222,6 +228,9 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     seasonality_heatmap: SeasonalityHeatmapWidget as ComponentType<WidgetProps>,
     technical_summary: TechnicalSummaryWidget as ComponentType<WidgetProps>,
     technical_snapshot: TechnicalSnapshotWidget as ComponentType<WidgetProps>,
+    signal_summary: SignalSummaryWidget as ComponentType<WidgetProps>,
+    ichimoku: IchimokuWidget as ComponentType<WidgetProps>,
+    fibonacci: FibonacciWidget as ComponentType<WidgetProps>,
     volume_flow: VolumeFlowWidget as ComponentType<WidgetProps>,
     rsi_seasonal: RSISeasonalWidget as ComponentType<WidgetProps>,
     bollinger_squeeze: BollingerSqueezeWidget as ComponentType<WidgetProps>,
@@ -319,6 +328,9 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     seasonality_heatmap: { w: 8, h: 7, minW: 6, minH: 5 },
     technical_summary: { w: 5, h: 7, minW: 4, minH: 5 },
     technical_snapshot: { w: 5, h: 6, minW: 4, minH: 5 },
+    signal_summary: { w: 8, h: 7, minW: 6, minH: 5 },
+    ichimoku: { w: 8, h: 8, minW: 6, minH: 6 },
+    fibonacci: { w: 8, h: 8, minW: 6, minH: 6 },
     volume_flow: { w: 6, h: 7, minW: 4, minH: 5 },
     rsi_seasonal: { w: 6, h: 7, minW: 4, minH: 5 },
     bollinger_squeeze: { w: 5, h: 6, minW: 4, minH: 5 },
@@ -423,6 +435,9 @@ export const widgetNames: Record<WidgetType, string> = {
     seasonality_heatmap: 'Seasonality Heatmap',
     technical_summary: 'Technical Summary',
     technical_snapshot: 'Technical Snapshot',
+    signal_summary: 'Signal Summary',
+    ichimoku: 'Ichimoku Cloud',
+    fibonacci: 'Fibonacci Retracement',
     volume_flow: 'Volume Flow',
     rsi_seasonal: 'RSI Seasonal',
     bollinger_squeeze: 'Bollinger Squeeze',
@@ -524,6 +539,9 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     seasonality_heatmap: 'Year by month return heatmap for seasonal structure',
     technical_summary: 'Indicator-based signals',
     technical_snapshot: 'Daily technical indicator snapshot',
+    signal_summary: 'Unified buy, sell, and hold summary distilled from technical indicators',
+    ichimoku: 'Ichimoku cloud trend structure with conversion and base lines',
+    fibonacci: 'Swing-based Fibonacci retracement map with nearest level context',
     volume_flow: 'Order-flow proxy from close-position weighted volume delta',
     rsi_seasonal: 'Monthly RSI profile with overbought and oversold frequencies',
     bollinger_squeeze: 'Current Bollinger width and squeeze status signal',
