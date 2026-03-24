@@ -46,6 +46,7 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
 
   const metric = data?.data?.metrics?.seasonality as
     | {
+        error?: string
         monthly_returns?: MonthlyReturnRow[]
         monthly_average_return_pct?: Record<string, number | null>
         best_month?: string | null
@@ -55,8 +56,9 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
       }
     | undefined
 
+  const metricError = metric?.error || data?.error || null
   const monthlyReturns = metric?.monthly_returns || []
-  const hasData = monthlyReturns.length >= 3
+  const hasData = monthlyReturns.length > 0
   const isFallback = Boolean(error && hasData)
 
   const years = useMemo(
@@ -141,10 +143,17 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
+        ) : metricError && !hasData ? (
+          <WidgetEmpty message={metricError} icon={<CalendarDays size={18} />} />
         ) : !hasData ? (
-          <WidgetEmpty message="Not enough backend seasonality data yet" icon={<CalendarDays size={18} />} />
+          <WidgetEmpty message="Insufficient historical data for the selected period" icon={<CalendarDays size={18} />} />
         ) : (
           <div className="min-w-[520px] space-y-2">
+            {data?.data?.warning ? (
+              <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+                {data.data.warning}
+              </div>
+            ) : null}
             <div className="grid grid-cols-[56px_repeat(12,minmax(0,1fr))] gap-1 text-[10px] text-[var(--text-muted)]">
               <div />
               {MONTH_LABELS.map((month) => (

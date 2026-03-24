@@ -134,7 +134,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend} except per-share values | Currency: VND | Reporting: VAS | Fiscal year end: Dec 31.`,
+        () => `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS`,
         [unitLegend, symbol]
     );
 

@@ -4415,9 +4415,18 @@ async def get_transaction_flow(
         total_buy_value = _pick_optional_float(row.buy_value)
         total_sell_value = _pick_optional_float(row.sell_value)
         total_net_value = _pick_optional_float(row.net_value)
+        if total_net_value is None and total_buy_value is not None and total_sell_value is not None:
+            total_net_value = total_buy_value - total_sell_value
+
         total_buy_volume = _coerce_optional_int(row.buy_volume)
         total_sell_volume = _coerce_optional_int(row.sell_volume)
         total_net_volume = _coerce_optional_int(row.net_volume)
+        if (
+            total_net_volume is None
+            and total_buy_volume is not None
+            and total_sell_volume is not None
+        ):
+            total_net_volume = total_buy_volume - total_sell_volume
 
         foreign_net_volume = _coerce_optional_int(
             row.foreign_net_volume

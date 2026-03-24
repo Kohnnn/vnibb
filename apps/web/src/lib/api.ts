@@ -1377,7 +1377,7 @@ export async function getPeerCompanies(symbol: string, limit = 5): Promise<Peers
 
 // ============ Quant API ============
 
-export type QuantPeriod = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y'
+export type QuantPeriod = '1M' | '6M' | '1Y' | '3Y' | '5Y' | 'ALL'
 
 export type QuantMetric =
     | 'seasonality'

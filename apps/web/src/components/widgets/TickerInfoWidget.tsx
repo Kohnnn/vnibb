@@ -1,7 +1,7 @@
 'use client';
 
 import { memo } from 'react';
-import { useStockQuote, useProfile, useScreenerData } from '@/lib/queries';
+import { useStockQuote, useProfile, useScreenerData, useTradingStats } from '@/lib/queries';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -28,6 +28,11 @@ function toPositiveNumber(value: unknown): number | null {
     return null
   }
   return parsed
+}
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(100, Math.max(0, value))
 }
 
 interface TickerInfoWidgetProps {
@@ -66,6 +71,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
     limit: 1,
     enabled: Boolean(symbol),
   });
+  const { data: tradingStats } = useTradingStats(symbol, Boolean(symbol));
 
   const isLoading = quoteLoading || profileLoading;
   const isFetching = quoteFetching || profileFetching || screenerFetching;
@@ -129,6 +135,14 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
     (screenerRow?.industry_name as string | undefined) ||
     null
 
+  const rangeLow = toPositiveNumber(tradingStats?.data?.low_52w)
+  const rangeHigh = toPositiveNumber(tradingStats?.data?.high_52w)
+  const rangePrice = toPositiveNumber(price)
+  const hasRange = Boolean(rangeLow && rangeHigh && rangePrice && rangeHigh > rangeLow)
+  const rangePosition = hasRange
+    ? clampPercent((((rangePrice as number) - (rangeLow as number)) / ((rangeHigh as number) - (rangeLow as number))) * 100)
+    : 0
+
   const isPositive = (change ?? 0) >= 0;
   const changeLabel =
     change !== null && change !== undefined && changePct !== null && changePct !== undefined
@@ -145,7 +159,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
       widgetId={id}
       hideHeader={hideHeader}
     >
-      <div className="flex flex-col h-full space-y-3">
+      <div className="flex flex-col h-full space-y-2.5">
         <WidgetMeta
           updatedAt={updatedAt}
           isFetching={isFetching && hasQuote}
@@ -189,8 +203,8 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
 
         <div className="grid grid-cols-2 gap-2">
           {[
-            { label: 'High', value: formatPriceValue(quote?.high) },
-            { label: 'Low', value: formatPriceValue(quote?.low) },
+            { label: 'Day High', value: formatPriceValue(quote?.high) },
+            { label: 'Day Low', value: formatPriceValue(quote?.low) },
             { label: 'Volume', value: formatNumber(quote?.volume) },
             { label: 'Prev Close', value: formatPriceValue(quote?.prevClose) },
             { label: 'Open', value: formatPriceValue(quote?.open) },
@@ -218,6 +232,24 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
             </div>
           ))}
         </div>
+
+        {hasRange && (
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 py-2.5">
+            <div className="mb-1.5 flex items-center justify-between text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">
+              <span>52W Range</span>
+              <span className="text-[var(--text-secondary)]">{rangePosition.toFixed(0)}%</span>
+            </div>
+            <div className="relative h-2 rounded-full bg-[var(--bg-secondary)]">
+              <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-rose-400/60 via-amber-300/60 to-emerald-400/70" style={{ width: `${rangePosition}%` }} />
+              <div className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border border-white/50 bg-[var(--bg-primary)] shadow" style={{ left: `calc(${rangePosition}% - 6px)` }} />
+            </div>
+            <div className="mt-1.5 flex items-center justify-between text-[10px] font-mono text-[var(--text-secondary)] tabular-nums">
+              <span>{formatPriceValue(rangeLow)}</span>
+              <span className="text-[var(--text-primary)]">{formatPriceValue(rangePrice)}</span>
+              <span>{formatPriceValue(rangeHigh)}</span>
+            </div>
+          </div>
+        )}
 
         <div className="pt-2 border-t border-[var(--border-subtle)]">
           <div className="flex items-center gap-2 mb-1.5">

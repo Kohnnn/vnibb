@@ -13,6 +13,8 @@ import {
   type AdvancedChartTimeframe,
 } from '@/components/chart/TradingViewAdvancedChart';
 import { formatPercent, formatRatio } from '@/lib/formatters';
+import type { FinancialRatioData } from '@/types/equity';
+import type { ScreenerData } from '@/types/screener';
 
 const TIMEFRAME_OPTIONS: readonly AdvancedChartTimeframe[] = [
   '1D',
@@ -39,6 +41,30 @@ interface PriceChartWidgetProps {
   onRemove?: () => void;
 }
 
+interface SnapshotMetric {
+  pe: number | null;
+  pb: number | null;
+  roe: number | null;
+  dividendYield: number | null;
+}
+
+function firstFinite(...values: Array<number | null | undefined>): number | null {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function normalizeDividendYield(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.abs(value) > 50 ? null : value;
+}
+
 function normalizeChartTimeframe(value: string | undefined): AdvancedChartTimeframe {
   return TIMEFRAME_OPTIONS.includes((value || '') as AdvancedChartTimeframe)
     ? (value as AdvancedChartTimeframe)
@@ -62,16 +88,19 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
   const [chartMode, setChartMode] = useState<AdvancedChartMode>('candles');
 
   const exchange = profileData?.data?.exchange;
-  const metrics = screenerData?.data?.[0];
-  const latestRatio = ratiosData?.data?.[0];
-  const mergedMetrics: any = metrics || {
-    pe: latestRatio?.pe,
-    pb: latestRatio?.pb,
-    roe: latestRatio?.roe,
-    dividend_yield: undefined,
+  const metrics = screenerData?.data?.[0] as ScreenerData | undefined;
+  const latestRatio = ratiosData?.data?.[0] as FinancialRatioData | undefined;
+  const snapshotMetrics: SnapshotMetric = {
+    pe: firstFinite(metrics?.pe, latestRatio?.pe),
+    pb: firstFinite(metrics?.pb, latestRatio?.pb),
+    roe: firstFinite(metrics?.roe, latestRatio?.roe),
+    dividendYield: firstFinite(
+      normalizeDividendYield(metrics?.dividend_yield),
+      normalizeDividendYield(latestRatio?.dividend_yield)
+    ),
   };
   const hasMetrics = Boolean(
-    mergedMetrics && Object.values(mergedMetrics).some((value) => value !== null && value !== undefined)
+    Object.values(snapshotMetrics).some((value) => value !== null && value !== undefined)
   );
 
   const featureChips = useMemo(() => ['Live data', 'Volume', 'Crosshair', 'Fast symbol switching'], []);
@@ -188,10 +217,10 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
           ) : (
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
               {[
-                { label: 'P/E', value: formatRatio(mergedMetrics.pe) },
-                { label: 'P/B', value: formatRatio(mergedMetrics.pb) },
-                { label: 'ROE', value: formatPercent(mergedMetrics.roe) },
-                { label: 'Div Yield', value: formatPercent(mergedMetrics.dividend_yield) },
+                { label: 'P/E', value: formatRatio(snapshotMetrics.pe) },
+                { label: 'P/B', value: formatRatio(snapshotMetrics.pb) },
+                { label: 'ROE', value: formatPercent(snapshotMetrics.roe) },
+                { label: 'Div Yield', value: formatPercent(snapshotMetrics.dividendYield) },
               ].map((item) => (
                 <div
                   key={item.label}

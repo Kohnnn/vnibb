@@ -89,16 +89,26 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove }: TransactionFlo
   const rows = data?.data?.data || [];
   const hasData = rows.length > 0;
   const latest = rows[rows.length - 1];
+  const latestDataDate = data?.meta?.last_data_date ?? latest?.date ?? null;
+
+  const staleDays = useMemo(() => {
+    if (!latestDataDate) return null;
+    const parsed = new Date(latestDataDate);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return Math.floor((Date.now() - parsed.getTime()) / (1000 * 60 * 60 * 24));
+  }, [latestDataDate]);
+
+  const isStale = Boolean(staleDays !== null && staleDays > 7);
 
   const chartRows = useMemo(() => {
     return rows.map((row) => ({
       ...row,
       label: formatShortDate(row.date),
-      domestic: mode === 'value' ? row.domestic_net_value ?? 0 : row.domestic_net_volume ?? 0,
-      foreign: mode === 'value' ? row.foreign_net_value ?? 0 : row.foreign_net_volume ?? 0,
+      domestic: mode === 'value' ? row.domestic_net_value ?? null : row.domestic_net_volume ?? null,
+      foreign: mode === 'value' ? row.foreign_net_value ?? null : row.foreign_net_volume ?? null,
       proprietary:
-        mode === 'value' ? row.proprietary_net_value ?? 0 : row.proprietary_net_volume ?? 0,
-      selected: getScopeValue(row, scope, mode) ?? 0,
+        mode === 'value' ? row.proprietary_net_value ?? null : row.proprietary_net_volume ?? null,
+      selected: getScopeValue(row, scope, mode),
       price: row.price ?? null,
     }));
   }, [mode, rows, scope]);
@@ -126,6 +136,17 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove }: TransactionFlo
 
     return candidates.sort((left, right) => Math.abs(right.value) - Math.abs(left.value))[0] || null;
   }, [latest, mode]);
+
+  const hasRenderableFlowData = useMemo(() => {
+    return rows.some((row) => (
+      [
+        getScopeValue(row, 'domestic', mode),
+        getScopeValue(row, 'foreign', mode),
+        getScopeValue(row, 'proprietary', mode),
+        getScopeValue(row, 'total', mode),
+      ].some((value) => value !== null && value !== undefined)
+    ));
+  }, [mode, rows]);
 
   return (
     <WidgetContainer
@@ -205,8 +226,18 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove }: TransactionFlo
               icon={<Activity size={18} />}
               message={`No transaction flow data available for ${upperSymbol}.`}
             />
+          ) : !hasRenderableFlowData ? (
+            <WidgetEmpty
+              icon={<Activity size={18} />}
+              message={`Investor bucket flow is not available for ${upperSymbol} yet.`}
+            />
           ) : (
             <div className="space-y-3">
+              {isStale ? (
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  Latest transaction flow snapshot is {staleDays} days old. Showing the last available session until the pipeline refreshes.
+                </div>
+              ) : null}
               <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
                 <span className="font-semibold text-[var(--text-primary)]">Current read:</span>{' '}
                 {latestLead

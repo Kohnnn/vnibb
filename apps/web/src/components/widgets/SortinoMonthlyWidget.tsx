@@ -26,6 +26,7 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
 
   const metric = data?.data?.metrics?.sortino as
     | {
+        error?: string
         monthly_sortino?: Record<string, number | null>
         monthly_sharpe?: Record<string, number | null>
         best_months?: string[]
@@ -33,18 +34,19 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
       }
     | undefined
 
+  const metricError = metric?.error || data?.error || null
   const sortino = metric?.monthly_sortino || {}
   const sharpe = metric?.monthly_sharpe || {}
   const rows = MONTHS.map((month) => ({
     month,
-    sortino: Number(sortino[month] ?? 0),
-    sharpe: Number(sharpe[month] ?? 0),
+    sortino: typeof sortino[month] === 'number' ? Number(sortino[month]) : null,
+    sharpe: typeof sharpe[month] === 'number' ? Number(sharpe[month]) : null,
   }))
   const maxAbs = Math.max(
-    ...rows.map((row) => Math.max(Math.abs(row.sortino), Math.abs(row.sharpe))),
+    ...rows.map((row) => Math.max(Math.abs(row.sortino ?? 0), Math.abs(row.sharpe ?? 0))),
     1
   )
-  const hasData = rows.some((row) => row.sortino !== 0 || row.sharpe !== 0)
+  const hasData = rows.some((row) => row.sortino !== null || row.sharpe !== null)
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Sortino profile" icon={<BarChart3 size={18} />} />
@@ -78,10 +80,17 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
         <WidgetSkeleton lines={8} />
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : metricError && !hasData ? (
+        <WidgetEmpty message={metricError} icon={<BarChart3 size={18} />} />
       ) : !hasData ? (
-        <WidgetEmpty message="No Sortino data" icon={<BarChart3 size={18} />} />
+        <WidgetEmpty message="Insufficient historical data for the selected period" icon={<BarChart3 size={18} />} />
       ) : (
         <>
+          {data?.data?.warning ? (
+            <div className="mb-2 rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+              {data.data.warning}
+            </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Best Months</div>
@@ -116,7 +125,7 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
                       borderRadius: '8px',
                       fontSize: '11px',
                     }}
-                    formatter={(value: unknown, name?: string) => [Number(value).toFixed(2), name || '']}
+                    formatter={(value: unknown, name?: string) => [Number(value ?? 0).toFixed(2), name || '']}
                   />
                   <Legend wrapperStyle={{ fontSize: 10 }} />
                   <Bar dataKey="sortino" name="Sortino" fill="#22c55e" radius={[2, 2, 0, 0]} />
@@ -128,15 +137,16 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
 
           <div className="flex-1 overflow-auto space-y-1 pr-1">
             {rows.map((row) => {
-              const width = Math.max(2, (Math.abs(row.sortino) / maxAbs) * 100)
+              const currentSortino = row.sortino ?? 0
+              const width = Math.max(2, (Math.abs(currentSortino) / maxAbs) * 100)
               return (
                 <div key={row.month} className="flex items-center gap-2">
                   <div className="w-8 text-[10px] text-[var(--text-muted)]">{row.month}</div>
                   <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
-                    <div className={`h-full ${row.sortino >= 0 ? 'bg-emerald-500/70' : 'bg-red-500/70'}`} style={{ width: `${width}%` }} />
+                    <div className={`h-full ${currentSortino >= 0 ? 'bg-emerald-500/70' : 'bg-red-500/70'}`} style={{ width: `${width}%` }} />
                   </div>
-                  <div className="w-14 text-[10px] text-right font-mono text-[var(--text-primary)]">S {row.sortino.toFixed(2)}</div>
-                  <div className="w-14 text-[10px] text-right font-mono text-cyan-300">H {row.sharpe.toFixed(2)}</div>
+                  <div className="w-14 text-[10px] text-right font-mono text-[var(--text-primary)]">S {(row.sortino ?? 0).toFixed(2)}</div>
+                  <div className="w-14 text-[10px] text-right font-mono text-cyan-300">H {(row.sharpe ?? 0).toFixed(2)}</div>
                 </div>
               )
             })}
