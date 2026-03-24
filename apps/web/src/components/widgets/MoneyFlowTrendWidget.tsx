@@ -94,6 +94,10 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendW
   const note = data?.sector
     ? `${data.sector} vs ${data.benchmark}`
     : `Universe vs ${data?.benchmark || 'VNINDEX'}`;
+  const referenceStock = useMemo(
+    () => stocks.find((stock) => stock.symbol === upperSymbol) || stocks[0] || null,
+    [stocks, upperSymbol]
+  );
 
   const toggleSymbol = (ticker: string) => {
     setVisibleSymbols((current) => ({
@@ -147,6 +151,12 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendW
             <Info size={12} className="text-cyan-300" />
             <span>Proxy model: relative strength vs VNINDEX with trend and momentum centered at 100.</span>
           </div>
+          {referenceStock && (
+            <div className="mt-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+              <span className="font-semibold text-[var(--text-primary)]">Current read:</span>{' '}
+              {referenceStock.symbol} is the anchor name for this view, so use its latest trail position versus the 100/100 crosshair to judge whether momentum is improving, stalling, or rolling over.
+            </div>
+          )}
         </div>
 
         <div className="flex flex-1 overflow-hidden">

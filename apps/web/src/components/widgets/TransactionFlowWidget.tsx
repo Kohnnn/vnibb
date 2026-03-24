@@ -116,6 +116,16 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove }: TransactionFlo
   const note = scope === 'total'
     ? `${mode === 'value' ? 'Net value' : 'Net volume'} stacked by inferred investor bucket`
     : `${scope} ${mode}`;
+  const latestLead = useMemo(() => {
+    if (!latest) return null;
+    const candidates = [
+      { label: 'Domestic', value: getScopeValue(latest, 'domestic', mode) },
+      { label: 'Foreign', value: getScopeValue(latest, 'foreign', mode) },
+      { label: 'Prop', value: getScopeValue(latest, 'proprietary', mode) },
+    ].filter((item) => item.value !== null) as Array<{ label: string; value: number }>;
+
+    return candidates.sort((left, right) => Math.abs(right.value) - Math.abs(left.value))[0] || null;
+  }, [latest, mode]);
 
   return (
     <WidgetContainer
@@ -197,6 +207,13 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove }: TransactionFlo
             />
           ) : (
             <div className="space-y-3">
+              <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+                <span className="font-semibold text-[var(--text-primary)]">Current read:</span>{' '}
+                {latestLead
+                  ? `${latestLead.label} flow is the strongest driver in the latest session, while price overlay helps confirm whether participation is supportive or divergent.`
+                  : 'Flow strength becomes more useful when at least one participant bucket shows persistent expansion.'}
+              </div>
+
               <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
                 {summaryCards.map((card) => (
                   <div

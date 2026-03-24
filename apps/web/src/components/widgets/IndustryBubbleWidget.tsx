@@ -113,6 +113,7 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove }: IndustryBubbleW
   const hasData = points.length > 0;
 
   const legendItems = useMemo(() => points.slice().sort((a, b) => Number(b.is_reference) - Number(a.is_reference)), [points]);
+  const referencePoint = useMemo(() => points.find((point) => point.is_reference) || null, [points]);
 
   return (
     <WidgetContainer
@@ -204,6 +205,29 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove }: IndustryBubbleW
             <WidgetEmpty message={`No industry bubble data available for ${upperSymbol}.`} icon={<CircleDot size={18} />} />
           ) : (
             <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-2 xl:grid-cols-3">
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Reference</div>
+                  <div className="mt-1 text-sm font-semibold text-fuchsia-200">{referencePoint?.symbol || upperSymbol}</div>
+                  <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                    {metricLabel(xMetric)} {formatBubbleMetric(xMetric, referencePoint?.x)} · {metricLabel(yMetric)} {formatBubbleMetric(yMetric, referencePoint?.y)}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Sector Average</div>
+                  <div className="mt-1 text-sm font-semibold text-cyan-200">{data?.sector || 'Peer set'}</div>
+                  <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                    {metricLabel(xMetric)} {formatBubbleMetric(xMetric, data?.sector_average?.x)} · {metricLabel(yMetric)} {formatBubbleMetric(yMetric, data?.sector_average?.y)}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">How To Read</div>
+                  <div className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                    Use the crosshair lines as the sector baseline. Outliers far from the center are more useful than crowded names hugging the average.
+                  </div>
+                </div>
+              </div>
+
               <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
                 <ChartMountGuard className="h-[360px]" minHeight={320}>
                   <ResponsiveContainer width="100%" height="100%">

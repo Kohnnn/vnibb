@@ -5,13 +5,16 @@ import { cn } from '@/lib/utils';
 const PopoverContext = createContext<{
     isOpen: boolean;
     setIsOpen: (open: boolean) => void;
+    rootRef: React.RefObject<HTMLDivElement | null>;
 } | null>(null);
 
 export const Popover = ({ children }: { children: React.ReactNode }) => {
     const [isOpen, setIsOpen] = useState(false);
+    const rootRef = useRef<HTMLDivElement>(null);
+
     return (
-        <PopoverContext.Provider value={{ isOpen, setIsOpen }}>
-            <div className="relative inline-block">
+        <PopoverContext.Provider value={{ isOpen, setIsOpen, rootRef }}>
+            <div ref={rootRef} className="relative inline-block">
                 {children}
             </div>
         </PopoverContext.Provider>
@@ -41,17 +44,25 @@ export const PopoverContent = ({ children, className = '', align = 'center' }: a
     const ref = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                context?.setIsOpen(false);
+            }
+        };
+
         const handleClickOutside = (event: MouseEvent) => {
-            if (ref.current && !ref.current.contains(event.target as Node)) {
+            if (context?.rootRef.current && !context.rootRef.current.contains(event.target as Node)) {
                 context?.setIsOpen(false);
             }
         };
 
         if (context?.isOpen) {
             document.addEventListener('mousedown', handleClickOutside);
+            document.addEventListener('keydown', handleKeyDown);
         }
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('keydown', handleKeyDown);
         };
     }, [context]);
 

@@ -63,6 +63,12 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
     () => Object.entries(marketSummary).slice(0, 4),
     [marketSummary]
   );
+  const strongestSector = useMemo(() => {
+    return sectors.length ? [...sectors].sort((left, right) => right.change_pct - left.change_pct)[0] : null;
+  }, [sectors]);
+  const weakestSector = useMemo(() => {
+    return sectors.length ? [...sectors].sort((left, right) => left.change_pct - right.change_pct)[0] : null;
+  }, [sectors]);
 
   const scroll = (direction: 'left' | 'right') => {
     scrollRef.current?.scrollBy({
@@ -99,6 +105,13 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
               </div>
             ))}
           </div>
+
+          {hasData && (
+            <div className="mb-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+              <span className="font-semibold text-[var(--text-primary)]">Leadership:</span>{' '}
+              strongest {strongestSector?.name || '--'} ({formatNumber(strongestSector?.change_pct ?? null, { decimals: 2 })}%) · weakest {weakestSector?.name || '--'} ({formatNumber(weakestSector?.change_pct ?? null, { decimals: 2 })}%)
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-0.5">
