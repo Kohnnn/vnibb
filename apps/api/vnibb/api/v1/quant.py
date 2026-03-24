@@ -45,8 +45,9 @@ SUPPORTED_METRICS = (
     "drawdown_recovery",
 )
 DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
-ALLOWED_QUANT_PERIODS = ("1M", "3M", "6M", "1Y", "3Y", "5Y")
+ALLOWED_QUANT_PERIODS = ("1M", "6M", "1Y", "3Y", "5Y", "ALL")
 QUANT_STALE_DAYS_THRESHOLD = 7
+ALL_HISTORY_START_DATE = date(1970, 1, 1)
 METRIC_ALIASES = {
     "seasonality": "seasonality",
     "seasonality_heatmap": "seasonality",
@@ -121,8 +122,6 @@ def _safe_float(value: Any, decimals: int = 4) -> float | None:
 def _resolve_start_date(period: str, end_date: date) -> date:
     if period == "1M":
         return end_date - timedelta(days=31)
-    if period == "3M":
-        return end_date - timedelta(days=93)
     if period == "6M":
         return end_date - timedelta(days=186)
     if period == "1Y":
@@ -131,6 +130,8 @@ def _resolve_start_date(period: str, end_date: date) -> date:
         return end_date - timedelta(days=365 * 3)
     if period == "5Y":
         return end_date - timedelta(days=365 * 5)
+    if period == "ALL":
+        return ALL_HISTORY_START_DATE
     return end_date - timedelta(days=365 * 5)
 
 
@@ -144,7 +145,7 @@ def _normalize_quant_period(period: str) -> str:
         status_code=400,
         detail={
             "code": "INVALID_PERIOD",
-            "message": f"Quant period must be one of {allowed}. 10Y is no longer supported.",
+            "message": f"Quant period must be one of {allowed}.",
             "allowed_periods": list(ALLOWED_QUANT_PERIODS),
             "requested_period": normalized or None,
         },
@@ -981,6 +982,17 @@ def _compute_atr(frame: pd.DataFrame) -> Dict[str, Any]:
 
 def _compute_sortino(frame: pd.DataFrame) -> Dict[str, Any]:
     enriched = frame.copy()
+    enriched["time"] = pd.to_datetime(enriched["time"], errors="coerce")
+    enriched = enriched.dropna(subset=["time", "close"]).sort_values("time")
+    if len(enriched) < 2:
+        empty_map = _build_month_map(pd.Series(dtype=float), decimals=3)
+        return {
+            "monthly_sortino": empty_map,
+            "monthly_sharpe": empty_map.copy(),
+            "best_months": [],
+            "avoid_months": [],
+        }
+
     enriched["returns"] = enriched["close"].pct_change()
     enriched["month"] = enriched["time"].dt.month
 
@@ -996,16 +1008,27 @@ def _compute_sortino(frame: pd.DataFrame) -> Dict[str, Any]:
 
         mean_return = monthly_returns.mean()
         downside = monthly_returns[monthly_returns < 0]
-        downside_std = downside.std(ddof=0)
+        downside_std = 0.0 if downside.empty else downside.std(ddof=0)
         monthly_std = monthly_returns.std(ddof=0)
 
         sortino = None
-        if downside_std and not np.isnan(downside_std):
-            sortino = (mean_return * 252) / (downside_std * np.sqrt(252))
+        if not np.isnan(downside_std):
+            if downside_std <= 1e-8:
+                if mean_return > 0:
+                    sortino = 99.0
+                elif mean_return < 0:
+                    sortino = -99.0
+                else:
+                    sortino = 0.0
+            else:
+                sortino = (mean_return * 252) / (downside_std * np.sqrt(252))
 
         sharpe = None
         if monthly_std and not np.isnan(monthly_std):
             sharpe = (mean_return * 252) / (monthly_std * np.sqrt(252))
+
+        if sortino is not None:
+            sortino = float(np.clip(sortino, -99.0, 99.0))
 
         sortino_map[label] = _safe_float(sortino, 3)
         sharpe_map[label] = _safe_float(sharpe, 3)

@@ -227,17 +227,17 @@ export function DenseFinancialTable({
 
   return (
     <div className={cn('overflow-auto', className)}>
-      <table className="data-table financial-dense freeze-first-col w-full text-[11px] text-left leading-4">
+      <table className="data-table financial-dense freeze-first-col w-full border-separate border-spacing-0 text-[10px] text-left leading-4">
         <thead className="sticky top-0 z-10 bg-[var(--bg-primary)] text-[var(--text-muted)]">
           <tr className="border-b border-[var(--border-color)]">
-            <th className="px-2 py-1.5 font-bold uppercase tracking-tighter">Metric</th>
+            <th className="px-2 py-1 font-bold uppercase tracking-tighter">Metric</th>
             {visibleColumns.map((column) => {
               const isActiveSort = sortKey === column.key
               return (
                 <th
                   key={column.key}
                   className={cn(
-                    'px-2 py-1.5 font-bold',
+                    'px-2 py-1 font-bold',
                     column.align === 'left' ? 'text-left' : 'text-right',
                     sortable ? 'cursor-pointer select-none hover:text-[var(--text-primary)]' : ''
                   )}
@@ -252,7 +252,7 @@ export function DenseFinancialTable({
               )
             })}
             {showTrend ? (
-              <th className="py-2 px-2 text-center font-bold uppercase tracking-tighter">Trend</th>
+              <th className="px-2 py-1 text-center font-bold uppercase tracking-tighter">Trend</th>
             ) : null}
           </tr>
         </thead>
@@ -266,8 +266,8 @@ export function DenseFinancialTable({
               <tr
                 key={row.id}
                 className={cn(
-                  'border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-hover)]',
-                  rowIndex % 2 === 1 && !row.isGroup ? 'bg-[var(--bg-secondary)]/30' : '',
+                  'h-6 border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-hover)]',
+                  rowIndex % 2 === 1 && !row.isGroup ? 'bg-[var(--bg-secondary)]/18' : '',
                   row.isGroup ? 'bg-[var(--bg-surface)] font-semibold' : '',
                   isEmphasisRow(row) && !row.isGroup ? 'border-t border-[var(--border-default)] bg-[var(--bg-surface)]/55 font-semibold' : ''
                 )}
@@ -326,7 +326,7 @@ export function DenseFinancialTable({
                       key={`${row.id}:${column.key}`}
                       data-type="number"
                         className={cn(
-                          'px-2 py-1 font-mono text-[var(--text-primary)]',
+                          'px-2 py-1 tabular-nums text-[var(--text-primary)]',
                           column.align === 'left' ? 'text-left' : 'text-right'
                         )}
                     >

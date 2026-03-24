@@ -54,7 +54,7 @@ async def test_quant_endpoint_rejects_10y_period(client):
     detail = payload.get("detail", payload)
     assert detail["code"] == "INVALID_PERIOD"
     assert detail["requested_period"] == "10Y"
-    assert detail["allowed_periods"] == ["1M", "3M", "6M", "1Y", "3Y", "5Y"]
+    assert detail["allowed_periods"] == ["1M", "6M", "1Y", "3Y", "5Y", "ALL"]
 
 
 @pytest.mark.asyncio
@@ -126,6 +126,43 @@ async def test_quant_endpoint_includes_backend_seasonality_metric(client, monkey
     metric = payload["data"]["metrics"]["seasonality"]
     assert len(metric["monthly_returns"]) > 0
     assert "Mar" in metric["monthly_average_return_pct"]
+
+
+@pytest.mark.asyncio
+async def test_quant_endpoint_accepts_all_period(client, monkeypatch):
+    async def fake_load_price_frame(*_args, **_kwargs):
+        return _build_price_frame(320)
+
+    monkeypatch.setattr("vnibb.api.v1.quant._load_price_frame", fake_load_price_frame)
+
+    response = await client.get(
+        "/api/v1/quant/VCI",
+        params={
+            "metrics": "seasonality,sortino",
+            "period": "ALL",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["error"] is None
+    assert payload["data"]["period"] == "ALL"
+    assert "seasonality" in payload["data"]["metrics"]
+    assert "sortino" in payload["data"]["metrics"]
+
+
+def test_compute_sortino_handles_string_dates_and_zero_downside():
+    frame = pd.DataFrame(
+        {
+            "time": pd.date_range(start="2026-01-02", periods=45, freq="B").strftime("%Y-%m-%d"),
+            "close": [100 + index for index in range(45)],
+        }
+    )
+
+    payload = quant._compute_sortino(frame)
+
+    assert payload["monthly_sortino"]["Jan"] == 99.0
+    assert payload["best_months"]
 
 
 @pytest.mark.asyncio

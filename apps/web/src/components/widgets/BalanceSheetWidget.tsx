@@ -134,7 +134,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend} | Currency: VND | Reporting: VAS | Fiscal year end: Dec 31.`,
+        () => `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS`,
         [unitLegend]
     );
 

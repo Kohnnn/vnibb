@@ -81,8 +81,8 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
                 ) : !hasData ? (
                     <WidgetEmpty message="No shareholders data" icon={<Users size={18} />} />
                 ) : !hasMeaningfulData ? (
-                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-4 text-center text-xs text-[var(--text-muted)]">
-                        No meaningful ownership data available yet.
+                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2.5 text-center text-xs text-[var(--text-muted)]">
+                        Data pending. Ownership disclosures for {symbol} are still sparse.
                     </div>
                 ) : (
                     <table className="data-table w-full text-xs">

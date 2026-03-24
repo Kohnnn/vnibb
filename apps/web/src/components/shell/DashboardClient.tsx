@@ -464,7 +464,7 @@ function DashboardContent() {
                                     layouts={memoizedLayouts}
                                     onLayoutChange={handleLayoutChange}
                                     isEditing={isEditing}
-                                    rowHeight={60}
+                                    rowHeight={48}
                                     cols={24}
                                 >
                                     {activeTab.widgets.map((widget) => {

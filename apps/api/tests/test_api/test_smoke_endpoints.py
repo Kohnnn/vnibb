@@ -1278,6 +1278,59 @@ async def test_price_depth_smoke_returns_entries(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_transaction_flow_derives_missing_net_fields_from_buy_sell(client, test_db):
+    test_db.add(
+        Stock(
+            id=901,
+            symbol="FPT",
+            exchange="HOSE",
+            company_name="FPT Corp",
+        )
+    )
+    test_db.add(
+        StockPrice(
+            id=901,
+            stock_id=901,
+            symbol="FPT",
+            time=date(2026, 3, 21),
+            open=120.0,
+            high=121.0,
+            low=119.5,
+            close=120.5,
+            volume=2_000_000,
+            interval="1D",
+        )
+    )
+    test_db.add(
+        OrderFlowDaily(
+            id=901,
+            symbol="FPT",
+            trade_date=date(2026, 3, 21),
+            buy_volume=1_500_000,
+            sell_volume=1_200_000,
+            buy_value=180_750_000.0,
+            sell_value=144_600_000.0,
+            net_volume=None,
+            net_value=None,
+            foreign_net_volume=None,
+            proprietary_net_volume=None,
+            big_order_count=4,
+            block_trade_count=0,
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/FPT/transaction-flow?days=30")
+
+    assert response.status_code == 200
+    row = response.json()["data"]["data"][0]
+    assert row["total_net_volume"] == 300_000
+    assert row["total_net_value"] == pytest.approx(36_150_000.0)
+    assert row["domestic_net_volume"] == 300_000
+    assert row["domestic_net_value"] == pytest.approx(36_150_000.0)
+
+
+@pytest.mark.asyncio
 async def test_orderbook_endpoint_uses_cached_payload_before_provider(client, monkeypatch):
     async def fake_get_json(key):
         if key.endswith(":orderbook:latest:VNM"):

@@ -366,7 +366,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                             )}
                             {activeTab !== 'ratios' && (
                                 <div className="px-2 pb-1 text-[10px] text-muted-foreground italic">
-                                    {unitLegend} | Currency: VND | Reporting: VAS | Fiscal year end: Dec 31.
+                                    Note: {unitLegend} except Per Share Values • Reporting Standard: VAS
                                 </div>
                             )}
                             <DenseFinancialTable

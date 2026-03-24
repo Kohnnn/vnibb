@@ -52,6 +52,11 @@ function formatDateOnly(value: string | number | Date | null | undefined): strin
     return stamp.split(' ')[0] || stamp
 }
 
+function formatMarketCapFull(value: number | null | undefined): string {
+    if (value === null || value === undefined || !Number.isFinite(value)) return '-'
+    return `VND ${Math.round(value).toLocaleString('en-US')}`
+}
+
 export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useProfile(symbol);
     const {
@@ -135,7 +140,7 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     const listedDate = cleanText(profileData.listed_date)
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-3">
             <WidgetMeta
                 updatedAt={updatedAt}
                 isFetching={(isFetching || dividendsFetching || insiderFetching) && hasData}
@@ -166,7 +171,7 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
                 )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-2 gap-2.5 text-sm">
                 {industry && (
                     <div className="flex items-center gap-2 text-[var(--text-muted)]">
                         <Building2 size={14} className="text-blue-400" />
@@ -205,14 +210,14 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
                     </div>
                 )}
                 {marketCapValue !== null && (
-                    <div className="flex items-center gap-2 text-[var(--text-muted)]">
+                    <div className="col-span-2 flex items-center gap-2 text-[var(--text-muted)]">
                         <Building2 size={14} className="text-blue-400" />
-                        <span>Mkt Cap {formatNumber(marketCapValue)}</span>
+                        <span>Mkt Cap {formatMarketCapFull(marketCapValue)}</span>
                     </div>
                 )}
             </div>
 
-            <div className="pt-2 border-t border-[var(--border-color)] space-y-3">
+            <div className="pt-2 border-t border-[var(--border-color)] space-y-2.5">
                 <p className="text-sm text-[var(--text-muted)] leading-relaxed">
                     {companyType} operating in {industry || 'various sectors'}.
                     {listedDate && ` Listed since ${formatDateOnly(listedDate)}.`}
