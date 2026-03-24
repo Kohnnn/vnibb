@@ -217,19 +217,19 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
           ) : (
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
               {[
-                { label: 'P/E', value: formatRatio(snapshotMetrics.pe) },
-                { label: 'P/B', value: formatRatio(snapshotMetrics.pb) },
-                { label: 'ROE', value: formatPercent(snapshotMetrics.roe) },
-                { label: 'Div Yield', value: formatPercent(snapshotMetrics.dividendYield) },
+                { label: 'P/E', value: formatRatio(snapshotMetrics.pe), tone: 'border-sky-500/15 bg-sky-500/[0.06]' },
+                { label: 'P/B', value: formatRatio(snapshotMetrics.pb), tone: 'border-cyan-500/15 bg-cyan-500/[0.06]' },
+                { label: 'ROE', value: formatPercent(snapshotMetrics.roe), tone: 'border-emerald-500/15 bg-emerald-500/[0.06]' },
+                { label: 'Div Yield', value: formatPercent(snapshotMetrics.dividendYield), tone: 'border-amber-500/15 bg-amber-500/[0.06]' },
               ].map((item) => (
                 <div
                   key={item.label}
-                  className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2.5 py-2"
+                  className={`rounded-xl border px-3 py-2.5 ${item.tone}`}
                 >
                   <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
                     {item.label}
                   </div>
-                  <div className="mt-1 text-sm font-mono font-semibold text-[var(--text-primary)]">
+                  <div className="mt-1 text-sm font-mono font-semibold text-[var(--text-primary)] tabular-nums">
                     {item.value}
                   </div>
                 </div>

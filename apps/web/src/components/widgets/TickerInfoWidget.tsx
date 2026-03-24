@@ -175,8 +175,11 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
           className="justify-between"
         />
 
-        <div className="flex items-baseline justify-between animate-in fade-in duration-500">
+        <div className="flex items-start justify-between rounded-2xl border border-blue-500/15 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-3 animate-in fade-in duration-500">
           <div className="flex flex-col gap-1">
+            <span className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-300/80">
+              {symbol}
+            </span>
             <span className="text-3xl font-black font-mono tracking-tighter text-[var(--text-primary)] tabular-nums drop-shadow-lg">
               {formatPriceValue(price)}
             </span>
@@ -235,7 +238,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
 
         {hasRange && (
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 py-2.5">
-            <div className="mb-1.5 flex items-center justify-between text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">
+            <div className="mb-1.5 flex items-center justify-between text-[9px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
               <span>52W Range</span>
               <span className="text-[var(--text-secondary)]">{rangePosition.toFixed(0)}%</span>
             </div>

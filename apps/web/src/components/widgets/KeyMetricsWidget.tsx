@@ -38,18 +38,29 @@ const METRIC_TABS: Array<{ id: MetricsCategory; label: string }> = [
     { id: 'market', label: 'Market' },
 ];
 
+const CATEGORY_DESCRIPTIONS: Record<MetricsCategory, string> = {
+    valuation: 'Pricing multiples and rerating risk versus history.',
+    profitability: 'Return efficiency and margin quality at a glance.',
+    health: 'Balance-sheet resilience and funding flexibility.',
+    market: 'Capitalization, yield, and trading profile context.',
+}
+
 function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
     return (
-        <div className="flex items-center justify-between py-1.5 border-b border-[var(--border-subtle)] hover:bg-[var(--bg-tertiary)]/30 transition-colors">
-            <span className="text-[var(--text-secondary)] text-xs leading-tight pr-2 flex-1">{label}</span>
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2 transition-colors hover:border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]/80">
+            <div className="min-w-0">
+                <div className="truncate text-[11px] font-semibold text-[var(--text-secondary)]">{label}</div>
+                {source && source !== 'Unavailable' && (
+                    <div className="mt-0.5 text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                        {source}
+                    </div>
+                )}
+            </div>
             <div className="flex items-center gap-2 shrink-0">
                 {sparklineData && sparklineData.length > 0 && (
                     <Sparkline data={sparklineData} width={40} height={16} />
                 )}
-                {source && source !== 'Unavailable' && (
-                    <span className="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">{source}</span>
-                )}
-                <span className="text-[var(--text-primary)] font-mono text-xs">{value ?? '-'}</span>
+                <span className="text-[var(--text-primary)] font-mono text-xs tabular-nums">{value ?? '-'}</span>
             </div>
         </div>
     );
@@ -171,6 +182,30 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         history && (history.roe?.length || history.roa?.length || history.pe_ratio?.length || history.pb_ratio?.length)
     );
 
+    const highlightCards = activeCategory === 'valuation'
+        ? [
+            { label: 'P/E', value: formatRatio(mergedStock?.pe) },
+            { label: 'P/B', value: formatRatio(mergedStock?.pb) },
+            { label: 'EV/EBITDA', value: formatRatio(mergedStock?.ev_ebitda) },
+        ]
+        : activeCategory === 'profitability'
+            ? [
+                { label: 'ROE', value: formatPercent(mergedStock?.roe) },
+                { label: 'ROA', value: formatPercent(mergedStock?.roa) },
+                { label: 'Net Margin', value: formatPercent(mergedStock?.net_margin) },
+            ]
+            : activeCategory === 'health'
+                ? [
+                    { label: 'Debt/Equity', value: formatRatio(mergedStock?.debt_to_equity) },
+                    { label: 'Current Ratio', value: formatRatio(mergedStock?.current_ratio) },
+                    { label: 'Gross Margin', value: formatPercent(mergedStock?.gross_margin) },
+                ]
+                : [
+                    { label: 'Market Cap', value: formatUnitValue(mergedStock?.market_cap, unitConfig) },
+                    { label: 'Dividend Yield', value: formatPercent(mergedStock?.dividend_yield) },
+                    { label: 'Beta', value: formatRatio(mergedStock?.beta) },
+                ]
+
     return (
         <WidgetContainer
             title="Key Metrics"
@@ -216,8 +251,30 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                         action={{ label: 'Refresh', onClick: () => refetch() }}
                     />
                 ) : (
-                    <div className="space-y-1">
-                        <div className="flex flex-wrap gap-1 pb-2 border-b border-[var(--border-subtle)]">
+                    <div className="space-y-2">
+                        <div className="rounded-2xl border border-blue-500/15 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_52%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-2.5">
+                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300/80">
+                                {METRIC_TABS.find((tab) => tab.id === activeCategory)?.label}
+                            </div>
+                            <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                                {CATEGORY_DESCRIPTIONS[activeCategory]}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                            {highlightCards.map((card) => (
+                                <div key={card.label} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2.5">
+                                    <div className="text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                                        {card.label}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold font-mono text-[var(--text-primary)] tabular-nums">
+                                        {card.value}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="flex flex-wrap gap-1 pb-1">
                             {METRIC_TABS.map((tab) => (
                                 <button
                                     key={tab.id}
@@ -234,37 +291,37 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                         </div>
 
                         {activeCategory === 'valuation' && (
-                            <>
+                            <div className="space-y-2">
                                 <MetricRow label="P/E Ratio" value={formatRatio(mergedStock?.pe)} sparklineData={history?.pe_ratio} source={metricMap.pe.source} />
                                 <MetricRow label="P/B Ratio" value={formatRatio(mergedStock?.pb)} sparklineData={history?.pb_ratio} source={metricMap.pb.source} />
                                 <MetricRow label="P/S Ratio" value={formatRatio(mergedStock?.ps)} source={metricMap.ps.source} />
                                 <MetricRow label="EV/EBITDA" value={formatRatio(mergedStock?.ev_ebitda)} source={metricMap.evEbitda.source} />
-                            </>
+                            </div>
                         )}
 
                         {activeCategory === 'profitability' && (
-                            <>
+                            <div className="space-y-2">
                                 <MetricRow label="ROE" value={formatPercent(mergedStock?.roe)} sparklineData={history?.roe} source={metricMap.roe.source} />
                                 <MetricRow label="ROA" value={formatPercent(mergedStock?.roa)} sparklineData={history?.roa} source={metricMap.roa.source} />
                                 <MetricRow label="ROIC" value={formatPercent(mergedStock?.roic)} source={metricMap.roic.source} />
                                 <MetricRow label="Net Margin" value={formatPercent(mergedStock?.net_margin)} source={metricMap.netMargin.source} />
                                 <MetricRow label="Gross Margin" value={formatPercent(mergedStock?.gross_margin)} source={metricMap.grossMargin.source} />
-                            </>
+                            </div>
                         )}
 
                         {activeCategory === 'health' && (
-                            <>
+                            <div className="space-y-2">
                                 <MetricRow label="Debt/Equity" value={formatRatio(mergedStock?.debt_to_equity)} source={metricMap.debtToEquity.source} />
                                 <MetricRow label="Current Ratio" value={formatRatio(mergedStock?.current_ratio)} source={metricMap.currentRatio.source} />
-                            </>
+                            </div>
                         )}
 
                         {activeCategory === 'market' && (
-                            <>
+                            <div className="space-y-2">
                                 <MetricRow label="Market Cap" value={formatUnitValue(mergedStock?.market_cap, unitConfig)} source={metricMap.marketCap.source} />
                                 <MetricRow label="Dividend Yield" value={formatPercent(mergedStock?.dividend_yield)} source={metricMap.dividendYield.source} />
                                 <MetricRow label="Beta" value={formatRatio(mergedStock?.beta)} source={metricMap.beta.source} />
-                            </>
+                            </div>
                         )}
                     </div>
                 )}

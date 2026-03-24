@@ -36,7 +36,7 @@ const DEFAULT_MIN_H = 2;
 // Breakpoints matching Tailwind defaults
 const BREAKPOINTS = { lg: 1024, md: 768, sm: 640, xs: 0 };
 const COLS = { lg: 24, md: 12, sm: 6, xs: 2 };
-const GRID_GAP = { lg: 8, md: 8, sm: 10, xs: 8 } as const;
+const GRID_GAP = { lg: 6, md: 6, sm: 8, xs: 6 } as const;
 
 interface DashboardGridProps {
     children: any;
@@ -54,7 +54,7 @@ export function DashboardGrid({
     layouts,
     onLayoutChange,
     isEditing = false,
-    rowHeight = 48,
+    rowHeight = 40,
 }: DashboardGridProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(1200);

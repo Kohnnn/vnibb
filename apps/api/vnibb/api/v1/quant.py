@@ -45,7 +45,7 @@ SUPPORTED_METRICS = (
     "drawdown_recovery",
 )
 DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
-ALLOWED_QUANT_PERIODS = ("1M", "6M", "1Y", "3Y", "5Y", "ALL")
+ALLOWED_QUANT_PERIODS = ("1M", "6M", "3Y", "5Y", "ALL")
 QUANT_STALE_DAYS_THRESHOLD = 7
 ALL_HISTORY_START_DATE = date(1970, 1, 1)
 METRIC_ALIASES = {
@@ -124,8 +124,6 @@ def _resolve_start_date(period: str, end_date: date) -> date:
         return end_date - timedelta(days=31)
     if period == "6M":
         return end_date - timedelta(days=186)
-    if period == "1Y":
-        return end_date - timedelta(days=365)
     if period == "3Y":
         return end_date - timedelta(days=365 * 3)
     if period == "5Y":

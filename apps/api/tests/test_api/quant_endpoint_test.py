@@ -54,7 +54,7 @@ async def test_quant_endpoint_rejects_10y_period(client):
     detail = payload.get("detail", payload)
     assert detail["code"] == "INVALID_PERIOD"
     assert detail["requested_period"] == "10Y"
-    assert detail["allowed_periods"] == ["1M", "6M", "1Y", "3Y", "5Y", "ALL"]
+    assert detail["allowed_periods"] == ["1M", "6M", "3Y", "5Y", "ALL"]
 
 
 @pytest.mark.asyncio
@@ -66,7 +66,7 @@ async def test_quant_endpoint_returns_insufficient_data_error(client, monkeypatc
 
     response = await client.get(
         "/api/v1/quant/VNM",
-        params={"metrics": "volume_delta", "period": "1Y"},
+        params={"metrics": "volume_delta", "period": "3Y"},
     )
 
     assert response.status_code == 200

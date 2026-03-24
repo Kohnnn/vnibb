@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Atom } from 'lucide-react'
 import { useGammaExposure } from '@/lib/queries'
+import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -13,10 +14,6 @@ interface GammaExposureWidgetProps {
   onRemove?: () => void
 }
 
-const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y'] as const
-
-type PeriodOption = (typeof PERIOD_OPTIONS)[number]
-
 function estimateGammaRegime(zScore: number): { label: string; tone: string } {
   if (zScore >= 1.5) return { label: 'Negative Gamma Risk', tone: 'text-red-400' }
   if (zScore >= 0.5) return { label: 'Neutral / Choppy', tone: 'text-amber-400' }
@@ -26,7 +23,7 @@ function estimateGammaRegime(zScore: number): { label: string; tone: string } {
 
 export function GammaExposureWidget({ symbol }: GammaExposureWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
-  const [period, setPeriod] = useState<PeriodOption>('3Y')
+  const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useGammaExposure(upperSymbol, {
     period,
@@ -65,7 +62,7 @@ export function GammaExposureWidget({ symbol }: GammaExposureWidgetProps) {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
-            {PERIOD_OPTIONS.map((option) => (
+            {QUANT_PERIOD_OPTIONS.map((option) => (
               <button
                 key={option}
                 type="button"

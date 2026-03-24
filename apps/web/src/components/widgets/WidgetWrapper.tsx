@@ -485,7 +485,7 @@ export function WidgetWrapper({
 
 
                 {/* Content */}
-                <div id={id} ref={contentHostRef} className="relative flex-1 overflow-auto bg-[var(--bg-secondary)] p-3 sm:p-4">
+                <div id={id} ref={contentHostRef} className="relative flex-1 overflow-auto bg-[var(--bg-secondary)] p-2 sm:p-2.5">
                     {isCollapsed ? (
                         <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
                             Collapsed
