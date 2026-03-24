@@ -126,7 +126,7 @@ export function findPreferredTabId<T extends { id: string; name: string }>(
   return preferredTabMatch?.id || null
 }
 
-export function findPreferredDashboardId<T extends { id: string; name: string }>(
+export function findPreferredDashboardId<T extends { id: string; name: string; tabs?: Array<{ name: string }> }>(
   dashboards: T[],
   preferredTab?: DefaultTabPreference
 ): string | null {
@@ -134,5 +134,11 @@ export function findPreferredDashboardId<T extends { id: string; name: string }>
   const preferredDashboardMatch = dashboards.find(
     (dashboard) => normalizeTabKey(dashboard.name) === resolvedPreference
   )
-  return preferredDashboardMatch?.id || null
+  if (preferredDashboardMatch?.id) return preferredDashboardMatch.id
+
+  const fallbackByTabMatch = dashboards.find((dashboard) =>
+    (dashboard.tabs || []).some((tab) => normalizeTabKey(tab.name) === resolvedPreference)
+  )
+
+  return fallbackByTabMatch?.id || null
 }
