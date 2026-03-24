@@ -52,7 +52,6 @@ export function Sidebar({
 
     const [collapsed, setCollapsed] = useState(false);
     const [showCreateMenu, setShowCreateMenu] = useState(false);
-    const [showWorkspaceTools, setShowWorkspaceTools] = useState(false);
     const [contextMenu, setContextMenu] = useState<{ id: string; type: 'dashboard' | 'folder'; x: number; y: number } | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState('');
@@ -211,6 +210,10 @@ export function Sidebar({
         return (dashboard?.isDeletable ?? true) !== false;
     };
 
+    const isSystemFolder = (folder: DashboardFolder | undefined) => {
+        return folder?.id === INITIAL_FOLDER_ID;
+    };
+
     const handleCreateDashboard = (folderId?: string) => {
         const dashboard = createDashboard({
             name: withUniqueDashboardName(nextDashboardName()),
@@ -246,7 +249,7 @@ export function Sidebar({
             }
         } else {
             const folder = state.folders.find(f => f.id === contextMenu.id);
-            if (folder) {
+            if (folder && !isSystemFolder(folder)) {
                 setEditingId(folder.id);
                 setEditingName(folder.name);
             }
@@ -266,6 +269,12 @@ export function Sidebar({
             }
             deleteDashboard(contextMenu.id);
         } else {
+            const folder = state.folders.find(f => f.id === contextMenu.id);
+            if (isSystemFolder(folder)) {
+                setContextMenu(null);
+                setShowMoveSubmenu(false);
+                return;
+            }
             deleteFolder(contextMenu.id);
         }
         setContextMenu(null);
@@ -311,6 +320,11 @@ export function Sidebar({
 
     const handleMoveToFolder = (targetFolderId: string | undefined) => {
         if (!contextMenu || contextMenu.type !== 'dashboard') return;
+        if (targetFolderId === INITIAL_FOLDER_ID) {
+            setContextMenu(null);
+            setShowMoveSubmenu(false);
+            return;
+        }
         const dashboard = state.dashboards.find(d => d.id === contextMenu.id);
         if (!isDashboardEditable(dashboard)) {
             setContextMenu(null);
@@ -355,6 +369,10 @@ export function Sidebar({
     const handleDropOnFolder = (e: React.DragEvent, folderId: string | undefined) => {
         e.preventDefault();
         if (!draggedId) return;
+        if (folderId === INITIAL_FOLDER_ID) {
+            handleDragEnd();
+            return;
+        }
         moveDashboard(draggedId, folderId);
         handleDragEnd();
     };
@@ -427,7 +445,10 @@ export function Sidebar({
                     setEditingId(dashboard.id);
                     setEditingName(dashboard.name);
                 }}
-                onContextMenu={(e) => handleContextMenu(e, dashboard.id, 'dashboard')}
+                onContextMenu={(e) => {
+                    if (!isEditableDashboard && !isDeletableDashboard) return;
+                    handleContextMenu(e, dashboard.id, 'dashboard');
+                }}
             >
                 <FileText size={14} className="shrink-0" />
                 {isEditing ? (
@@ -448,22 +469,17 @@ export function Sidebar({
                 ) : (
                     <>
                         <span className="flex-1 truncate">{dashboard.name}</span>
-                        {!isEditableDashboard && (
-                            <span className="inline-flex items-center rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">
-                                <Lock size={9} className="mr-1" />
-                                System
-                            </span>
+                        {(isEditableDashboard || isDeletableDashboard) && (
+                            <button
+                                className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleContextMenu(e, dashboard.id, 'dashboard');
+                                }}
+                            >
+                                <MoreVertical size={14} />
+                            </button>
                         )}
-                        <button
-                            className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
-                            disabled={!isEditableDashboard && !isDeletableDashboard}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleContextMenu(e, dashboard.id, 'dashboard');
-                            }}
-                        >
-                            <MoreVertical size={14} />
-                        </button>
                     </>
                 )}
             </div>
@@ -474,6 +490,7 @@ export function Sidebar({
         const isEditing = editingId === folder.id;
         const folderDashboards = (dashboardsByFolder.get(folder.id) || []).sort((a, b) => a.order - b.order);
         const isDragOver = dragOverFolderId === folder.id;
+        const lockedFolder = isSystemFolder(folder);
 
         return (
             <div key={folder.id}>
@@ -492,7 +509,10 @@ export function Sidebar({
                         }
                     }}
                     onClick={() => !isEditing && toggleFolder(folder.id)}
-                    onContextMenu={(e) => handleContextMenu(e, folder.id, 'folder')}
+                    onContextMenu={(e) => {
+                        if (lockedFolder) return;
+                        handleContextMenu(e, folder.id, 'folder');
+                    }}
                     onDragOver={(e) => handleDragOver(e, folder.id, true)}
                     onDragLeave={handleDragLeave}
                     onDrop={(e) => handleDropOnFolder(e, folder.id)}
@@ -520,6 +540,12 @@ export function Sidebar({
                     ) : (
                         <>
                             <span className="flex-1 truncate">{folder.name}</span>
+                            {lockedFolder && (
+                                <span className="inline-flex items-center rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">
+                                    <Lock size={9} className="mr-1" />
+                                    System
+                                </span>
+                            )}
                             <span className="text-[10px] text-[var(--text-muted)]">{folderDashboards.length}</span>
                             {folder.isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                         </>
@@ -538,8 +564,13 @@ export function Sidebar({
         contextMenu?.type === 'dashboard'
             ? state.dashboards.find((dashboard) => dashboard.id === contextMenu.id)
             : undefined;
+    const contextFolder =
+        contextMenu?.type === 'folder'
+            ? state.folders.find((folder) => folder.id === contextMenu.id)
+            : undefined;
     const contextDashboardEditable = isDashboardEditable(contextDashboard);
     const contextDashboardDeletable = isDashboardDeletable(contextDashboard);
+    const contextFolderEditable = !isSystemFolder(contextFolder);
 
     return (
         <>
@@ -582,6 +613,33 @@ export function Sidebar({
                     {!collapsed && (
                         <>
                             <div className="space-y-0.5">
+                                <div className="mb-3 border-b border-[var(--border-color)] pb-2">
+                                    <div className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                                        Customize
+                                    </div>
+                                    <button
+                                        onClick={onOpenTemplateSelector}
+                                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
+                                    >
+                                        <AppWindow size={14} />
+                                        <span>Templates</span>
+                                    </button>
+                                    <button
+                                        onClick={onOpenWidgetLibrary}
+                                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
+                                    >
+                                        <Grid3X3 size={14} />
+                                        <span>Widgets</span>
+                                    </button>
+                                    <button
+                                        onClick={onOpenPromptsLibrary}
+                                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
+                                    >
+                                        <MessageSquareText size={14} />
+                                        <span>Prompts</span>
+                                    </button>
+                                </div>
+
                                 <div className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                                     Initial Workspaces
                                 </div>
@@ -621,41 +679,6 @@ export function Sidebar({
 
                                 {customFolders.map(renderFolderItem)}
                                 {rootDashboards.map(d => renderDashboardItem(d))}
-
-                                <div className="mt-3 rounded-lg border border-[var(--border-color)]/70 bg-[var(--bg-tertiary)]/35 p-1">
-                                    <button
-                                        onClick={() => setShowWorkspaceTools((prev) => !prev)}
-                                        className="flex w-full items-center justify-between rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
-                                    >
-                                        <span>Customize</span>
-                                        {showWorkspaceTools ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                                    </button>
-                                    {showWorkspaceTools && (
-                                        <div className="mt-1 space-y-0.5">
-                                            <button
-                                                onClick={onOpenTemplateSelector}
-                                                className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
-                                            >
-                                                <AppWindow size={14} />
-                                                <span>Templates</span>
-                                            </button>
-                                            <button
-                                                onClick={onOpenWidgetLibrary}
-                                                className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
-                                            >
-                                                <Grid3X3 size={14} />
-                                                <span>Widgets</span>
-                                            </button>
-                                            <button
-                                                onClick={onOpenPromptsLibrary}
-                                                className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
-                                            >
-                                                <MessageSquareText size={14} />
-                                                <span>Prompts</span>
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
                             </div>
                         </>
                     )}
@@ -728,7 +751,7 @@ export function Sidebar({
                     >
                         <button
                             onClick={handleRename}
-                            disabled={contextMenu.type === 'dashboard' && !contextDashboardEditable}
+                            disabled={contextMenu.type === 'dashboard' ? !contextDashboardEditable : !contextFolderEditable}
                             className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             <Edit2 size={12} />
@@ -786,7 +809,7 @@ export function Sidebar({
                                                 <FolderX size={12} />
                                                 <span>No Folder (Root)</span>
                                             </button>
-                                            {state.folders.map(folder => (
+                                            {state.folders.filter(folder => folder.id !== INITIAL_FOLDER_ID).map(folder => (
                                                 <button
                                                     key={folder.id}
                                                     onClick={() => handleMoveToFolder(folder.id)}
@@ -804,7 +827,7 @@ export function Sidebar({
                         <div className="my-0.5 border-t border-[var(--border-color)]" />
                         <button
                             onClick={handleDelete}
-                            disabled={contextMenu.type === 'dashboard' && !contextDashboardDeletable}
+                            disabled={contextMenu.type === 'dashboard' ? !contextDashboardDeletable : !contextFolderEditable}
                             className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-red-500 hover:bg-[var(--bg-tertiary)] hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             <Trash2 size={12} />

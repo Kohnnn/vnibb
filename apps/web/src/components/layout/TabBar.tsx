@@ -308,11 +308,11 @@ export function TabBar(_props: TabBarProps) {
                             return (
                                 <div
                                     key={tab.id}
-                                    draggable={!isEditing}
-                                    onDragStart={(e) => handleDragStart(e, tab.id)}
-                                    onDragEnd={handleDragEnd}
-                                    onDragOver={(e) => handleDragOver(e, tab.id)}
-                                    onDragLeave={handleDragLeave}
+                                    draggable={dashboardEditable && !isEditing}
+                                    onDragStart={dashboardEditable ? (e) => handleDragStart(e, tab.id) : undefined}
+                                    onDragEnd={dashboardEditable ? handleDragEnd : undefined}
+                                    onDragOver={dashboardEditable ? (e) => handleDragOver(e, tab.id) : undefined}
+                                    onDragLeave={dashboardEditable ? handleDragLeave : undefined}
                                     className={`
                                         group relative flex items-center gap-1 px-1 py-1 text-xs font-medium 
                                         transition-all whitespace-nowrap rounded-t cursor-pointer
@@ -335,9 +335,11 @@ export function TabBar(_props: TabBarProps) {
                                     onDoubleClick={() => handleDoubleClick(tab)}
                                 >
                                     {/* Drag handle (visible on hover) */}
-                                    <span className="opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing">
-                                        <GripVertical size={12} />
-                                    </span>
+                                    {dashboardEditable ? (
+                                        <span className="opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing">
+                                            <GripVertical size={12} />
+                                        </span>
+                                    ) : null}
 
                                     {/* Tab name or edit input */}
                                     {isEditing ? (
@@ -386,31 +388,30 @@ export function TabBar(_props: TabBarProps) {
                     </div>
 
                     {/* Add tab button */}
-                    <button
-                        onClick={handleAddTab}
-                        disabled={!dashboardEditable || reachedTabLimit || isCreatingTab}
-                        className={`p-1.5 rounded transition-colors ml-1 ${
-                            !dashboardEditable || reachedTabLimit || isCreatingTab
-                                ? 'text-[var(--text-muted)]/50 cursor-not-allowed'
-                                : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60'
-                        }`}
-                        title={dashboardEditable ? (reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : 'Add new tab (Ctrl+T)') : 'Main dashboard is read-only'}
-                    >
-                        <Plus size={14} />
-                    </button>
+                    {dashboardEditable ? (
+                        <>
+                            <button
+                                onClick={handleAddTab}
+                                disabled={reachedTabLimit || isCreatingTab}
+                                className={`p-1.5 rounded transition-colors ml-1 ${
+                                    reachedTabLimit || isCreatingTab
+                                        ? 'text-[var(--text-muted)]/50 cursor-not-allowed'
+                                        : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60'
+                                }`}
+                                title={reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : 'Add new tab (Ctrl+T)'}
+                            >
+                                <Plus size={14} />
+                            </button>
 
-                    {/* Edit tabs button */}
-                    <button
-                        onClick={() => setIsManageModalOpen(true)}
-                        disabled={!dashboardEditable}
-                        className={`p-1.5 rounded transition-colors ${dashboardEditable
-                            ? 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60'
-                            : 'text-[var(--text-muted)]/50 cursor-not-allowed'
-                        }`}
-                        title={dashboardEditable ? 'Manage tabs' : 'Main dashboard is read-only'}
-                    >
-                        <Settings2 size={14} />
-                    </button>
+                            <button
+                                onClick={() => setIsManageModalOpen(true)}
+                                className="p-1.5 rounded transition-colors text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60"
+                                title="Manage tabs"
+                            >
+                                <Settings2 size={14} />
+                            </button>
+                        </>
+                    ) : null}
 
                     {/* Spacer */}
                     <div className="flex-1" />

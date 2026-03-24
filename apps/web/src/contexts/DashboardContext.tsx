@@ -1164,6 +1164,26 @@ const createDefaultTab = (name: string, order: number): DashboardTab => ({
     widgets: [],
 });
 
+type SystemDashboardTabSpec = {
+    idSuffix: string;
+    name: string;
+    template: TemplateWidget[];
+};
+
+const createSystemDashboardTab = (
+    dashboardId: string,
+    spec: SystemDashboardTabSpec,
+    order: number,
+): DashboardTab => {
+    const tabId = `tab-${dashboardId}-${spec.idSuffix}`;
+    return {
+        id: tabId,
+        name: spec.name,
+        order,
+        widgets: createWidgetsFromTemplate(spec.template, tabId),
+    };
+};
+
 const createMainDashboardTabs = (): DashboardTab[] => {
     const macroId = 'tab-main-macro-discovery';
     const deepDiveId = 'tab-main-deep-dive';
@@ -1243,12 +1263,11 @@ const createInitialFolder = (): DashboardFolder => ({
 const createSystemDashboard = (
     id: string,
     name: string,
-    template: TemplateWidget[],
+    tabs: SystemDashboardTabSpec[],
     order: number,
     description: string,
 ): Dashboard => {
     const timestamp = new Date().toISOString();
-    const tabId = `tab-${id}-primary`;
 
     return {
         id,
@@ -1260,14 +1279,7 @@ const createSystemDashboard = (
         isEditable: false,
         isDeletable: false,
         showGroupLabels: true,
-        tabs: [
-            {
-                id: tabId,
-                name,
-                order: 0,
-                widgets: createWidgetsFromTemplate(template, tabId),
-            },
-        ],
+        tabs: tabs.map((tab, index) => createSystemDashboardTab(id, tab, index)),
         syncGroups: [
             { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: DEFAULT_TICKER },
         ],
@@ -1280,7 +1292,14 @@ const createMainSystemDashboard = (): Dashboard => {
     return createSystemDashboard(
         MAIN_DASHBOARD_ID,
         MAIN_DASHBOARD_NAME,
-        INITIAL_FUNDAMENTAL_TEMPLATE,
+        [
+            { idSuffix: 'fundamentals', name: 'Fundamentals', template: MAIN_FUNDAMENTALS_TEMPLATE },
+            { idSuffix: 'overview', name: 'Overview', template: MAIN_DEEP_DIVE_TEMPLATE },
+            { idSuffix: 'company', name: 'Company', template: INITIAL_FUNDAMENTAL_TEMPLATE },
+            { idSuffix: 'ownership', name: 'Ownership', template: OWNERSHIP_TEMPLATE },
+            { idSuffix: 'comparison', name: 'Comparison', template: MAIN_COMPARISON_TEMPLATE },
+            { idSuffix: 'news-events', name: 'News & Events', template: MAIN_NEWS_TEMPLATE },
+        ],
         0,
         'Default fundamental workspace with ownership and financial statement context.',
     );
@@ -1290,7 +1309,12 @@ const createTechnicalSystemDashboard = (): Dashboard => {
     return createSystemDashboard(
         TECHNICAL_DASHBOARD_ID,
         'Technical',
-        INITIAL_TECHNICAL_TEMPLATE,
+        [
+            { idSuffix: 'technical', name: 'Technical', template: MAIN_TECHNICAL_TEMPLATE },
+            { idSuffix: 'overview', name: 'Overview', template: INITIAL_TECHNICAL_TEMPLATE },
+            { idSuffix: 'trading', name: 'Trading', template: MAIN_TRADING_TEMPLATE },
+            { idSuffix: 'market', name: 'Market', template: MAIN_MARKET_TEMPLATE },
+        ],
         1,
         'Default technical workspace with chart structure, momentum, and conclusion signal.',
     );
@@ -1300,7 +1324,12 @@ const createQuantSystemDashboard = (): Dashboard => {
     return createSystemDashboard(
         QUANT_DASHBOARD_ID,
         'Quant',
-        INITIAL_QUANT_TEMPLATE,
+        [
+            { idSuffix: 'quant', name: 'Quant', template: MAIN_QUANT_TEMPLATE },
+            { idSuffix: 'overview', name: 'Overview', template: INITIAL_QUANT_TEMPLATE },
+            { idSuffix: 'comparison', name: 'Comparison', template: MAIN_COMPARISON_TEMPLATE },
+            { idSuffix: 'market', name: 'Market', template: MAIN_MARKET_TEMPLATE },
+        ],
         2,
         'Default quant workspace focused on seasonality, drawdown, and cross-metric context.',
     );
@@ -1858,6 +1887,10 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
                 return state;
             }
 
+            if (action.payload.targetFolderId === INITIAL_FOLDER_ID) {
+                return state;
+            }
+
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
@@ -1870,6 +1903,9 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
 
         case 'REORDER_DASHBOARDS': {
             const { dashboardIds, folderId } = action.payload;
+            if (folderId === INITIAL_FOLDER_ID) {
+                return state;
+            }
             const orderedEditableIds = dashboardIds.filter((dashboardId) => !SYSTEM_DASHBOARD_IDS.has(dashboardId));
             return {
                 ...state,
