@@ -4,128 +4,285 @@
 
 ![VNIBB Logo](./logo.svg)
 
-**Vietnam-first financial analytics platform for investors, quants, and agentic tools**
+**Vietnam-first financial analytics workspace for serious equity research, market scanning, and agent-assisted workflows**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](https://nodejs.org/)
-[![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue.svg)](https://www.python.org/)
+[![Node.js](https://img.shields.io/badge/node-20%20CI-339933.svg)](https://nodejs.org/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688)](https://fastapi.tiangolo.com/)
 
-[Live demo](https://vnibb-web.vercel.app/) · [API docs](./docs/API_REFERENCE.md) · [Widget catalog](./docs/WIDGET_CATALOG.md)
+[Live Demo](https://vnibb-web.vercel.app/) · [Docs Hub](../docs/README.md) · [Development Journal](../docs/DEVELOPMENT_JOURNAL.md)
 
 </div>
 
 ---
 
-## What This Repo Contains
+## Product Introduction
 
-VNIBB is a monorepo that combines the web application, API server, and shared packages used to power Vietnamese market analysis workflows.
+VNIBB is a dashboard-driven research platform for Vietnamese equities.
 
-### Apps
+It combines:
 
-- `apps/web` - Next.js 16 frontend with React 19, dashboard UI, widgets, and Jest tests.
-- `apps/api` - FastAPI backend with async SQLAlchemy, pytest, Ruff, and production-oriented startup checks.
+- a high-density widget workspace for fundamentals, technicals, quant, sector rotation, and company intelligence
+- a FastAPI backend that normalizes messy local-market data into product-ready responses
+- bank-aware analytics, market-structure tools, and Vietnam-specific workflows that generic global terminals usually miss
+- a repo structure and documentation style that make it practical for AI agents to continue development, debugging, and deployment work
 
-### Packages
+The goal is not to be just another screener or charting page. VNIBB is meant to feel like a serious research cockpit for Vietnam-focused investors, builders, and agents.
 
-- `packages/shared` - shared TypeScript utilities.
-- `packages/ui` - reusable UI package built with `tsup`.
-- `packages/widgets` - reusable widget package built with `tsup`.
-- `packages/providers` - Python provider package.
+> [Image 1]
+> Personalized hero suggestion for this repo: a full-width VNIBB dashboard screenshot showing the `Initial` workspace with `Fundamentals`, `Technical`, and `Quant` views, using `VCI` as the main symbol, plus visible widgets such as Financials, Seasonality Heatmap, Signal Summary, Industry Bubble, and Bank Analytics.
 
-### Highlights
+## What Makes It Different
 
-- 40+ market and financial widgets.
-- Screener, fundamentals, technical, quant, and market-monitoring workflows.
-- Backend APIs for quotes, statements, news, sectors, dashboards, exports, and admin health.
-- Shared workspace commands for linting, builds, tests, and CI-style validation.
+- **Vietnam-first modeling**: the app is designed around Vietnamese equities, not retrofitted from a US-market product
+- **OpenBB-inspired workflow**: dense, modular, multi-widget research surfaces instead of shallow page-by-page navigation
+- **Bank-aware analytics**: banks are treated as a distinct analytical class, not forced into industrial-company ratios
+- **Fallback-first backend**: provider instability, missing values, and schema quirks are handled in the backend instead of leaking directly into the UI
+- **Agent-friendly repo**: phased planning, ops notes, AGENTS guidance, and docs make handoff to other coding agents much easier
 
----
+## VNIBB Ecosystem
 
-## Tech Stack
+VNIBB is more than one app folder. It is a working system made of cooperating layers.
 
-- Frontend: Next.js 16, React 19, TypeScript, Testing Library, Jest, optional Playwright.
-- Backend: FastAPI, Pydantic v2, SQLAlchemy 2, pytest, Ruff.
-- Workspace: `pnpm` + Turborepo.
-- Data: vnstock-centered provider flow with database/cache fallback layers.
+- `apps/web` - Next.js frontend for the dashboard, widget system, routing, and user-facing workflows
+- `apps/api` - FastAPI backend for normalization, fallbacks, caching, logging, and API contracts
+- `packages/shared` - shared TypeScript utilities
+- `packages/ui` - reusable UI package
+- `packages/widgets` - reusable widget package
+- `scripts/ci-gate.mjs` - local source of truth for validation order
+- `../docs/` - human-facing documentation for architecture, setup, widgets, ops, and project history
+- `AGENTS.md` - repo instructions for coding agents
 
----
+## Architecture
 
-## Getting Started
+### System Architecture
 
-### Prerequisites
-
-- Node.js 18+
-- `pnpm` 9+
-- Python 3.11+ for the API package (`apps/api`)
-
-### 1. Install JavaScript dependencies
-
-```bash
-pnpm install
+```text
+                              +----------------------+
+                              |     End Users        |
+                              |  Investors / Quants  |
+                              |   Research Agents    |
+                              +----------+-----------+
+                                         |
+                                         v
+                     +-------------------------------------------+
+                     |         apps/web (Next.js 16)             |
+                     |  Dashboard UI, widgets, routing, queries  |
+                     +-------------------+-----------------------+
+                                         |
+                                         v
+                     +-------------------------------------------+
+                     |        apps/api (FastAPI backend)         |
+                     | validation, orchestration, normalization, |
+                     | retries, caching, logging, rate limiting  |
+                     +-------------------+-----------------------+
+                                         |
+                  +----------------------+----------------------+
+                  |                      |                      |
+                  v                      v                      v
+      +------------------+   +---------------------+  +------------------+
+      |  services layer  |   |  providers layer    |  |  core infra      |
+      | business logic   |   | vnstock + fallback  |  | config/cache/log |
+      +--------+---------+   +----------+----------+  +---------+--------+
+               |                        |                       |
+               +------------+-----------+-----------------------+
+                            |
+                            v
+          +---------------------------------------------------------+
+          | Appwrite / Redis / persisted cache / external providers |
+          +---------------------------------------------------------+
 ```
 
-### 2. Install backend dependencies
+### Data Flow
+
+```text
+User action
+   |
+   v
+Widget -> query hook -> src/lib/api.ts
+   |
+   v
+FastAPI route -> service -> provider/fallback chain
+   |
+   +--> fresh provider data succeeds -----------------------------+
+   |                                                              |
+   +--> provider unstable -> alternate source / cache / fallback  |
+   |                                                              |
+   +--> enrichment logic fills product-critical fields -----------+
+                                                                  |
+                                                                  v
+                                                      normalized API response
+                                                                  |
+                                                                  v
+                                                   widget renders loading / empty /
+                                                   success state with stable contract
+```
+
+### Repo Layout
+
+```text
+vnibb/
+|- apps/
+|  |- web/
+|  \- api/
+|- packages/
+|  |- shared/
+|  |- ui/
+|  \- widgets/
+|- scripts/
+|- docker-compose.oracle.yml
+|- package.json
+|- turbo.json
+\- pnpm-workspace.yaml
+```
+
+## Quick Start
+
+### From Source
+
+Run from `vnibb/`.
+
+1. Install JavaScript dependencies
+
+```bash
+pnpm install --frozen-lockfile
+```
+
+2. Install backend dependencies
 
 ```bash
 python -m pip install -e "apps/api[dev]"
 ```
 
-### 3. Configure env files
-
-Typical local files already referenced by the repo:
-
-- `apps/web/.env.local`
-- `apps/api/.env`
-
-At minimum, local frontend development usually needs:
+3. Add local env values
 
 ```env
+# apps/web/.env.local
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/api/v1/ws/prices
 ```
 
-### 4. Start the frontend
-
-```bash
-pnpm --filter frontend dev
-```
-
-Open `http://localhost:3000`.
-
-### 5. Start the backend
+4. Start the backend
 
 ```bash
 python -m uvicorn vnibb.api.main:app --reload --app-dir apps/api
 ```
 
-Open `http://localhost:8000/docs` when debug docs are enabled.
+5. Start the frontend
 
----
+```bash
+pnpm --filter frontend dev
+```
 
-## Workspace Commands
+6. Open:
 
-### Root commands
+- frontend: `http://localhost:3000`
+- backend docs: `http://localhost:8000/docs`
+
+### With Docker
+
+VNIBB includes a production-oriented OCI compose file rather than a generic local-all-in-one dev compose.
+
+Available container assets:
+
+- `apps/api/Dockerfile`
+- `apps/api/Dockerfile.premium`
+- `apps/web/Dockerfile`
+- `docker-compose.oracle.yml`
+
+Example OCI-style compose run:
+
+```bash
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build
+```
+
+Notes:
+
+- this path is closer to production deployment than local contributor setup
+- local source-first development is still the recommended default
+
+### AI Quick Start
+
+If you want another coding agent to take over quickly, send it the repo link plus this instruction block.
+
+```text
+You are working on VNIBB, a Vietnam-first financial analytics monorepo.
+
+Repo: <PASTE_REPO_LINK>
+
+Start here:
+1. Read `AGENTS.md`
+2. Read `docs/README.md`
+3. Read `docs/DEVELOPMENT_JOURNAL.md`
+4. Work from `vnibb/`
+
+Install:
+- `pnpm install --frozen-lockfile`
+- `python -m pip install -e "apps/api[dev]"`
+
+Run:
+- frontend: `pnpm --filter frontend dev`
+- backend: `python -m uvicorn vnibb.api.main:app --reload --app-dir apps/api`
+
+Validate:
+- `pnpm --filter frontend exec tsc --noEmit`
+- `pnpm --filter frontend lint`
+- `python -m ruff check apps/api`
+- `python -m pytest apps/api/tests -v`
+- `pnpm run ci:gate`
+
+Important context:
+- active product code lives in `vnibb/`
+- docs history and planning live in `../docs/` and `.agent/`
+- backend is FastAPI, frontend is Next.js 16 + React 19
+- current roadmap focus is Phase 11 UX/workflow refinement
+```
+
+## Multi-Agent Orchestration
+
+VNIBB is especially suitable for multi-agent workflows because the repo already contains planning structure, phased docs, and task-oriented context.
+
+### Agent Delegation
+
+Recommended split for parallel work:
+
+- **frontend agent** - dashboard UX, widget composition, layout polish, React state flows
+- **backend agent** - endpoint logic, provider fallback handling, schema normalization, tests
+- **ops agent** - deployment, OCI, caching, smoke checks, reliability gates
+- **docs/product agent** - README, docs, journals, parity notes, roadmap synthesis
+
+### Agent Teams
+
+For larger tasks, a practical agent team structure is:
+
+1. **planner** - reads `AGENTS.md`, docs, and active phase context
+2. **implementer** - makes the actual code changes
+3. **validator** - runs the narrowest relevant tests and then `pnpm run ci:gate`
+4. **documenter** - updates docs or the development journal when product behavior changes
+
+Good handoff files:
+
+- `AGENTS.md`
+- `../docs/README.md`
+- `../docs/DEVELOPMENT_JOURNAL.md`
+- `.agent/memory_bank/active_context.md`
+- `.agent/phases/PHASE_OVERVIEW.md`
+
+## Built-in Tools
+
+### Workspace scripts
 
 ```bash
 pnpm dev
 pnpm build
 pnpm lint
 pnpm test
-pnpm ci:gate
+pnpm run ci:gate
+pnpm run gate:no502
+pnpm run gate:widgets:strict
 ```
-
-Notes:
-
-- `pnpm build`, `pnpm lint`, and `pnpm test` run through Turborepo.
-- `pnpm test` mainly exercises the frontend workspace.
-- `pnpm ci:gate` is the strict local validation path and runs:
-  - frontend lint
-  - frontend build
-  - frontend tests with `--runInBand`
-  - backend compile check
-  - backend pytest suite
 
 ### Frontend commands
 
@@ -133,112 +290,73 @@ Notes:
 pnpm --filter frontend dev
 pnpm --filter frontend build
 pnpm --filter frontend lint
+pnpm --filter frontend exec tsc --noEmit
 pnpm --filter frontend test
-pnpm --filter frontend test -- --watch
 pnpm --filter frontend test -- --runInBand
-```
-
-### Run a single frontend test
-
-```bash
 pnpm --filter frontend test -- --runTestsByPath src/lib/financialPeriods.test.ts
-pnpm --filter frontend test -- --runTestsByPath src/components/widgets/FinancialRatiosWidget.test.tsx
-pnpm --filter frontend test -- --runTestsByPath src/lib/financialPeriods.test.ts -t "formats yearly labels from year strings"
 ```
 
 ### Backend commands
 
 ```bash
+python -m uvicorn vnibb.api.main:app --reload --app-dir apps/api
+python -m ruff check apps/api
 python -m py_compile apps/api/vnibb/api/main.py
 python -m pytest apps/api/tests -v
-python -m pytest apps/api/tests -q
-python -m ruff check apps/api
-```
-
-### Run a single backend test
-
-```bash
 python -m pytest apps/api/tests/test_api/test_news_service.py -v
-python -m pytest apps/api/tests/test_api/test_news_service.py -k hydrates -v
-python -m pytest apps/api/tests/test_integration/test_api_integration.py -v
+python -m pytest apps/api/tests/test_api/test_financial_service.py::test_get_financials_with_ttm_caps_quarter_fetch_limit -v
 ```
-
-### Package builds
-
-```bash
-pnpm --filter @vnibb/shared build
-pnpm --filter @vnibb/ui build
-pnpm --filter @vnibb/widgets build
-```
-
-### Database migrations
-
-```bash
-alembic -c apps/api/alembic.ini upgrade head
-```
-
----
-
-## Repository Layout
-
-```text
-.
-├── apps/
-│   ├── api/        # FastAPI backend
-│   └── web/        # Next.js frontend
-├── packages/
-│   ├── providers/  # Python provider package
-│   ├── shared/     # Shared TS utilities
-│   ├── ui/         # Reusable UI package
-│   └── widgets/    # Widget package
-├── docs/           # Project and ops docs
-├── scripts/        # Root automation and CI helpers
-├── AGENTS.md       # Repo instructions for coding agents
-└── package.json    # Workspace entrypoint
-```
-
----
-
-## Development Notes
-
-- Use `pnpm` for JavaScript work and `python -m ...` for Python commands.
-- Prefer root-level commands unless you are debugging a specific package.
-- Treat `scripts/ci-gate.mjs` as the source of truth for local validation order.
-- Avoid editing generated output such as `.next/`, `dist/`, `.turbo/`, or local database/log artifacts unless the task requires it.
-- Frontend uses the `@/` alias for app-local imports in `apps/web`.
-
----
 
 ## Documentation
 
-- API reference: `docs/API_REFERENCE.md`
-- Widget catalog: `docs/WIDGET_CATALOG.md`
-- Production health notes: `docs/v47_production_health.md`
-- Changelog: `CHANGELOG.md`
-- Agent instructions: `AGENTS.md`
+- docs hub: `../docs/README.md`
+- product overview: `../docs/PRODUCT_OVERVIEW.md`
+- architecture: `../docs/ARCHITECTURE.md`
+- development setup: `../docs/DEVELOPMENT_SETUP.md`
+- API reference: `../docs/API_REFERENCE.md`
+- widget catalog: `../docs/WIDGET_CATALOG.md`
+- deployment and operations: `../docs/DEPLOYMENT_AND_OPERATIONS.md`
+- development journal: `../docs/DEVELOPMENT_JOURNAL.md`
+- agent instructions: `AGENTS.md`
 
----
+## Testing
 
-## Contributing
+Recommended validation order:
 
-Keep changes focused and validate with the narrowest relevant command first, then with `pnpm ci:gate` for broader changes.
+1. run the narrowest relevant test for the touched area
+2. run package-level validation if the change is broader
+3. finish with `pnpm run ci:gate` for substantial work
 
-Examples:
+Example flows:
 
-- frontend-only UI change -> run frontend lint/test for the touched area.
-- backend service change -> run targeted pytest first, then broader backend tests.
-- cross-cutting change -> finish with `pnpm ci:gate`.
+- frontend UI change -> `pnpm --filter frontend exec tsc --noEmit` + relevant Jest test
+- backend service fix -> focused `pytest` target + broader backend tests
+- cross-stack change -> package checks + `pnpm run ci:gate`
 
----
+## Project Status
+
+Current position based on the active planning context:
+
+- major Phase 7 financial data and hardening work completed
+- major Phase 8 widget expansion completed
+- major Phase 9 and 10 UX/product planning executed or prepared
+- current refinement frontier is Phase 11
+
+Current strategic focus:
+
+- folder-level symbol scope
+- consolidated financial workflows
+- categorized comparison analysis
+- stronger table hierarchy and readability
+- tighter OpenBB-style workflow polish
+
+## Acknowledgments
+
+- inspired by [OpenBB](https://github.com/OpenBB-finance/OpenBB)
+- shaped by Vietnamese market workflows and local data realities
+- informed by iterative parity checks against both OpenBB Pro and Vietnamese market products
+- built for both human researchers and agentic development workflows
 
 ## License
 
 MIT. See `LICENSE`.
-
----
-
-## Acknowledgments
-
-- Inspired by [OpenBB](https://github.com/OpenBB-finance/OpenBB)
-- Built around Vietnamese market workflows and vnstock-based provider integrations
-- Designed for both human analysts and agentic coding/research tools
