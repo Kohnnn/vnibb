@@ -238,6 +238,41 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
       'Look for repeated green cells across several categories rather than one isolated best-in-class metric.',
     ],
   },
+  correlation_matrix: {
+    purpose: 'Shows how tightly the selected stock has been moving with its nearest sector peers.',
+    calculation: 'Builds close-to-close return series for the selected stock and peer set, then computes pairwise return correlation across the chosen window.',
+    interpretation: 'High positive values suggest the stocks often move together. Low or negative values can highlight diversification or dispersion candidates.',
+    advanced_insights: [
+      'The most useful row is usually the selected symbol versus peers, not the full matrix by itself.',
+      'A loose cluster often means stock-specific narratives are dominating sector beta.',
+    ],
+    limitations: [
+      'Correlation does not imply leadership or causality; it only measures co-movement over the chosen lookback.',
+    ],
+    pro_tips: [
+      'Use the most-correlated names for relative-strength confirmation and the least-correlated names when looking for dispersion setups.',
+    ],
+  },
+  transaction_flow: {
+    purpose: 'Breaks each session into domestic, foreign, and proprietary participation so you can see who drove the tape.',
+    calculation: 'Uses transaction-flow decomposition and overlays price to compare net participation against the session close.',
+    interpretation: 'Rising price with supportive flow suggests healthier sponsorship. Divergence between price and flow often matters more than a single large print.',
+  },
+  money_flow_trend: {
+    purpose: 'Maps sector peers into strength and trend quadrants to show where leadership is rotating.',
+    calculation: 'Normalizes relative strength and trend proxies against a benchmark, then plots recent trails for each peer.',
+    interpretation: 'Names in the bullish quadrant with improving trails are typically stronger candidates than those drifting into weakening or bearish quadrants.',
+  },
+  industry_bubble: {
+    purpose: 'Compares sector peers on valuation, quality, growth, or leverage dimensions in one exploratory chart.',
+    calculation: 'Places each peer on user-selected X and Y metrics and sizes bubbles by a third metric such as market cap or revenue.',
+    interpretation: 'Outliers far from the sector average are usually the most interesting. The selected symbol matters most when it is meaningfully displaced from the peer cluster.',
+  },
+  sector_board: {
+    purpose: 'Shows sector leadership in a tape-style board with the most active names for each industry bucket.',
+    calculation: 'Ranks sector constituents by the selected sort key and groups them into sector columns with sector-level performance summaries.',
+    interpretation: 'Helpful for spotting leadership concentration. Strong sectors with several aligned names usually carry more weight than one isolated mover.',
+  },
   market_news: {
     purpose: 'Surfaces broad market headlines that can affect sector and ticker context.',
     calculation: 'Aggregates recent market stories and sorts them by recency and relevance.',

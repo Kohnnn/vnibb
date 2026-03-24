@@ -407,12 +407,6 @@ const MAIN_DEEP_DIVE_TEMPLATE: TemplateWidget[] = [
 
 const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
     {
-        type: 'signal_summary',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 34, w: 24, h: 6, minW: 12, minH: 5 }
-    },
-    {
         type: 'seasonality_heatmap',
         syncGroupId: 1,
         config: {},
@@ -478,15 +472,15 @@ const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
         config: {},
         layout: { x: 16, y: 27, w: 8, h: 7, minW: 6, minH: 5 }
     },
-];
-
-const MAIN_TECHNICAL_TEMPLATE: TemplateWidget[] = [
     {
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 35, w: 24, h: 6, minW: 12, minH: 5 }
+        layout: { x: 0, y: 34, w: 24, h: 6, minW: 12, minH: 5 }
     },
+];
+
+const MAIN_TECHNICAL_TEMPLATE: TemplateWidget[] = [
     {
         type: 'ichimoku',
         syncGroupId: 1,
@@ -552,6 +546,12 @@ const MAIN_TECHNICAL_TEMPLATE: TemplateWidget[] = [
         syncGroupId: 1,
         config: {},
         layout: { x: 16, y: 28, w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'signal_summary',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 35, w: 24, h: 6, minW: 12, minH: 5 }
     }
 ];
 
@@ -662,28 +662,28 @@ const MAIN_COMPARISON_TEMPLATE: TemplateWidget[] = [
 
 const MAIN_FUNDAMENTALS_TEMPLATE: TemplateWidget[] = [
     {
+        type: 'financial_ratios',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 24, h: 6, minW: 12, minH: 5 }
+    },
+    {
         type: 'income_statement',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 12, h: 8, minW: 8, minH: 6 }
+        layout: { x: 0, y: 6, w: 12, h: 6, minW: 8, minH: 5 }
     },
     {
         type: 'balance_sheet',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 0, w: 12, h: 8, minW: 8, minH: 6 }
+        layout: { x: 12, y: 6, w: 12, h: 6, minW: 8, minH: 5 }
     },
     {
         type: 'cash_flow',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 8, w: 12, h: 8, minW: 8, minH: 6 }
-    },
-    {
-        type: 'financial_ratios',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 12, y: 8, w: 12, h: 8, minW: 8, minH: 6 }
+        layout: { x: 0, y: 12, w: 24, h: 6, minW: 12, minH: 5 }
     },
 ];
 

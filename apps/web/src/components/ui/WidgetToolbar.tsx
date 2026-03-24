@@ -3,6 +3,7 @@
 import React from 'react';
 import { Settings, Maximize2, Minimize2, Download, X, RefreshCw, Sparkles, Move, Users, Info } from 'lucide-react';
 import { WIDGET_DESCRIPTIONS } from '@/lib/widgetDescriptions';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { WidgetType } from '@/types/dashboard';
 
 interface WidgetToolbarProps {
@@ -75,17 +76,29 @@ export function WidgetToolbar({
         </span>
 
         {description && (
-          <div className="group relative flex items-center">
-            <button
-              type="button"
-              className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              title="Widget guide"
-              aria-label={`About ${title}`}
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                title="Widget guide"
+                aria-label={`About ${title}`}
+              >
+                <Info size={12} />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="left"
+              className="z-[120] mt-2 w-[28rem] rounded-xl border border-[var(--border-default)] bg-[rgba(10,15,26,0.98)] p-3 text-left shadow-2xl"
             >
-              <Info size={12} />
-            </button>
-            <div className="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden w-[26rem] rounded-xl border border-[var(--border-default)] bg-[rgba(10,15,26,0.97)] p-3 text-left shadow-2xl group-hover:block group-focus-within:block">
-              <div className="max-h-[26rem] space-y-3 overflow-y-auto pr-1 text-[11px] leading-5 text-slate-100">
+              <div className="mb-2 flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] pb-2">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">Widget Guide</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-100">{title}</div>
+                </div>
+                <div className="text-[10px] text-slate-300/70">Click outside or press Esc to close</div>
+              </div>
+              <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1 text-[11px] leading-5 text-slate-100">
                 <div>
                   <div className="mb-0.5 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">Purpose</div>
                   <p className="text-slate-100/90">{description.purpose}</p>
@@ -129,8 +142,8 @@ export function WidgetToolbar({
                   </div>
                 ) : null}
               </div>
-            </div>
-          </div>
+            </PopoverContent>
+          </Popover>
         )}
 
         {parameters && (
