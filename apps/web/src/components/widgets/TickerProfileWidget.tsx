@@ -138,6 +138,14 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     const website = cleanText(profileData.website)
     const companyType = cleanText(profileData.company_type) || 'Company information'
     const listedDate = cleanText(profileData.listed_date)
+    const infoCards = [
+        industry ? { label: 'Industry', value: industry, icon: Building2 } : null,
+        exchange ? { label: 'Exchange', value: exchange, icon: MapPin } : null,
+        website ? { label: 'Website', value: website.replace(/^https?:\/\//, ''), icon: Globe } : null,
+        profileData.no_employees ? { label: 'Employees', value: `${profileData.no_employees.toLocaleString()}`, icon: Users } : null,
+        profileData.established_year ? { label: 'Established', value: `${profileData.established_year}`, icon: Calendar } : null,
+        marketCapValue !== null ? { label: 'Market Cap', value: formatMarketCapFull(marketCapValue), icon: Building2 } : null,
+    ].filter(Boolean) as Array<{ label: string; value: string; icon: typeof Building2 }>
 
     return (
         <div className="space-y-3">
@@ -149,72 +157,59 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
                 align="right"
             />
 
-            <div>
-                <div className="flex items-center gap-3">
+            <div className="rounded-2xl border border-blue-500/15 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] p-3">
+                <div className="flex items-start gap-3">
                     <CompanyLogo
                         symbol={symbol}
                         name={companyName}
                         website={website || undefined}
-                        size={34}
+                        size={36}
                     />
-                    <div>
-                        <h3 className="text-lg font-semibold text-[var(--text-primary)]">
+                    <div className="min-w-0 flex-1">
+                        <div className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-300/80">{symbol}</div>
+                        <h3 className="truncate text-lg font-semibold text-[var(--text-primary)]">
                             {companyName}
                         </h3>
                         {shortName && (
-                            <p className="text-sm text-[var(--text-muted)]">{shortName}</p>
+                            <p className="truncate text-sm text-[var(--text-muted)]">{shortName}</p>
                         )}
                     </div>
                 </div>
-                {shortName && (
-                    <p className="text-sm text-[var(--text-muted)] sr-only">{shortName}</p>
-                )}
+
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                    {exchange && (
+                        <span className="inline-flex items-center rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
+                            {exchange}
+                        </span>
+                    )}
+                    {industry && (
+                        <span className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                            {industry}
+                        </span>
+                    )}
+                    {companyType && (
+                        <span className="inline-flex items-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)]">
+                            {companyType}
+                        </span>
+                    )}
+                </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 text-sm">
-                {industry && (
-                    <div className="flex items-center gap-2 text-[var(--text-muted)]">
-                        <Building2 size={14} className="text-blue-400" />
-                        <span>{industry}</span>
-                    </div>
-                )}
-                {exchange && (
-                    <div className="flex items-center gap-2 text-[var(--text-muted)]">
-                        <MapPin size={14} className="text-blue-400" />
-                        <span>{exchange}</span>
-                    </div>
-                )}
-                {website && (
-                    <div className="flex items-center gap-2 text-[var(--text-muted)]">
-                        <Globe size={14} className="text-blue-400" />
-                        <a
-                            href={website}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:text-blue-400 truncate"
-                        >
-                            {website.replace(/^https?:\/\//, '')}
-                        </a>
-                    </div>
-                )}
-                {profileData.no_employees && (
-                    <div className="flex items-center gap-2 text-[var(--text-muted)]">
-                        <Users size={14} className="text-blue-400" />
-                        <span>{profileData.no_employees.toLocaleString()} employees</span>
-                    </div>
-                )}
-                {profileData.established_year && (
-                    <div className="flex items-center gap-2 text-[var(--text-muted)]">
-                        <Calendar size={14} className="text-blue-400" />
-                        <span>Est. {profileData.established_year}</span>
-                    </div>
-                )}
-                {marketCapValue !== null && (
-                    <div className="col-span-2 flex items-center gap-2 text-[var(--text-muted)]">
-                        <Building2 size={14} className="text-blue-400" />
-                        <span>Mkt Cap {formatMarketCapFull(marketCapValue)}</span>
-                    </div>
-                )}
+            <div className="grid grid-cols-2 gap-2 text-sm">
+                {infoCards.map((item) => {
+                    const Icon = item.icon
+                    return (
+                        <div key={item.label} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2.5">
+                            <div className="mb-1 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                                <Icon size={12} className="text-blue-400" />
+                                <span>{item.label}</span>
+                            </div>
+                            <div className="truncate text-sm font-medium text-[var(--text-primary)]">
+                                {item.value}
+                            </div>
+                        </div>
+                    )
+                })}
             </div>
 
             <div className="pt-2 border-t border-[var(--border-color)] space-y-2.5">

@@ -95,7 +95,7 @@ export function WidgetContainer({
       )}
       <div className={cn(
         "flex-1 overflow-auto scrollbar-hide",
-        !noPadding && "p-3",
+        !noPadding && "p-2.5",
         bodyClassName
       )}>
         {children}
