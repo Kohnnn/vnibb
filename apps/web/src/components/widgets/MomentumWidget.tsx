@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Gauge } from 'lucide-react'
 import { useMomentumProfile } from '@/lib/queries'
+import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -12,10 +13,6 @@ interface MomentumWidgetProps {
   isEditing?: boolean
   onRemove?: () => void
 }
-
-const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y'] as const
-
-type PeriodOption = (typeof PERIOD_OPTIONS)[number]
 
 function formatPct(value: number | null): string {
   if (value === null) return '-'
@@ -40,7 +37,7 @@ function scoreLabel(score: number): string {
 
 export function MomentumWidget({ symbol }: MomentumWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
-  const [period, setPeriod] = useState<PeriodOption>('3Y')
+  const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMomentumProfile(upperSymbol, {
     period,
@@ -76,7 +73,7 @@ export function MomentumWidget({ symbol }: MomentumWidgetProps) {
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
-            {PERIOD_OPTIONS.map((option) => (
+              {QUANT_PERIOD_OPTIONS.map((option) => (
               <button
                 key={option}
                 type="button"

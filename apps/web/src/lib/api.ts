@@ -228,6 +228,7 @@ export async function getHistoricalPrices(
         endDate?: string;
         interval?: string;
         source?: string;
+        signal?: AbortSignal;
     }
 ): Promise<EquityHistoricalResponse> {
     return fetchAPI<EquityHistoricalResponse>('/equity/historical', {
@@ -238,6 +239,7 @@ export async function getHistoricalPrices(
             interval: options?.interval,
             source: options?.source,
         },
+        signal: options?.signal,
     });
 }
 
@@ -1375,7 +1377,7 @@ export async function getPeerCompanies(symbol: string, limit = 5): Promise<Peers
 
 // ============ Quant API ============
 
-export type QuantPeriod = '6M' | '1Y' | '3Y' | '5Y'
+export type QuantPeriod = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y'
 
 export type QuantMetric =
     | 'seasonality'
@@ -1757,7 +1759,7 @@ export async function getTechnicalHistory(
 
 export async function getIchimokuSeries(
     symbol: string,
-    options?: { period?: '6M' | '1Y' | '3Y' | '5Y' }
+    options?: { period?: '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' }
 ): Promise<IchimokuSeriesResponse> {
     return fetchAPI<IchimokuSeriesResponse>(`/analysis/ta/${symbol}/ichimoku`, {
         params: { period: options?.period || '1Y' },

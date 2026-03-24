@@ -11,20 +11,65 @@ export interface WidgetDescription {
 
 export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>> = {
   price_chart: {
-    purpose: 'Provides a full-featured price chart for the selected ticker with drawing tools, indicator overlays, and timeframe switching.',
-    calculation: 'Uses TradingView advanced charting by default, with an optional VNIBB local-history mode for supported Vietnamese exchanges.',
-    interpretation: 'Use TradingView mode for annotation and indicator work. Use local mode when you want a lightweight clean price-history view from VNIBB data.',
+    purpose: 'Provides a live lightweight chart for the selected ticker with timeframe switching and multiple display modes.',
+    calculation: 'Fetches VNIBB historical OHLCV data for the chosen range, merges the latest quote when available, and renders it with lightweight-charts.',
+    interpretation: 'Use candlesticks for structure, line mode for clean trend reading, and area mode for quick momentum context. The volume bars help confirm participation.',
     advanced_insights: [
-      'TradingView mode is best for scenario work because drawings and indicators stay tied to the active symbol and timeframe.',
-      'Local mode is useful when you want a fast sanity-check against VNIBB history without external chart rendering latency.',
+      '1D and 5D are best for tactical tape reading, while 1Y and 3Y are better for regime and swing structure.',
+      'Merged latest-quote handling makes the right edge of the chart more realistic during live sessions than pure EOD history alone.',
     ],
     limitations: [
-      'TradingView symbol mapping can fail for thinly supported tickers, in which case the fallback open link is the fastest escape hatch.',
-      'Local mode is intentionally simpler and does not include the full indicator and drawing toolbox.',
+      'This chart is intentionally lighter than the full licensed TradingView Charting Library and does not yet support saved drawings or advanced studies.',
+      'Intraday bars are inferred from daily history and live quote merging, so it should be treated as a decision aid rather than a tick-perfect tape tool.',
     ],
     pro_tips: [
-      'Use 1Y or 3Y for structure work, then drop to 1M or 3M when drawing tactical entries.',
+      'Start with 1Y or 3Y to find structure, then drop to 1M or 5D to refine entries around support and resistance.',
     ],
+  },
+  market_overview: {
+    purpose: 'Summarizes the state of the broader market before you drill into single-stock work.',
+    calculation: 'Aggregates index-level moves, breadth, and market-level performance snapshots from the current market payload.',
+    interpretation: 'Use it to judge whether the tape is risk-on, risk-off, narrow, or broad. Single-stock setups are more reliable when market context agrees.',
+    advanced_insights: [
+      'A strong stock in a weak market can still work, but you should usually demand better entry levels and tighter invalidation.',
+    ],
+    limitations: [
+      'Market overview compresses many moving parts and can miss important sector rotation under the surface.',
+    ],
+  },
+  top_movers: {
+    purpose: 'Shows which names are driving the session on the upside and downside.',
+    calculation: 'Ranks stocks by percentage move and liquidity filters from the active market snapshot.',
+    interpretation: 'Helpful for spotting leadership, capitulation, or crowded momentum. Fast movers matter more when liquidity is real, not thin.',
+    advanced_insights: [
+      'Look for repeat appearances over several sessions. Durable leaders usually persist rather than appearing once and disappearing.',
+    ],
+  },
+  market_heatmap: {
+    purpose: 'Visualizes where capital is flowing across the market in one glance.',
+    calculation: 'Uses stock-level move, size, and sector grouping to render relative market pressure on a heatmap canvas.',
+    interpretation: 'Large green blocks suggest broad leadership; isolated green in a red field often means defensive or idiosyncratic strength.',
+    limitations: [
+      'Heatmaps are excellent for breadth intuition but poor for precise timing by themselves.',
+    ],
+  },
+  screener: {
+    purpose: 'Filters the market into a smaller actionable universe based on your current preset or criteria.',
+    calculation: 'Applies the selected screen logic to the latest market and fundamentals payload.',
+    interpretation: 'Use it as an idea-generation surface. The best candidates still need follow-up in chart, fundamentals, and ownership widgets.',
+    pro_tips: [
+      'Treat screen output as a watchlist generator, not a final ranking of conviction.',
+    ],
+  },
+  ticker_profile: {
+    purpose: 'Provides the business identity, exchange context, and recent corporate profile details for the selected company.',
+    calculation: 'Combines cached profile metadata, website, listing context, and related corporate actions or dividend details.',
+    interpretation: 'Use it to confirm what the company actually does before comparing its valuation or technical setup against peers.',
+  },
+  institutional_ownership: {
+    purpose: 'Shows who owns the stock and how concentrated that ownership base appears.',
+    calculation: 'Organizes shareholder and institutional ownership records into a ranked ownership view.',
+    interpretation: 'Concentrated ownership can support strong trends but can also reduce float and increase gap risk if sentiment changes.',
   },
   seasonality_heatmap: {
     purpose: 'Shows how the stock has historically performed by month so you can spot recurring seasonal strength and weakness.',

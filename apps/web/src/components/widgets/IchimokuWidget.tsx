@@ -17,7 +17,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 
-const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y'] as const
+const PERIOD_OPTIONS = ['1M', '3M', '6M', '1Y', '3Y', '5Y'] as const
 type PeriodOption = (typeof PERIOD_OPTIONS)[number]
 
 interface IchimokuWidgetProps {

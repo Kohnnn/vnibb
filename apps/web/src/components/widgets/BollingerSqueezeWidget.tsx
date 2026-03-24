@@ -13,6 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { useQuantMetrics } from '@/lib/queries'
+import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -22,10 +23,6 @@ interface BollingerSqueezeWidgetProps {
   symbol: string
 }
 
-const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y'] as const
-
-type PeriodOption = (typeof PERIOD_OPTIONS)[number]
-
 interface WidthPoint {
   date: string
   bb_width_pct: number | null
@@ -34,7 +31,7 @@ interface WidthPoint {
 
 export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
-  const [period, setPeriod] = useState<PeriodOption>('3Y')
+  const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
     period,
     metrics: ['bollinger'],
@@ -77,7 +74,7 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
-            {PERIOD_OPTIONS.map((option) => (
+              {QUANT_PERIOD_OPTIONS.map((option) => (
               <button
                 key={option}
                 type="button"

@@ -1136,7 +1136,7 @@ export function useTechnicalHistory(
 
 export function useIchimokuSeries(
     symbol: string,
-    options?: { period?: '6M' | '1Y' | '3Y' | '5Y'; enabled?: boolean }
+    options?: { period?: '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y'; enabled?: boolean }
 ) {
     const period = options?.period || '1Y'
     return useQuery({

@@ -18,6 +18,8 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 
 const PERIOD_OPTIONS = [
+  { label: '1M', days: 31 },
+  { label: '3M', days: 93 },
   { label: '6M', days: 126 },
   { label: '1Y', days: 252 },
   { label: '3Y', days: 756 },

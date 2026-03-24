@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { BarChart3 } from 'lucide-react'
 import { Bar, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis, BarChart } from 'recharts'
 import { useQuantMetrics } from '@/lib/queries'
+import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -14,13 +15,9 @@ interface SortinoMonthlyWidgetProps {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y'] as const
-
-type PeriodOption = (typeof PERIOD_OPTIONS)[number]
-
 export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
-  const [period, setPeriod] = useState<PeriodOption>('5Y')
+  const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
     period,
     metrics: ['sortino'],
@@ -56,13 +53,13 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
-        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+        <div className="flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
           <BarChart3 size={12} className="text-cyan-400" />
           <span>Sortino Monthly</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
-            {PERIOD_OPTIONS.map((option) => (
+            {QUANT_PERIOD_OPTIONS.map((option) => (
               <button
                 key={option}
                 type="button"
@@ -87,12 +84,12 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
         <>
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-              <div className="text-[var(--text-muted)] uppercase tracking-widest">Best Months</div>
-              <div className="text-emerald-300">{metric?.best_months?.join(', ') || '-'}</div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Best Months</div>
+              <div className="mt-1 text-sm font-semibold text-emerald-300">{metric?.best_months?.join(', ') || '-'}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-              <div className="text-[var(--text-muted)] uppercase tracking-widest">Avoid Months</div>
-              <div className="text-red-300">{metric?.avoid_months?.join(', ') || '-'}</div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Avoid Months</div>
+              <div className="mt-1 text-sm font-semibold text-red-300">{metric?.avoid_months?.join(', ') || '-'}</div>
             </div>
           </div>
 

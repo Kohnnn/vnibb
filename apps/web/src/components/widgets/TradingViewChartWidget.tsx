@@ -1,13 +1,11 @@
 'use client';
 
-import { useMemo } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { TradingViewAdvancedChart } from '@/components/chart/TradingViewAdvancedChart';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { useProfile } from '@/lib/queries';
-import { toTradingViewSymbol } from '@/lib/tradingView';
 
 interface TradingViewChartWidgetProps {
   id: string;
@@ -18,8 +16,6 @@ interface TradingViewChartWidgetProps {
 export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChartWidgetProps) {
   const { data: profileData, isFetching, dataUpdatedAt } = useProfile(symbol, !!symbol);
   const exchange = profileData?.data?.exchange;
-
-  const tvSymbol = useMemo(() => toTradingViewSymbol(symbol, exchange), [symbol, exchange]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view TradingView" />;
@@ -38,7 +34,7 @@ export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChar
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching}
-            note={tvSymbol || (exchange ? exchange.toUpperCase() : 'TradingView')}
+            note={exchange ? `${exchange.toUpperCase()} lightweight chart` : 'Lightweight chart'}
             align="right"
           />
         </div>
@@ -46,9 +42,8 @@ export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChar
           <ChartSizeBox className="h-full" minHeight={220}>
             {() => (
               <TradingViewAdvancedChart
-                symbol={tvSymbol || symbol}
-                exchange={exchange}
-                interval="D"
+                symbol={symbol}
+                timeframe="1Y"
                 height={320}
               />
             )}
