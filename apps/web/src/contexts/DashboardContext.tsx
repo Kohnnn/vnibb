@@ -719,49 +719,25 @@ const INITIAL_FUNDAMENTAL_TEMPLATE: TemplateWidget[] = [
         type: 'ticker_info',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 8, h: 3, minW: 6, minH: 2 }
+        layout: { x: 0, y: 0, w: 6, h: 5, minW: 5, minH: 4 }
+    },
+    {
+        type: 'key_metrics',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 6, y: 0, w: 7, h: 5, minW: 6, minH: 4 }
     },
     {
         type: 'ticker_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 0, w: 8, h: 4, minW: 6, minH: 4 }
+        layout: { x: 13, y: 0, w: 11, h: 5, minW: 8, minH: 4 }
     },
     {
-        type: 'institutional_ownership',
+        type: 'unified_financials',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 0, w: 8, h: 4, minW: 6, minH: 4 }
-    },
-    {
-        type: 'financial_ratios',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 4, w: 24, h: 6, minW: 12, minH: 6 }
-    },
-    {
-        type: 'income_statement',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 10, w: 12, h: 6, minW: 8, minH: 6 }
-    },
-    {
-        type: 'balance_sheet',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 12, y: 10, w: 12, h: 6, minW: 8, minH: 6 }
-    },
-    {
-        type: 'cash_flow',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 16, w: 12, h: 6, minW: 8, minH: 6 }
-    },
-    {
-        type: 'major_shareholders',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 12, y: 16, w: 12, h: 5, minW: 8, minH: 5 }
+        layout: { x: 0, y: 5, w: 24, h: 10, minW: 14, minH: 8 }
     },
 ];
 
