@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { CalendarDays } from 'lucide-react'
 import { useQuantMetrics } from '@/lib/queries'
+import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -19,9 +20,6 @@ interface MonthlyReturnRow {
 }
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const PERIOD_OPTIONS = ['1Y', '3Y', '5Y'] as const
-type PeriodOption = (typeof PERIOD_OPTIONS)[number]
-
 function formatPct(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '-'
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
@@ -39,7 +37,7 @@ function getCellClass(value: number | null): string {
 
 export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
-  const [period, setPeriod] = useState<PeriodOption>('5Y')
+  const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
     period,
     metrics: ['seasonality'],
@@ -85,14 +83,14 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-2 flex items-center justify-between px-1 py-1">
-        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+        <div className="mb-2 flex items-center justify-between px-1 py-1">
+        <div className="flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
           <CalendarDays size={12} className="text-cyan-400" />
           <span>Monthly Seasonality</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
-            {PERIOD_OPTIONS.map((option) => (
+            {QUANT_PERIOD_OPTIONS.map((option) => (
               <button
                 key={option}
                 type="button"
@@ -119,20 +117,20 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
 
       <div className="mb-2 grid grid-cols-4 gap-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Best Avg</div>
-          <div className="font-mono text-emerald-300">{metric?.best_month || '-'}</div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Best Avg</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-emerald-300">{metric?.best_month || '-'}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Worst Avg</div>
-          <div className="font-mono text-rose-300">{metric?.worst_month || '-'}</div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Worst Avg</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-rose-300">{metric?.worst_month || '-'}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Hit Rate</div>
-          <div className="font-mono text-cyan-300">{formatPct(metric?.hit_rate_pct)}</div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Hit Rate</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-cyan-300">{formatPct(metric?.hit_rate_pct)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Current Month</div>
-          <div className="font-mono text-[var(--text-primary)]">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Current Month</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-[var(--text-primary)]">
             {metric?.current_month ? `${metric.current_month.label} ${formatPct(metric.current_month.return_pct)}` : '-'}
           </div>
         </div>

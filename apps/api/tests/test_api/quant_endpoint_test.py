@@ -54,7 +54,7 @@ async def test_quant_endpoint_rejects_10y_period(client):
     detail = payload.get("detail", payload)
     assert detail["code"] == "INVALID_PERIOD"
     assert detail["requested_period"] == "10Y"
-    assert detail["allowed_periods"] == ["6M", "1Y", "3Y", "5Y"]
+    assert detail["allowed_periods"] == ["1M", "3M", "6M", "1Y", "3Y", "5Y"]
 
 
 @pytest.mark.asyncio

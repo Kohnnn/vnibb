@@ -262,6 +262,8 @@ class FullTechnicalAnalysis(BaseModel):
 
 
 PERIOD_LOOKBACK_MAP: Dict[str, int] = {
+    "1M": 31,
+    "3M": 93,
     "6M": 180,
     "1Y": 365,
     "3Y": 365 * 3,
@@ -625,7 +627,7 @@ async def get_full_analysis(
 )
 async def get_ichimoku_series(
     symbol: str,
-    period: str = Query(default="1Y", pattern=r"^(6M|1Y|3Y|5Y)$"),
+    period: str = Query(default="1Y", pattern=r"^(1M|3M|6M|1Y|3Y|5Y)$"),
 ) -> IchimokuSeriesResponse:
     upper_symbol = symbol.upper()
     lookback_days = PERIOD_LOOKBACK_MAP[period]

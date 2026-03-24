@@ -40,6 +40,7 @@ import { AICopilot } from '@/components/ui/AICopilot';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
+import { compactGridItems } from '@/lib/dashboardLayout';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
 import type { DashboardTemplate } from '@/types/dashboard-templates';
@@ -244,53 +245,26 @@ function DashboardContent() {
     }, [activeDashboard, activeTab, resetTabLayout]);
 
     const handleAutoFitLayout = useCallback(() => {
-        if (!activeDashboard || !activeTab) return;
+        if (!activeDashboard) return;
 
-        const cols = 24;
-        const columnHeights = new Array(cols).fill(0);
+        activeDashboard.tabs.forEach((tab) => {
+            const normalizedWidgets = tab.widgets.map((widget) => {
+                const defaults = defaultWidgetLayouts[widget.type as WidgetType] || { w: 6, h: 4, minW: 3, minH: 2 };
+                return {
+                    ...widget,
+                    layout: {
+                        ...widget.layout,
+                        w: widget.layout.w || defaults.w || 6,
+                        h: widget.layout.h || defaults.h || 4,
+                        minW: defaults.minW ?? widget.layout.minW ?? 3,
+                        minH: defaults.minH ?? widget.layout.minH ?? 2,
+                    },
+                };
+            });
 
-        const findBestPosition = (width: number) => {
-            let bestX = 0;
-            let bestY = Number.MAX_SAFE_INTEGER;
-
-            for (let x = 0; x <= cols - width; x += 1) {
-                const candidateY = Math.max(...columnHeights.slice(x, x + width));
-                if (candidateY < bestY) {
-                    bestY = candidateY;
-                    bestX = x;
-                }
-            }
-
-            return { x: bestX, y: bestY };
-        };
-
-        const updatedWidgets = activeTab.widgets.map((widget) => {
-            const defaults = defaultWidgetLayouts[widget.type as WidgetType] || { w: 6, h: 4, minW: 3, minH: 2 };
-            const minW = defaults.minW ?? widget.layout.minW ?? 3;
-            const minH = defaults.minH ?? widget.layout.minH ?? 2;
-            const width = Math.min(Math.max(widget.layout.w || defaults.w || 6, minW), cols);
-            const height = Math.max(widget.layout.h || defaults.h || 4, minH);
-            const { x, y } = findBestPosition(width);
-
-            for (let col = x; col < x + width; col += 1) {
-                columnHeights[col] = y + height;
-            }
-
-            const nextLayout = {
-                ...widget.layout,
-                x,
-                y,
-                w: width,
-                h: height,
-                minW,
-                minH,
-            };
-
-            return { ...widget, layout: nextLayout };
+            updateTabLayout(activeDashboard.id, tab.id, compactGridItems(normalizedWidgets));
         });
-
-        updateTabLayout(activeDashboard.id, activeTab.id, updatedWidgets);
-    }, [activeDashboard, activeTab, updateTabLayout]);
+    }, [activeDashboard, updateTabLayout]);
 
     const handleCollapseAll = useCallback(() => {
         if (!activeDashboard || !activeTab) return;

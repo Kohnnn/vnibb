@@ -1,149 +1,244 @@
-# VNIBB - Vietnam-First Financial Analytics Platform
+# VNIBB
 
 <div align="center">
 
-![VNIBB Logo](https://raw.githubusercontent.com/Kohnnn/vnibb/085295eca4ea948e7d0fcb258b3716bdb274230a/logo.svg)
+![VNIBB Logo](./logo.svg)
 
-**Financial data platform for Vietnamese market analysts, quants and AI agents**
+**Vietnam-first financial analytics platform for investors, quants, and agentic tools**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](https://nodejs.org/)
+[![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue.svg)](https://www.python.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688)](https://fastapi.tiangolo.com/)
 
-[Demo](https://vnibb-web.vercel.app/) · [N/A](https://github.com/Kohnnn/vnibb-docs) · [Contributing](#contributing)
+[Live demo](https://vnibb-web.vercel.app/) · [API docs](./docs/API_REFERENCE.md) · [Widget catalog](./docs/WIDGET_CATALOG.md)
 
 </div>
 
 ---
 
-## 🚀 What is VNIBB?
+## What This Repo Contains
 
-VNIBB (Vietnam Investment Building Blocks) is an **open-source financial analytics platform** specifically designed for the **Vietnamese stock market**. Built with modern web technologies, it provides:
+VNIBB is a monorepo that combines the web application, API server, and shared packages used to power Vietnamese market analysis workflows.
 
-- 📊 **40+ Financial Widgets** - Real-time market data visualization
-- 🔍 **Advanced Stock Screener** - Filter 1000+ Vietnamese stocks
-- 📈 **Technical Analysis** - Charts, indicators, and patterns
-- 💼 **Company Fundamentals** - Financial statements, ratios, news
-- 🤖 **AI-Ready** - OpenBB-inspired architecture for quant analysis
+### Apps
 
----
+- `apps/web` - Next.js 16 frontend with React 19, dashboard UI, widgets, and Jest tests.
+- `apps/api` - FastAPI backend with async SQLAlchemy, pytest, Ruff, and production-oriented startup checks.
 
-## 🏗️ Architecture
+### Packages
 
-VNIBB follows a **modular multi-repo** design:
+- `packages/shared` - shared TypeScript utilities.
+- `packages/ui` - reusable UI package built with `tsup`.
+- `packages/widgets` - reusable widget package built with `tsup`.
+- `packages/providers` - Python provider package.
 
-| Repository | Description | Tech Stack |
-|------------|-------------|------------|
-| [vnibb-web](https://github.com/Kohnnn/vnibb-web) | Frontend application | Next.js 16, React, Tailwind |
-| [vnibb-api](https://github.com/Kohnnn/vnibb-api) | Backend API | FastAPI, SQLAlchemy, PostgreSQL |
-| [vnibb-widgets](https://github.com/Kohnnn/vnibb-widgets) | Widget library | React 18, TypeScript |
+### Highlights
 
----
-
-## ✨ Features
-
-### For Investors
-- Real-time Vietnamese stock data (HOSE, HNX, UPCOM)
-- Advanced filtering & screening tools
-- Financial statement analysis
-- Technical indicators & charts
-
-### For Developers
-- OpenBB-inspired modular architecture
-- RESTful API with 50+ endpoints
-- React widget library (npm package)
-- Python data provider (PyPI package)
-
-### For Quants
-- Historical price data (10+ years)
-- Fundamental metrics & ratios
-- Sector & industry classification
-- Export to CSV/Excel
+- 40+ market and financial widgets.
+- Screener, fundamentals, technical, quant, and market-monitoring workflows.
+- Backend APIs for quotes, statements, news, sectors, dashboards, exports, and admin health.
+- Shared workspace commands for linting, builds, tests, and CI-style validation.
 
 ---
 
-## 🎯 Quick Start
+## Tech Stack
 
-### Option 1: Use Hosted Version
-Visit [vnibb-web.vercel.app](https://vnibb-web.vercel.app/)
+- Frontend: Next.js 16, React 19, TypeScript, Testing Library, Jest, optional Playwright.
+- Backend: FastAPI, Pydantic v2, SQLAlchemy 2, pytest, Ruff.
+- Workspace: `pnpm` + Turborepo.
+- Data: vnstock-centered provider flow with database/cache fallback layers.
 
-### Option 2: Run Locally
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- `pnpm` 9+
+- Python 3.11+ for the API package (`apps/api`)
+
+### 1. Install JavaScript dependencies
 
 ```bash
-# Clone repos
-git clone https://github.com/Kohnnn/vnibb-web.git
-git clone https://github.com/Kohnnn/vnibb-api.git
-
-# Start frontend
-cd vnibb-web
 pnpm install
-pnpm dev
-
-# Start backend
-cd vnibb-api
-python -m venv .venv
-pip install -e .
-uvicorn vnibb.api.main:app --reload
 ```
 
----
-
-## Quality Gate
-
-Run lint, build, and tests for both apps with one command:
+### 2. Install backend dependencies
 
 ```bash
-# macOS/Linux
-pnpm ci:gate
+python -m pip install -e "apps/api[dev]"
+```
 
-# Windows PowerShell
-pnpm ci:gate:win
+### 3. Configure env files
+
+Typical local files already referenced by the repo:
+
+- `apps/web/.env.local`
+- `apps/api/.env`
+
+At minimum, local frontend development usually needs:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_WS_URL=ws://localhost:8000/api/v1/ws/prices
+```
+
+### 4. Start the frontend
+
+```bash
+pnpm --filter frontend dev
+```
+
+Open `http://localhost:3000`.
+
+### 5. Start the backend
+
+```bash
+python -m uvicorn vnibb.api.main:app --reload --app-dir apps/api
+```
+
+Open `http://localhost:8000/docs` when debug docs are enabled.
+
+---
+
+## Workspace Commands
+
+### Root commands
+
+```bash
+pnpm dev
+pnpm build
+pnpm lint
+pnpm test
+pnpm ci:gate
+```
+
+Notes:
+
+- `pnpm build`, `pnpm lint`, and `pnpm test` run through Turborepo.
+- `pnpm test` mainly exercises the frontend workspace.
+- `pnpm ci:gate` is the strict local validation path and runs:
+  - frontend lint
+  - frontend build
+  - frontend tests with `--runInBand`
+  - backend compile check
+  - backend pytest suite
+
+### Frontend commands
+
+```bash
+pnpm --filter frontend dev
+pnpm --filter frontend build
+pnpm --filter frontend lint
+pnpm --filter frontend test
+pnpm --filter frontend test -- --watch
+pnpm --filter frontend test -- --runInBand
+```
+
+### Run a single frontend test
+
+```bash
+pnpm --filter frontend test -- --runTestsByPath src/lib/financialPeriods.test.ts
+pnpm --filter frontend test -- --runTestsByPath src/components/widgets/FinancialRatiosWidget.test.tsx
+pnpm --filter frontend test -- --runTestsByPath src/lib/financialPeriods.test.ts -t "formats yearly labels from year strings"
+```
+
+### Backend commands
+
+```bash
+python -m py_compile apps/api/vnibb/api/main.py
+python -m pytest apps/api/tests -v
+python -m pytest apps/api/tests -q
+python -m ruff check apps/api
+```
+
+### Run a single backend test
+
+```bash
+python -m pytest apps/api/tests/test_api/test_news_service.py -v
+python -m pytest apps/api/tests/test_api/test_news_service.py -k hydrates -v
+python -m pytest apps/api/tests/test_integration/test_api_integration.py -v
+```
+
+### Package builds
+
+```bash
+pnpm --filter @vnibb/shared build
+pnpm --filter @vnibb/ui build
+pnpm --filter @vnibb/widgets build
+```
+
+### Database migrations
+
+```bash
+alembic -c apps/api/alembic.ini upgrade head
 ```
 
 ---
 
-## 📚 Documentation
+## Repository Layout
+
+```text
+.
+├── apps/
+│   ├── api/        # FastAPI backend
+│   └── web/        # Next.js frontend
+├── packages/
+│   ├── providers/  # Python provider package
+│   ├── shared/     # Shared TS utilities
+│   ├── ui/         # Reusable UI package
+│   └── widgets/    # Widget package
+├── docs/           # Project and ops docs
+├── scripts/        # Root automation and CI helpers
+├── AGENTS.md       # Repo instructions for coding agents
+└── package.json    # Workspace entrypoint
+```
+
+---
+
+## Development Notes
+
+- Use `pnpm` for JavaScript work and `python -m ...` for Python commands.
+- Prefer root-level commands unless you are debugging a specific package.
+- Treat `scripts/ci-gate.mjs` as the source of truth for local validation order.
+- Avoid editing generated output such as `.next/`, `dist/`, `.turbo/`, or local database/log artifacts unless the task requires it.
+- Frontend uses the `@/` alias for app-local imports in `apps/web`.
+
+---
+
+## Documentation
 
 - API reference: `docs/API_REFERENCE.md`
 - Widget catalog: `docs/WIDGET_CATALOG.md`
-- Production health tracking: `docs/v47_production_health.md`
-- Sprint summary changes: `CHANGELOG.md`
+- Production health notes: `docs/v47_production_health.md`
+- Changelog: `CHANGELOG.md`
+- Agent instructions: `AGENTS.md`
 
 ---
 
-## 📦 Packages
+## Contributing
 
-### NPM Packages
-```bash
-npm install @vnibb/widgets
-```
+Keep changes focused and validate with the narrowest relevant command first, then with `pnpm ci:gate` for broader changes.
 
----
+Examples:
 
-## 🤝 Contributing
-
-We welcome contributions!
+- frontend-only UI change -> run frontend lint/test for the touched area.
+- backend service change -> run targeted pytest first, then broader backend tests.
+- cross-cutting change -> finish with `pnpm ci:gate`.
 
 ---
 
-## 📜 License
+## License
 
-MIT License - see [LICENSE](LICENSE) file
+MIT. See `LICENSE`.
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Inspired by [OpenBB](https://github.com/OpenBB-finance/OpenBB)
-- Data powered by [vnstock](https://github.com/thinh-vu/vnstock)
-- Built with ❤️ for Vietnamese investors
-
----
-
-<div align="center">
-
-**[⭐ Star this repo](https://github.com/Kohnnn/vnibb)** if you find it useful!
-
-Made with 🇻🇳stock by [Kohnnn](https://github.com/Kohnnn)
-
-</div>
+- Built around Vietnamese market workflows and vnstock-based provider integrations
+- Designed for both human analysts and agentic coding/research tools

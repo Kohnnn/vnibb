@@ -27,6 +27,7 @@ import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
 import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync } from '@/lib/useDashboardSync';
+import { compactGridItems } from '@/lib/dashboardLayout';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
 
@@ -1123,7 +1124,7 @@ const migrateSidebarClutter = (
 
 // Convert template widgets to actual widget instances
 const createWidgetsFromTemplate = (template: TemplateWidget[], tabId: string): WidgetInstance[] => {
-    return template.map((tw) => {
+    return compactGridItems(template).map((tw) => {
         const widgetId = generateWidgetId(tw.type);
         return {
             id: widgetId,

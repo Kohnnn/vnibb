@@ -45,7 +45,7 @@ SUPPORTED_METRICS = (
     "drawdown_recovery",
 )
 DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
-ALLOWED_QUANT_PERIODS = ("6M", "1Y", "3Y", "5Y")
+ALLOWED_QUANT_PERIODS = ("1M", "3M", "6M", "1Y", "3Y", "5Y")
 QUANT_STALE_DAYS_THRESHOLD = 7
 METRIC_ALIASES = {
     "seasonality": "seasonality",
@@ -119,6 +119,10 @@ def _safe_float(value: Any, decimals: int = 4) -> float | None:
 
 
 def _resolve_start_date(period: str, end_date: date) -> date:
+    if period == "1M":
+        return end_date - timedelta(days=31)
+    if period == "3M":
+        return end_date - timedelta(days=93)
     if period == "6M":
         return end_date - timedelta(days=186)
     if period == "1Y":

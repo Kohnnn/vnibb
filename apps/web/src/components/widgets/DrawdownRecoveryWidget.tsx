@@ -13,6 +13,7 @@ import {
   YAxis,
 } from 'recharts'
 import { useQuantMetrics } from '@/lib/queries'
+import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -21,10 +22,6 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 interface DrawdownRecoveryWidgetProps {
   symbol: string
 }
-
-const PERIOD_OPTIONS = ['6M', '1Y', '3Y', '5Y'] as const
-
-type PeriodOption = (typeof PERIOD_OPTIONS)[number]
 
 type UnderwaterPoint = {
   date: string
@@ -48,7 +45,7 @@ function formatPct(value: number | null | undefined): string {
 
 export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
-  const [period, setPeriod] = useState<PeriodOption>('5Y')
+  const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
     period,
@@ -90,7 +87,7 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
-            {PERIOD_OPTIONS.map((option) => (
+              {QUANT_PERIOD_OPTIONS.map((option) => (
               <button
                 key={option}
                 type="button"
