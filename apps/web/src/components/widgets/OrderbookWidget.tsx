@@ -57,10 +57,10 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId }: Orderbo
           />
         </div>
 
-        <div className="flex text-[10px] font-bold text-[var(--text-muted)] px-3 py-2 border-b border-[var(--border-color)] uppercase tracking-wider">
-          <div className="w-1/3">Bid Vol</div>
-          <div className="w-1/3 text-center">Price</div>
-          <div className="w-1/3 text-right">Ask Vol</div>
+        <div className="grid grid-cols-[minmax(0,1fr)_74px_minmax(0,1fr)] gap-2 border-b border-[var(--border-color)] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+          <div>Bid Vol</div>
+          <div className="text-center">Price</div>
+          <div className="text-right">Ask Vol</div>
         </div>
 
         <div className="flex-1 overflow-auto scrollbar-hide">
@@ -72,7 +72,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId }: Orderbo
             <WidgetEmpty message="Order book data not available yet" />
           ) : (
             entries.map((entry: any, i: number) => (
-              <div key={i} className="flex items-center px-3 py-1.5 relative border-b border-[var(--border-subtle)]">
+              <div key={i} className="relative grid grid-cols-[minmax(0,1fr)_74px_minmax(0,1fr)] items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-1.5">
                 <div
                   className="absolute left-0 top-0 h-full bg-green-500/10"
                   style={{ width: `${((entry.bid_vol || 0) / maxVolume) * 50}%` }}
@@ -82,13 +82,13 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId }: Orderbo
                   style={{ width: `${((entry.ask_vol || 0) / maxVolume) * 50}%` }}
                 />
 
-                <div className="w-1/3 text-xs text-green-400 font-mono relative z-10">
+                <div className="min-w-0 truncate text-xs text-green-400 font-mono relative z-10">
                   {entry.bid_vol?.toLocaleString() || '--'}
                 </div>
-                <div className="w-1/3 text-center text-xs text-[var(--text-primary)] font-bold relative z-10">
+                <div className="text-center text-xs text-[var(--text-primary)] font-bold relative z-10">
                   {entry.price?.toLocaleString() || '--'}
                 </div>
-                <div className="w-1/3 text-right text-xs text-red-400 font-mono relative z-10">
+                <div className="min-w-0 truncate text-right text-xs text-red-400 font-mono relative z-10">
                   {entry.ask_vol?.toLocaleString() || '--'}
                 </div>
               </div>

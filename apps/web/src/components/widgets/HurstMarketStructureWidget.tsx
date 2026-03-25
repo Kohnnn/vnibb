@@ -7,6 +7,7 @@ import type { OHLCData } from '@/lib/chartUtils'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface HurstMarketStructureWidgetProps {
   symbol: string
@@ -129,6 +130,7 @@ export function HurstMarketStructureWidget({ symbol }: HurstMarketStructureWidge
   const lag1 = computeLag1Autocorrelation(returns)
   const structure = classifyHurst(hurst)
   const hasData = closes.length > 120
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   const rollingWindows = useMemo(() => {
     const output: Array<{ label: string; value: number | null }> = []
@@ -163,34 +165,43 @@ export function HurstMarketStructureWidget({ symbol }: HurstMarketStructureWidge
         <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="R/S method" align="right" />
       </div>
 
-      <div className="mb-2 grid grid-cols-3 gap-2 text-[10px]">
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="uppercase tracking-widest text-[var(--text-muted)]">Hurst</div>
-          <div className="font-mono text-cyan-300">{formatNumber(hurst ?? Number.NaN)}</div>
-        </div>
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="uppercase tracking-widest text-[var(--text-muted)]">Lag-1 AC</div>
-          <div className="font-mono text-emerald-300">{formatNumber((lag1 ?? 0) * 100, 2)}%</div>
-        </div>
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="uppercase tracking-widest text-[var(--text-muted)]">Structure</div>
-          <div className={structure.className}>{structure.label}</div>
-        </div>
-      </div>
-
-      <div className="mb-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[10px] text-[var(--text-secondary)]">
-        <span className="text-[var(--text-muted)]">Interpretation:</span> <span className={structure.className}>{structure.note}</span>
-      </div>
-
       <div className="flex-1 overflow-auto pr-1">
-        {isLoading && !hasData ? (
+        {timedOut && isLoading && !hasData ? (
+          <WidgetError
+            title="Loading timed out"
+            error={new Error('Market structure data took too long to load.')}
+            onRetry={() => {
+              resetTimeout()
+              refetch()
+            }}
+          />
+        ) : isLoading && !hasData ? (
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty message="Not enough historical data for Hurst estimation" icon={<Sigma size={18} />} />
+          <WidgetEmpty message="Not enough historical data for Hurst estimation" icon={<Sigma size={18} />} size="compact" />
         ) : (
           <div className="space-y-2">
+            <div className="grid grid-cols-3 gap-2 text-[10px]">
+              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+                <div className="uppercase tracking-widest text-[var(--text-muted)]">Hurst</div>
+                <div className="font-mono text-cyan-300">{formatNumber(hurst ?? Number.NaN)}</div>
+              </div>
+              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+                <div className="uppercase tracking-widest text-[var(--text-muted)]">Lag-1 AC</div>
+                <div className="font-mono text-emerald-300">{formatNumber((lag1 ?? 0) * 100, 2)}%</div>
+              </div>
+              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+                <div className="uppercase tracking-widest text-[var(--text-muted)]">Structure</div>
+                <div className={structure.className}>{structure.label}</div>
+              </div>
+            </div>
+
+            <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[10px] text-[var(--text-secondary)]">
+              <span className="text-[var(--text-muted)]">Interpretation:</span> <span className={structure.className}>{structure.note}</span>
+            </div>
+
             <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2">
               <div className="mb-2 text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Rolling Regime</div>
               <div className="space-y-1">

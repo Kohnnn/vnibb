@@ -158,11 +158,15 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
 
           <div ref={scrollRef} className="flex h-full overflow-x-auto scrollbar-hide">
             {isLoading && !hasData ? (
-              <div className="w-full p-3"><WidgetSkeleton lines={8} /></div>
+              <div className="mx-auto mt-6 max-h-[200px] w-full max-w-[560px] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70 p-3">
+                <WidgetSkeleton lines={8} />
+              </div>
             ) : error && !hasData ? (
               <WidgetError error={error as Error} onRetry={() => refetch()} />
             ) : !hasData ? (
-              <WidgetEmpty message="Sector board data unavailable" icon={<LayoutGrid size={18} />} />
+              <div className="mx-auto mt-8 max-w-md">
+                <WidgetEmpty message="Sector board data unavailable" icon={<LayoutGrid size={18} />} size="compact" />
+              </div>
             ) : (
               sectors.map((sector) => (
                 <div key={sector.name} className="min-w-[190px] border-r border-[var(--border-subtle)] last:border-r-0">

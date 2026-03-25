@@ -159,7 +159,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
       widgetId={id}
       hideHeader={hideHeader}
     >
-      <div className="flex flex-col h-full space-y-2.5">
+      <div className="flex flex-col h-full space-y-2">
         <WidgetMeta
           updatedAt={updatedAt}
           isFetching={isFetching && hasQuote}
@@ -175,7 +175,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
           className="justify-between"
         />
 
-        <div className="flex items-start justify-between rounded-2xl border border-blue-500/15 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-3 animate-in fade-in duration-500">
+        <div className="flex items-start justify-between rounded-2xl border border-blue-500/15 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-2.5 animate-in fade-in duration-500">
           <div className="flex flex-col gap-1">
             <span className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-300/80">
               {symbol}
@@ -199,9 +199,9 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
               <span>{changeLabel}</span>
             </div>
           </div>
-          <div className="bg-blue-500/10 rounded-xl p-2.5 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.15)]">
-            <Activity size={18} className="text-blue-400" />
-          </div>
+            <div className="bg-blue-500/10 rounded-xl p-2 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.15)]">
+              <Activity size={18} className="text-blue-400" />
+            </div>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -219,12 +219,15 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
           ].map((item, i) => (
             <div
               key={i}
-              className="group flex min-h-[66px] flex-col justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2.5 transition-colors hover:border-[var(--border-color)]"
+              className="group flex min-h-[56px] flex-col justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2 transition-colors hover:border-[var(--border-color)]"
             >
               <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest group-hover:text-blue-400 transition-colors">
                 {item.label}
               </div>
-              <div className="mt-1 text-sm font-mono font-semibold text-[var(--text-secondary)] tabular-nums">
+              <div className={cn(
+                'mt-1 text-sm font-mono font-semibold tabular-nums',
+                item.value === '--' ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'
+              )}>
                 {item.value || '--'}
               </div>
               {item.source && (
@@ -254,7 +257,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
           </div>
         )}
 
-        <div className="pt-2 border-t border-[var(--border-subtle)]">
+        <div className="pt-1.5 border-t border-[var(--border-subtle)]">
           <div className="flex items-center gap-2 mb-1.5">
             <Info size={12} className="text-blue-500" />
             <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest">Company Profile</span>
@@ -265,7 +268,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
           >
             {companyName || 'Company information unavailable'}
           </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
             {exchange && (
               <span className="inline-flex items-center rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
                 {exchange}

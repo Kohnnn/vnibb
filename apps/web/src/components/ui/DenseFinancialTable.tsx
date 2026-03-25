@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Sparkline } from '@/components/ui/Sparkline'
+import { EMPTY_VALUE } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
 export interface DenseTableColumn {
@@ -48,9 +49,9 @@ function asNumber(value: number | string | null | undefined): number | null {
 }
 
 function defaultFormatter(value: number | string | null | undefined): string {
-  if (value === null || value === undefined) return '-'
+  if (value === null || value === undefined) return EMPTY_VALUE
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return '-'
+    if (!Number.isFinite(value)) return EMPTY_VALUE
     return value.toLocaleString('en-US', {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2,
@@ -227,7 +228,7 @@ export function DenseFinancialTable({
   }
 
   const handleCopyValue = async (cellKey: string, value: string) => {
-    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText || value === '-') return
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText || value === EMPTY_VALUE) return
 
     try {
       await navigator.clipboard.writeText(value)
@@ -256,7 +257,7 @@ export function DenseFinancialTable({
                     column.align === 'left' ? 'text-left' : 'text-right',
                     sortable ? 'cursor-pointer select-none hover:text-[var(--text-primary)]' : ''
                   )}
-                  style={column.width ? { width: column.width } : undefined}
+                  style={column.width ? { minWidth: column.width, width: column.width } : { minWidth: '88px' }}
                   onClick={() => onSort(column.key)}
                 >
                   <span className="inline-flex items-center gap-1">
@@ -316,13 +317,15 @@ export function DenseFinancialTable({
 
                 {visibleColumns.map((column, index) => {
                   const rawValue = row.values[column.key]
-                  const displayValue = valueFormatter
-                    ? valueFormatter(rawValue, row, column.key)
-                    : defaultFormatter(rawValue)
+                  const displayValue = row.isGroup
+                    ? ''
+                    : valueFormatter
+                      ? valueFormatter(rawValue, row, column.key)
+                      : defaultFormatter(rawValue)
 
                   const currentNumber = asNumber(rawValue)
                   const previousNumber =
-                    showGrowth && index > 0
+                    showGrowth && !row.isGroup && index > 0
                       ? asNumber(row.values[visibleColumns[index - 1].key])
                       : null
 
@@ -346,6 +349,7 @@ export function DenseFinancialTable({
                         copiedCellKey === `${row.id}:${column.key}` ? 'ring-1 ring-inset ring-blue-400/80' : '',
                         column.align === 'left' ? 'text-left' : 'text-right'
                       )}
+                      style={column.width ? { minWidth: column.width, width: column.width } : { minWidth: '88px' }}
                       onClick={() => {
                         if (!row.isGroup) {
                           void handleCopyValue(`${row.id}:${column.key}`, displayValue)
@@ -357,7 +361,9 @@ export function DenseFinancialTable({
                         <span
                           className={cn(
                             'ml-1 inline-flex rounded px-1 py-0.5 text-[9px] font-semibold',
-                            growthPct >= 0
+                            growthPct === 0
+                              ? 'bg-slate-500/15 text-slate-300'
+                              : growthPct >= 0
                               ? 'bg-emerald-500/15 text-emerald-500'
                               : 'bg-rose-500/15 text-rose-500'
                           )}
@@ -372,8 +378,8 @@ export function DenseFinancialTable({
 
                 {showTrend ? (
                   <td className="trend-col px-2 py-1 text-center">
-                    {trendValues.length < 2 ? (
-                      <span className="text-[10px] text-[var(--text-muted)]">-</span>
+                    {row.isGroup ? null : trendValues.length < 2 ? (
+                      <span className="text-[10px] text-[var(--text-muted)]">{EMPTY_VALUE}</span>
                     ) : (
                       <Sparkline data={trendValues} width={74} height={18} />
                     )}

@@ -6,6 +6,7 @@ import { calculateOBV, type OHLCData } from '@/lib/chartUtils';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface OBVDivergenceWidgetProps {
   symbol: string;
@@ -88,6 +89,7 @@ export function OBVDivergenceWidget({ symbol }: OBVDivergenceWidgetProps) {
   const candles = (data?.data || []) as OHLCData[];
   const hasData = candles.length > 30;
   const isFallback = Boolean(error && hasData);
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
   const lookback = 20;
   const { signal, priceDeltaPct, obvDeltaPct, confidence } = detectDivergence(candles, lookback);
@@ -129,60 +131,71 @@ export function OBVDivergenceWidget({ symbol }: OBVDivergenceWidgetProps) {
         />
       </div>
 
-      <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
-        <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Signal</div>
-        <div className={`text-sm font-semibold ${signalClass}`}>{signalLabel}</div>
-        <div className="mt-1 text-[10px] text-[var(--text-secondary)]">Confidence: {confidence}%</div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2 mb-2">
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Price %</div>
-          <div className={`text-xs font-mono ${priceDeltaPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-            {priceDeltaPct >= 0 ? '+' : ''}
-            {priceDeltaPct.toFixed(2)}%
-          </div>
-        </div>
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">OBV %</div>
-          <div className={`text-xs font-mono ${obvDeltaPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-            {obvDeltaPct >= 0 ? '+' : ''}
-            {obvDeltaPct.toFixed(2)}%
-          </div>
-        </div>
-      </div>
-
       <div className="flex-1 overflow-auto space-y-1 pr-1">
-        {isLoading && !hasData ? (
+        {timedOut && isLoading && !hasData ? (
+          <WidgetError
+            title="Loading timed out"
+            error={new Error('OBV divergence data took too long to load.')}
+            onRetry={() => {
+              resetTimeout();
+              refetch();
+            }}
+          />
+        ) : isLoading && !hasData ? (
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty message="Not enough historical candles" icon={<Activity size={18} />} />
+          <WidgetEmpty message="Not enough historical candles" icon={<Activity size={18} />} size="compact" />
         ) : (
-          recentObv.slice(-12).map((point, index) => {
-            const prev = recentObv[recentObv.length - 12 + index - 1]?.value ?? point.value;
-            const isUp = point.value >= prev;
-            const widthPct = (Math.abs(point.value) / maxAbsObv) * 100;
+          <>
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
+              <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Signal</div>
+              <div className={`text-sm font-semibold ${signalClass}`}>{signalLabel}</div>
+              <div className="mt-1 text-[10px] text-[var(--text-secondary)]">Confidence: {confidence}%</div>
+            </div>
 
-            return (
-              <div key={`${point.time}-${index}`} className="flex items-center gap-2">
-                <div className="w-14 text-[10px] text-[var(--text-muted)] shrink-0">{String(point.time).slice(5, 10)}</div>
-                <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
-                  <div
-                    className={`h-full ${isUp ? 'bg-emerald-500/70' : 'bg-red-500/70'}`}
-                    style={{ width: `${Math.max(2, widthPct)}%` }}
-                  />
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+                <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Price %</div>
+                <div className={`text-xs font-mono ${priceDeltaPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {priceDeltaPct >= 0 ? '+' : ''}
+                  {priceDeltaPct.toFixed(2)}%
                 </div>
-                <div className="w-16 text-[10px] text-[var(--text-secondary)] text-right font-mono">{formatCompact(point.value)}</div>
-                {isUp ? (
-                  <TrendingUp size={10} className="text-emerald-400" />
-                ) : (
-                  <TrendingDown size={10} className="text-red-400" />
-                )}
               </div>
-            );
-          })
+              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+                <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">OBV %</div>
+                <div className={`text-xs font-mono ${obvDeltaPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {obvDeltaPct >= 0 ? '+' : ''}
+                  {obvDeltaPct.toFixed(2)}%
+                </div>
+              </div>
+            </div>
+
+            {recentObv.slice(-12).map((point, index) => {
+              const prev = recentObv[recentObv.length - 12 + index - 1]?.value ?? point.value;
+              const isUp = point.value >= prev;
+              const widthPct = (Math.abs(point.value) / maxAbsObv) * 100;
+
+              return (
+                <div key={`${point.time}-${index}`} className="flex items-center gap-2">
+                  <div className="w-14 text-[10px] text-[var(--text-muted)] shrink-0">{String(point.time).slice(5, 10)}</div>
+                  <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
+                    <div
+                      className={`h-full ${isUp ? 'bg-emerald-500/70' : 'bg-red-500/70'}`}
+                      style={{ width: `${Math.max(2, widthPct)}%` }}
+                    />
+                  </div>
+                  <div className="w-16 text-[10px] text-[var(--text-secondary)] text-right font-mono">{formatCompact(point.value)}</div>
+                  {isUp ? (
+                    <TrendingUp size={10} className="text-emerald-400" />
+                  ) : (
+                    <TrendingDown size={10} className="text-red-400" />
+                  )}
+                </div>
+              );
+            })}
+          </>
         )}
       </div>
     </div>

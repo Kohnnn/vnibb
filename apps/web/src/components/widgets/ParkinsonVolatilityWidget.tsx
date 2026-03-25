@@ -19,6 +19,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface ParkinsonVolatilityWidgetProps {
   symbol: string
@@ -80,6 +81,7 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
   const hasData = rows.length > 30
   const currentRegime = metric?.current_regime || 'normal'
   const maxVol = Math.max(...rows.map((row) => Math.max(row.parkinson, row.closeVol)), 20)
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Parkinson volatility" icon={<Activity size={18} />} />
@@ -109,12 +111,21 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
         </div>
       </div>
 
-      {isLoading && !hasData ? (
+      {timedOut && isLoading && !hasData ? (
+        <WidgetError
+          title="Loading timed out"
+          error={new Error('Volatility regime data took too long to load.')}
+          onRetry={() => {
+            resetTimeout()
+            refetch()
+          }}
+        />
+      ) : isLoading && !hasData ? (
         <WidgetSkeleton lines={8} />
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
-        <WidgetEmpty message={backendError || 'No volatility data'} icon={<Activity size={18} />} />
+        <WidgetEmpty message={backendError || 'No volatility data'} icon={<Activity size={18} />} size="compact" />
       ) : (
         <>
           <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">
