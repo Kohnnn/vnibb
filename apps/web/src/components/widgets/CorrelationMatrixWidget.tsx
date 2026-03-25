@@ -186,7 +186,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 xl:grid-cols-[260px_minmax(0,1fr)]">
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-[220px_minmax(0,1fr)]">
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
                   <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
                     Ranked vs {upperSymbol}
@@ -243,7 +243,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
                             <th
                               key={ticker}
                               className={cn(
-                                'min-w-[60px] px-1 py-1 text-center text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]',
+                                'min-w-[72px] px-1 py-1 text-center text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]',
                                 (hoverTicker === ticker || ticker === upperSymbol) && 'text-[var(--text-primary)]'
                               )}
                             >

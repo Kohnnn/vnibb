@@ -20,6 +20,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface MACDCrossoverWidgetProps {
   symbol: string
@@ -94,6 +95,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
     1
   )
   const hasData = macdSeries.length > 0 || crossovers.length > 0
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view MACD crossovers" icon={<ActivitySquare size={18} />} />
@@ -123,12 +125,21 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
         </div>
       </div>
 
-      {isLoading && !hasData ? (
+      {timedOut && isLoading && !hasData ? (
+        <WidgetError
+          title="Loading timed out"
+          error={new Error('MACD crossover history took too long to load.')}
+          onRetry={() => {
+            resetTimeout()
+            refetch()
+          }}
+        />
+      ) : isLoading && !hasData ? (
         <WidgetSkeleton lines={8} />
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
-        <WidgetEmpty message={backendError || 'No crossover history'} icon={<ActivitySquare size={18} />} />
+        <WidgetEmpty message={backendError || 'No crossover history'} icon={<ActivitySquare size={18} />} size="compact" />
       ) : (
         <>
           <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">

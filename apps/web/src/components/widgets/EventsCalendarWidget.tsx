@@ -8,6 +8,7 @@ import { useCompanyEvents } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface EventsCalendarWidgetProps {
     symbol: string;
@@ -82,6 +83,7 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
     }, [data?.data]);
     const hasData = events.length > 0;
     const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view events" icon={<Calendar size={18} />} />;
@@ -117,12 +119,26 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-1 pt-2">
-                {isLoading && !hasData ? (
+                {timedOut && isLoading && !hasData ? (
+                    <WidgetError
+                        title="Loading timed out"
+                        error={new Error('Events data took too long to load.')}
+                        onRetry={() => {
+                            resetTimeout();
+                            refetch();
+                        }}
+                    />
+                ) : isLoading && !hasData ? (
                     <WidgetSkeleton lines={5} />
                 ) : error && !hasData ? (
                     <WidgetError error={error as Error} onRetry={() => refetch()} />
                 ) : !hasData ? (
-                    <WidgetEmpty message={`No events for ${symbol}`} icon={<Calendar size={18} />} />
+                    <WidgetEmpty
+                        message={`No events for ${symbol}`}
+                        detail="Upcoming filings, dividends, and meetings appear here when scheduled."
+                        icon={<Calendar size={18} />}
+                        size="compact"
+                    />
                 ) : (
                     events.map((event, index) => {
                         const typeKey = getEventTypeKey(event.event_type);

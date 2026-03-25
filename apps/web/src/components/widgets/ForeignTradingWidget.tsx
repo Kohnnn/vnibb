@@ -7,6 +7,7 @@ import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/Virtua
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { cn } from '@/lib/utils';
 import { memo, useMemo } from 'react';
 
@@ -102,6 +103,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove }: ForeignTradingW
 
     const hasData = trades.length > 0;
     const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
     return (
         <WidgetContainer
@@ -143,12 +145,26 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove }: ForeignTradingW
                 </div>
 
                 <div className="flex-1 overflow-hidden">
-                    {isLoading && !hasData ? (
+                    {timedOut && isLoading && !hasData ? (
+                        <WidgetError
+                            title="Loading timed out"
+                            error={new Error('Foreign trading data took too long to load.')}
+                            onRetry={() => {
+                                resetTimeout();
+                                refetch();
+                            }}
+                        />
+                    ) : isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
-                        <WidgetEmpty message={`No data for ${symbol}`} icon={<Globe size={18} />} />
+                        <WidgetEmpty
+                            message={`No data for ${symbol}`}
+                            detail="Foreign flow appears here when exchange data is available."
+                            icon={<Globe size={18} />}
+                            size="compact"
+                        />
                     ) : (
                         <VirtualizedTable data={trades} columns={columns} rowHeight={30} />
                     )}
