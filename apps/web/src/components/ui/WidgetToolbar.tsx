@@ -55,7 +55,7 @@ export function WidgetToolbar({
   const description = widgetType ? WIDGET_DESCRIPTIONS[widgetType] : undefined;
 
   return (
-    <div className="flex items-center justify-between h-9 px-2 border-b border-[var(--border-default)] bg-[var(--bg-widget-header)]/80 select-none">
+    <div className="flex h-8 items-center justify-between border-b border-[var(--border-default)] bg-[var(--bg-widget-header)]/80 px-2 select-none">
       {/* Left: Sync, Symbol, Title, Parameters */}
       <div className="flex items-center gap-2 min-w-0">
         {showGroupSelector && groupSelector}

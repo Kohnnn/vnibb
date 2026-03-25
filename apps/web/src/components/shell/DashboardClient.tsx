@@ -24,7 +24,6 @@ import {
     WidgetWrapper,
     widgetRegistry
 } from '@/components/widgets';
-import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
 import {
     TIMEFRAME_OPTIONS,
     CHART_TYPE_OPTIONS,
@@ -40,7 +39,7 @@ import { AICopilot } from '@/components/ui/AICopilot';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
-import { autoFitGridItems } from '@/lib/dashboardLayout';
+import { autoFitGridItems, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
 import type { DashboardTemplate } from '@/types/dashboard-templates';
@@ -238,6 +237,28 @@ function DashboardContent() {
         }
     }, [activeDashboard?.id, activeDashboard?.isEditable, isEditing]);
 
+    useEffect(() => {
+        if (!mounted || typeof window === 'undefined') return;
+
+        let timeoutId: number | undefined;
+        let frameA: number | undefined;
+        let frameB: number | undefined;
+
+        timeoutId = window.setTimeout(() => {
+            frameA = window.requestAnimationFrame(() => {
+                frameB = window.requestAnimationFrame(() => {
+                    window.dispatchEvent(new Event('resize'));
+                });
+            });
+        }, 140);
+
+        return () => {
+            if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+            if (frameA !== undefined) window.cancelAnimationFrame(frameA);
+            if (frameB !== undefined) window.cancelAnimationFrame(frameB);
+        };
+    }, [activeDashboard?.id, activeTab?.id, activeTab?.widgets, mounted]);
+
     const handleResetLayout = useCallback(() => {
         if (activeDashboard && activeTab) {
             resetTabLayout(activeDashboard.id, activeTab.id);
@@ -249,13 +270,13 @@ function DashboardContent() {
 
         activeDashboard.tabs.forEach((tab) => {
             const normalizedWidgets = tab.widgets.map((widget) => {
-                const defaults = defaultWidgetLayouts[widget.type as WidgetType] || { w: 6, h: 4, minW: 3, minH: 2 };
+                const defaults = getWidgetDefaultLayout(widget.type);
                 return {
                     ...widget,
                     layout: {
                         ...widget.layout,
-                        w: widget.layout.w || defaults.w || 6,
-                        h: widget.layout.h || defaults.h || 4,
+                        w: widget.layout.w || defaults.w,
+                        h: widget.layout.h || defaults.h,
                         minW: defaults.minW ?? widget.layout.minW ?? 3,
                         minH: defaults.minH ?? widget.layout.minH ?? 2,
                     },
@@ -341,7 +362,7 @@ function DashboardContent() {
     const handleQuickAddWidget = useCallback((type: WidgetType) => {
         if (!activeDashboard || !activeTab) return;
 
-        const defaults = defaultWidgetLayouts[type] || { w: 6, h: 4 };
+        const defaults = getWidgetDefaultLayout(type);
         const nextY = activeTab.widgets.reduce(
             (maxY, widget) => Math.max(maxY, widget.layout.y + widget.layout.h),
             0,

@@ -225,11 +225,15 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove }: TransactionFlo
             <WidgetEmpty
               icon={<Activity size={18} />}
               message={`No transaction flow data available for ${upperSymbol}.`}
+              detail="Data updates when investor bucket flow is published."
+              size="compact"
             />
           ) : !hasRenderableFlowData ? (
             <WidgetEmpty
               icon={<Activity size={18} />}
               message={`Investor bucket flow is not available for ${upperSymbol} yet.`}
+              detail="This stream is sparse for non-broker symbols and resumes when provider data is available."
+              size="compact"
             />
           ) : (
             <div className="space-y-3">

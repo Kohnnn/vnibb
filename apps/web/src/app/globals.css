@@ -366,6 +366,27 @@ body {
   background: var(--table-sticky-cell-hover-bg);
 }
 
+.data-table .trend-col {
+  min-width: 80px;
+}
+
+.data-table .section-header-row {
+  background: #1a2233;
+}
+
+.data-table .section-header-row td {
+  border-left: 2px solid #3b82f6;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.data-table .section-header-row td:first-child {
+  background: #1a2233;
+}
+
 /* Tab animations */
 .tab-indicator {
   transition: all 0.2s ease-in-out;
