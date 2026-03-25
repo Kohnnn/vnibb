@@ -39,10 +39,10 @@ import { AICopilot } from '@/components/ui/AICopilot';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
-import { autoFitGridItems, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { autoFitGridItems, findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
-import type { DashboardTemplate } from '@/types/dashboard-templates';
+import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '@/types/dashboard-templates';
 import { Grid3X3, PlusCircle, RefreshCw } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -91,6 +91,13 @@ function DashboardContent() {
         widgetId: string;
         tabId: string;
     } | null>(null);
+
+    const starterTemplates = useMemo(() => {
+        const preferredIds = ['getting-started', 'fundamental-analyst', 'day-trader'];
+        return preferredIds
+            .map((id) => DASHBOARD_TEMPLATES.find((template) => template.id === id))
+            .filter((template): template is DashboardTemplate => Boolean(template));
+    }, []);
 
     const updateSidebarWidth = useCallback(() => {
         if (typeof window !== 'undefined') {
@@ -348,6 +355,19 @@ function DashboardContent() {
         setActiveTab(tab.id);
     }, [activeDashboard, activeTab, addWidget, createTab, setActiveTab]);
 
+    const handleSeedEmptyTab = useCallback((template: DashboardTemplate) => {
+        if (!activeDashboard || !activeTab || activeDashboard.isEditable === false || activeTab.widgets.length > 0) return;
+
+        template.widgets.forEach((widget) => {
+            addWidget(activeDashboard.id, activeTab.id, {
+                type: widget.type,
+                tabId: activeTab.id,
+                layout: widget.layout,
+                config: widget.config || {},
+            });
+        });
+    }, [activeDashboard, activeTab, addWidget]);
+
     const handleCreateWorkspace = useCallback(() => {
         const dashboard = createDashboard({ name: 'Workspace 1' });
         setActiveDashboard(dashboard.id);
@@ -362,18 +382,15 @@ function DashboardContent() {
     const handleQuickAddWidget = useCallback((type: WidgetType) => {
         if (!activeDashboard || !activeTab) return;
 
+        const placement = findNextAvailableLayout(activeTab.widgets, type);
         const defaults = getWidgetDefaultLayout(type);
-        const nextY = activeTab.widgets.reduce(
-            (maxY, widget) => Math.max(maxY, widget.layout.y + widget.layout.h),
-            0,
-        );
 
         addWidget(activeDashboard.id, activeTab.id, {
             type,
             tabId: activeTab.id,
             layout: {
-                x: 0,
-                y: nextY,
+                x: placement.x,
+                y: placement.y,
                 w: defaults.w,
                 h: defaults.h,
                 minW: defaults.minW,
@@ -531,26 +548,44 @@ function DashboardContent() {
                                     })}
                                 </ResponsiveDashboardGrid>
                             ) : (
-                                <div className="h-full flex flex-col items-center justify-center text-[var(--text-secondary)] space-y-4 px-4 text-center">
-                                    <Grid3X3 size={48} className="opacity-30" />
-                                    <div className="space-y-1">
-                                        <p className="font-medium text-[var(--text-primary)]">This tab is empty</p>
-                                        <p className="text-sm text-[var(--text-muted)]">Add your first widget or open the full library.</p>
+                                <div className="mx-auto flex h-full w-full max-w-4xl flex-col items-center justify-center gap-5 px-4 text-center text-[var(--text-secondary)]">
+                                    <Grid3X3 size={42} className="opacity-35" />
+                                    <div className="space-y-1.5">
+                                        <p className="text-lg font-semibold text-[var(--text-primary)]">Start with a suggested layout</p>
+                                        <p className="text-sm text-[var(--text-muted)]">Seed this empty tab with a balanced starter, then refine it widget by widget.</p>
                                     </div>
+
+                                    <div className="grid w-full gap-3 md:grid-cols-3">
+                                        {starterTemplates.map((template) => (
+                                            <button
+                                                key={template.id}
+                                                onClick={() => handleSeedEmptyTab(template)}
+                                                className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/70 p-4 text-left transition-colors hover:border-blue-500/30 hover:bg-[var(--bg-hover)]"
+                                            >
+                                                <div className="text-sm font-semibold text-[var(--text-primary)]">{template.name}</div>
+                                                <div className="mt-1 text-xs text-[var(--text-muted)]">{template.description}</div>
+                                                <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-300/80">
+                                                    {template.widgets.slice(0, 3).map((widget) => widget.type.replace(/_/g, ' ')).join(' • ')}
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+
                                     <div className="flex flex-wrap items-center justify-center gap-2">
                                         {quickAddOptions.map((option) => (
                                             <button
                                                 key={option.type}
                                                 onClick={() => handleQuickAddWidget(option.type)}
-                                                className="px-3 py-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                                                className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                                             >
                                                 {option.label}
                                             </button>
                                         ))}
                                     </div>
+
                                     <button
                                         onClick={() => setIsWidgetLibraryOpen(true)}
-                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors"
+                                        className="rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-500"
                                     >
                                         Open Widget Library
                                     </button>
