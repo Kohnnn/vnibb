@@ -27,8 +27,7 @@ import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
 import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync } from '@/lib/useDashboardSync';
-import { compactGridItems } from '@/lib/dashboardLayout';
-import { getWidgetDefinition } from '@/data/widgetDefinitions';
+import { autoFitGridItems, preserveTemplateGridItems } from '@/lib/dashboardLayout';
 import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
 
 // ============================================================================
@@ -725,13 +724,13 @@ const INITIAL_FUNDAMENTAL_TEMPLATE: TemplateWidget[] = [
         type: 'key_metrics',
         syncGroupId: 1,
         config: {},
-        layout: { x: 6, y: 0, w: 7, h: 5, minW: 6, minH: 4 }
+        layout: { x: 6, y: 0, w: 6, h: 5, minW: 5, minH: 4 }
     },
     {
         type: 'ticker_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 13, y: 0, w: 11, h: 5, minW: 8, minH: 4 }
+        layout: { x: 12, y: 0, w: 12, h: 5, minW: 8, minH: 4 }
     },
     {
         type: 'unified_financials',
@@ -746,43 +745,43 @@ const INITIAL_TECHNICAL_TEMPLATE: TemplateWidget[] = [
         type: 'price_chart',
         syncGroupId: 1,
         config: { timeframe: '1Y', chartType: 'candle' },
-        layout: { x: 0, y: 0, w: 24, h: 6, minW: 12, minH: 6 }
+        layout: { x: 0, y: 0, w: 14, h: 8, minW: 10, minH: 6 }
     },
     {
         type: 'ichimoku',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 6, w: 12, h: 6, minW: 8, minH: 6 }
+        layout: { x: 14, y: 0, w: 10, h: 4, minW: 8, minH: 4 }
     },
     {
         type: 'fibonacci',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 6, w: 12, h: 6, minW: 8, minH: 6 }
+        layout: { x: 14, y: 4, w: 10, h: 4, minW: 8, minH: 4 }
     },
     {
         type: 'macd_crossovers',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 12, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 0, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
     },
     {
         type: 'rsi_seasonal',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 12, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 8, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
     },
     {
         type: 'bollinger_squeeze',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 12, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 16, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
     },
     {
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 17, w: 24, h: 5, minW: 12, minH: 5 }
+        layout: { x: 0, y: 13, w: 24, h: 4, minW: 12, minH: 4 }
     },
 ];
 
@@ -791,37 +790,37 @@ const INITIAL_QUANT_TEMPLATE: TemplateWidget[] = [
         type: 'seasonality_heatmap',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 12, h: 6, minW: 8, minH: 6 }
+        layout: { x: 0, y: 0, w: 14, h: 8, minW: 10, minH: 6 }
     },
     {
         type: 'sortino_monthly',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 0, w: 12, h: 6, minW: 8, minH: 6 }
+        layout: { x: 14, y: 0, w: 10, h: 8, minW: 8, minH: 6 }
     },
     {
         type: 'drawdown_recovery',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 6, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 0, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
     },
     {
         type: 'gap_analysis',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 6, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 8, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
     },
     {
         type: 'correlation_matrix',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 6, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 16, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
     },
     {
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 11, w: 24, h: 5, minW: 12, minH: 5 }
+        layout: { x: 0, y: 13, w: 24, h: 4, minW: 12, minH: 4 }
     },
 ];
 
@@ -1100,7 +1099,7 @@ const migrateSidebarClutter = (
 
 // Convert template widgets to actual widget instances
 const createWidgetsFromTemplate = (template: TemplateWidget[], tabId: string): WidgetInstance[] => {
-    return compactGridItems(template).map((tw) => {
+    return preserveTemplateGridItems(template).map((tw) => {
         const widgetId = generateWidgetId(tw.type);
         return {
             id: widgetId,
@@ -1776,38 +1775,22 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
                             ...d,
                             tabs: d.tabs.map((t) => {
                                 if (t.id !== action.payload.tabId) return t;
-                                // Reset each widget to its default layout from widgetDefinitions
-                                let currentX = 0;
-                                let currentY = 0;
-                                const cols = 24;  // Updated to match new 24-column grid
-                                const resetWidgets = t.widgets.map((w) => {
-                                    const definition = getWidgetDefinition(w.type);
-                                    // Scale default widths for 24-column grid (multiply by 2)
-                                    const defaultW = (definition?.defaultLayout.w ?? 6) * 2;
-                                    const defaultH = definition?.defaultLayout.h ?? 4;
-                                    const minW = (definition?.defaultLayout.minW ?? 2) * 2;
-                                    const minH = definition?.defaultLayout.minH ?? 2;
+                                const resetWidgets = autoFitGridItems(t.widgets.map((w) => {
+                                    const defaults = defaultWidgetLayouts[w.type as keyof typeof defaultWidgetLayouts] || { w: 6, h: 4, minW: 3, minH: 2 };
 
-                                    // Auto-flow: if widget doesn't fit on current row, move to next
-                                    if (currentX + defaultW > cols) {
-                                        currentX = 0;
-                                        currentY += defaultH;
-                                    }
-
-                                    const newLayout = {
-                                        ...w.layout,
-                                        x: currentX,
-                                        y: currentY,
-                                        w: defaultW,
-                                        h: defaultH,
-                                        minW,
-                                        minH,
+                                    return {
+                                        ...w,
+                                        layout: {
+                                            ...w.layout,
+                                            x: 0,
+                                            y: 0,
+                                            w: defaults.w,
+                                            h: defaults.h,
+                                            minW: defaults.minW ?? 3,
+                                            minH: defaults.minH ?? 2,
+                                        },
                                     };
-
-                                    currentX += defaultW;
-
-                                    return { ...w, layout: newLayout };
-                                });
+                                }));
                                 return { ...t, widgets: resetWidgets };
                             }),
                             updatedAt: new Date().toISOString(),

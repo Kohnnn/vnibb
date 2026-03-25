@@ -1,4 +1,7 @@
+import type { WidgetType } from '@/types/dashboard'
+
 export interface CompactableLayoutItem {
+  type?: WidgetType | string
   layout: {
     x: number
     y: number
@@ -11,46 +14,216 @@ export interface CompactableLayoutItem {
   }
 }
 
-export function compactGridItems<T extends CompactableLayoutItem>(items: T[], cols = 24): T[] {
-  const columnHeights = new Array(cols).fill(0)
+type LayoutOrientation = 'horizontal' | 'vertical' | 'balanced'
 
-  const findBestPosition = (width: number) => {
-    let bestX = 0
-    let bestY = Number.MAX_SAFE_INTEGER
+interface LayoutBehavior {
+  preferredW: number
+  preferredH: number
+  minW: number
+  minH: number
+  maxW?: number
+  maxH?: number
+  orientation: LayoutOrientation
+  expandPriority: number
+}
 
-    for (let x = 0; x <= cols - width; x += 1) {
-      const candidateY = Math.max(...columnHeights.slice(x, x + width))
-      if (candidateY < bestY) {
-        bestY = candidateY
-        bestX = x
-      }
+interface ResolvedLayoutBehavior extends LayoutBehavior {
+  maxW: number
+  maxH?: number
+}
+
+const FALLBACK_BEHAVIOR: LayoutBehavior = {
+  preferredW: 6,
+  preferredH: 5,
+  minW: 3,
+  minH: 3,
+  orientation: 'balanced',
+  expandPriority: 2,
+}
+
+const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
+  ticker_info: { preferredW: 6, preferredH: 5, minW: 5, minH: 4, maxW: 8, orientation: 'balanced', expandPriority: 2 },
+  key_metrics: { preferredW: 6, preferredH: 6, minW: 5, minH: 5, maxW: 8, orientation: 'vertical', expandPriority: 1 },
+  share_statistics: { preferredW: 6, preferredH: 5, minW: 5, minH: 4, maxW: 8, orientation: 'vertical', expandPriority: 1 },
+  ticker_profile: { preferredW: 12, preferredH: 5, minW: 8, minH: 4, maxW: 14, orientation: 'horizontal', expandPriority: 3 },
+  price_chart: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 5 },
+  unified_financials: { preferredW: 24, preferredH: 10, minW: 14, minH: 8, orientation: 'horizontal', expandPriority: 6 },
+  financial_ratios: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 4 },
+  income_statement: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 4 },
+  balance_sheet: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 4 },
+  cash_flow: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 4 },
+  institutional_ownership: { preferredW: 10, preferredH: 6, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
+  major_shareholders: { preferredW: 10, preferredH: 6, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
+  news_feed: { preferredW: 10, preferredH: 7, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
+  peer_comparison: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
+  comparison_analysis: { preferredW: 10, preferredH: 8, minW: 8, minH: 6, maxW: 12, orientation: 'vertical', expandPriority: 2 },
+  transaction_flow: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 4 },
+  foreign_trading: { preferredW: 6, preferredH: 7, minW: 5, minH: 6, maxW: 8, orientation: 'vertical', expandPriority: 1 },
+  orderbook: { preferredW: 6, preferredH: 7, minW: 5, minH: 6, maxW: 8, orientation: 'vertical', expandPriority: 1 },
+  intraday_trades: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 3 },
+  block_trade: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 3 },
+  seasonality_heatmap: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 5 },
+  sortino_monthly: { preferredW: 10, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  drawdown_recovery: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  gap_analysis: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  correlation_matrix: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  ichimoku: { preferredW: 10, preferredH: 6, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 3 },
+  fibonacci: { preferredW: 10, preferredH: 6, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 3 },
+  macd_crossovers: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  rsi_seasonal: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  bollinger_squeeze: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  signal_summary: { preferredW: 24, preferredH: 4, minW: 12, minH: 4, orientation: 'horizontal', expandPriority: 6 },
+}
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
+function inferOrientation(layout: CompactableLayoutItem['layout']): LayoutOrientation {
+  const ratio = (layout.w || 1) / Math.max(layout.h || 1, 1)
+  if (ratio >= 1.45) return 'horizontal'
+  if (ratio <= 0.85) return 'vertical'
+  return 'balanced'
+}
+
+function resolveLayoutBehavior(item: CompactableLayoutItem, cols: number): ResolvedLayoutBehavior {
+  const explicit = item.type ? WIDGET_LAYOUT_BEHAVIORS[item.type as WidgetType] : undefined
+  const inferredOrientation = explicit?.orientation ?? inferOrientation(item.layout)
+  const minW = Math.max(item.layout.minW ?? explicit?.minW ?? FALLBACK_BEHAVIOR.minW, explicit?.minW ?? 1)
+  const minH = Math.max(item.layout.minH ?? explicit?.minH ?? FALLBACK_BEHAVIOR.minH, explicit?.minH ?? 1)
+
+  const preferredWBase = explicit?.preferredW ?? item.layout.w ?? FALLBACK_BEHAVIOR.preferredW
+  const preferredHBase = explicit?.preferredH ?? item.layout.h ?? FALLBACK_BEHAVIOR.preferredH
+
+  const maxW = Math.min(
+    item.layout.maxW ?? explicit?.maxW ?? (inferredOrientation === 'horizontal' ? cols : preferredWBase + 4),
+    cols
+  )
+  const maxH = item.layout.maxH ?? explicit?.maxH
+
+  return {
+    preferredW: clamp(Math.max(item.layout.w ?? 0, preferredWBase), minW, maxW),
+    preferredH: clamp(Math.max(item.layout.h ?? 0, preferredHBase), minH, maxH ?? Number.MAX_SAFE_INTEGER),
+    minW,
+    minH,
+    maxW,
+    maxH,
+    orientation: inferredOrientation,
+    expandPriority: explicit?.expandPriority ?? (inferredOrientation === 'horizontal' ? 3 : inferredOrientation === 'balanced' ? 2 : 1),
+  }
+}
+
+function normalizeItemLayout<T extends CompactableLayoutItem>(item: T, cols: number): T {
+  const behavior = resolveLayoutBehavior(item, cols)
+
+  return {
+    ...item,
+    layout: {
+      ...item.layout,
+      w: clamp(item.layout.w || behavior.preferredW, behavior.minW, behavior.maxW),
+      h: clamp(item.layout.h || behavior.preferredH, behavior.minH, behavior.maxH ?? Number.MAX_SAFE_INTEGER),
+      minW: behavior.minW,
+      minH: behavior.minH,
+      maxW: item.layout.maxW ?? behavior.maxW,
+      maxH: item.layout.maxH ?? behavior.maxH,
+    },
+  }
+}
+
+function expandRowWidths<RowItem extends CompactableLayoutItem>(row: Array<RowItem & { __behavior: ResolvedLayoutBehavior }>, cols: number) {
+  const orderedIndexes = row
+    .map((item, index) => ({ index, priority: item.__behavior.expandPriority }))
+    .sort((left, right) => right.priority - left.priority || left.index - right.index)
+    .map((entry) => entry.index)
+
+  let remaining = cols - row.reduce((sum, item) => sum + item.layout.w, 0)
+
+  while (remaining > 0) {
+    let progressed = false
+
+    for (const index of orderedIndexes) {
+      if (remaining <= 0) break
+      const item = row[index]
+      const maxWidth = item.__behavior.maxW
+      if (item.layout.w >= maxWidth) continue
+
+      item.layout.w += 1
+      remaining -= 1
+      progressed = true
     }
 
-    return { x: bestX, y: bestY }
+    if (!progressed) {
+      break
+    }
+  }
+}
+
+export function preserveTemplateGridItems<T extends CompactableLayoutItem>(items: T[], cols = 24): T[] {
+  return items.map((item) => normalizeItemLayout(item, cols))
+}
+
+export function autoFitGridItems<T extends CompactableLayoutItem>(items: T[], cols = 24): T[] {
+  const normalized = items.map((item) => ({
+    ...normalizeItemLayout(item, cols),
+    __behavior: resolveLayoutBehavior(item, cols),
+  }))
+
+  const fitted: Array<T & { __behavior: ResolvedLayoutBehavior }> = []
+  let row: Array<(T & { __behavior: ResolvedLayoutBehavior })> = []
+  let rowWidth = 0
+  let currentY = 0
+
+  const flushRow = () => {
+    if (row.length === 0) return
+
+    expandRowWidths(row, cols)
+
+    let currentX = 0
+    let rowHeight = 0
+
+    row.forEach((item) => {
+      const nextItem = {
+        ...item,
+        layout: {
+          ...item.layout,
+          x: currentX,
+          y: currentY,
+        },
+      }
+
+      rowHeight = Math.max(rowHeight, nextItem.layout.h)
+      currentX += nextItem.layout.w
+      fitted.push(nextItem)
+    })
+
+    currentY += rowHeight
+    row = []
+    rowWidth = 0
   }
 
-  return items.map((item) => {
-    const minW = item.layout.minW ?? 1
-    const minH = item.layout.minH ?? 1
-    const width = Math.min(Math.max(item.layout.w || minW, minW), cols)
-    const height = Math.max(item.layout.h || minH, minH)
-    const { x, y } = findBestPosition(width)
+  normalized.forEach((item) => {
+    const width = Math.min(item.layout.w, cols)
 
-    for (let col = x; col < x + width; col += 1) {
-      columnHeights[col] = y + height
+    if (row.length > 0 && rowWidth + width > cols) {
+      flushRow()
     }
 
-    return {
+    row.push({
       ...item,
       layout: {
         ...item.layout,
-        x,
-        y,
         w: width,
-        h: height,
-        minW,
-        minH,
       },
-    }
+    })
+    rowWidth += width
   })
+
+  flushRow()
+
+  return fitted.map((item) => {
+    const { __behavior: _behavior, ...rest } = item
+    return rest as unknown as T
+  })
+}
+
+export function compactGridItems<T extends CompactableLayoutItem>(items: T[], cols = 24): T[] {
+  return autoFitGridItems(items, cols)
 }
