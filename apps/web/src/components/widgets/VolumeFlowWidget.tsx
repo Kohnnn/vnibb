@@ -20,6 +20,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface VolumeFlowWidgetProps {
   symbol: string
@@ -74,6 +75,7 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
     }))
   const maxAbs = Math.max(...monthRows.map((row) => Math.abs(row.value)), 1)
   const hasData = monthRows.some((row) => row.value !== 0)
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume flow" icon={<Waves size={18} />} />
@@ -103,7 +105,16 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
         </div>
       </div>
 
-      {isLoading && !hasData ? (
+      {timedOut && isLoading && !hasData ? (
+        <WidgetError
+          title="Loading timed out"
+          error={new Error('Volume flow data took too long to load.')}
+          onRetry={() => {
+            resetTimeout()
+            refetch()
+          }}
+        />
+      ) : isLoading && !hasData ? (
         <WidgetSkeleton lines={8} />
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
@@ -111,6 +122,7 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
         <WidgetEmpty
           message={backendError || `Insufficient Data: Expected at least 30 sessions, got ${cumulativeRows.length}.`}
           icon={<Waves size={18} />}
+          size="compact"
         />
       ) : (
         <>

@@ -6,6 +6,7 @@ import type { OHLCData } from '@/lib/chartUtils';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface GapFillStatsWidgetProps {
   symbol: string;
@@ -87,6 +88,7 @@ export function GapFillStatsWidget({ symbol }: GapFillStatsWidgetProps) {
   const events = calculateGapEvents(candles, 0.5, 20);
   const hasData = events.length > 0;
   const isFallback = Boolean(error && hasData);
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
   const filledEvents = events.filter((event) => event.filled);
   const fillRate = events.length > 0 ? (filledEvents.length / events.length) * 100 : 0;
@@ -153,12 +155,21 @@ export function GapFillStatsWidget({ symbol }: GapFillStatsWidgetProps) {
       </div>
 
       <div className="flex-1 overflow-auto space-y-1 pr-1">
-        {isLoading && !hasData ? (
+        {timedOut && isLoading && !hasData ? (
+          <WidgetError
+            title="Loading timed out"
+            error={new Error('Gap fill statistics took too long to load.')}
+            onRetry={() => {
+              resetTimeout();
+              refetch();
+            }}
+          />
+        ) : isLoading && !hasData ? (
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty message="No qualifying gaps in lookback window" icon={<CalendarClock size={18} />} />
+          <WidgetEmpty message="No qualifying gaps in lookback window" icon={<CalendarClock size={18} />} size="compact" />
         ) : (
           recentEvents.map((event, index) => {
             const isUp = event.direction === 'up';

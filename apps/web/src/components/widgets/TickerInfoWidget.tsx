@@ -208,6 +208,8 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
           {[
             { label: 'Day High', value: formatPriceValue(quote?.high) },
             { label: 'Day Low', value: formatPriceValue(quote?.low) },
+            { label: '52W High', value: formatPriceValue(rangeHigh) },
+            { label: '52W Low', value: formatPriceValue(rangeLow) },
             { label: 'Volume', value: formatNumber(quote?.volume) },
             { label: 'Prev Close', value: formatPriceValue(quote?.prevClose) },
             { label: 'Open', value: formatPriceValue(quote?.open) },
@@ -216,7 +218,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
               value: formatNumber(marketCap),
               source: marketCapSource,
             },
-          ].map((item, i) => (
+          ].slice(0, 8).map((item, i) => (
             <div
               key={i}
               className="group flex min-h-[56px] flex-col justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2 transition-colors hover:border-[var(--border-color)]"

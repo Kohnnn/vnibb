@@ -220,18 +220,18 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                 <table className="data-table w-full text-[10px] border-collapse">
                     <thead className="text-[var(--text-muted)] sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
                         <tr>
-                            <th className="text-left py-2 px-2 font-medium bg-[var(--bg-secondary)] z-10 w-32 border-r border-[var(--border-subtle)]">Metric</th>
+                            <th className="text-left py-2 px-2 font-medium bg-[var(--bg-secondary)] z-10 min-w-[148px] border-r border-[var(--border-subtle)]">Metric</th>
                             {peers.map((sym, index) => (
-                                <th key={`${sym}-${index}`} className="text-right py-2 px-2 font-medium min-w-[80px]">
+                                <th key={`${sym}-${index}`} className="text-right py-2 px-2 font-medium min-w-[104px]">
                                     <div className="flex flex-col">
                                         <span className="text-[var(--text-primary)] font-bold">{sym}</span>
-                                        <span className="text-[8px] font-normal truncate opacity-60">
+                                        <span className="text-[8px] font-normal break-words opacity-60">
                                             {compData.data[sym]?.name || 'Loading...'}
                                         </span>
                                     </div>
                                 </th>
                             ))}
-                            <th className="text-right py-2 px-2 font-medium min-w-[70px] text-amber-400/80 border-l border-[var(--border-subtle)]">
+                            <th className="text-right py-2 px-2 font-medium min-w-[84px] text-amber-400/80 border-l border-[var(--border-subtle)]">
                                 <div className="flex flex-col">
                                     <span>Sector</span>
                                     <span className="text-[8px] font-normal opacity-60">Avg</span>
@@ -244,7 +244,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                             const sectorValue = sectorAvg[metric.key];
                             return (
                                 <tr key={metric.key} className="hover:bg-[var(--bg-hover)]">
-                                    <td className="py-1.5 px-2 text-[var(--text-secondary)] border-r border-[var(--border-subtle)] sticky left-0 bg-[var(--bg-secondary)]">
+                                    <td className="py-1.5 px-2 text-[var(--text-secondary)] border-r border-[var(--border-subtle)] sticky left-0 bg-[var(--bg-secondary)] min-w-[148px]">
                                         {metric.label}
                                     </td>
                                     {peers.map((sym, index) => {

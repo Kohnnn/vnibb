@@ -38,7 +38,7 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 10;
+const CURRENT_MIGRATION_VERSION = 11;
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
@@ -290,7 +290,7 @@ const CALENDAR_TEMPLATE: TemplateWidget[] = [
         type: 'events_calendar',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 12, h: 7, minW: 6, minH: 4 }
+        layout: { x: 0, y: 0, w: 12, h: 5, minW: 6, minH: 3 }
     },
     {
         type: 'dividend_payment',
@@ -480,13 +480,13 @@ const MAIN_TRADING_TEMPLATE: TemplateWidget[] = [
         type: 'orderbook',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 0, w: 8, h: 9, minW: 6, minH: 6 }
+        layout: { x: 12, y: 0, w: 7, h: 9, minW: 6, minH: 6 }
     },
     {
         type: 'foreign_trading',
         syncGroupId: 1,
         config: {},
-        layout: { x: 20, y: 0, w: 4, h: 9, minW: 4, minH: 6 }
+        layout: { x: 19, y: 0, w: 5, h: 9, minW: 4, minH: 6 }
     },
     {
         type: 'intraday_trades',
@@ -618,7 +618,7 @@ const MAIN_NEWS_TEMPLATE: TemplateWidget[] = [
         type: 'events_calendar',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 8, w: 12, h: 6, minW: 8, minH: 4 }
+        layout: { x: 0, y: 8, w: 12, h: 4, minW: 8, minH: 3 }
     },
     {
         type: 'market_news',

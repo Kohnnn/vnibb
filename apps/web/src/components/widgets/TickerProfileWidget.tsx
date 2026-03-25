@@ -9,6 +9,7 @@ import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { Building2, Globe, Users, Calendar, MapPin, AlertTriangle } from 'lucide-react';
 import { formatTimestamp } from '@/lib/format';
 import { formatNumber, formatPercent, formatVND } from '@/lib/formatters';
+import { formatLargeNumber } from '@/lib/units';
 import type { DividendRecord } from '@/lib/api';
 
 interface TickerProfileWidgetProps {
@@ -52,9 +53,9 @@ function formatDateOnly(value: string | number | Date | null | undefined): strin
     return stamp.split(' ')[0] || stamp
 }
 
-function formatMarketCapFull(value: number | null | undefined): string {
-    if (value === null || value === undefined || !Number.isFinite(value)) return '-'
-    return `VND ${Math.round(value).toLocaleString('en-US')}`
+function formatMarketCapCompact(value: number | null | undefined): string {
+    if (value === null || value === undefined || !Number.isFinite(value)) return 'Unavailable'
+    return `VND ${formatLargeNumber(value, { decimals: 2 })}`
 }
 
 export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
@@ -139,13 +140,13 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     const companyType = cleanText(profileData.company_type) || 'Company information'
     const listedDate = cleanText(profileData.listed_date)
     const infoCards = [
-        industry ? { label: 'Industry', value: industry, icon: Building2 } : null,
-        exchange ? { label: 'Exchange', value: exchange, icon: MapPin } : null,
-        website ? { label: 'Website', value: website.replace(/^https?:\/\//, ''), icon: Globe } : null,
-        profileData.no_employees ? { label: 'Employees', value: `${profileData.no_employees.toLocaleString()}`, icon: Users } : null,
-        profileData.established_year ? { label: 'Established', value: `${profileData.established_year}`, icon: Calendar } : null,
-        marketCapValue !== null ? { label: 'Market Cap', value: formatMarketCapFull(marketCapValue), icon: Building2 } : null,
-    ].filter(Boolean) as Array<{ label: string; value: string; icon: typeof Building2 }>
+        { label: 'Industry', value: industry || 'Unavailable', icon: Building2 },
+        { label: 'Exchange', value: exchange || 'Unavailable', icon: MapPin },
+        { label: 'Website', value: website ? website.replace(/^https?:\/\//, '') : 'Unavailable', icon: Globe },
+        { label: 'Employees', value: profileData.no_employees ? `${profileData.no_employees.toLocaleString()}` : 'Unavailable', icon: Users },
+        { label: 'Established', value: profileData.established_year ? `${profileData.established_year}` : 'Unavailable', icon: Calendar },
+        { label: 'Market Cap', value: formatMarketCapCompact(marketCapValue), icon: Building2 },
+    ] as Array<{ label: string; value: string; icon: typeof Building2 }>
 
     return (
         <div className="space-y-3">
@@ -214,7 +215,9 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
 
             <div className="pt-2 border-t border-[var(--border-color)] space-y-2.5">
                 <p className="text-sm text-[var(--text-muted)] leading-relaxed">
-                    {companyType} operating in {industry || 'various sectors'}.
+                    {industry
+                        ? `${companyType} operating in ${industry}.`
+                        : 'No company description available.'}
                     {listedDate && ` Listed since ${formatDateOnly(listedDate)}.`}
                 </p>
 
