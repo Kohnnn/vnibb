@@ -157,6 +157,47 @@ export function getWidgetDefaultLayout(type?: WidgetType | string, cols = 24): W
   return item.layout as WidgetDefaultLayout
 }
 
+function layoutsOverlap(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number }
+) {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+export function findNextAvailableLayout<T extends CompactableLayoutItem>(
+  items: T[],
+  type?: WidgetType | string,
+  cols = 24
+): WidgetDefaultLayout {
+  const defaults = getWidgetDefaultLayout(type, cols)
+  const normalizedItems = items
+    .map((item) => normalizeItemLayout(item, cols))
+    .filter((item) => Number.isFinite(item.layout.x) && Number.isFinite(item.layout.y))
+
+  const maxY = normalizedItems.reduce((acc, item) => Math.max(acc, item.layout.y + item.layout.h), 0)
+  const searchLimit = maxY + defaults.h + 48
+
+  for (let y = 0; y <= searchLimit; y += 1) {
+    for (let x = 0; x <= cols - defaults.w; x += 1) {
+      const candidate = { x, y, w: defaults.w, h: defaults.h }
+      const hasOverlap = normalizedItems.some((item) => layoutsOverlap(candidate, item.layout))
+      if (!hasOverlap) {
+        return {
+          ...defaults,
+          x,
+          y,
+        }
+      }
+    }
+  }
+
+  return {
+    ...defaults,
+    x: 0,
+    y: maxY,
+  }
+}
+
 function inferOrientation(layout: CompactableLayoutItem['layout']): LayoutOrientation {
   const ratio = (layout.w || 1) / Math.max(layout.h || 1, 1)
   if (ratio >= 1.45) return 'horizontal'
