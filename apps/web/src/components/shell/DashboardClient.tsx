@@ -40,7 +40,7 @@ import { AICopilot } from '@/components/ui/AICopilot';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
-import { compactGridItems } from '@/lib/dashboardLayout';
+import { autoFitGridItems } from '@/lib/dashboardLayout';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
 import type { DashboardTemplate } from '@/types/dashboard-templates';
@@ -262,7 +262,7 @@ function DashboardContent() {
                 };
             });
 
-            updateTabLayout(activeDashboard.id, tab.id, compactGridItems(normalizedWidgets));
+            updateTabLayout(activeDashboard.id, tab.id, autoFitGridItems(normalizedWidgets));
         });
     }, [activeDashboard, updateTabLayout]);
 
@@ -364,20 +364,9 @@ function DashboardContent() {
     const memoizedLayouts = useMemo(() => {
         if (!activeTab?.widgets) return [];
 
-        const compactHeights: Partial<Record<WidgetType, number>> = {
-            income_statement: 5,
-            balance_sheet: 5,
-            cash_flow: 5,
-            financial_ratios: 5,
-            comparison_analysis: 8,
-        };
-
         return activeTab.widgets.map(w => ({
             ...w.layout,
             i: w.id,
-            h: !isEditing && compactHeights[w.type]
-                ? Math.min(w.layout.h, compactHeights[w.type] as number)
-                : w.layout.h,
             minW: w.layout.minW ?? 4,
             minH: w.layout.minH ?? 3,
         }));
