@@ -158,125 +158,52 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
             if (metricKey === 'accounts_receivable') return entry.accounts_receivable ?? entry.receivables
             return entry[metricKey as keyof typeof entry]
         }
+        const recentItems = orderedItems.slice(-TABLE_YEAR_LIMIT)
+        const hasMetricData = (metricKey: string) =>
+            recentItems.some((entry) => {
+                const value = valueFor(entry, metricKey)
+                return typeof value === 'number' && Number.isFinite(value)
+            })
 
         const mapValues = (metricKey: string) =>
             Object.fromEntries(
-                orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => [
+                recentItems.map((entry, index) => [
                     tableColumns[index]?.key ?? `period_${index}`,
                     valueFor(entry, metricKey),
                 ])
             );
 
+        const createRow = (groupId: string, metricKey: string): DenseTableRow | null =>
+            hasMetricData(metricKey)
+                ? {
+                    id: metricKey,
+                    label: labels[metricKey] || metricKey,
+                    parentId: groupId,
+                    indent: 12,
+                    values: mapValues(metricKey),
+                }
+                : null;
+
         return [
             { id: 'group:assets', label: 'Assets', values: {}, isGroup: true },
-            {
-                id: 'total_assets',
-                label: labels.total_assets,
-                parentId: 'group:assets',
-                indent: 12,
-                values: mapValues('total_assets'),
-            },
-            {
-                id: 'current_assets',
-                label: labels.current_assets,
-                parentId: 'group:assets',
-                indent: 12,
-                values: mapValues('current_assets'),
-            },
-            {
-                id: 'fixed_assets',
-                label: labels.fixed_assets,
-                parentId: 'group:assets',
-                indent: 12,
-                values: mapValues('fixed_assets'),
-            },
-            {
-                id: 'cash',
-                label: labels.cash,
-                parentId: 'group:assets',
-                indent: 12,
-                values: mapValues('cash'),
-            },
-            {
-                id: 'inventory',
-                label: labels.inventory,
-                parentId: 'group:assets',
-                indent: 12,
-                values: mapValues('inventory'),
-            },
-            {
-                id: 'accounts_receivable',
-                label: labels.accounts_receivable,
-                parentId: 'group:assets',
-                indent: 12,
-                values: mapValues('accounts_receivable'),
-            },
+            createRow('group:assets', 'total_assets'),
+            createRow('group:assets', 'current_assets'),
+            createRow('group:assets', 'fixed_assets'),
+            createRow('group:assets', 'cash'),
+            createRow('group:assets', 'inventory'),
+            createRow('group:assets', 'accounts_receivable'),
             { id: 'group:liabilities', label: 'Liabilities', values: {}, isGroup: true },
-            {
-                id: 'total_liabilities',
-                label: labels.total_liabilities,
-                parentId: 'group:liabilities',
-                indent: 12,
-                values: mapValues('total_liabilities'),
-            },
-            {
-                id: 'current_liabilities',
-                label: labels.current_liabilities,
-                parentId: 'group:liabilities',
-                indent: 12,
-                values: mapValues('current_liabilities'),
-            },
-            {
-                id: 'long_term_liabilities',
-                label: labels.long_term_liabilities,
-                parentId: 'group:liabilities',
-                indent: 12,
-                values: mapValues('long_term_liabilities'),
-            },
-            {
-                id: 'short_term_debt',
-                label: labels.short_term_debt,
-                parentId: 'group:liabilities',
-                indent: 12,
-                values: mapValues('short_term_debt'),
-            },
-            {
-                id: 'long_term_debt',
-                label: labels.long_term_debt,
-                parentId: 'group:liabilities',
-                indent: 12,
-                values: mapValues('long_term_debt'),
-            },
-            {
-                id: 'accounts_payable',
-                label: labels.accounts_payable,
-                parentId: 'group:liabilities',
-                indent: 12,
-                values: mapValues('accounts_payable'),
-            },
-            {
-                id: 'customer_deposits',
-                label: labels.customer_deposits,
-                parentId: 'group:liabilities',
-                indent: 12,
-                values: mapValues('customer_deposits'),
-            },
+            createRow('group:liabilities', 'total_liabilities'),
+            createRow('group:liabilities', 'current_liabilities'),
+            createRow('group:liabilities', 'long_term_liabilities'),
+            createRow('group:liabilities', 'short_term_debt'),
+            createRow('group:liabilities', 'long_term_debt'),
+            createRow('group:liabilities', 'accounts_payable'),
+            createRow('group:liabilities', 'customer_deposits'),
             { id: 'group:equity', label: 'Equity', values: {}, isGroup: true },
-            {
-                id: 'total_equity',
-                label: labels.total_equity,
-                parentId: 'group:equity',
-                indent: 12,
-                values: mapValues('total_equity'),
-            },
-            {
-                id: 'retained_earnings',
-                label: labels.retained_earnings,
-                parentId: 'group:equity',
-                indent: 12,
-                values: mapValues('retained_earnings'),
-            },
-        ];
+            createRow('group:equity', 'total_equity'),
+            createRow('group:equity', 'retained_earnings'),
+        ].filter(Boolean) as DenseTableRow[];
     }, [orderedItems, tableColumns]);
 
     const renderTable = () => (

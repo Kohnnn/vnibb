@@ -11,7 +11,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
-import { formatNumber, formatPercent } from '@/lib/units';
+import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
@@ -211,7 +211,18 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
     const tableRows = useMemo<DenseTableRow[]>(() => {
         const rows: DenseTableRow[] = [];
 
+        const hasMetricData = (metricKey: string) =>
+            ratios.slice(0, TABLE_YEAR_LIMIT).some((entry) => {
+                const value = entry[metricKey as keyof typeof entry];
+                return typeof value === 'number' && Number.isFinite(value);
+            });
+
         Object.entries(categoryMetrics).forEach(([categoryKey, metricKeys]) => {
+            const visibleMetricKeys = metricKeys.filter((metricKey) => hasMetricData(metricKey));
+            if (visibleMetricKeys.length === 0) {
+                return;
+            }
+
             const groupId = `group:${categoryKey}`;
             rows.push({
                 id: groupId,
@@ -220,7 +231,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                 isGroup: true,
             });
 
-            metricKeys.forEach((metricKey) => {
+            visibleMetricKeys.forEach((metricKey) => {
                 rows.push({
                     id: metricKey,
                     label: ratioLabels[metricKey] || metricKey,
@@ -286,6 +297,9 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                             sortable
                             storageKey={`ratios:${id}:${symbol}:${period}`}
                             valueFormatter={(value, row) => {
+                                if (row.id === 'ev_ebitda' && typeof value === 'number' && value === 0) {
+                                    return EMPTY_VALUE;
+                                }
                                 const isPercentMetric = percentKeys.has(row.id);
                                 return isPercentMetric
                                     ? formatPct(value as number | null | undefined)

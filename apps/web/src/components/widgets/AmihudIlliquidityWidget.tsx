@@ -6,6 +6,7 @@ import type { OHLCData } from '@/lib/chartUtils'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface AmihudIlliquidityWidgetProps {
   symbol: string
@@ -146,6 +147,7 @@ export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps
   const rolling20 = rollingMean(dailyAmihud, 20)
   const hasData = rolling20.length > 20
   const isFallback = Boolean(error && hasData)
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   const yearly = yearlyMeans(dailyAmihud).slice(-8)
   const current = rolling20[rolling20.length - 1]?.value ?? 0
@@ -179,72 +181,83 @@ export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Current</div>
-          <div className="font-mono text-cyan-300">{formatAmihud(current)}</div>
-        </div>
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Trend</div>
-          <div className={trendPct <= 0 ? 'text-emerald-300 font-mono' : 'text-red-300 font-mono'}>
-            {trendPct >= 0 ? '+' : ''}
-            {trendPct.toFixed(2)}%
-          </div>
-        </div>
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Liquidity</div>
-          <div className={`font-semibold ${liquidityState.className}`}>{liquidityState.label}</div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-4 gap-1 mb-2 text-[10px]">
-        {yearly.map((row) => {
-          const widthPct = (row.value / maxYearly) * 100
-          return (
-            <div key={row.year} className="rounded border border-[var(--border-subtle)] px-2 py-1 bg-[var(--bg-secondary)]">
-              <div className="text-[var(--text-muted)]">{row.year}</div>
-              <div className="text-cyan-300 font-mono">{formatAmihud(row.value)}</div>
-              <div className="mt-1 h-1.5 rounded bg-[var(--bg-tertiary)] overflow-hidden">
-                <div className="h-full bg-cyan-500/70" style={{ width: `${Math.max(6, widthPct)}%` }} />
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
       <div className="flex-1 overflow-auto space-y-1 pr-1">
-        {isLoading && !hasData ? (
+        {timedOut && isLoading && !hasData ? (
+          <WidgetError
+            title="Loading timed out"
+            error={new Error('Amihud illiquidity data took too long to load.')}
+            onRetry={() => {
+              resetTimeout()
+              refetch()
+            }}
+          />
+        ) : isLoading && !hasData ? (
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty message="Not enough history to compute Amihud ratio" icon={<Droplets size={18} />} />
+          <WidgetEmpty message="Not enough history to compute Amihud ratio" icon={<Droplets size={18} />} size="compact" />
         ) : (
-          recent.map((row, index) => {
-            const previous = recent[index - 1]?.value ?? row.value
-            const improving = row.value <= previous
-            const widthPct = (row.value / maxRecent) * 100
-
-            return (
-              <div key={`${row.time}-${index}`} className="flex items-center gap-2">
-                <div className="w-12 text-[10px] text-[var(--text-muted)] shrink-0">{toDateLabel(row.time)}</div>
-                <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
-                  <div
-                    className={`h-full ${improving ? 'bg-emerald-500/65' : 'bg-red-500/65'}`}
-                    style={{ width: `${Math.max(2, widthPct)}%` }}
-                  />
-                </div>
-                <div className="w-16 text-[10px] text-right text-[var(--text-primary)] font-mono">
-                  {formatAmihud(row.value)}
-                </div>
-                {improving ? (
-                  <TrendingDown size={10} className="text-emerald-400" />
-                ) : (
-                  <TrendingUp size={10} className="text-red-400" />
-                )}
+          <>
+            <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
+              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+                <div className="text-[var(--text-muted)] uppercase tracking-widest">Current</div>
+                <div className="font-mono text-cyan-300">{formatAmihud(current)}</div>
               </div>
-            )
-          })
+              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+                <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Trend</div>
+                <div className={trendPct <= 0 ? 'text-emerald-300 font-mono' : 'text-red-300 font-mono'}>
+                  {trendPct >= 0 ? '+' : ''}
+                  {trendPct.toFixed(2)}%
+                </div>
+              </div>
+              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+                <div className="text-[var(--text-muted)] uppercase tracking-widest">Liquidity</div>
+                <div className={`font-semibold ${liquidityState.className}`}>{liquidityState.label}</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-1 mb-2 text-[10px]">
+              {yearly.map((row) => {
+                const widthPct = (row.value / maxYearly) * 100
+                return (
+                  <div key={row.year} className="rounded border border-[var(--border-subtle)] px-2 py-1 bg-[var(--bg-secondary)]">
+                    <div className="text-[var(--text-muted)]">{row.year}</div>
+                    <div className="text-cyan-300 font-mono">{formatAmihud(row.value)}</div>
+                    <div className="mt-1 h-1.5 rounded bg-[var(--bg-tertiary)] overflow-hidden">
+                      <div className="h-full bg-cyan-500/70" style={{ width: `${Math.max(6, widthPct)}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {recent.map((row, index) => {
+              const previous = recent[index - 1]?.value ?? row.value
+              const improving = row.value <= previous
+              const widthPct = (row.value / maxRecent) * 100
+
+              return (
+                <div key={`${row.time}-${index}`} className="flex items-center gap-2">
+                  <div className="w-12 text-[10px] text-[var(--text-muted)] shrink-0">{toDateLabel(row.time)}</div>
+                  <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
+                    <div
+                      className={`h-full ${improving ? 'bg-emerald-500/65' : 'bg-red-500/65'}`}
+                      style={{ width: `${Math.max(2, widthPct)}%` }}
+                    />
+                  </div>
+                  <div className="w-16 text-[10px] text-right text-[var(--text-primary)] font-mono">
+                    {formatAmihud(row.value)}
+                  </div>
+                  {improving ? (
+                    <TrendingDown size={10} className="text-emerald-400" />
+                  ) : (
+                    <TrendingUp size={10} className="text-red-400" />
+                  )}
+                </div>
+              )
+            })}
+          </>
         )}
       </div>
 

@@ -154,11 +154,15 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
             <div className="h-full flex flex-col bg-[var(--bg-primary)]">
                 <div className="flex-1 overflow-hidden relative">
                     {isLoading && !hasData ? (
-                        <WidgetSkeleton variant="chart" />
+                        <div className="mx-auto mt-6 max-h-[200px] max-w-[560px] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70">
+                            <WidgetSkeleton variant="chart" />
+                        </div>
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !treemapLayout ? (
-                        <WidgetEmpty message="Market data unavailable" icon={<LayoutGrid size={18} />} />
+                        <div className="mx-auto mt-8 max-w-md">
+                            <WidgetEmpty message="Market data unavailable" icon={<LayoutGrid size={18} />} size="compact" />
+                        </div>
                     ) : (
                         <div ref={heatmapRef} className="w-full h-full p-2">
                             <svg width="100%" height="100%" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet">

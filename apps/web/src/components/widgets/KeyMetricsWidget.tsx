@@ -112,20 +112,20 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
 
     const metricMap = {
         pe: resolveMetric([
-            { value: stock?.pe, source: 'Screener' },
-            { value: latestRatio?.pe, source: 'Ratios' },
+            { value: stock?.pe, source: 'Screener', positiveOnly: true },
+            { value: latestRatio?.pe, source: 'Ratios', positiveOnly: true },
         ]),
         pb: resolveMetric([
-            { value: stock?.pb, source: 'Screener' },
-            { value: latestRatio?.pb, source: 'Ratios' },
+            { value: stock?.pb, source: 'Screener', positiveOnly: true },
+            { value: latestRatio?.pb, source: 'Ratios', positiveOnly: true },
         ]),
         ps: resolveMetric([
-            { value: stock?.ps, source: 'Screener' },
-            { value: latestRatio?.ps, source: 'Ratios' },
+            { value: stock?.ps, source: 'Screener', positiveOnly: true },
+            { value: latestRatio?.ps, source: 'Ratios', positiveOnly: true },
         ]),
         evEbitda: resolveMetric([
-            { value: stock?.ev_ebitda, source: 'Screener' },
-            { value: latestRatio?.ev_ebitda, source: 'Ratios' },
+            { value: stock?.ev_ebitda, source: 'Screener', positiveOnly: true },
+            { value: latestRatio?.ev_ebitda, source: 'Ratios', positiveOnly: true },
         ]),
         roe: resolveMetric([
             { value: stock?.roe, source: 'Screener' },

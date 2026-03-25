@@ -87,7 +87,7 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
       ) : (
         <>
           {data?.data?.warning ? (
-            <div className="mb-2 rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+            <div className="mb-2 rounded-md border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-[10px] text-blue-200">
               {data.data.warning}
             </div>
           ) : null}

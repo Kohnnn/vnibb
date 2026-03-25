@@ -33,6 +33,7 @@ import {
 } from './WidgetParameterDropdown';
 import { WidgetHeaderVisibilityProvider } from '@/components/ui/WidgetContainer';
 import { WidgetToolbar } from '@/components/ui/WidgetToolbar';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetErrorBoundary } from './ErrorBoundary';
 import { MaximizedWidgetPortal } from './MaximizedWidgetPortal';
 import { useProfile } from '@/lib/queries';
@@ -122,6 +123,7 @@ export function WidgetWrapper({
     const currentDashboard = state.dashboards.find((dashboard) => dashboard.id === dashboardId) || null;
     const currentTab = currentDashboard?.tabs.find((tab) => tab.id === tabId) || null;
     const currentWidget = currentTab?.widgets.find((widget) => widget.id === id) || null;
+    const shouldEagerMount = currentDashboard?.isEditable === false || (currentWidget?.layout.y ?? Number.POSITIVE_INFINITY) <= 18;
     const copyTargets = state.dashboards.filter(
         (dashboard) =>
             dashboard.id !== dashboardId &&
@@ -144,6 +146,11 @@ export function WidgetWrapper({
     }, [initialCollapsed]);
 
     useEffect(() => {
+        if (shouldEagerMount) {
+            setIsContentVisible(true);
+            return;
+        }
+
         if (isContentVisible || isCollapsed || isMaximized) {
             if (isMaximized && !isContentVisible) {
                 setIsContentVisible(true);
@@ -173,9 +180,17 @@ export function WidgetWrapper({
             { rootMargin: '280px 0px' }
         );
 
+        const fallbackTimer = window.setTimeout(() => {
+            setIsContentVisible(true);
+            observer.disconnect();
+        }, 6000);
+
         observer.observe(node);
-        return () => observer.disconnect();
-    }, [isCollapsed, isContentVisible, isMaximized]);
+        return () => {
+            window.clearTimeout(fallbackTimer);
+            observer.disconnect();
+        };
+    }, [isCollapsed, isContentVisible, isMaximized, shouldEagerMount]);
 
     // Get current group details if assigned
     const effectiveSymbol = getSymbolForGroup(widgetGroup);
@@ -491,8 +506,10 @@ export function WidgetWrapper({
                             Collapsed
                         </div>
                     ) : !isContentVisible ? (
-                        <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                            Loading Widget
+                        <div className="flex h-full items-center justify-center">
+                            <div className="w-full max-w-sm rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)]/70">
+                                <WidgetSkeleton lines={4} />
+                            </div>
                         </div>
                     ) : (
                         <WidgetHeaderVisibilityProvider hideHeader>

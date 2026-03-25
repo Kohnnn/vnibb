@@ -157,6 +157,12 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
             if (metricKey === 'pre_tax_profit') return entry.pre_tax_profit ?? entry.profit_before_tax;
             return entry[metricKey as keyof typeof entry];
         }
+        const recentItems = orderedItems.slice(-TABLE_YEAR_LIMIT)
+        const hasAnyMetricData = (metricKey: string) =>
+            recentItems.some((entry) => {
+                const value = rowValue(entry, metricKey)
+                return typeof value === 'number' && Number.isFinite(value)
+            })
 
         const coreMetrics = [
             'revenue',
@@ -207,7 +213,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                 parentId: 'group:expenses',
                 indent: 12,
                 values: Object.fromEntries(
-                    items.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
+                    recentItems.map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
                         rowValue(entry, metricKey),
                     ])
@@ -231,18 +237,20 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                     ])
                 ),
             },
-            {
-                id: 'eps_diluted',
-                label: labels.eps_diluted,
-                parentId: 'group:per-share',
-                indent: 12,
-                values: Object.fromEntries(
-                    orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => [
-                        tableColumns[index]?.key ?? `period_${index}`,
-                        entry.eps_diluted,
-                    ])
-                ),
-            },
+            ...(hasAnyMetricData('eps_diluted')
+                ? [{
+                    id: 'eps_diluted',
+                    label: labels.eps_diluted,
+                    parentId: 'group:per-share',
+                    indent: 12,
+                    values: Object.fromEntries(
+                        recentItems.map((entry, index) => [
+                            tableColumns[index]?.key ?? `period_${index}`,
+                            entry.eps_diluted,
+                        ])
+                    ),
+                }]
+                : []),
         ];
 
         return rows;

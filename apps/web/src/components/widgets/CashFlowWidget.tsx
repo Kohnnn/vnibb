@@ -145,75 +145,44 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             if (metricKey === 'capex') return entry.capex ?? entry.capital_expenditure
             return entry[metricKey as keyof typeof entry]
         }
+        const recentItems = orderedItems.slice(-TABLE_YEAR_LIMIT)
+        const hasMetricData = (metricKey: string) =>
+            recentItems.some((entry) => {
+                const value = valueFor(entry, metricKey)
+                return typeof value === 'number' && Number.isFinite(value)
+            })
 
         const mapValues = (metricKey: string) =>
             Object.fromEntries(
-                orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => [
+                recentItems.map((entry, index) => [
                     tableColumns[index]?.key ?? `period_${index}`,
                     valueFor(entry, metricKey),
                 ])
             );
 
+        const createRow = (groupId: string, metricKey: string): DenseTableRow | null =>
+            hasMetricData(metricKey)
+                ? {
+                    id: metricKey,
+                    label: labels[metricKey] || metricKey,
+                    parentId: groupId,
+                    indent: 12,
+                    values: mapValues(metricKey),
+                }
+                : null;
+
         return [
             { id: 'group:cash-flows', label: 'Cash flows', values: {}, isGroup: true },
-            {
-                id: 'operating_cash_flow',
-                label: labels.operating_cash_flow,
-                parentId: 'group:cash-flows',
-                indent: 12,
-                values: mapValues('operating_cash_flow'),
-            },
-            {
-                id: 'investing_cash_flow',
-                label: labels.investing_cash_flow,
-                parentId: 'group:cash-flows',
-                indent: 12,
-                values: mapValues('investing_cash_flow'),
-            },
-            {
-                id: 'financing_cash_flow',
-                label: labels.financing_cash_flow,
-                parentId: 'group:cash-flows',
-                indent: 12,
-                values: mapValues('financing_cash_flow'),
-            },
+            createRow('group:cash-flows', 'operating_cash_flow'),
+            createRow('group:cash-flows', 'investing_cash_flow'),
+            createRow('group:cash-flows', 'financing_cash_flow'),
             { id: 'group:summary', label: 'Summary', values: {}, isGroup: true },
-            {
-                id: 'free_cash_flow',
-                label: labels.free_cash_flow,
-                parentId: 'group:summary',
-                indent: 12,
-                values: mapValues('free_cash_flow'),
-            },
-            {
-                id: 'net_change_in_cash',
-                label: labels.net_change_in_cash,
-                parentId: 'group:summary',
-                indent: 12,
-                values: mapValues('net_change_in_cash'),
-            },
-            {
-                id: 'capex',
-                label: labels.capital_expenditure,
-                parentId: 'group:summary',
-                indent: 12,
-                values: mapValues('capex'),
-            },
-            {
-                id: 'dividends_paid',
-                label: labels.dividends_paid,
-                parentId: 'group:summary',
-                indent: 12,
-                values: mapValues('dividends_paid'),
-            },
-            {
-                id: 'debt_repayment',
-                label: labels.debt_repayment,
-                parentId: 'group:summary',
-                indent: 12,
-                values: mapValues('debt_repayment'),
-            },
-        ];
+            createRow('group:summary', 'free_cash_flow'),
+            createRow('group:summary', 'net_change_in_cash'),
+            createRow('group:summary', 'capex'),
+            createRow('group:summary', 'dividends_paid'),
+            createRow('group:summary', 'debt_repayment'),
+        ].filter(Boolean) as DenseTableRow[];
     }, [orderedItems, tableColumns]);
 
     const renderTable = () => (

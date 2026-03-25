@@ -6,6 +6,7 @@ import { useFullTechnicalAnalysis } from '@/lib/queries'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import type { Signal, Timeframe } from '@/types/technical'
 
 const TIMEFRAME_OPTIONS: Array<{ value: Timeframe; label: string }> = [
@@ -39,6 +40,7 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
 
   const hasData = Boolean(data)
   const isFallback = Boolean(error && hasData)
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   const derived = useMemo(() => {
     if (!data) return null
@@ -109,12 +111,21 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
         </div>
       </div>
 
-      {isLoading && !hasData ? (
+      {timedOut && isLoading && !hasData ? (
+        <WidgetError
+          title="Loading timed out"
+          error={new Error('Signal summary took too long to load.')}
+          onRetry={() => {
+            resetTimeout()
+            refetch()
+          }}
+        />
+      ) : isLoading && !hasData ? (
         <WidgetSkeleton lines={8} />
       ) : error && !hasData ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !data || !derived ? (
-        <WidgetEmpty message="No signal summary available." icon={<ShieldAlert size={18} />} />
+        <WidgetEmpty message="No signal summary available." icon={<ShieldAlert size={18} />} size="compact" />
       ) : (
         <>
           <div className="grid grid-cols-[auto_1fr] gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">

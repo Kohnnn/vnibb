@@ -150,7 +150,7 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
         ) : (
           <div className="min-w-[520px] space-y-2">
             {data?.data?.warning ? (
-              <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+              <div className="rounded-md border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-[10px] text-blue-200">
                 {data.data.warning}
               </div>
             ) : null}
