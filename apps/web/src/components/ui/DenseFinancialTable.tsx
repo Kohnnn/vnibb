@@ -105,6 +105,7 @@ export function DenseFinancialTable({
 
   const [sortKey, setSortKey] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const [copiedCellKey, setCopiedCellKey] = useState<string | null>(null)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
     if (storageKey && typeof window !== 'undefined') {
       try {
@@ -225,6 +226,20 @@ export function DenseFinancialTable({
     setExpandedGroups((prev) => ({ ...prev, ...next }))
   }
 
+  const handleCopyValue = async (cellKey: string, value: string) => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText || value === '-') return
+
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedCellKey(cellKey)
+      window.setTimeout(() => {
+        setCopiedCellKey((current) => (current === cellKey ? null : current))
+      }, 900)
+    } catch {
+      // Ignore clipboard failures.
+    }
+  }
+
   return (
     <div className={cn('overflow-auto', className)}>
       <table className="data-table financial-dense freeze-first-col w-full border-separate border-spacing-0 text-[10px] text-left leading-4">
@@ -252,7 +267,7 @@ export function DenseFinancialTable({
               )
             })}
             {showTrend ? (
-              <th className="px-2 py-1 text-center font-bold uppercase tracking-tighter">Trend</th>
+              <th className="trend-col px-2 py-1 text-center font-bold uppercase tracking-tighter">Trend</th>
             ) : null}
           </tr>
         </thead>
@@ -268,7 +283,7 @@ export function DenseFinancialTable({
                 className={cn(
                   'h-6 border-b border-[var(--border-subtle)] transition-colors hover:bg-[var(--bg-hover)]',
                   rowIndex % 2 === 1 && !row.isGroup ? 'bg-[var(--bg-secondary)]/18' : '',
-                  row.isGroup ? 'bg-[var(--bg-surface)] font-semibold' : '',
+                  row.isGroup ? 'section-header-row bg-[var(--bg-surface)] font-semibold' : '',
                   isEmphasisRow(row) && !row.isGroup ? 'border-t border-[var(--border-default)] bg-[var(--bg-surface)]/55 font-semibold' : ''
                 )}
               >
@@ -325,10 +340,17 @@ export function DenseFinancialTable({
                     <td
                       key={`${row.id}:${column.key}`}
                       data-type="number"
-                        className={cn(
-                          'px-2 py-1 tabular-nums text-[var(--text-primary)]',
-                          column.align === 'left' ? 'text-left' : 'text-right'
-                        )}
+                      className={cn(
+                        'px-2 py-1 tabular-nums text-[var(--text-primary)]',
+                        row.isGroup ? 'cursor-default' : 'cursor-copy',
+                        copiedCellKey === `${row.id}:${column.key}` ? 'ring-1 ring-inset ring-blue-400/80' : '',
+                        column.align === 'left' ? 'text-left' : 'text-right'
+                      )}
+                      onClick={() => {
+                        if (!row.isGroup) {
+                          void handleCopyValue(`${row.id}:${column.key}`, displayValue)
+                        }
+                      }}
                     >
                       <span>{displayValue}</span>
                       {growthPct !== null ? (
@@ -349,7 +371,7 @@ export function DenseFinancialTable({
                 })}
 
                 {showTrend ? (
-                  <td className="px-2 py-1 text-center">
+                  <td className="trend-col px-2 py-1 text-center">
                     {trendValues.length < 2 ? (
                       <span className="text-[10px] text-[var(--text-muted)]">-</span>
                     ) : (

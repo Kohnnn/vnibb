@@ -16,6 +16,7 @@ import { useFibonacciRetracement } from '@/lib/queries'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 
 const PERIOD_OPTIONS = [
   { label: '1M', days: 31 },
@@ -117,8 +118,9 @@ export function FibonacciWidget({ symbol }: { symbol?: string }) {
           </div>
 
           <div className="min-h-[260px] flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+            <ChartMountGuard className="h-full" minHeight={260}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} minTickGap={32} />
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} width={52} domain={['auto', 'auto']} />
@@ -141,8 +143,9 @@ export function FibonacciWidget({ symbol }: { symbol?: string }) {
                   />
                 ))}
                 <Line type="monotone" dataKey="close" stroke="#f8fafc" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartMountGuard>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-[10px]">

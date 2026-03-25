@@ -209,6 +209,17 @@ export function TradingViewAdvancedChart({
       const { createChart, ColorType, CrosshairMode } = await import('lightweight-charts');
       if (disposed || !containerRef.current) return;
 
+      const initialWidth = containerRef.current.clientWidth;
+      const initialHeight = containerRef.current.clientHeight;
+      if (initialWidth <= 0 || initialHeight <= 0) {
+        window.requestAnimationFrame(() => {
+          if (!disposed) {
+            renderChart();
+          }
+        });
+        return;
+      }
+
       removeChart(chartRef.current);
       chartRef.current = null;
       mainSeriesRef.current = null;
@@ -222,8 +233,8 @@ export function TradingViewAdvancedChart({
       const borderSubtle = cssVars.getPropertyValue('--border-subtle').trim() || '#1f2937';
 
       const chart = createChart(containerRef.current, {
-        width: containerRef.current.clientWidth,
-        height: containerRef.current.clientHeight,
+        width: initialWidth,
+        height: initialHeight,
         layout: {
           background: { type: ColorType.Solid, color: bgPrimary },
           textColor: textMuted,

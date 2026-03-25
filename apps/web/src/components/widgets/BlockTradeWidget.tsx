@@ -152,6 +152,8 @@ export function BlockTradeWidget({ symbol }: BlockTradeWidgetProps) {
           <WidgetEmpty
             message={isMissingData ? 'Block trade data not available yet' : 'No block trades match your filter'}
             icon={<AlertTriangle size={18} />}
+            detail={isMissingData ? 'Large negotiated prints show up here when the provider publishes them.' : undefined}
+            size="compact"
             action={!isMissingData ? { label: 'Lower threshold', onClick: () => setMinThreshold(5) } : undefined}
           />
         ) : (

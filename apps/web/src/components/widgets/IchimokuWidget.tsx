@@ -16,6 +16,7 @@ import { useIchimokuSeries } from '@/lib/queries'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 
 const PERIOD_OPTIONS = ['1M', '3M', '6M', '1Y', '3Y', '5Y'] as const
 type PeriodOption = (typeof PERIOD_OPTIONS)[number]
@@ -142,8 +143,9 @@ export function IchimokuWidget({ symbol }: IchimokuWidgetProps) {
           </div>
 
           <div className="min-h-[260px] flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+            <ChartMountGuard className="h-full" minHeight={260}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} minTickGap={32} />
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} domain={['auto', 'auto']} width={52} />
@@ -185,8 +187,9 @@ export function IchimokuWidget({ symbol }: IchimokuWidgetProps) {
                 <Line type="monotone" dataKey="close" stroke="#f8fafc" strokeWidth={2} dot={false} connectNulls />
                 <Line type="monotone" dataKey="tenkan_sen" stroke="#38bdf8" strokeWidth={1.5} dot={false} connectNulls />
                 <Line type="monotone" dataKey="kijun_sen" stroke="#f97316" strokeWidth={1.5} dot={false} connectNulls />
-              </ComposedChart>
-            </ResponsiveContainer>
+                </ComposedChart>
+              </ResponsiveContainer>
+            </ChartMountGuard>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-[10px]">

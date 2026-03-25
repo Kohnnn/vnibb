@@ -134,7 +134,12 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove }: IntradayTradesW
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
-                        <WidgetEmpty message={`No trades for ${symbol}`} icon={<Activity size={18} />} />
+                        <WidgetEmpty
+                            message={`No trades for ${symbol}`}
+                            detail="Intraday tape will appear here once trade prints are available."
+                            icon={<Activity size={18} />}
+                            size="compact"
+                        />
                     ) : (
                         <VirtualizedTable data={trades} columns={columns} rowHeight={30} />
                     )}

@@ -27,6 +27,28 @@ interface LayoutBehavior {
   expandPriority: number
 }
 
+export interface WidgetSizeContract {
+  defaultW: number
+  defaultH: number
+  minW: number
+  minH: number
+  maxW?: number
+  maxH?: number
+  bias: LayoutOrientation | 'full'
+  priority: 1 | 2 | 3
+}
+
+export interface WidgetDefaultLayout {
+  x: number
+  y: number
+  w: number
+  h: number
+  minW: number
+  minH: number
+  maxW?: number
+  maxH?: number
+}
+
 interface ResolvedLayoutBehavior extends LayoutBehavior {
   maxW: number
   maxH?: number
@@ -42,6 +64,7 @@ const FALLBACK_BEHAVIOR: LayoutBehavior = {
 }
 
 const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
+  screener: { preferredW: 24, preferredH: 12, minW: 16, minH: 8, orientation: 'horizontal', expandPriority: 6 },
   ticker_info: { preferredW: 6, preferredH: 5, minW: 5, minH: 4, maxW: 8, orientation: 'balanced', expandPriority: 2 },
   key_metrics: { preferredW: 6, preferredH: 6, minW: 5, minH: 5, maxW: 8, orientation: 'vertical', expandPriority: 1 },
   share_statistics: { preferredW: 6, preferredH: 5, minW: 5, minH: 4, maxW: 8, orientation: 'vertical', expandPriority: 1 },
@@ -54,28 +77,85 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   cash_flow: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 4 },
   institutional_ownership: { preferredW: 10, preferredH: 6, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
   major_shareholders: { preferredW: 10, preferredH: 6, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
+  insider_trading: { preferredW: 10, preferredH: 6, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
+  officers_management: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, maxW: 14, orientation: 'vertical', expandPriority: 2 },
   news_feed: { preferredW: 10, preferredH: 7, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
+  news_corporate_actions: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  events_calendar: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  market_news: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
   peer_comparison: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
   comparison_analysis: { preferredW: 10, preferredH: 8, minW: 8, minH: 6, maxW: 12, orientation: 'vertical', expandPriority: 2 },
+  rs_ranking: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
   transaction_flow: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 4 },
   foreign_trading: { preferredW: 6, preferredH: 7, minW: 5, minH: 6, maxW: 8, orientation: 'vertical', expandPriority: 1 },
   orderbook: { preferredW: 6, preferredH: 7, minW: 5, minH: 6, maxW: 8, orientation: 'vertical', expandPriority: 1 },
   intraday_trades: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 3 },
   block_trade: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 3 },
+  market_overview: { preferredW: 8, preferredH: 7, minW: 6, minH: 5, maxW: 10, orientation: 'balanced', expandPriority: 2 },
+  top_movers: { preferredW: 8, preferredH: 9, minW: 6, minH: 7, maxW: 10, orientation: 'vertical', expandPriority: 1 },
+  market_breadth: { preferredW: 8, preferredH: 7, minW: 6, minH: 5, maxW: 10, orientation: 'balanced', expandPriority: 2 },
+  market_heatmap: { preferredW: 14, preferredH: 10, minW: 10, minH: 8, orientation: 'horizontal', expandPriority: 4 },
+  sector_board: { preferredW: 10, preferredH: 12, minW: 8, minH: 10, orientation: 'vertical', expandPriority: 2 },
+  money_flow_trend: { preferredW: 14, preferredH: 10, minW: 10, minH: 8, orientation: 'horizontal', expandPriority: 3 },
+  industry_bubble: { preferredW: 10, preferredH: 10, minW: 8, minH: 8, orientation: 'balanced', expandPriority: 2 },
   seasonality_heatmap: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 5 },
   sortino_monthly: { preferredW: 10, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  volume_profile: { preferredW: 8, preferredH: 9, minW: 6, minH: 7, orientation: 'vertical', expandPriority: 2 },
+  volume_flow: { preferredW: 8, preferredH: 8, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  momentum: { preferredW: 8, preferredH: 8, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   drawdown_recovery: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
   gap_analysis: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
-  correlation_matrix: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  correlation_matrix: { preferredW: 10, preferredH: 10, minW: 8, minH: 8, orientation: 'vertical', expandPriority: 2 },
   ichimoku: { preferredW: 10, preferredH: 6, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 3 },
   fibonacci: { preferredW: 10, preferredH: 6, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 3 },
+  technical_summary: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  technical_snapshot: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  atr_regime: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   macd_crossovers: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
   rsi_seasonal: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
   bollinger_squeeze: { preferredW: 8, preferredH: 5, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  ema_respect: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  obv_divergence: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  volume_delta: { preferredW: 8, preferredH: 8, minW: 6, minH: 7, orientation: 'vertical', expandPriority: 2 },
+  gap_fill_stats: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  hurst_market_structure: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  parkinson_volatility: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  amihud_illiquidity: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   signal_summary: { preferredW: 24, preferredH: 4, minW: 12, minH: 4, orientation: 'horizontal', expandPriority: 6 },
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
+function toWidgetSizeContract(behavior: LayoutBehavior | undefined): WidgetSizeContract {
+  const resolved = behavior ?? FALLBACK_BEHAVIOR
+  return {
+    defaultW: resolved.preferredW,
+    defaultH: resolved.preferredH,
+    minW: resolved.minW,
+    minH: resolved.minH,
+    maxW: resolved.maxW,
+    maxH: resolved.maxH,
+    bias: resolved.maxW && resolved.maxW >= 24 ? 'full' : resolved.orientation,
+    priority: resolved.expandPriority >= 5 ? 1 : resolved.expandPriority >= 2 ? 2 : 3,
+  }
+}
+
+export function getWidgetSizeContract(type?: WidgetType | string): WidgetSizeContract {
+  if (!type) return toWidgetSizeContract(undefined)
+  return toWidgetSizeContract(WIDGET_LAYOUT_BEHAVIORS[type as WidgetType])
+}
+
+export function getWidgetDefaultLayout(type?: WidgetType | string, cols = 24): WidgetDefaultLayout {
+  const item = normalizeItemLayout(
+    {
+      type,
+      layout: { x: 0, y: 0, w: 0, h: 0 },
+    },
+    cols
+  )
+
+  return item.layout as WidgetDefaultLayout
+}
 
 function inferOrientation(layout: CompactableLayoutItem['layout']): LayoutOrientation {
   const ratio = (layout.w || 1) / Math.max(layout.h || 1, 1)

@@ -27,8 +27,7 @@ import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
 import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync } from '@/lib/useDashboardSync';
-import { autoFitGridItems, preserveTemplateGridItems } from '@/lib/dashboardLayout';
-import { defaultWidgetLayouts } from '@/components/widgets/WidgetRegistry';
+import { autoFitGridItems, getWidgetDefaultLayout, preserveTemplateGridItems } from '@/lib/dashboardLayout';
 
 // ============================================================================
 // Storage Keys
@@ -122,152 +121,116 @@ const FINANCIALS_TEMPLATE: TemplateWidget[] = [
 // Quant Tab: seasonality, risk, structure, and liquidity toolkit
 const QUANT_TEMPLATE: TemplateWidget[] = [
     {
-        type: 'signal_summary',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 34, w: 24, h: 6, minW: 12, minH: 5 }
-    },
-    {
         type: 'seasonality_heatmap',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 6, w: 12, h: 7, minW: 8, minH: 5 }
+        layout: { x: 0, y: 0, w: 14, h: 12, minW: 10, minH: 8 }
     },
     {
         type: 'sortino_monthly',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 6, w: 12, h: 7, minW: 8, minH: 5 }
+        layout: { x: 14, y: 0, w: 10, h: 11, minW: 8, minH: 8 }
     },
     {
         type: 'volume_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 13, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 0, y: 12, w: 8, h: 12, minW: 6, minH: 8 }
     },
     {
         type: 'volume_flow',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 13, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 8, y: 12, w: 8, h: 10, minW: 6, minH: 7 }
     },
     {
         type: 'momentum',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 13, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 16, y: 12, w: 8, h: 10, minW: 6, minH: 7 }
     },
     {
         type: 'gap_analysis',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 20, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 0, y: 24, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'drawdown_recovery',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 20, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 8, y: 24, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
-        type: 'gap_fill_stats',
+        type: 'correlation_matrix',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 20, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 16, y: 24, w: 8, h: 10, minW: 8, minH: 8 }
     },
     {
-        type: 'hurst_market_structure',
+        type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 27, w: 8, h: 7, minW: 6, minH: 5 }
-    },
-    {
-        type: 'parkinson_volatility',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 8, y: 27, w: 8, h: 7, minW: 6, minH: 5 }
-    },
-    {
-        type: 'amihud_illiquidity',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 16, y: 27, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 0, y: 34, w: 24, h: 6, minW: 12, minH: 4 }
     }
 ];
 
 // Technical Tab: momentum, volatility, and confirmation signals
 const TECHNICAL_TEMPLATE: TemplateWidget[] = [
     {
-        type: 'signal_summary',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 35, w: 24, h: 6, minW: 12, minH: 5 }
-    },
-    {
         type: 'ichimoku',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 6, w: 12, h: 8, minW: 8, minH: 6 }
+        layout: { x: 0, y: 0, w: 12, h: 12, minW: 10, minH: 10 }
     },
     {
         type: 'fibonacci',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 6, w: 12, h: 8, minW: 8, minH: 6 }
+        layout: { x: 12, y: 0, w: 12, h: 12, minW: 10, minH: 10 }
     },
     {
         type: 'technical_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 14, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 0, y: 12, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'technical_snapshot',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 14, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 8, y: 12, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'atr_regime',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 14, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 16, y: 12, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'macd_crossovers',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 21, w: 8, h: 7, minW: 6, minH: 5 }
-    },
-    {
-        type: 'bollinger_squeeze',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 8, y: 21, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 0, y: 21, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'rsi_seasonal',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 21, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 8, y: 21, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
-        type: 'ema_respect',
+        type: 'bollinger_squeeze',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 28, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 16, y: 21, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
-        type: 'obv_divergence',
+        type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 28, w: 8, h: 7, minW: 6, minH: 5 }
-    },
-    {
-        type: 'volume_delta',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 16, y: 28, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 0, y: 30, w: 24, h: 6, minW: 12, minH: 4 }
     }
 ];
 
@@ -299,25 +262,25 @@ const OWNERSHIP_TEMPLATE: TemplateWidget[] = [
         type: 'major_shareholders',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 12, h: 7, minW: 6, minH: 4 }
+        layout: { x: 0, y: 0, w: 12, h: 4, minW: 8, minH: 3 }
     },
     {
         type: 'officers_management',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 0, w: 12, h: 7, minW: 6, minH: 4 }
+        layout: { x: 12, y: 0, w: 12, h: 9, minW: 8, minH: 6 }
     },
     {
         type: 'foreign_trading',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 7, w: 12, h: 7, minW: 6, minH: 4 }
+        layout: { x: 0, y: 9, w: 12, h: 9, minW: 8, minH: 7 }
     },
     {
         type: 'insider_trading',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 7, w: 12, h: 6, minW: 8, minH: 4 }
+        layout: { x: 12, y: 9, w: 12, h: 5, minW: 8, minH: 4 }
     }
 ];
 
@@ -376,31 +339,31 @@ const MAIN_DEEP_DIVE_TEMPLATE: TemplateWidget[] = [
         type: 'price_chart',
         syncGroupId: 1,
         config: { timeframe: '1Y', chartType: 'candle' },
-        layout: { x: 0, y: 0, w: 14, h: 8, minW: 10, minH: 6 }
+        layout: { x: 0, y: 0, w: 16, h: 11, minW: 10, minH: 8 }
     },
     {
         type: 'ticker_info',
         syncGroupId: 1,
         config: {},
-        layout: { x: 14, y: 0, w: 10, h: 3, minW: 8, minH: 3 }
+        layout: { x: 16, y: 5, w: 8, h: 6, minW: 6, minH: 4 }
     },
     {
         type: 'ticker_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 14, y: 3, w: 10, h: 5, minW: 8, minH: 4 }
+        layout: { x: 16, y: 0, w: 8, h: 5, minW: 6, minH: 4 }
     },
     {
         type: 'institutional_ownership',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 8, w: 12, h: 7, minW: 8, minH: 5 }
+        layout: { x: 0, y: 11, w: 10, h: 5, minW: 8, minH: 3 }
     },
     {
         type: 'financial_ratios',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 8, w: 12, h: 7, minW: 8, minH: 5 }
+        layout: { x: 10, y: 11, w: 14, h: 12, minW: 10, minH: 9 }
     },
 ];
 
@@ -559,37 +522,37 @@ const MAIN_TRADING_TEMPLATE: TemplateWidget[] = [
         type: 'transaction_flow',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 12, h: 7, minW: 8, minH: 6 }
+        layout: { x: 0, y: 0, w: 12, h: 9, minW: 8, minH: 4 }
     },
     {
         type: 'orderbook',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 0, w: 6, h: 7, minW: 4, minH: 6 }
+        layout: { x: 12, y: 0, w: 6, h: 9, minW: 4, minH: 6 }
     },
     {
         type: 'foreign_trading',
         syncGroupId: 1,
         config: {},
-        layout: { x: 18, y: 0, w: 6, h: 7, minW: 4, minH: 6 }
+        layout: { x: 18, y: 0, w: 6, h: 9, minW: 4, minH: 6 }
     },
     {
         type: 'intraday_trades',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 7, w: 12, h: 7, minW: 8, minH: 6 }
+        layout: { x: 0, y: 9, w: 12, h: 9, minW: 8, minH: 4 }
     },
     {
         type: 'block_trade',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 7, w: 12, h: 7, minW: 8, minH: 6 }
+        layout: { x: 12, y: 9, w: 12, h: 9, minW: 8, minH: 4 }
     },
     {
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 14, w: 24, h: 5, minW: 12, minH: 5 }
+        layout: { x: 0, y: 18, w: 24, h: 6, minW: 12, minH: 4 }
     },
 ];
 
@@ -598,43 +561,43 @@ const MAIN_MARKET_TEMPLATE: TemplateWidget[] = [
         type: 'market_overview',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 8, h: 5, minW: 6, minH: 4 }
+        layout: { x: 0, y: 0, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
         type: 'top_movers',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 0, w: 8, h: 5, minW: 6, minH: 4 }
+        layout: { x: 8, y: 0, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'market_breadth',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 0, w: 8, h: 5, minW: 6, minH: 4 }
+        layout: { x: 16, y: 0, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
         type: 'market_heatmap',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 5, w: 12, h: 9, minW: 8, minH: 6 }
+        layout: { x: 0, y: 9, w: 14, h: 11, minW: 10, minH: 8 }
     },
     {
         type: 'sector_board',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 5, w: 12, h: 9, minW: 8, minH: 6 }
+        layout: { x: 14, y: 9, w: 10, h: 12, minW: 8, minH: 10 }
     },
     {
         type: 'money_flow_trend',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 14, w: 12, h: 8, minW: 8, minH: 6 }
+        layout: { x: 0, y: 21, w: 14, h: 10, minW: 10, minH: 8 }
     },
     {
         type: 'industry_bubble',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 14, w: 12, h: 8, minW: 8, minH: 6 }
+        layout: { x: 14, y: 21, w: 10, h: 10, minW: 8, minH: 8 }
     },
 ];
 
@@ -643,19 +606,19 @@ const MAIN_COMPARISON_TEMPLATE: TemplateWidget[] = [
         type: 'comparison_analysis',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 24, h: 8, minW: 12, minH: 6 }
+        layout: { x: 0, y: 0, w: 14, h: 11, minW: 10, minH: 8 }
     },
     {
         type: 'peer_comparison',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 8, w: 12, h: 7, minW: 8, minH: 5 }
+        layout: { x: 14, y: 0, w: 10, h: 10, minW: 8, minH: 8 }
     },
     {
         type: 'rs_ranking',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 8, w: 12, h: 7, minW: 8, minH: 5 }
+        layout: { x: 0, y: 11, w: 24, h: 10, minW: 10, minH: 8 }
     },
 ];
 
@@ -664,25 +627,25 @@ const MAIN_FUNDAMENTALS_TEMPLATE: TemplateWidget[] = [
         type: 'financial_ratios',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 24, h: 6, minW: 12, minH: 5 }
+        layout: { x: 0, y: 0, w: 10, h: 14, minW: 8, minH: 11 }
     },
     {
         type: 'income_statement',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 6, w: 12, h: 6, minW: 8, minH: 5 }
+        layout: { x: 10, y: 0, w: 14, h: 14, minW: 10, minH: 9 }
     },
     {
         type: 'balance_sheet',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 6, w: 12, h: 6, minW: 8, minH: 5 }
+        layout: { x: 0, y: 14, w: 14, h: 12, minW: 10, minH: 9 }
     },
     {
         type: 'cash_flow',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 12, w: 24, h: 6, minW: 12, minH: 5 }
+        layout: { x: 14, y: 14, w: 10, h: 12, minW: 8, minH: 8 }
     },
 ];
 
@@ -709,7 +672,7 @@ const MAIN_NEWS_TEMPLATE: TemplateWidget[] = [
         type: 'market_news',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 8, w: 12, h: 6, minW: 8, minH: 4 }
+        layout: { x: 12, y: 8, w: 12, h: 10, minW: 8, minH: 6 }
     },
 ];
 
@@ -718,25 +681,25 @@ const INITIAL_FUNDAMENTAL_TEMPLATE: TemplateWidget[] = [
         type: 'ticker_info',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 6, h: 5, minW: 5, minH: 4 }
+        layout: { x: 0, y: 0, w: 6, h: 6, minW: 5, minH: 4 }
     },
     {
         type: 'key_metrics',
         syncGroupId: 1,
         config: {},
-        layout: { x: 6, y: 0, w: 6, h: 5, minW: 5, minH: 4 }
+        layout: { x: 6, y: 0, w: 10, h: 9, minW: 8, minH: 8 }
     },
     {
         type: 'ticker_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 0, w: 12, h: 5, minW: 8, minH: 4 }
+        layout: { x: 16, y: 0, w: 8, h: 6, minW: 6, minH: 5 }
     },
     {
         type: 'unified_financials',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 5, w: 24, h: 10, minW: 14, minH: 8 }
+        layout: { x: 0, y: 9, w: 24, h: 10, minW: 14, minH: 8 }
     },
 ];
 
@@ -745,43 +708,31 @@ const INITIAL_TECHNICAL_TEMPLATE: TemplateWidget[] = [
         type: 'price_chart',
         syncGroupId: 1,
         config: { timeframe: '1Y', chartType: 'candle' },
-        layout: { x: 0, y: 0, w: 14, h: 8, minW: 10, minH: 6 }
-    },
-    {
-        type: 'ichimoku',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 14, y: 0, w: 10, h: 4, minW: 8, minH: 4 }
-    },
-    {
-        type: 'fibonacci',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 14, y: 4, w: 10, h: 4, minW: 8, minH: 4 }
+        layout: { x: 0, y: 0, w: 24, h: 11, minW: 12, minH: 8 }
     },
     {
         type: 'macd_crossovers',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 0, y: 11, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'rsi_seasonal',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 8, y: 11, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'bollinger_squeeze',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 16, y: 11, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 13, w: 24, h: 4, minW: 12, minH: 4 }
+        layout: { x: 0, y: 20, w: 24, h: 6, minW: 12, minH: 4 }
     },
 ];
 
@@ -790,37 +741,37 @@ const INITIAL_QUANT_TEMPLATE: TemplateWidget[] = [
         type: 'seasonality_heatmap',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 14, h: 8, minW: 10, minH: 6 }
+        layout: { x: 0, y: 0, w: 14, h: 12, minW: 10, minH: 9 }
     },
     {
         type: 'sortino_monthly',
         syncGroupId: 1,
         config: {},
-        layout: { x: 14, y: 0, w: 10, h: 8, minW: 8, minH: 6 }
+        layout: { x: 14, y: 0, w: 10, h: 11, minW: 8, minH: 9 }
     },
     {
         type: 'drawdown_recovery',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 0, y: 12, w: 8, h: 12, minW: 6, minH: 9 }
     },
     {
         type: 'gap_analysis',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 8, y: 12, w: 8, h: 10, minW: 6, minH: 8 }
     },
     {
         type: 'correlation_matrix',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 8, w: 8, h: 5, minW: 6, minH: 5 }
+        layout: { x: 16, y: 12, w: 8, h: 13, minW: 8, minH: 10 }
     },
     {
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 13, w: 24, h: 4, minW: 12, minH: 4 }
+        layout: { x: 0, y: 25, w: 24, h: 6, minW: 12, minH: 4 }
     },
 ];
 
@@ -1776,7 +1727,7 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
                             tabs: d.tabs.map((t) => {
                                 if (t.id !== action.payload.tabId) return t;
                                 const resetWidgets = autoFitGridItems(t.widgets.map((w) => {
-                                    const defaults = defaultWidgetLayouts[w.type as keyof typeof defaultWidgetLayouts] || { w: 6, h: 4, minW: 3, minH: 2 };
+                                    const defaults = getWidgetDefaultLayout(w.type);
 
                                     return {
                                         ...w,
@@ -2242,7 +2193,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
     const addWidget = useCallback((dashboardId: string, tabId: string, data: WidgetCreate): WidgetInstance => {
         // Get default layout constraints from WidgetRegistry
-        const defaults = defaultWidgetLayouts[data.type as keyof typeof defaultWidgetLayouts];
+        const defaults = getWidgetDefaultLayout(data.type);
         const widgetId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
         const widget: WidgetInstance = {
@@ -2255,11 +2206,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 i: widgetId,
                 x: data.layout?.x ?? 0,
                 y: data.layout?.y ?? Infinity, // Place at bottom if not specified
-                w: data.layout?.w ?? (defaults?.w ?? 6),
-                h: data.layout?.h ?? (defaults?.h ?? 4),
-                // Always apply minW/minH from registry for proper resize constraints
-                minW: data.layout?.minW ?? defaults?.minW ?? 3,
-                minH: data.layout?.minH ?? defaults?.minH ?? 2,
+                w: data.layout?.w ?? defaults.w,
+                h: data.layout?.h ?? defaults.h,
+                minW: data.layout?.minW ?? defaults.minW ?? 3,
+                minH: data.layout?.minH ?? defaults.minH ?? 2,
             },
         };
         dispatch({ type: 'ADD_WIDGET', payload: { dashboardId, tabId, widget } });

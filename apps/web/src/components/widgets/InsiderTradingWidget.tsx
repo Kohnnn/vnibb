@@ -169,7 +169,12 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER }: InsiderTrading
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetchDeals()} />
         ) : filteredDeals.length === 0 ? (
-          <WidgetEmpty message="No insider trades found" icon={<AlertCircle size={18} />} />
+          <WidgetEmpty
+            message="No insider trades found"
+            detail="Insider filings are only shown when official disclosures are available."
+            icon={<AlertCircle size={18} />}
+            size="compact"
+          />
         ) : (
           <div className="space-y-1.5">
             {filteredDeals.map((deal) => {

@@ -168,6 +168,28 @@ export function DashboardGrid({
     const canEdit = isEditing && currentBreakpoint === 'lg';
     const draggableHandle = canEdit ? '.widget-drag-handle' : undefined;
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        let timeoutId: number | undefined;
+        let frameA: number | undefined;
+        let frameB: number | undefined;
+
+        timeoutId = window.setTimeout(() => {
+            frameA = window.requestAnimationFrame(() => {
+                frameB = window.requestAnimationFrame(() => {
+                    window.dispatchEvent(new Event('resize'));
+                });
+            });
+        }, 120);
+
+        return () => {
+            if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+            if (frameA !== undefined) window.cancelAnimationFrame(frameA);
+            if (frameB !== undefined) window.cancelAnimationFrame(frameB);
+        };
+    }, [currentBreakpoint, layouts, rowHeight, width]);
+
     const effectiveLayouts = useMemo(() => {
         if (canEdit) return responsiveLayouts;
 

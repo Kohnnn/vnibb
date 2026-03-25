@@ -121,6 +121,8 @@ export function OfflineIndicator() {
 interface WidgetEmptyProps {
     message?: string;
     icon?: React.ReactNode;
+    detail?: string;
+    size?: 'default' | 'compact';
     action?: {
         label: string;
         onClick: () => void;
@@ -130,14 +132,19 @@ interface WidgetEmptyProps {
 export function WidgetEmpty({
     message = 'No data available',
     icon,
+    detail,
+    size = 'default',
     action
 }: WidgetEmptyProps) {
     return (
-        <div className="flex flex-col items-center justify-center h-full min-h-[120px] p-4 text-center">
+        <div className={`flex flex-col items-center justify-center h-full p-4 text-center ${size === 'compact' ? 'min-h-[72px]' : 'min-h-[120px]'}`}>
             <div className="text-[var(--text-muted)] mb-2">
                 {icon || <Inbox size={24} />}
             </div>
             <p className="text-xs text-[var(--text-secondary)] font-medium mb-3">{message}</p>
+            {detail && (
+                <p className="-mt-1 mb-3 text-[11px] text-[var(--text-muted)]">{detail}</p>
+            )}
             {action && (
                 <button
                     onClick={action.onClick}
