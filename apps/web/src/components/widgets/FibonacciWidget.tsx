@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CartesianGrid,
   Line,
@@ -46,6 +46,14 @@ export function FibonacciWidget({ symbol }: { symbol?: string }) {
   )
   const hasData = chartData.length > 0 && Boolean(data)
   const isFallback = Boolean(error && hasData)
+
+  useEffect(() => {
+    if (!hasData || typeof window === 'undefined') return
+    const timeoutId = window.setTimeout(() => {
+      window.dispatchEvent(new Event('resize'))
+    }, 120)
+    return () => window.clearTimeout(timeoutId)
+  }, [hasData, chartData.length])
 
   const orderedLevels = useMemo(() => {
     return Object.entries(data?.levels || {}).sort((left, right) => right[1] - left[1])

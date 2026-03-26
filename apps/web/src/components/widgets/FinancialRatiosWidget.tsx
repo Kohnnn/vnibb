@@ -71,6 +71,7 @@ const ratioLabels: Record<string, string> = {
 };
 
 const TABLE_YEAR_LIMIT = 10;
+const NULL_LIKE_RATIO_KEYS = new Set(['pe', 'pb', 'ps', 'peg_ratio', 'ev_sales', 'ev_ebitda']);
 
 const VALID_RATIO_PERIOD_RE = /^20\d{2}(?:-Q[1-4])?$/
 
@@ -196,7 +197,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
 
     const tableColumns = useMemo(
         () =>
-            ratios.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => ({
+            ratios.slice(-TABLE_YEAR_LIMIT).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
@@ -212,7 +213,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
         const rows: DenseTableRow[] = [];
 
         const hasMetricData = (metricKey: string) =>
-            ratios.slice(0, TABLE_YEAR_LIMIT).some((entry) => {
+            ratios.slice(-TABLE_YEAR_LIMIT).some((entry) => {
                 const value = entry[metricKey as keyof typeof entry];
                 return typeof value === 'number' && Number.isFinite(value);
             });
@@ -238,7 +239,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                     parentId: groupId,
                     indent: 12,
                     values: Object.fromEntries(
-                        ratios.slice(0, TABLE_YEAR_LIMIT).map((entry, index) => [
+                        ratios.slice(-TABLE_YEAR_LIMIT).map((entry, index) => [
                             tableColumns[index]?.key ?? `period_${index}`,
                             entry[metricKey as keyof typeof entry],
                         ])
@@ -291,21 +292,26 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                     ) : !hasData ? (
                         <WidgetEmpty message={`No ratio data for ${symbol}`} icon={<BarChart3 size={18} />} />
                     ) : (
-                        <DenseFinancialTable
-                            columns={tableColumns}
-                            rows={tableRows}
-                            sortable
-                            storageKey={`ratios:${id}:${symbol}:${period}`}
-                            valueFormatter={(value, row) => {
-                                if (row.id === 'ev_ebitda' && typeof value === 'number' && value === 0) {
-                                    return EMPTY_VALUE;
-                                }
-                                const isPercentMetric = percentKeys.has(row.id);
-                                return isPercentMetric
-                                    ? formatPct(value as number | null | undefined)
-                                    : formatRatio(value as number | null | undefined);
-                            }}
-                        />
+                        <>
+                            <DenseFinancialTable
+                                columns={tableColumns}
+                                rows={tableRows}
+                                sortable
+                                storageKey={`ratios:${id}:${symbol}:${period}`}
+                                valueFormatter={(value, row) => {
+                                    if (NULL_LIKE_RATIO_KEYS.has(row.id) && typeof value === 'number' && value === 0) {
+                                        return EMPTY_VALUE;
+                                    }
+                                    const isPercentMetric = percentKeys.has(row.id);
+                                    return isPercentMetric
+                                        ? formatPct(value as number | null | undefined)
+                                        : formatRatio(value as number | null | undefined);
+                                }}
+                            />
+                            <div className="px-1 pt-1 text-[10px] text-[var(--text-muted)] italic">
+                                First available period is shown as the base period; missing ratios render as {EMPTY_VALUE}.
+                            </div>
+                        </>
                     )}
                 </div>
             </div>

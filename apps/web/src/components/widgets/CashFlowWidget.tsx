@@ -121,7 +121,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS`,
+        () => `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS • First available period is the base period`,
         [unitLegend]
     );
 

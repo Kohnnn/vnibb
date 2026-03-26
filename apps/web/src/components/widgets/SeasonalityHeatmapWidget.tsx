@@ -148,7 +148,12 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
         ) : !hasData ? (
           <WidgetEmpty message="Insufficient historical data for the selected period" icon={<CalendarDays size={18} />} />
         ) : (
-          <div className="min-w-[520px] space-y-2">
+          <div className="min-w-[560px] space-y-2">
+            {years.length < 2 ? (
+              <div className="rounded-md border border-blue-500/15 bg-blue-500/8 px-2 py-1 text-[10px] text-blue-200">
+                Limited history: seasonality patterns are still forming for this symbol.
+              </div>
+            ) : null}
             {data?.data?.warning ? (
               <div className="rounded-md border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-[10px] text-blue-200">
                 {data.data.warning}

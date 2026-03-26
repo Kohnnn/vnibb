@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Area,
   ComposedChart,
@@ -74,6 +74,14 @@ export function IchimokuWidget({ symbol }: IchimokuWidgetProps) {
   const latest = chartData[chartData.length - 1]
   const hasData = chartData.length > 0
   const isFallback = Boolean(error && hasData)
+
+  useEffect(() => {
+    if (!hasData || typeof window === 'undefined') return
+    const timeoutId = window.setTimeout(() => {
+      window.dispatchEvent(new Event('resize'))
+    }, 120)
+    return () => window.clearTimeout(timeoutId)
+  }, [hasData, chartData.length])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Ichimoku cloud" icon={<CloudSun size={18} />} />
