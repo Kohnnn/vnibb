@@ -203,18 +203,20 @@ export function BlockTradeWidget({ symbol }: BlockTradeWidgetProps) {
       </div>
 
       {/* Legend */}
-      <div className="mt-2 pt-2 border-t border-[var(--border-color)]">
-        <div className="flex items-center gap-3 text-[10px] text-[var(--text-muted)]">
-          <div className="flex items-center gap-1">
-            <Globe size={10} className="text-blue-400" />
-            <span>Foreign</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Building2 size={10} className="text-cyan-400" />
-            <span>Proprietary</span>
+      {filteredTrades.length > 0 ? (
+        <div className="mt-2 pt-2 border-t border-[var(--border-color)]">
+          <div className="flex items-center gap-3 text-[10px] text-[var(--text-muted)]">
+            <div className="flex items-center gap-1">
+              <Globe size={10} className="text-blue-400" />
+              <span>Foreign</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Building2 size={10} className="text-cyan-400" />
+              <span>Proprietary</span>
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

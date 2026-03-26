@@ -94,6 +94,10 @@ export function DenseFinancialTable({
   valueFormatter,
 }: DenseFinancialTableProps) {
   const visibleColumns = useMemo(() => columns.slice(0, Math.max(1, maxYears)), [columns, maxYears])
+  const metricColumnWidth = 168
+  const yearColumnWidth = 104
+  const trendColumnWidth = 88
+  const tableMinWidth = metricColumnWidth + visibleColumns.length * yearColumnWidth + (showTrend ? trendColumnWidth : 0)
   const hasGroups = useMemo(() => rows.some((row) => row.isGroup), [rows])
   const groupChildCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -243,10 +247,10 @@ export function DenseFinancialTable({
 
   return (
     <div className={cn('overflow-auto', className)}>
-      <table className="data-table financial-dense freeze-first-col w-full border-separate border-spacing-0 text-[10px] text-left leading-4">
+      <table className="data-table financial-dense freeze-first-col min-w-max w-full border-separate border-spacing-0 text-[10px] text-left leading-4" style={{ minWidth: `${tableMinWidth}px` }}>
         <thead className="sticky top-0 z-10 bg-[var(--bg-primary)] text-[var(--text-muted)]">
           <tr className="border-b border-[var(--border-color)]">
-            <th className="px-2 py-1 font-bold uppercase tracking-tighter">Metric</th>
+            <th className="px-2 py-1 font-bold uppercase tracking-tighter" style={{ minWidth: `${metricColumnWidth}px`, width: `${metricColumnWidth}px` }}>Metric</th>
             {visibleColumns.map((column) => {
               const isActiveSort = sortKey === column.key
               return (
@@ -257,7 +261,7 @@ export function DenseFinancialTable({
                     column.align === 'left' ? 'text-left' : 'text-right',
                     sortable ? 'cursor-pointer select-none hover:text-[var(--text-primary)]' : ''
                   )}
-                  style={column.width ? { minWidth: column.width, width: column.width } : { minWidth: '88px' }}
+                  style={column.width ? { minWidth: column.width, width: column.width } : { minWidth: `${yearColumnWidth}px`, width: `${yearColumnWidth}px` }}
                   onClick={() => onSort(column.key)}
                 >
                   <span className="inline-flex items-center gap-1">
@@ -268,7 +272,7 @@ export function DenseFinancialTable({
               )
             })}
             {showTrend ? (
-              <th className="trend-col px-2 py-1 text-center font-bold uppercase tracking-tighter">Trend</th>
+              <th className="trend-col px-2 py-1 text-center font-bold uppercase tracking-tighter" style={{ minWidth: `${trendColumnWidth}px`, width: `${trendColumnWidth}px` }}>Trend</th>
             ) : null}
           </tr>
         </thead>
@@ -293,7 +297,7 @@ export function DenseFinancialTable({
                     'px-2 py-1 text-[var(--text-secondary)]',
                     isEmphasisRow(row) ? 'text-[var(--text-primary)]' : ''
                   )}
-                  style={row.indent ? { paddingLeft: `${8 + row.indent}px` } : undefined}
+                  style={{ minWidth: `${metricColumnWidth}px`, width: `${metricColumnWidth}px`, ...(row.indent ? { paddingLeft: `${8 + row.indent}px` } : {}) }}
                 >
                   {row.isGroup ? (
                     (groupChildCounts[row.id] || 0) > 3 ? (
@@ -349,7 +353,7 @@ export function DenseFinancialTable({
                         copiedCellKey === `${row.id}:${column.key}` ? 'ring-1 ring-inset ring-blue-400/80' : '',
                         column.align === 'left' ? 'text-left' : 'text-right'
                       )}
-                      style={column.width ? { minWidth: column.width, width: column.width } : { minWidth: '88px' }}
+                      style={column.width ? { minWidth: column.width, width: column.width } : { minWidth: `${yearColumnWidth}px`, width: `${yearColumnWidth}px` }}
                       onClick={() => {
                         if (!row.isGroup) {
                           void handleCopyValue(`${row.id}:${column.key}`, displayValue)

@@ -145,16 +145,18 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove }: IntradayTradesW
                     )}
                 </div>
 
-                <div className="flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-1.5">
-                    <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-tighter text-[var(--text-muted)]">
-                        <Activity size={10} />
-                        Total {trades.length.toLocaleString()} Ticks
+                {hasData ? (
+                    <div className="flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-1.5">
+                        <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-tighter text-[var(--text-muted)]">
+                            <Activity size={10} />
+                            Total {trades.length.toLocaleString()} Ticks
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                            <span className="text-[9px] font-bold uppercase text-[var(--text-muted)]">Live</span>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                        <span className="text-[9px] font-bold uppercase text-[var(--text-muted)]">Live</span>
-                    </div>
-                </div>
+                ) : null}
             </div>
         </WidgetContainer>
     );

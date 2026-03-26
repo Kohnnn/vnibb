@@ -134,7 +134,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
-        () => `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS`,
+        () => `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS • First available period is the base period`,
         [unitLegend]
     );
 
