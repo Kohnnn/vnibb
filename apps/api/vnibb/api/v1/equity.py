@@ -3,6 +3,7 @@ Equity API Endpoints with Graceful Degradation.
 """
 
 import asyncio
+from bisect import bisect_right
 import logging
 import re
 import unicodedata
@@ -2087,6 +2088,25 @@ def _extract_year_quarter(period_value: str) -> tuple[Optional[int], Optional[in
     return year, quarter
 
 
+def _resolve_period_end_date(
+    year: int | None, quarter: int | None, normalized_period: str
+) -> date | None:
+    if year is None:
+        return None
+
+    if normalized_period == "quarter" and quarter in {1, 2, 3, 4}:
+        month_day_map = {
+            1: (3, 31),
+            2: (6, 30),
+            3: (9, 30),
+            4: (12, 31),
+        }
+        month, day = month_day_map[int(quarter)]
+        return date(int(year), month, day)
+
+    return date(int(year), 12, 31)
+
+
 def _build_ratio_eps_lookups(
     ratio_rows: List[FinancialRatioData],
 ) -> tuple[dict[tuple[int, int], float], dict[int, float]]:
@@ -2611,6 +2631,52 @@ async def _enrich_missing_ratio_metrics(
             fallback_market_cap=market_cap,
         )
 
+    period_end_targets = {
+        (year, quarter or 0): _resolve_period_end_date(year, quarter, normalized_period)
+        for item in rows
+        for year, quarter in [_extract_year_quarter(item.period or "")]
+        if year is not None
+    }
+    period_end_targets = {
+        key: target for key, target in period_end_targets.items() if target is not None
+    }
+    period_price_lookup: dict[tuple[int, int], float | None] = {}
+    period_market_cap_lookup: dict[tuple[int, int], float | None] = {}
+
+    if period_end_targets:
+        max_target = max(period_end_targets.values())
+        price_history_stmt = (
+            select(StockPrice.time, StockPrice.close)
+            .where(
+                StockPrice.symbol == symbol,
+                StockPrice.interval == "1D",
+                StockPrice.time <= max_target,
+            )
+            .order_by(StockPrice.time.asc())
+        )
+        price_history_rows = (await db.execute(price_history_stmt)).all()
+        price_dates = [row.time for row in price_history_rows if row.time is not None]
+        price_closes = [
+            _coerce_optional_float(row.close) for row in price_history_rows if row.time is not None
+        ]
+
+        if price_dates and price_closes:
+            share_multiplier = (
+                1.0
+                if outstanding_shares is not None and outstanding_shares >= 1_000_000
+                else 1_000_000.0
+            )
+            for key, target_date in period_end_targets.items():
+                index = bisect_right(price_dates, target_date) - 1
+                if index < 0:
+                    continue
+                close_value = price_closes[index]
+                period_price_lookup[key] = close_value
+                if close_value not in (None, 0) and outstanding_shares not in (None, 0):
+                    period_market_cap_lookup[key] = (
+                        outstanding_shares * share_multiplier * close_value
+                    )
+
     for item in rows:
         year, quarter = _extract_year_quarter(item.period or "")
         if year is None:
@@ -2804,7 +2870,10 @@ async def _enrich_missing_ratio_metrics(
                 item.bvps = book_value_per_share
             elif total_equity is not None and outstanding_shares not in (None, 0):
                 item.bvps = total_equity / outstanding_shares
-        price_vnd = _price_to_vnd_units(latest_price, dps_hint=item.dps or item.eps)
+        period_price = period_price_lookup.get(key)
+        valuation_price = _pick_optional_float(period_price, latest_price)
+        valuation_market_cap = _pick_optional_float(period_market_cap_lookup.get(key), market_cap)
+        price_vnd = _price_to_vnd_units(valuation_price, dps_hint=item.dps or item.eps)
         if item.pe is None and price_vnd not in (None, 0) and item.eps not in (None, 0):
             item.pe = price_vnd / item.eps
         if item.pb is None and price_vnd not in (None, 0) and item.bvps not in (None, 0):
@@ -2812,15 +2881,15 @@ async def _enrich_missing_ratio_metrics(
         if (
             not is_bank_like
             and item.ps is None
-            and market_cap not in (None, 0)
+            and valuation_market_cap not in (None, 0)
             and revenue not in (None, 0)
         ):
-            item.ps = market_cap / revenue
+            item.ps = valuation_market_cap / revenue
         if (
             not is_bank_like
             and item.ev_sales is None
             and revenue not in (None, 0)
-            and market_cap not in (None, 0)
+            and valuation_market_cap not in (None, 0)
         ):
             total_debt = None
             if short_term_debt is not None or long_term_debt is not None:
@@ -2828,7 +2897,7 @@ async def _enrich_missing_ratio_metrics(
             elif total_liabilities is not None:
                 total_debt = total_liabilities
 
-            enterprise_value = market_cap
+            enterprise_value = valuation_market_cap
             if total_debt is not None:
                 enterprise_value += total_debt
             if cash_and_equivalents is not None:
@@ -2997,9 +3066,9 @@ async def _enrich_missing_ratio_metrics(
             not is_bank_like
             and item.fcf_yield is None
             and free_cash_flow is not None
-            and market_cap not in (None, 0)
+            and valuation_market_cap not in (None, 0)
         ):
-            item.fcf_yield = free_cash_flow / market_cap
+            item.fcf_yield = free_cash_flow / valuation_market_cap
 
         if item.dps is None and dividends_paid is not None and outstanding_shares not in (None, 0):
             item.dps = abs(dividends_paid) / outstanding_shares
@@ -3007,11 +3076,11 @@ async def _enrich_missing_ratio_metrics(
         item.dividend_yield = _resolve_dividend_yield_percent(
             raw_yield=item.dividend_yield,
             dps=item.dps,
-            latest_price=latest_price,
+            latest_price=valuation_price,
         )
 
         if item.dps is None and item.dividend_yield is not None:
-            price_vnd = _price_to_vnd_units(latest_price, dps_hint=1.0)
+            price_vnd = _price_to_vnd_units(valuation_price, dps_hint=1.0)
             if price_vnd not in (None, 0):
                 item.dps = (item.dividend_yield / 100) * price_vnd
 
@@ -3019,7 +3088,7 @@ async def _enrich_missing_ratio_metrics(
             item.dividend_yield = _resolve_dividend_yield_percent(
                 raw_yield=None,
                 dps=item.dps,
-                latest_price=latest_price,
+                latest_price=valuation_price,
             )
 
         if item.payout_ratio is None:
