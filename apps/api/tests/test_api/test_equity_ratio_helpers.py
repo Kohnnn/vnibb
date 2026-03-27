@@ -8,7 +8,7 @@ from vnibb.api.v1.equity import _enrich_missing_ratio_metrics
 from vnibb.models.company import Company
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.stock import Stock
+from vnibb.models.stock import Stock, StockPrice
 from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
 
 
@@ -417,3 +417,52 @@ async def test_enrich_missing_ratio_metrics_backfills_missing_statement_periods(
 
     backfilled_2021 = next(item for item in enriched if item.period == "2021")
     assert backfilled_2021.roe == pytest.approx((20.0 / 110.0) * 100)
+
+
+@pytest.mark.asyncio
+async def test_enrich_missing_ratio_metrics_uses_period_end_price_for_valuation(test_db):
+    test_db.add(Stock(id=40, symbol="VNM", exchange="HOSE", company_name="Vinamilk"))
+    test_db.add(
+        Company(
+            symbol="VNM",
+            company_name="Vinamilk",
+            exchange="HOSE",
+            outstanding_shares=1_000_000,
+        )
+    )
+    test_db.add_all(
+        [
+            StockPrice(
+                id=400,
+                stock_id=40,
+                symbol="VNM",
+                time=date(2022, 12, 30),
+                open=50.0,
+                high=51.0,
+                low=49.0,
+                close=50.0,
+                volume=1000,
+                interval="1D",
+            ),
+            StockPrice(
+                id=401,
+                stock_id=40,
+                symbol="VNM",
+                time=date(2024, 1, 2),
+                open=80.0,
+                high=81.0,
+                low=79.0,
+                close=80.0,
+                volume=1000,
+                interval="1D",
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    rows = [FinancialRatioData(symbol="VNM", period="2022", eps=5_000.0, bvps=20_000.0)]
+    enriched = await _enrich_missing_ratio_metrics("VNM", "year", rows, test_db)
+    item = enriched[0]
+
+    assert item.pe == pytest.approx(10.0)
+    assert item.pb == pytest.approx(2.5)
