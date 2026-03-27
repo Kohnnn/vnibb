@@ -8,6 +8,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { useCorrelationMatrix } from '@/lib/queries'
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink'
 import { cn } from '@/lib/utils'
 
 interface CorrelationMatrixWidgetProps {
@@ -45,6 +46,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
   const [topN, setTopN] = useState(10)
   const [hoverTicker, setHoverTicker] = useState<string | null>(null)
   const upperSymbol = symbol?.toUpperCase() || ''
+  const { setLinkedSymbol } = useWidgetSymbolLink()
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useCorrelationMatrix(upperSymbol, {
     days,
@@ -200,11 +202,13 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
                           type="button"
                           onMouseEnter={() => setHoverTicker(pair.ticker)}
                           onMouseLeave={() => setHoverTicker(null)}
-                          className={cn(
-                            'w-full rounded-md border border-transparent px-2 py-1.5 text-left transition-colors',
-                            hoverTicker === pair.ticker ? 'bg-[var(--bg-hover)] border-[var(--border-default)]' : 'hover:bg-[var(--bg-hover)]/70'
-                          )}
-                        >
+                        className={cn(
+                          'w-full rounded-md border border-transparent px-2 py-1.5 text-left transition-colors',
+                          hoverTicker === pair.ticker ? 'bg-[var(--bg-hover)] border-[var(--border-default)]' : 'hover:bg-[var(--bg-hover)]/70'
+                        )}
+                        onClick={() => setLinkedSymbol(pair.ticker)}
+                        aria-label={`Set symbol to ${pair.ticker}`}
+                      >
                           <div className="mb-1 flex items-center justify-between gap-2 text-xs">
                             <span className="font-semibold text-[var(--text-primary)]">{pair.ticker}</span>
                             <span className={cn('font-mono', pair.value != null && pair.value >= 0 ? 'text-emerald-200' : 'text-rose-200')}>
@@ -246,6 +250,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
                                 'min-w-[72px] px-1 py-1 text-center text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]',
                                 (hoverTicker === ticker || ticker === upperSymbol) && 'text-[var(--text-primary)]'
                               )}
+                              onClick={() => ticker !== upperSymbol ? setLinkedSymbol(ticker) : undefined}
                             >
                               {ticker}
                             </th>
@@ -262,6 +267,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
                               )}
                               onMouseEnter={() => setHoverTicker(rowTicker)}
                               onMouseLeave={() => setHoverTicker(null)}
+                              onClick={() => rowTicker !== upperSymbol ? setLinkedSymbol(rowTicker) : undefined}
                             >
                               {rowTicker}
                             </th>

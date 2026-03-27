@@ -201,7 +201,15 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
                     <td className="py-1 text-right font-mono text-red-300">{formatPct(episode.depth_pct)}</td>
                     <td className="py-1 text-right font-mono">{episode.days_to_trough}d</td>
                     <td className="py-1 text-right font-mono">
-                      {episode.days_to_recovery != null ? `${episode.days_to_recovery}d` : 'recovering'}
+                      {episode.days_to_recovery != null ? (
+                        <span className="inline-flex rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-semibold text-emerald-300">
+                          Recovered {episode.days_to_recovery}d
+                        </span>
+                      ) : (
+                        <span className="inline-flex rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-semibold text-amber-300">
+                          Recovering
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}

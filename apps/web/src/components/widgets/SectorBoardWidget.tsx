@@ -8,6 +8,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useSectorBoard } from '@/lib/queries';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { formatNumber } from '@/lib/units';
 import { cn } from '@/lib/utils';
 
@@ -49,6 +50,7 @@ function colorClass(color: string) {
 function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sortBy, setSortBy] = useState<'volume' | 'market_cap' | 'change_pct'>('volume');
+  const { setLinkedSymbol } = useWidgetSymbolLink();
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorBoard({
     limit_per_sector: 12,
@@ -120,13 +122,13 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
                   key={option.value}
                   type="button"
                   onClick={() => setSortBy(option.value)}
-                  className={cn(
-                    'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
-                    sortBy === option.value
-                      ? 'bg-blue-600 text-white'
-                      : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                  )}
-                >
+                    className={cn(
+                     'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
+                     sortBy === option.value
+                       ? 'bg-blue-600 text-white ring-1 ring-blue-300/40'
+                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+                   )}
+                 >
                   {option.label}
                 </button>
               ))}
@@ -178,12 +180,18 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
                       {sector.change_pct >= 0 ? '+' : ''}{formatNumber(sector.change_pct, { decimals: 2 })}%
                     </div>
                   </div>
-                  <div className="divide-y divide-[var(--border-subtle)]">
-                    {sector.stocks.map((stock) => (
-                      <div key={`${sector.name}:${stock.symbol}`} className="flex items-center justify-between px-3 py-2">
-                        <div>
-                          <div className="text-xs font-bold text-[var(--text-primary)]">{stock.symbol}</div>
-                          <div className="text-[10px] text-[var(--text-muted)]">
+                    <div className="divide-y divide-[var(--border-subtle)]">
+                      {sector.stocks.map((stock) => (
+                        <button
+                          key={`${sector.name}:${stock.symbol}`}
+                          type="button"
+                          onClick={() => setLinkedSymbol(stock.symbol)}
+                          className="flex w-full items-center justify-between px-3 py-2 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                          aria-label={`Open ${stock.symbol}`}
+                        >
+                          <div>
+                            <div className="text-xs font-bold text-[var(--text-primary)]">{stock.symbol}</div>
+                            <div className="text-[10px] text-[var(--text-muted)]">
                             Vol {formatCompactNumber(stock.volume)}
                           </div>
                         </div>
@@ -192,13 +200,13 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
                             {stock.change_pct != null && stock.change_pct > 0 ? '+' : ''}
                             {formatNumber(stock.change_pct ?? null, { decimals: 2 })}%
                           </div>
-                          <div className="text-[10px] font-mono text-[var(--text-secondary)]">
-                            {formatNumber(stock.price ?? null, { decimals: 2 })}
+                            <div className="text-[10px] font-mono text-[var(--text-secondary)]">
+                              {formatNumber(stock.price ?? null, { decimals: 2 })}
+                            </div>
                           </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                        </button>
+                      ))}
+                    </div>
                 </div>
               ))
             )}
