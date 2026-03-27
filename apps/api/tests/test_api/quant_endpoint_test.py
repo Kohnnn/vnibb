@@ -54,7 +54,7 @@ async def test_quant_endpoint_rejects_10y_period(client):
     detail = payload.get("detail", payload)
     assert detail["code"] == "INVALID_PERIOD"
     assert detail["requested_period"] == "10Y"
-    assert detail["allowed_periods"] == ["1M", "6M", "3Y", "5Y", "ALL"]
+    assert detail["allowed_periods"] == ["1M", "6M", "1Y", "3Y", "5Y", "ALL"]
 
 
 @pytest.mark.asyncio
@@ -149,6 +149,27 @@ async def test_quant_endpoint_accepts_all_period(client, monkeypatch):
     assert payload["data"]["period"] == "ALL"
     assert "seasonality" in payload["data"]["metrics"]
     assert "sortino" in payload["data"]["metrics"]
+
+
+@pytest.mark.asyncio
+async def test_quant_endpoint_accepts_1y_period(client, monkeypatch):
+    async def fake_load_price_frame(*_args, **_kwargs):
+        return _build_price_frame(260)
+
+    monkeypatch.setattr("vnibb.api.v1.quant._load_price_frame", fake_load_price_frame)
+
+    response = await client.get(
+        "/api/v1/quant/VCI",
+        params={
+            "metrics": "seasonality,sortino",
+            "period": "1Y",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["error"] is None
+    assert payload["data"]["period"] == "1Y"
 
 
 def test_compute_sortino_handles_string_dates_and_zero_downside():

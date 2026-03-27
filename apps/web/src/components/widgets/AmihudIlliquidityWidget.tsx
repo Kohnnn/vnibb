@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { Droplets, TrendingDown, TrendingUp } from 'lucide-react'
 import { useHistoricalPrices } from '@/lib/queries'
 import type { OHLCData } from '@/lib/chartUtils'
@@ -7,6 +8,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 
 interface AmihudIlliquidityWidgetProps {
   symbol: string
@@ -131,13 +133,12 @@ function resolveLiquidityState(trendPct: number) {
 
 export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
+  const [period, setPeriod] = useState<QuantPeriodOption>('1Y')
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useHistoricalPrices(
     upperSymbol,
     {
-      startDate: new Date(Date.now() - 6 * 365 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split('T')[0],
+      startDate: getQuantPeriodStartDate(period),
       enabled: Boolean(upperSymbol),
     }
   )
@@ -172,13 +173,27 @@ export function AmihudIlliquidityWidget({ symbol }: AmihudIlliquidityWidgetProps
           <Droplets size={12} className="text-cyan-400" />
           <span>Amihud Illiquidity</span>
         </div>
-        <WidgetMeta
-          updatedAt={dataUpdatedAt}
-          isFetching={isFetching && hasData}
-          isCached={isFallback}
-          note="20D mean"
-          align="right"
-        />
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {QUANT_PERIOD_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setPeriod(option)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <WidgetMeta
+            updatedAt={dataUpdatedAt}
+            isFetching={isFetching && hasData}
+            isCached={isFallback}
+            note={`${period} • 20D mean`}
+            align="right"
+          />
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto space-y-1 pr-1">

@@ -186,18 +186,16 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
     }, [orderedItems, tableColumns]);
 
     const renderTable = () => (
-        <div className="space-y-1">
-            <DenseFinancialTable
-                columns={tableColumns}
-                rows={tableRows}
-                sortable
-                storageKey={`cash-flow:${id}:${symbol}:${period}`}
-                valueFormatter={(value) =>
-                    formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig)
-                }
-            />
-            <div className="px-1 pt-1 text-[10px] text-[var(--text-muted)] italic">{unitNote}</div>
-        </div>
+        <DenseFinancialTable
+            columns={tableColumns}
+            rows={tableRows}
+            sortable
+            storageKey={`cash-flow:${id}:${symbol}:${period}`}
+            footerNote={unitNote}
+            valueFormatter={(value) =>
+                formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig)
+            }
+        />
     );
 
     const [chartType, setChartType] = useState<'overview' | 'fcf'>('overview');

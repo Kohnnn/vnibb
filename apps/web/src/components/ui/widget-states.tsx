@@ -133,7 +133,7 @@ export function WidgetEmpty({
     message = 'No data available',
     icon,
     detail,
-    size = 'default',
+    size = 'compact',
     action
 }: WidgetEmptyProps) {
     return (

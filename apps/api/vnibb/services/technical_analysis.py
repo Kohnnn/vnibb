@@ -984,7 +984,11 @@ class TechnicalAnalysisService:
         )
 
         indicator_signals: List[str] = []
-        weighted_signals: List[tuple[str, float]] = []
+        category_weighted_signals: Dict[str, List[tuple[str, float]]] = {
+            "trend": [],
+            "oscillator": [],
+            "volume": [],
+        }
         indicator_details = []
 
         current_price = ma.get("current_price")
@@ -1011,11 +1015,12 @@ class TechnicalAnalysisService:
             value: Any,
             signal: str,
             weight: float | None = None,
+            category: str | None = None,
         ) -> None:
             indicator_details.append({"name": name, "value": value, "signal": signal})
             indicator_signals.append(signal)
-            if weight is not None:
-                weighted_signals.append((signal, weight))
+            if weight is not None and category is not None:
+                category_weighted_signals.setdefault(category, []).append((signal, weight))
 
         def contextualize_signal(
             *,
@@ -1051,6 +1056,7 @@ class TechnicalAnalysisService:
                 value=ma.get("sma" if "sma" in key else "ema", {}).get(key),
                 signal=adjusted_signal,
                 weight=weight,
+                category="trend",
             )
 
         if rsi.get("value") is not None:
@@ -1065,6 +1071,7 @@ class TechnicalAnalysisService:
                 value=rsi["value"],
                 signal=adjusted_rsi_signal,
                 weight=0.4,
+                category="oscillator",
             )
 
         if macd.get("macd") is not None:
@@ -1080,6 +1087,7 @@ class TechnicalAnalysisService:
                 value=histogram_value,
                 signal=adjusted_macd_signal,
                 weight=0.45,
+                category="oscillator",
             )
 
         if bb.get("upper") is not None:
@@ -1088,6 +1096,7 @@ class TechnicalAnalysisService:
                 value=f"{bb['percent_b']:.2%}",
                 signal=bb["signal"],
                 weight=0.35,
+                category="oscillator",
             )
 
         if stoch.get("k") is not None:
@@ -1102,6 +1111,7 @@ class TechnicalAnalysisService:
                 value=stoch["k"],
                 signal=adjusted_stoch_signal,
                 weight=0.35,
+                category="oscillator",
             )
 
         if adx.get("adx") is not None:
@@ -1111,6 +1121,7 @@ class TechnicalAnalysisService:
                 value=adx["adx"],
                 signal=adx["signal"],
                 weight=adx_weight,
+                category="trend",
             )
 
         if vol.get("volume") is not None:
@@ -1118,7 +1129,8 @@ class TechnicalAnalysisService:
                 name="Volume",
                 value=f"{vol['relative_volume']}x",
                 signal=vol["signal"],
-                weight=None,
+                weight=0.3,
+                category="volume",
             )
 
         buy_count = indicator_signals.count("buy")
@@ -1126,24 +1138,38 @@ class TechnicalAnalysisService:
         neutral_count = indicator_signals.count("neutral")
         total = len(indicator_signals)
 
-        total_weight = sum(weight for _, weight in weighted_signals)
-        weighted_score = 0.0
-        for signal, weight in weighted_signals:
-            if signal == "buy":
-                weighted_score += weight
-            elif signal == "sell":
-                weighted_score -= weight
+        category_weights = {"trend": 1.0, "oscillator": 1.0, "volume": 0.6}
+        weighted_categories: List[tuple[float, float]] = []
+        for category, signals in category_weighted_signals.items():
+            if not signals:
+                continue
 
-        volume_signal = vol.get("signal")
-        if volume_signal in {"buy", "sell"} and weighted_score != 0:
-            relative_volume = float(vol.get("relative_volume") or 1.0)
-            same_direction = (volume_signal == "buy" and weighted_score > 0) or (
-                volume_signal == "sell" and weighted_score < 0
+            total_category_weight = sum(weight for _, weight in signals)
+            if total_category_weight <= 0:
+                continue
+
+            category_score = 0.0
+            for signal, weight in signals:
+                if signal == "buy":
+                    category_score += weight
+                elif signal == "sell":
+                    category_score -= weight
+
+            normalized_category_score = category_score / total_category_weight
+            weighted_categories.append(
+                (normalized_category_score, category_weights.get(category, 1.0))
             )
-            impact = 1.0 + min(max(relative_volume - 1.0, 0.0), 1.5) * 0.18
-            weighted_score = weighted_score * impact if same_direction else weighted_score / impact
 
-        normalized_score = ((weighted_score / total_weight) + 1) * 50 if total_weight > 0 else 50.0
+        if weighted_categories:
+            normalized_score = (
+                (
+                    sum(score * weight for score, weight in weighted_categories)
+                    / sum(weight for _, weight in weighted_categories)
+                )
+                + 1
+            ) * 50
+        else:
+            normalized_score = 50.0
 
         if 40 <= normalized_score <= 60:
             overall_signal = "neutral"

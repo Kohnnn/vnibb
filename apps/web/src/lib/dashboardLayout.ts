@@ -66,6 +66,7 @@ const FALLBACK_BEHAVIOR: LayoutBehavior = {
 const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   screener: { preferredW: 24, preferredH: 12, minW: 16, minH: 8, orientation: 'horizontal', expandPriority: 6 },
   ticker_info: { preferredW: 6, preferredH: 4, minW: 5, minH: 4, maxW: 8, orientation: 'balanced', expandPriority: 2 },
+  valuation_band: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
   key_metrics: { preferredW: 8, preferredH: 9, minW: 6, minH: 8, maxW: 10, orientation: 'vertical', expandPriority: 1 },
   share_statistics: { preferredW: 6, preferredH: 5, minW: 5, minH: 4, maxW: 8, orientation: 'vertical', expandPriority: 1 },
   ticker_profile: { preferredW: 12, preferredH: 5, minW: 8, minH: 4, maxW: 14, orientation: 'horizontal', expandPriority: 3 },
@@ -121,6 +122,7 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   hurst_market_structure: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   parkinson_volatility: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   amihud_illiquidity: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  risk_dashboard: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
   signal_summary: { preferredW: 24, preferredH: 4, minW: 12, minH: 4, orientation: 'horizontal', expandPriority: 6 },
 }
 

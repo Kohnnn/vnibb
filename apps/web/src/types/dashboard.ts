@@ -27,6 +27,7 @@ export type WidgetType =
     | 'valuation_multiples'
     | 'price_chart'
     | 'valuation_multiples_chart'
+    | 'valuation_band'
 
     | 'key_metrics'
     | 'share_statistics'
@@ -98,6 +99,7 @@ export type WidgetType =
     | 'earnings_quality'
     | 'smart_money'
     | 'relative_rotation'
+    | 'risk_dashboard'
     | 'forex_rates'
     | 'commodities'
     | 'similar_stocks'

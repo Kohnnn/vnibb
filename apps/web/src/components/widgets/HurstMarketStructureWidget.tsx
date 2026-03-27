@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Sigma } from 'lucide-react'
 import { useHistoricalPrices } from '@/lib/queries'
 import type { OHLCData } from '@/lib/chartUtils'
@@ -8,6 +8,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 
 interface HurstMarketStructureWidgetProps {
   symbol: string
@@ -106,13 +107,12 @@ function classifyHurst(hurst: number | null): { label: string; className: string
 
 export function HurstMarketStructureWidget({ symbol }: HurstMarketStructureWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
+  const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useHistoricalPrices(
     upperSymbol,
     {
-      startDate: new Date(Date.now() - 8 * 365 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split('T')[0],
+      startDate: getQuantPeriodStartDate(period),
       enabled: Boolean(upperSymbol),
     }
   )
@@ -162,7 +162,21 @@ export function HurstMarketStructureWidget({ symbol }: HurstMarketStructureWidge
           <Sigma size={12} className="text-cyan-300" />
           <span>Hurst & Market Structure</span>
         </div>
-        <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="R/S method" align="right" />
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {QUANT_PERIOD_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setPeriod(option)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} • R/S method`} align="right" />
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto pr-1">
