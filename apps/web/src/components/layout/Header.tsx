@@ -52,9 +52,8 @@ function formatHeaderPrice(value: number | null | undefined): string {
 
 function formatHeaderPercent(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
-  const normalized = Math.abs(value) > 1 ? value : value * 100
-  const sign = normalized > 0 ? '+' : ''
-  return `${sign}${normalized.toFixed(2)}%`
+  const sign = value > 0 ? '+' : ''
+  return `${sign}${value.toFixed(2)}%`
 }
 
 function formatHeaderDelta(value: number | null | undefined): string {

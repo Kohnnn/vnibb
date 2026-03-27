@@ -2335,6 +2335,38 @@ async def _enrich_missing_ratio_metrics(
     balance_rows = (await db.execute(balance_stmt)).all()
     cashflow_rows = (await db.execute(cashflow_stmt)).all()
 
+    existing_periods = {
+        str(item.period or "").upper() for item in rows if str(item.period or "").strip()
+    }
+
+    def _serialize_ratio_period(year: int | None, quarter: int | None) -> str | None:
+        if year is None:
+            return None
+        normalized_year = int(year)
+        normalized_quarter = int(quarter or 0)
+        if normalized_period == "quarter":
+            if normalized_quarter not in {1, 2, 3, 4}:
+                return None
+            return f"{normalized_year}-Q{normalized_quarter}"
+        return str(normalized_year)
+
+    derived_periods = {
+        _serialize_ratio_period(year, quarter)
+        for year, quarter, *_rest in [*income_rows, *balance_rows, *cashflow_rows]
+    }
+
+    missing_periods = [
+        period_value
+        for period_value in derived_periods
+        if period_value and period_value.upper() not in existing_periods
+    ]
+    if missing_periods:
+        rows.extend(
+            FinancialRatioData(symbol=symbol, period=period_value)
+            for period_value in sorted(missing_periods, key=_ratio_period_sort_key)
+        )
+        existing_periods.update(period_value.upper() for period_value in missing_periods)
+
     income_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
     prev_income_lookup: dict[tuple[int, int], tuple[float | None, float | None, float | None]] = {}
     for (

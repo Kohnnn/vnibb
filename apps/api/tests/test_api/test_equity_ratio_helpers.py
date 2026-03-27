@@ -360,3 +360,60 @@ async def test_enrich_missing_ratio_metrics_computes_bank_native_kpis(test_db):
     assert item.nim == pytest.approx((80.0 / 930.0) * 100)
     assert item.credit_cost == pytest.approx((10.0 / 665.0) * 100)
     assert item.provision_coverage == pytest.approx((50.0 / 700.0) * 100)
+
+
+@pytest.mark.asyncio
+async def test_enrich_missing_ratio_metrics_backfills_missing_statement_periods(test_db):
+    test_db.add(Stock(symbol="VNM", exchange="HOSE", industry="Consumer", sector="Staples"))
+    test_db.add_all(
+        [
+            IncomeStatement(
+                id=30,
+                symbol="VNM",
+                period="2022",
+                period_type="year",
+                fiscal_year=2022,
+                revenue=120.0,
+                net_income=24.0,
+            ),
+            IncomeStatement(
+                id=31,
+                symbol="VNM",
+                period="2021",
+                period_type="year",
+                fiscal_year=2021,
+                revenue=100.0,
+                net_income=20.0,
+            ),
+            BalanceSheet(
+                id=30,
+                symbol="VNM",
+                period="2022",
+                period_type="year",
+                fiscal_year=2022,
+                total_assets=200.0,
+                total_liabilities=80.0,
+                total_equity=120.0,
+            ),
+            BalanceSheet(
+                id=31,
+                symbol="VNM",
+                period="2021",
+                period_type="year",
+                fiscal_year=2021,
+                total_assets=180.0,
+                total_liabilities=70.0,
+                total_equity=110.0,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    rows = [FinancialRatioData(symbol="VNM", period="2022", pe=10.0)]
+    enriched = await _enrich_missing_ratio_metrics("VNM", "year", rows, test_db)
+
+    periods = {item.period for item in enriched}
+    assert "2021" in periods
+
+    backfilled_2021 = next(item for item in enriched if item.period == "2021")
+    assert backfilled_2021.roe == pytest.approx((20.0 / 110.0) * 100)
