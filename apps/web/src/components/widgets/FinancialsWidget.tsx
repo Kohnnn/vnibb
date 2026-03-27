@@ -364,16 +364,12 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                     Partial dataset: some provider fields are still missing for this symbol.
                                 </div>
                             )}
-                            {activeTab !== 'ratios' && (
-                                <div className="px-2 pb-1 text-[10px] text-muted-foreground italic">
-                                    Note: {unitLegend} except Per Share Values • Reporting Standard: VAS
-                                </div>
-                            )}
                             <DenseFinancialTable
                                 columns={denseColumns}
                                 rows={denseRows}
                                 maxYears={denseColumns.length || 1}
                                 storageKey={`financials:${symbol}:${activeTab}:${period}`}
+                                footerNote={activeTab !== 'ratios' ? `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS` : undefined}
                                 valueFormatter={(value, row) => {
                                     const meta = denseRowMeta.get(row.id)
                                     const numericValue = typeof value === 'number' ? value : Number(value)

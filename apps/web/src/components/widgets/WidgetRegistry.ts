@@ -11,6 +11,7 @@ import { EarningsHistoryWidget } from './EarningsHistoryWidget';
 import { DividendPaymentWidget } from './DividendPaymentWidget';
 import { ValuationWidget } from './ValuationWidget';
 import { ValuationMultiplesChartWidget } from './ValuationMultiplesChartWidget';
+import { ValuationBandWidget } from './ValuationBandWidget';
 import { StockSplitsWidget } from './StockSplitsWidget';
 
 import { CompanyFilingsWidget } from './CompanyFilingsWidget';
@@ -98,6 +99,7 @@ import { MomentumWidget } from './MomentumWidget';
 import { EarningsQualityWidget } from './EarningsQualityWidget';
 import { SmartMoneyWidget } from './SmartMoneyWidget';
 import { RelativeRotationWidget } from './RelativeRotationWidget';
+import { RiskDashboardWidget } from './RiskDashboardWidget';
 import type { ComponentType } from 'react';
 import dynamic from 'next/dynamic';
 
@@ -154,6 +156,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     dividend_payment: DividendPaymentWidget as ComponentType<WidgetProps>,
     valuation_multiples: ValuationWidget as ComponentType<WidgetProps>,
     valuation_multiples_chart: ValuationMultiplesChartWidget as ComponentType<WidgetProps>,
+    valuation_band: ValuationBandWidget as ComponentType<WidgetProps>,
     stock_splits: StockSplitsWidget as ComponentType<WidgetProps>,
 
     // Financial widgets
@@ -245,6 +248,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     earnings_quality: EarningsQualityWidget as ComponentType<WidgetProps>,
     smart_money: SmartMoneyWidget as ComponentType<WidgetProps>,
     relative_rotation: RelativeRotationWidget as ComponentType<WidgetProps>,
+    risk_dashboard: RiskDashboardWidget as ComponentType<WidgetProps>,
     similar_stocks: SimilarStocksWidget as ComponentType<WidgetProps>,
     quick_stats: QuickStatsWidget as ComponentType<WidgetProps>,
 
@@ -273,6 +277,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     ticker_info: { w: 4, h: 5, minW: 3, minH: 4 },
     valuation_multiples: { w: 4, h: 6, minW: 3, minH: 5 },
     valuation_multiples_chart: { w: 7, h: 7, minW: 5, minH: 5 },
+    valuation_band: { w: 8, h: 8, minW: 6, minH: 6 },
     ticker_profile: { w: 4, h: 6, minW: 3, minH: 5 },
 
     price_chart: { w: 8, h: 8, minW: 6, minH: 6 },
@@ -345,6 +350,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     earnings_quality: { w: 6, h: 6, minW: 4, minH: 5 },
     smart_money: { w: 6, h: 6, minW: 4, minH: 5 },
     relative_rotation: { w: 6, h: 6, minW: 4, minH: 5 },
+    risk_dashboard: { w: 8, h: 8, minW: 6, minH: 6 },
     forex_rates: { w: 5, h: 7, minW: 4, minH: 5 },
     commodities: { w: 5, h: 7, minW: 4, minH: 5 },
     similar_stocks: { w: 4, h: 6, minW: 3, minH: 5 },
@@ -380,6 +386,7 @@ export const widgetNames: Record<WidgetType, string> = {
     ticker_info: 'Ticker Info',
     valuation_multiples: 'Valuation Multiples',
     valuation_multiples_chart: 'Valuation Multiples Chart',
+    valuation_band: 'Valuation Band',
     ticker_profile: 'Company Profile',
 
     price_chart: 'Price Chart',
@@ -452,6 +459,7 @@ export const widgetNames: Record<WidgetType, string> = {
     earnings_quality: 'Earnings Quality',
     smart_money: 'Smart Money',
     relative_rotation: 'Relative Rotation',
+    risk_dashboard: 'Risk Dashboard',
     forex_rates: 'Forex Rates',
     commodities: 'Commodities',
     similar_stocks: 'Similar Stocks',
@@ -485,6 +493,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     ticker_info: 'Real-time price and basic info',
     valuation_multiples: 'P/E, P/B, and P/S vs historical',
     valuation_multiples_chart: 'Historical valuation multiples trend',
+    valuation_band: 'Statistical valuation bands highlighting current multiple vs mean and sigma range',
     ticker_profile: 'Detailed company description',
     price_chart: 'Professional candlestick charting',
     key_metrics: 'Summary of critical financial ratios',
@@ -556,6 +565,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     earnings_quality: 'Quality score from profitability, cash conversion, and leverage checks',
     smart_money: 'Foreign flow and block-trade bias to infer accumulation vs distribution',
     relative_rotation: 'Relative Strength rating trend and quadrant classification',
+    risk_dashboard: 'Composite view of drawdown, volatility, Sortino, and Hurst-style structure risk',
     forex_rates: 'Currency exchange (VND pairs)',
     commodities: 'Gold, oil, and metals',
     similar_stocks: 'Stocks with high correlation',

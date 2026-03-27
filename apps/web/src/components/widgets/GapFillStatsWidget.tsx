@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { ArrowDownCircle, ArrowUpCircle, CalendarClock } from 'lucide-react';
 import { useHistoricalPrices } from '@/lib/queries';
 import type { OHLCData } from '@/lib/chartUtils';
@@ -7,6 +8,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods';
 
 interface GapFillStatsWidgetProps {
   symbol: string;
@@ -70,6 +72,7 @@ function average(values: number[]): number {
 
 export function GapFillStatsWidget({ symbol }: GapFillStatsWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
+  const [period, setPeriod] = useState<QuantPeriodOption>('1Y');
   const {
     data,
     isLoading,
@@ -78,9 +81,7 @@ export function GapFillStatsWidget({ symbol }: GapFillStatsWidgetProps) {
     isFetching,
     dataUpdatedAt,
   } = useHistoricalPrices(upperSymbol, {
-    startDate: new Date(Date.now() - 420 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split('T')[0],
+    startDate: getQuantPeriodStartDate(period),
     enabled: Boolean(upperSymbol),
   });
 
@@ -117,15 +118,29 @@ export function GapFillStatsWidget({ symbol }: GapFillStatsWidgetProps) {
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <CalendarClock size={12} className="text-cyan-400" />
-          <span>Gap Fill Stats (1Y)</span>
+          <span>Gap Fill Stats</span>
         </div>
-        <WidgetMeta
-          updatedAt={dataUpdatedAt}
-          isFetching={isFetching && hasData}
-          isCached={isFallback}
-          note="0.5%+ gaps"
-          align="right"
-        />
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {QUANT_PERIOD_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setPeriod(option)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <WidgetMeta
+            updatedAt={dataUpdatedAt}
+            isFetching={isFetching && hasData}
+            isCached={isFallback}
+            note={`${period} • 0.5%+ gaps`}
+            align="right"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">

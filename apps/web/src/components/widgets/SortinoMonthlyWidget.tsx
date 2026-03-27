@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface SortinoMonthlyWidgetProps {
   symbol: string
@@ -47,6 +48,7 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
     1
   )
   const hasData = rows.some((row) => row.sortino !== null || row.sharpe !== null)
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Sortino profile" icon={<BarChart3 size={18} />} />
@@ -76,7 +78,16 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
         </div>
       </div>
 
-      {isLoading && !hasData ? (
+      {timedOut && isLoading && !hasData ? (
+        <WidgetError
+          title="Loading timed out"
+          error={new Error('Sortino data took too long to load.')}
+          onRetry={() => {
+            resetTimeout()
+            refetch()
+          }}
+        />
+      ) : isLoading && !hasData ? (
         <WidgetSkeleton lines={8} />
       ) : error ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />

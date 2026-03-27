@@ -1,11 +1,14 @@
 'use client'
 
+import { useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { useHistoricalPrices } from '@/lib/queries'
 import type { OHLCData } from '@/lib/chartUtils'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface DrawdownDeepDiveWidgetProps {
   symbol: string
@@ -110,13 +113,12 @@ function averageRecoveryDays(episodes: DrawdownEpisode[]): number {
 
 export function DrawdownDeepDiveWidget({ symbol }: DrawdownDeepDiveWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
+  const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useHistoricalPrices(
     upperSymbol,
     {
-      startDate: new Date(Date.now() - 10 * 365 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split('T')[0],
+      startDate: getQuantPeriodStartDate(period),
       enabled: Boolean(upperSymbol),
     }
   )
@@ -127,6 +129,7 @@ export function DrawdownDeepDiveWidget({ symbol }: DrawdownDeepDiveWidgetProps) 
 
   const drawdown = computeDrawdown(candles)
   const hasData = drawdown.length > 30
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
   const episodes = computeEpisodes(drawdown)
   const currentDrawdown = drawdown[drawdown.length - 1]?.drawdownPct ?? 0
   const maxDrawdown = episodes.reduce((min, episode) => Math.min(min, episode.depthPct), 0)
@@ -151,7 +154,21 @@ export function DrawdownDeepDiveWidget({ symbol }: DrawdownDeepDiveWidgetProps) 
           <ShieldAlert size={12} className="text-amber-400" />
           <span>Drawdown Deep Dive</span>
         </div>
-        <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="Underwater" align="right" />
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {QUANT_PERIOD_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setPeriod(option)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <WidgetMeta updatedAt={dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} underwater`} align="right" />
+        </div>
       </div>
 
       <div className="mb-2 grid grid-cols-3 gap-2 text-[10px]">
@@ -188,7 +205,16 @@ export function DrawdownDeepDiveWidget({ symbol }: DrawdownDeepDiveWidgetProps) 
       </div>
 
       <div className="flex-1 overflow-auto space-y-1 pr-1">
-        {isLoading && !hasData ? (
+        {timedOut && isLoading && !hasData ? (
+          <WidgetError
+            title="Loading timed out"
+            error={new Error('Drawdown history took too long to load.')}
+            onRetry={() => {
+              resetTimeout()
+              refetch()
+            }}
+          />
+        ) : isLoading && !hasData ? (
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />

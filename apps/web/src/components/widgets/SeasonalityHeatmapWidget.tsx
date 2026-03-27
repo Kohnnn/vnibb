@@ -7,6 +7,7 @@ import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface SeasonalityHeatmapWidgetProps {
   symbol: string
@@ -60,6 +61,7 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
   const monthlyReturns = metric?.monthly_returns || []
   const hasData = monthlyReturns.length > 0
   const isFallback = Boolean(error && hasData)
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   const years = useMemo(
     () => [...new Set(monthlyReturns.map((row) => row.year))].sort((a, b) => b - a),
@@ -139,7 +141,16 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
       </div>
 
       <div className="flex-1 overflow-auto pr-1">
-        {isLoading && !hasData ? (
+        {timedOut && isLoading && !hasData ? (
+          <WidgetError
+            title="Loading timed out"
+            error={new Error('Seasonality data took too long to load.')}
+            onRetry={() => {
+              resetTimeout()
+              refetch()
+            }}
+          />
+        ) : isLoading && !hasData ? (
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetch()} />

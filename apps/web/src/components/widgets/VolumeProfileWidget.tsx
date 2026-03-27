@@ -1,11 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { BarChart2 } from 'lucide-react';
 import { useHistoricalPrices } from '@/lib/queries';
 import { calculateVolumeProfile, type OHLCData } from '@/lib/chartUtils';
+import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface VolumeProfileWidgetProps {
   symbol: string;
@@ -73,6 +76,7 @@ function calculateValueArea(profile: VolumeBin[], targetShare = 0.7) {
 
 export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
+  const [period, setPeriod] = useState<QuantPeriodOption>('6M');
   const {
     data,
     isLoading,
@@ -81,9 +85,7 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
     isFetching,
     dataUpdatedAt,
   } = useHistoricalPrices(upperSymbol, {
-    startDate: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .split('T')[0],
+    startDate: getQuantPeriodStartDate(period),
     enabled: Boolean(upperSymbol),
   });
 
@@ -109,6 +111,7 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
   const profile = calculateVolumeProfile(candles, 24) as VolumeBin[];
   const hasData = profile.length > 0;
   const isFallback = Boolean(error && hasData);
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
   const maxVolume = profile.reduce((max, bin) => Math.max(max, bin.volume), 0);
   const { pocPrice, vahPrice, valPrice } = calculateValueArea(profile, 0.7);
@@ -117,15 +120,19 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
     return <WidgetEmpty message="Select a symbol to view volume profile" icon={<BarChart2 size={18} />} />;
   }
 
+  if (timedOut && isLoading && !hasData) {
+    return <WidgetError title="Loading timed out" error={new Error('Volume profile data took too long to load.')} onRetry={() => { resetTimeout(); refetch(); }} />;
+  }
+
   if (isLoading && !hasData) {
     return (
       <div className="h-full flex flex-col">
-        <div className="flex items-center justify-between px-1 py-1 mb-2">
-          <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-            <BarChart2 size={12} className="text-cyan-400" />
-            <span>6M Volume Profile</span>
-          </div>
+      <div className="flex items-center justify-between px-1 py-1 mb-2">
+        <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+          <BarChart2 size={12} className="text-cyan-400" />
+          <span>{period} Volume Profile</span>
         </div>
+      </div>
         <WidgetSkeleton lines={10} />
       </div>
     );
@@ -144,15 +151,29 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <BarChart2 size={12} className="text-cyan-400" />
-          <span>6M Volume Profile</span>
+          <span>Volume Profile</span>
         </div>
-        <WidgetMeta
-          updatedAt={dataUpdatedAt}
-          isFetching={isFetching && hasData}
-          isCached={isFallback}
-          note="24 bins"
-          align="right"
-        />
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {QUANT_PERIOD_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setPeriod(option)}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+          <WidgetMeta
+            updatedAt={dataUpdatedAt}
+            isFetching={isFetching && hasData}
+            isCached={isFallback}
+            note={`${period} • 24 bins`}
+            align="right"
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">

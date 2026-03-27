@@ -121,6 +121,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultConfig: {},
         defaultLayout: { w: 7, h: 7, minW: 5, minH: 5 }
     },
+    {
+        type: 'valuation_band',
+        name: 'Valuation Band',
+        description: 'Historical P/E and P/B bands against current valuation',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 }
+    },
 
     // Calendar
     {
@@ -282,6 +290,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'analysis',
         defaultConfig: {},
         defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'risk_dashboard',
+        name: 'Risk Dashboard',
+        description: 'Composite quant risk view blending drawdown, volatility, Sortino, and Hurst context',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'foreign_trading',

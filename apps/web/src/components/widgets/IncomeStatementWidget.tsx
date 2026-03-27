@@ -257,21 +257,19 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
     }, [orderedItems, tableColumns]);
 
     const renderTable = () => (
-        <div className="space-y-1">
-            <DenseFinancialTable
-                columns={tableColumns}
-                rows={tableRows}
-                sortable
-                storageKey={`income:${id}:${symbol}:${period}`}
-                valueFormatter={(value, row) => {
-                    if (row.id === 'eps') {
-                        return formatNumber(value as number | null | undefined, { decimals: 2 });
-                    }
-                    return formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig);
-                }}
-            />
-            <div className="px-1 pt-1 text-[10px] text-[var(--text-muted)] italic">{unitNote}</div>
-        </div>
+        <DenseFinancialTable
+            columns={tableColumns}
+            rows={tableRows}
+            sortable
+            storageKey={`income:${id}:${symbol}:${period}`}
+            footerNote={unitNote}
+            valueFormatter={(value, row) => {
+                if (row.id === 'eps') {
+                    return formatNumber(value as number | null | undefined, { decimals: 2 });
+                }
+                return formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig);
+            }}
+        />
     );
 
     const [chartType, setChartType] = useState<'overview' | 'margins'>('overview');

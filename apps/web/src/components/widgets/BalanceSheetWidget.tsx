@@ -207,18 +207,16 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
     }, [orderedItems, tableColumns]);
 
     const renderTable = () => (
-        <div className="space-y-1">
-            <DenseFinancialTable
-                columns={tableColumns}
-                rows={tableRows}
-                sortable
-                storageKey={`balance:${id}:${symbol}:${period}`}
-                valueFormatter={(value) =>
-                    formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig)
-                }
-            />
-            <div className="px-1 pt-1 text-[10px] text-[var(--text-muted)] italic">{unitNote}</div>
-        </div>
+        <DenseFinancialTable
+            columns={tableColumns}
+            rows={tableRows}
+            sortable
+            storageKey={`balance:${id}:${symbol}:${period}`}
+            footerNote={unitNote}
+            valueFormatter={(value) =>
+                formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig)
+            }
+        />
     );
 
     const [chartType, setChartType] = useState<'overview' | 'debt'>('overview');

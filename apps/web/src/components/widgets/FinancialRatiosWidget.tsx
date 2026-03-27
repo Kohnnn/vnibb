@@ -298,6 +298,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                                 rows={tableRows}
                                 sortable
                                 storageKey={`ratios:${id}:${symbol}:${period}`}
+                                footerNote={`Note: Ratio history by ${period}. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
                                 valueFormatter={(value, row) => {
                                     if (NULL_LIKE_RATIO_KEYS.has(row.id) && typeof value === 'number' && value === 0) {
                                         return EMPTY_VALUE;
@@ -308,9 +309,6 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                                         : formatRatio(value as number | null | undefined);
                                 }}
                             />
-                            <div className="px-1 pt-1 text-[10px] text-[var(--text-muted)] italic">
-                                First available period is shown as the base period; missing ratios render as {EMPTY_VALUE}.
-                            </div>
                         </>
                     )}
                 </div>
