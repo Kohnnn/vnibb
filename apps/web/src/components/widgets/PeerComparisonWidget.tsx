@@ -15,7 +15,8 @@ import {
     Save,
     FolderOpen,
     Trash2,
-    Grid3X3
+    Grid3X3,
+    ArrowUpDown
 } from 'lucide-react';
 import { useComparison, usePeers, usePeerStorage } from '@/hooks/useComparison';
 import { ExportButton } from '@/components/common/ExportButton';
@@ -24,6 +25,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import {
 
     Radar as ReRadar,
@@ -46,6 +48,7 @@ interface PeerComparisonWidgetProps {
 }
 
 type TabMode = 'table' | 'radar' | 'performance';
+type SortDirection = 'asc' | 'desc';
 
 interface ComparisonSet {
     id: string;
@@ -112,6 +115,8 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
     const [saveSetName, setSaveSetName] = useState('');
     const [period, setPeriod] = useState('1Y');
     const [heatmapEnabled, setHeatmapEnabled] = useState(false);
+    const [sortKey, setSortKey] = useState<string>('metric');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
     const {
         data: compData,
@@ -124,6 +129,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
 
     const { data: peerSuggestions } = usePeers(symbol, 5, !!symbol);
     const { sets, saveSet, deleteSet } = useComparisonSets();
+    const { setLinkedSymbol } = useWidgetSymbolLink();
 
     const hasData = Boolean(compData?.metrics?.length);
     const isFallback = Boolean(error && hasData);
@@ -211,20 +217,73 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
         });
     }, [compData, peers]);
 
+    const sortedMetrics = useMemo(() => {
+        if (!compData?.metrics) return [];
+
+        const metrics = [...compData.metrics];
+        const getSortValue = (metric: typeof compData.metrics[number]) => {
+            if (sortKey === 'metric') return metric.label;
+            if (sortKey === 'sector') return compData.sectorAverages?.[metric.key] ?? null;
+            return compData.data?.[sortKey]?.metrics?.[metric.key] ?? null;
+        };
+
+        metrics.sort((left, right) => {
+            const leftValue = getSortValue(left);
+            const rightValue = getSortValue(right);
+
+            if (typeof leftValue === 'string' || typeof rightValue === 'string') {
+                const leftText = String(leftValue ?? '');
+                const rightText = String(rightValue ?? '');
+                return sortDirection === 'asc'
+                    ? leftText.localeCompare(rightText)
+                    : rightText.localeCompare(leftText);
+            }
+
+            const leftNumber = typeof leftValue === 'number' ? leftValue : Number.NEGATIVE_INFINITY;
+            const rightNumber = typeof rightValue === 'number' ? rightValue : Number.NEGATIVE_INFINITY;
+            return sortDirection === 'asc' ? leftNumber - rightNumber : rightNumber - leftNumber;
+        });
+
+        return metrics;
+    }, [compData, sortDirection, sortKey]);
+
+    const handleSort = (nextKey: string) => {
+        if (sortKey === nextKey) {
+            setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
+            return;
+        }
+
+        setSortKey(nextKey);
+        setSortDirection(nextKey === 'metric' ? 'asc' : 'desc');
+    };
+
+    const sortIndicator = (key: string) => {
+        if (sortKey !== key) return <ArrowUpDown size={10} className="opacity-50" />;
+        return <span className="text-[10px]">{sortDirection === 'asc' ? '↑' : '↓'}</span>;
+    };
+
     const renderTable = () => {
         if (!compData) return null;
         const sectorAvg = compData.sectorAverages || {};
         
         return (
             <div className="flex-1 overflow-auto">
-                <table className="data-table w-full text-[10px] border-collapse">
+                        <table className="data-table w-full text-[10px] border-collapse">
                     <thead className="text-[var(--text-muted)] sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
                         <tr>
-                            <th className="text-left py-2 px-2 font-medium bg-[var(--bg-secondary)] z-10 min-w-[148px] border-r border-[var(--border-subtle)]">Metric</th>
+                            <th className="text-left py-2 px-2 font-medium bg-[var(--bg-secondary)] z-10 min-w-[148px] border-r border-[var(--border-subtle)]">
+                                <button type="button" onClick={() => handleSort('metric')} className="inline-flex items-center gap-1 hover:text-[var(--text-primary)]">
+                                    <span>Metric</span>
+                                    {sortIndicator('metric')}
+                                </button>
+                            </th>
                             {peers.map((sym, index) => (
                                 <th key={`${sym}-${index}`} className="text-right py-2 px-2 font-medium min-w-[104px]">
                                     <div className="flex flex-col">
-                                        <span className="text-[var(--text-primary)] font-bold">{sym}</span>
+                                        <button type="button" onClick={() => handleSort(sym)} className="inline-flex items-center justify-end gap-1 font-bold text-[var(--text-primary)] hover:text-blue-300">
+                                            <span>{sym}</span>
+                                            {sortIndicator(sym)}
+                                        </button>
                                         <span className="text-[8px] font-normal break-words opacity-60">
                                             {compData.data[sym]?.name || 'Loading...'}
                                         </span>
@@ -233,14 +292,17 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                             ))}
                             <th className="text-right py-2 px-2 font-medium min-w-[84px] text-amber-400/80 border-l border-[var(--border-subtle)]">
                                 <div className="flex flex-col">
-                                    <span>Sector</span>
+                                    <button type="button" onClick={() => handleSort('sector')} className="inline-flex items-center justify-end gap-1 hover:text-amber-300">
+                                        <span>Sector</span>
+                                        {sortIndicator('sector')}
+                                    </button>
                                     <span className="text-[8px] font-normal opacity-60">Avg</span>
                                 </div>
                             </th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--border-subtle)]">
-                        {compData.metrics.map(metric => {
+                        {sortedMetrics.map(metric => {
                             const sectorValue = sectorAvg[metric.key];
                             return (
                                 <tr key={metric.key} className="hover:bg-[var(--bg-hover)]">
@@ -397,12 +459,25 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
             {/* Header Area */}
             <div className="px-3 py-2 border-b border-[var(--border-color)] flex items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1 bg-[var(--bg-secondary)] p-1 rounded border border-[var(--border-subtle)]">
+                            <div className="flex items-center gap-1 bg-[var(--bg-secondary)] p-1 rounded border border-[var(--border-subtle)]">
                         {peers.map((sym, index) => (
-                            <div key={`${sym}-${index}`} className="flex items-center gap-1 bg-[var(--bg-tertiary)] px-2 py-0.5 rounded text-[10px] font-medium group">
-                                {sym}
+                            <div
+                                key={`${sym}-${index}`}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setLinkedSymbol(sym)}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault();
+                                        setLinkedSymbol(sym);
+                                    }
+                                }}
+                                className="flex items-center gap-1 bg-[var(--bg-tertiary)] px-2 py-0.5 rounded text-[10px] font-medium group hover:bg-[var(--bg-hover)] cursor-pointer"
+                                aria-label={`Set comparison symbol to ${sym}`}
+                            >
+                                <span>{sym}</span>
                                 {peers.length > 2 && (
-                                    <button onClick={() => removePeer(sym)} className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity">
+                                    <button onClick={(event) => { event.stopPropagation(); removePeer(sym); }} className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity" aria-label={`Remove ${sym}`}>
                                         <X size={10} />
                                     </button>
                                 )}

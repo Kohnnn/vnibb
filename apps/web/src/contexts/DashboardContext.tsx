@@ -38,7 +38,7 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 12;
+const CURRENT_MIGRATION_VERSION = 13;
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
@@ -499,12 +499,6 @@ const MAIN_TRADING_TEMPLATE: TemplateWidget[] = [
         syncGroupId: 1,
         config: {},
         layout: { x: 12, y: 8, w: 12, h: 7, minW: 8, minH: 4 }
-    },
-    {
-        type: 'signal_summary',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 15, w: 24, h: 6, minW: 12, minH: 4 }
     },
 ];
 

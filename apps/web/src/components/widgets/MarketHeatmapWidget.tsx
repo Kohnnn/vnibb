@@ -6,6 +6,7 @@ import { LayoutGrid, Download } from 'lucide-react';
 import { hierarchy, treemap } from 'd3-hierarchy';
 import html2canvas from 'html2canvas';
 import { useMarketHeatmap } from '@/lib/queries';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { SectorGroup } from '@/lib/api';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -40,6 +41,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
     const [groupBy, setGroupBy] = useState<'sector' | 'industry'>('sector');
     const [exchange, setExchange] = useState<'HOSE' | 'HNX' | 'UPCOM' | 'ALL'>('HOSE');
     const heatmapRef = useRef<HTMLDivElement>(null);
+    const { setLinkedSymbol } = useWidgetSymbolLink();
 
     const {
         data,
@@ -62,10 +64,17 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
             name: 'Market',
             children: data.sectors.map((sector: SectorGroup) => ({
                 name: sector.sector,
-                value: sector.total_market_cap,
                 changePct: sector.avg_change_pct,
                 stockCount: sector.stock_count,
-                stocks: sector.stocks,
+                children: sector.stocks.map((stock) => ({
+                    name: stock.symbol,
+                    symbol: stock.symbol,
+                    sector: sector.sector,
+                    value: stock.market_cap || 0,
+                    changePct: stock.change_pct,
+                    price: stock.price,
+                    volume: stock.volume,
+                })),
             })),
         };
     }, [data]);
@@ -189,9 +198,11 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                 strokeWidth={1}
                                                 rx={8}
                                                 ry={8}
+                                                onClick={() => node.data.symbol ? setLinkedSymbol(node.data.symbol) : undefined}
                                             >
                                                 <title>
-                                                    {node.data.name}
+                                                    {node.data.symbol || node.data.name}
+                                                    {node.data.sector ? `\nSector: ${node.data.sector}` : ''}
                                                     {'\n'}Change: {changePct.toFixed(2)}%
                                                     {'\n'}Value: {(node.data.value / 1e9).toFixed(1)}B
                                                 </title>
@@ -206,7 +217,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                         fill="rgba(255,255,255,0.96)"
                                                         style={{ fontSize: labelSize }}
                                                     >
-                                                        {node.data.name}
+                                                        {node.data.symbol || node.data.name}
                                                     </text>
                                                     <text
                                                         x={node.x0 + 10}
@@ -229,7 +240,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                     fill="rgba(255,255,255,0.78)"
                                                     style={{ fontSize: 10 }}
                                                 >
-                                                    {`${node.data.stockCount} stocks • ${(node.data.value / 1e9).toFixed(1)}B`}
+                                                    {`${node.data.sector || node.data.name} • ${(node.data.value / 1e9).toFixed(1)}B`}
                                                 </text>
                                             )}
                                         </g>

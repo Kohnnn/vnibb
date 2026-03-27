@@ -200,10 +200,13 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
             const isPOC = pocPrice !== null && Math.abs(bin.price - pocPrice) < Number.EPSILON;
             const isInValueArea =
               vahPrice !== null && valPrice !== null && bin.price >= valPrice && bin.price <= vahPrice;
+            const showPriceLabel = profile.length <= 14 || index % 2 === 0 || isPOC || isInValueArea;
 
             return (
               <div key={`${bin.price}-${index}`} className="flex items-center gap-2">
-                <div className="w-14 text-[10px] text-[var(--text-muted)] shrink-0 font-mono">{bin.price.toFixed(2)}</div>
+                <div className="w-16 text-[9px] text-[var(--text-muted)] shrink-0 font-mono" title={bin.price.toFixed(2)}>
+                  {showPriceLabel ? bin.price.toFixed(2) : '·'}
+                </div>
                 <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden relative">
                   <div
                     className={`h-full ${
@@ -216,7 +219,7 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
                     style={{ width: `${Math.max(2, widthPct)}%` }}
                   />
                 </div>
-                <div className="w-12 text-[10px] text-[var(--text-secondary)] text-right shrink-0">{formatVolume(bin.volume)}</div>
+                <div className="w-14 text-[10px] text-[var(--text-secondary)] text-right shrink-0">{formatVolume(bin.volume)}</div>
               </div>
             );
           })}

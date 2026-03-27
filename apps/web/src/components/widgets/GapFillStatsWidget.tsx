@@ -162,10 +162,16 @@ export function GapFillStatsWidget({ symbol }: GapFillStatsWidgetProps) {
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Up Fill</div>
           <div className="text-emerald-300 font-mono">{upFillRate.toFixed(1)}%</div>
+          <div className="mt-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+            <div className="h-full bg-emerald-500/80" style={{ width: `${Math.max(4, upFillRate)}%` }} />
+          </div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Down Fill</div>
           <div className="text-red-300 font-mono">{downFillRate.toFixed(1)}%</div>
+          <div className="mt-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+            <div className="h-full bg-rose-500/80" style={{ width: `${Math.max(4, downFillRate)}%` }} />
+          </div>
         </div>
       </div>
 
