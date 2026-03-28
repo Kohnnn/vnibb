@@ -5,6 +5,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useFullTechnicalAnalysis } from '@/lib/queries';
 import { formatNumber } from '@/lib/format';
 
@@ -37,6 +38,7 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove }: TechnicalSnaps
   } = useFullTechnicalAnalysis(symbol, { timeframe: 'D', enabled: Boolean(symbol) });
 
   const hasData = Boolean(data);
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
   const rsi = data?.oscillators?.rsi?.value;
   const macd = data?.oscillators?.macd?.histogram;
   const adx = data?.volatility?.adx?.adx;
@@ -69,7 +71,16 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove }: TechnicalSnaps
         </div>
 
         <div className="flex-1 overflow-auto p-3">
-          {isLoading && !hasData ? (
+          {timedOut && isLoading && !hasData ? (
+            <WidgetError
+              title="Loading timed out"
+              error={new Error('Technical snapshot took too long to load.')}
+              onRetry={() => {
+                resetTimeout();
+                refetch();
+              }}
+            />
+          ) : isLoading && !hasData ? (
             <WidgetSkeleton lines={5} />
           ) : error && !hasData ? (
             <WidgetError error={error as Error} onRetry={() => refetch()} />

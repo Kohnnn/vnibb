@@ -69,7 +69,10 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId }: Orderbo
           ) : error && !hasData ? (
             <WidgetError error={error as Error} onRetry={() => refetch()} />
           ) : !hasData ? (
-            <WidgetEmpty message="Order book data not available yet" />
+            <WidgetEmpty
+              message="Order book data not available yet"
+              detail="Market closed - showing this panel when the exchange publishes the next depth snapshot."
+            />
           ) : (
             entries.map((entry: any, i: number) => (
               <div key={i} className="relative grid grid-cols-[minmax(0,1fr)_74px_minmax(0,1fr)] items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-1.5">
