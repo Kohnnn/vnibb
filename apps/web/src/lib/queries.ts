@@ -1080,11 +1080,11 @@ export function useFinancials(
 
 export function useComparison(
     symbols: string[],
-    options?: { enabled?: boolean; refetchInterval?: number }
+    options?: { enabled?: boolean; refetchInterval?: number; period?: string }
 ) {
     return useQuery({
-        queryKey: ['comparison', symbols.join(',')] as const,
-        queryFn: () => api.compareStocks(symbols),
+        queryKey: ['comparison', symbols.join(','), options?.period ?? 'FY'] as const,
+        queryFn: () => api.compareStocks(symbols, options?.period ?? 'FY'),
         enabled: options?.enabled !== false && symbols.length > 0,
         staleTime: 60 * 1000, // 1 minute 
         refetchInterval: options?.refetchInterval ?? 60000,
