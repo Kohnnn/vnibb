@@ -95,8 +95,8 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
     pb: firstFinite(metrics?.pb, latestRatio?.pb),
     roe: firstFinite(metrics?.roe, latestRatio?.roe),
     dividendYield: firstFinite(
-      normalizeDividendYield(metrics?.dividend_yield),
-      normalizeDividendYield(latestRatio?.dividend_yield)
+      normalizeDividendYield(latestRatio?.dividend_yield),
+      normalizeDividendYield(metrics?.dividend_yield)
     ),
   };
   const hasMetrics = Boolean(
@@ -220,7 +220,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
                 { label: 'P/E', value: formatRatio(snapshotMetrics.pe), tone: 'border-sky-500/15 bg-sky-500/[0.06]' },
                 { label: 'P/B', value: formatRatio(snapshotMetrics.pb), tone: 'border-cyan-500/15 bg-cyan-500/[0.06]' },
                 { label: 'ROE', value: formatPercent(snapshotMetrics.roe), tone: 'border-emerald-500/15 bg-emerald-500/[0.06]' },
-                { label: 'Div Yield', value: formatPercent(snapshotMetrics.dividendYield), tone: 'border-amber-500/15 bg-amber-500/[0.06]' },
+                { label: 'Dividend Yield', value: formatPercent(snapshotMetrics.dividendYield), tone: 'border-amber-500/15 bg-amber-500/[0.06]' },
               ].map((item) => (
                 <div
                   key={item.label}

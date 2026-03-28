@@ -128,35 +128,38 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
             { value: latestRatio?.ev_ebitda, source: 'Ratios', positiveOnly: true },
         ]),
         roe: resolveMetric([
-            { value: stock?.roe, source: 'Screener' },
             { value: latestRatio?.roe, source: 'Ratios' },
+            { value: stock?.roe, source: 'Screener' },
         ]),
         roa: resolveMetric([
-            { value: stock?.roa, source: 'Screener' },
             { value: latestRatio?.roa, source: 'Ratios' },
+            { value: stock?.roa, source: 'Screener' },
         ]),
         roic: resolveMetric([{ value: (latestRatio as any)?.roic, source: 'Ratios' }]),
         netMargin: resolveMetric([
-            { value: stock?.net_margin, source: 'Screener' },
             { value: latestRatio?.net_margin, source: 'Ratios' },
+            { value: stock?.net_margin, source: 'Screener' },
         ]),
         grossMargin: resolveMetric([
-            { value: stock?.gross_margin, source: 'Screener' },
             { value: latestRatio?.gross_margin, source: 'Ratios' },
+            { value: stock?.gross_margin, source: 'Screener' },
         ]),
         debtToEquity: resolveMetric([
-            { value: stock?.debt_to_equity, source: 'Screener' },
             { value: latestRatio?.debt_equity, source: 'Ratios' },
+            { value: stock?.debt_to_equity, source: 'Screener' },
         ]),
         currentRatio: resolveMetric([
-            { value: stock?.current_ratio, source: 'Screener' },
-            { value: latestRatio?.current_ratio, source: 'Ratios' },
+            { value: latestRatio?.current_ratio, source: 'Ratios', positiveOnly: true },
+            { value: stock?.current_ratio, source: 'Screener', positiveOnly: true },
         ]),
         marketCap: resolveMetric([
             { value: stock?.market_cap, source: 'Screener', positiveOnly: true },
             { value: derivedMarketCap, source: 'Profile+Quote', positiveOnly: true },
         ]),
-        dividendYield: resolveMetric([{ value: stock?.dividend_yield, source: 'Screener' }]),
+        dividendYield: resolveMetric([
+            { value: latestRatio?.dividend_yield, source: 'Ratios' },
+            { value: stock?.dividend_yield, source: 'Screener' },
+        ]),
         beta: resolveMetric([{ value: stock?.beta, source: 'Screener' }]),
     }
 

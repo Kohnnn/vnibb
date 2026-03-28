@@ -195,8 +195,8 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
                             Vol {formatCompactNumber(stock.volume)}
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className={cn('text-xs font-semibold', colorClass(stock.color))}>
+                        <div className="min-w-[64px] text-right">
+                          <div className={cn('truncate text-xs font-semibold tabular-nums', colorClass(stock.color))}>
                             {stock.change_pct != null && stock.change_pct > 0 ? '+' : ''}
                             {formatNumber(stock.change_pct ?? null, { decimals: 2 })}%
                           </div>
