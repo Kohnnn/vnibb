@@ -216,7 +216,10 @@ def _resolve_frame_last_timestamp(frame: pd.DataFrame) -> datetime | None:
     latest = parsed.max()
     if pd.isna(latest):
         return None
-    return latest.to_pydatetime()
+    resolved = latest.to_pydatetime()
+    if resolved > datetime.utcnow() + timedelta(days=1):
+        return None
+    return resolved
 
 
 def _build_staleness_warning(frame: pd.DataFrame, end_date: date) -> str | None:

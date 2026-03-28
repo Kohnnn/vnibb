@@ -125,23 +125,61 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
         refetch,
         isFetching,
         dataUpdatedAt,
-    } = useComparison(peers, period);
+    } = useComparison(peers, { period });
 
     const { data: peerSuggestions } = usePeers(symbol, 5, !!symbol);
     const { sets, saveSet, deleteSet } = useComparisonSets();
     const { setLinkedSymbol } = useWidgetSymbolLink();
 
-    const hasData = Boolean(compData?.metrics?.length);
+    const comparisonData = useMemo(() => {
+        if (!compData?.stocks) return {} as Record<string, { name: string; metrics: Record<string, number | null> }>;
+        return compData.stocks.reduce<Record<string, { name: string; metrics: Record<string, number | null> }>>((acc, stock) => {
+            acc[stock.symbol] = {
+                name: stock.company_name || stock.name || stock.symbol,
+                metrics: stock.metrics || {},
+            };
+            return acc;
+        }, {});
+    }, [compData?.stocks]);
+
+    const normalizedMetrics = useMemo<Array<{ key: string; label: string; format: string }>>(() => {
+        return (compData?.metrics || []).map((metric) => ({
+            ...metric,
+            key: metric.id || metric.key || '',
+            label: metric.name || metric.label || metric.id || metric.key || 'Metric',
+            format: metric.format || 'number',
+        }));
+    }, [compData?.metrics]);
+
+    const sectorAverages = useMemo(() => {
+        const accumulator: Record<string, number[]> = {};
+        Object.values(comparisonData).forEach((stock) => {
+            Object.entries(stock.metrics || {}).forEach(([key, value]) => {
+                if (typeof value !== 'number' || !Number.isFinite(value)) return;
+                if (!accumulator[key]) accumulator[key] = [];
+                accumulator[key].push(value);
+            });
+        });
+
+        return Object.fromEntries(
+            Object.entries(accumulator).map(([key, values]) => [
+                key,
+                values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null,
+            ])
+        );
+    }, [comparisonData]);
+
+    const hasData = Boolean(normalizedMetrics.length);
     const isFallback = Boolean(error && hasData);
 
     const allMetricValues = useMemo(() => {
-        if (!compData?.data) return {};
+        if (!Object.keys(comparisonData).length) return {};
         const values: Record<string, number[]> = {};
-        compData.metrics.forEach(m => {
-            values[m.key] = peers.map(sym => compData.data[sym]?.metrics?.[m.key]).filter((v): v is number => typeof v === 'number');
+        normalizedMetrics.forEach(m => {
+            values[m.key] = peers.map(sym => comparisonData[sym]?.metrics?.[m.key]).filter((v): v is number => typeof v === 'number');
         });
         return values;
-    }, [compData, peers]);
+    }, [comparisonData, normalizedMetrics, peers]);
 
     // This is tricky because we need a separate hook result per row, or a more dynamic hook.
     // For simplicity, let's just use the logic directly in the component if we can't call hooks in a loop.
@@ -200,12 +238,12 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
 
     // Transform data for Radar Chart
     const radarData = useMemo(() => {
-        if (!compData?.data) return [];
+        if (!Object.keys(comparisonData).length) return [];
 
         return RADAR_METRICS.map(m => {
             const entry: any = { subject: m.label };
             peers.forEach(sym => {
-                const val = compData.data[sym]?.metrics?.[m.key];
+                const val = comparisonData[sym]?.metrics?.[m.key];
                 // Simple normalization for visualization
                 if (m.inverse) {
                     entry[sym] = val ? (1 / val) * 100 : 0;
@@ -215,16 +253,16 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
             });
             return entry;
         });
-    }, [compData, peers]);
+    }, [comparisonData, peers]);
 
     const sortedMetrics = useMemo(() => {
-        if (!compData?.metrics) return [];
+        if (!normalizedMetrics.length) return [];
 
-        const metrics = [...compData.metrics];
-        const getSortValue = (metric: typeof compData.metrics[number]) => {
+        const metrics = [...normalizedMetrics];
+        const getSortValue = (metric: typeof normalizedMetrics[number]) => {
             if (sortKey === 'metric') return metric.label;
-            if (sortKey === 'sector') return compData.sectorAverages?.[metric.key] ?? null;
-            return compData.data?.[sortKey]?.metrics?.[metric.key] ?? null;
+            if (sortKey === 'sector') return sectorAverages?.[metric.key] ?? null;
+            return comparisonData?.[sortKey]?.metrics?.[metric.key] ?? null;
         };
 
         metrics.sort((left, right) => {
@@ -245,7 +283,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
         });
 
         return metrics;
-    }, [compData, sortDirection, sortKey]);
+    }, [comparisonData, normalizedMetrics, sectorAverages, sortDirection, sortKey]);
 
     const handleSort = (nextKey: string) => {
         if (sortKey === nextKey) {
@@ -264,7 +302,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
 
     const renderTable = () => {
         if (!compData) return null;
-        const sectorAvg = compData.sectorAverages || {};
+        const sectorAvg = sectorAverages || {};
         
         return (
             <div className="flex-1 overflow-auto">
@@ -285,7 +323,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                             {sortIndicator(sym)}
                                         </button>
                                         <span className="text-[8px] font-normal break-words opacity-60">
-                                            {compData.data[sym]?.name || 'Loading...'}
+                                            {comparisonData[sym]?.name || 'Loading...'}
                                         </span>
                                     </div>
                                 </th>
@@ -310,7 +348,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                         {metric.label}
                                     </td>
                                     {peers.map((sym, index) => {
-                                        const value = compData.data[sym]?.metrics?.[metric.key];
+                                        const value = comparisonData[sym]?.metrics?.[metric.key];
                                         const isNumeric = typeof value === 'number';
 
                                         // Highlighting logic (best/worst)
@@ -321,7 +359,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                             if (heatmapEnabled) {
                                                 cellStyle = { backgroundColor: getHeatmapColor(metric.key, value) };
                                             } else {
-                                                const allValues = peers.map(s => compData.data[s]?.metrics?.[metric.key]).filter(v => typeof v === 'number');
+                                                const allValues = peers.map(s => comparisonData[s]?.metrics?.[metric.key]).filter(v => typeof v === 'number');
                                                 const min = Math.min(...allValues);
                                                 const max = Math.max(...allValues);
                                                 if (value === max && allValues.length > 1) cellClass += " text-green-400";

@@ -691,8 +691,11 @@ def _serialize_datetime_like(value: Any) -> Optional[str]:
 
 
 def _latest_timestamp(values: List[Any]) -> Optional[str]:
+    future_cutoff = datetime.utcnow() + timedelta(days=1)
     parsed_values = [
-        parsed for parsed in (_parse_datetime_like(value) for value in values) if parsed
+        parsed
+        for parsed in (_parse_datetime_like(value) for value in values)
+        if parsed and parsed <= future_cutoff
     ]
     if not parsed_values:
         return None
