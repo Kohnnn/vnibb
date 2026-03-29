@@ -22,7 +22,14 @@ export interface AppwriteAccount {
     prefs?: Record<string, unknown>;
 }
 
+interface AppwriteJwtResponse {
+    jwt?: string;
+}
+
 const APPWRITE_SESSION_HINT_KEY = 'vnibb_appwrite_session_hint';
+const APPWRITE_JWT_DURATION_SECONDS = 900;
+
+let cachedJwt: { token: string; expiresAt: number } | null = null;
 
 const APPWRITE_ENDPOINT = (
     process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || 'https://cloud.appwrite.io/v1'
@@ -132,6 +139,8 @@ export function appwriteRememberSessionHint(): void {
 }
 
 export function appwriteClearSessionHint(): void {
+    cachedJwt = null;
+
     if (!canUseBrowserStorage()) {
         return;
     }
@@ -145,6 +154,32 @@ export function appwriteHasSessionHint(): boolean {
     }
 
     return window.localStorage.getItem(APPWRITE_SESSION_HINT_KEY) === '1';
+}
+
+export async function appwriteCreateJWT(forceRefresh = false): Promise<string> {
+    ensureConfigured();
+
+    const now = Date.now();
+    if (!forceRefresh && cachedJwt && cachedJwt.expiresAt > now + 30_000) {
+        return cachedJwt.token;
+    }
+
+    const response = await appwriteRequest<AppwriteJwtResponse>('/account/jwts', {
+        method: 'POST',
+        body: JSON.stringify({ duration: APPWRITE_JWT_DURATION_SECONDS }),
+    });
+    const token = response?.jwt?.trim();
+
+    if (!token) {
+        throw createAuthError('Appwrite JWT response was empty');
+    }
+
+    cachedJwt = {
+        token,
+        expiresAt: now + APPWRITE_JWT_DURATION_SECONDS * 1000,
+    };
+
+    return token;
 }
 
 export function appwriteShouldBootstrapSession(): boolean {

@@ -73,6 +73,7 @@ Edit `deployment/env.oracle` and set:
 - `REDIS_URL` if Redis remains enabled
 - `SENTRY_DSN`
 - `ADMIN_API_KEY`
+- `LOG_FORMAT=json`
 - `CORS_ORIGINS`
 
 ### Start the stack

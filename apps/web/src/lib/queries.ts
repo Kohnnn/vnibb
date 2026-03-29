@@ -502,7 +502,7 @@ export function useScreenerData(options?: {
 
 // ============ Dashboard Queries ============
 
-export function useDashboards(userId = 'anonymous') {
+export function useDashboards(userId = 'current') {
     return useQuery({
         queryKey: queryKeys.dashboards(userId),
         queryFn: () => api.getDashboards(userId),

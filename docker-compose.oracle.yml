@@ -21,7 +21,7 @@ services:
       - vnibb_python_venv:/root/.venv
       - vnibb_api_logs:/app/logs
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:${PORT:-8000}/health/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${PORT:-8000}/live >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
