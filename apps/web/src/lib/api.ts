@@ -1,6 +1,14 @@
 // API client for VNIBB backend
 
+import {
+    appwriteClearSessionHint,
+    appwriteCreateJWT,
+    authProvider,
+    isAppwriteConfigured,
+    isAppwriteUnauthorizedError,
+} from './appwrite';
 import { env } from './env';
+import { isSupabaseConfigured, supabase } from './supabase';
 
 const LOCALHOST_OR_LOOPBACK_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i
 
@@ -30,6 +38,7 @@ export const API_BASE_URL = `${getRuntimeApiBaseUrl(env.apiUrl)}/api/v1`;
 interface FetchOptions extends RequestInit {
     params?: Record<string, string | number | boolean | undefined>;
     timeout?: number; // Custom timeout in milliseconds
+    auth?: 'required' | 'optional' | 'none';
 }
 
 /**
@@ -69,7 +78,7 @@ export class RateLimitError extends APIError {
  * - Supports abort signals from calling code
  */
 async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
-    const { params, timeout = 30000, signal, ...fetchOptions } = options;
+    const { params, timeout = 30000, signal, auth = 'none', ...fetchOptions } = options;
 
     let url = `${API_BASE_URL}${endpoint}`;
 
@@ -121,6 +130,16 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
     const method = String(fetchOptions.method || 'GET').toUpperCase();
     const hasBody = fetchOptions.body !== undefined && fetchOptions.body !== null;
     const headers = new Headers(fetchOptions.headers || {});
+
+    if (auth !== 'none' && !headers.has('Authorization')) {
+        const token = await getAuthorizationToken();
+        if (!token && auth === 'required') {
+            throw new APIError('Authentication required. Please log in.', 401, 'Unauthorized');
+        }
+        if (token) {
+            headers.set('Authorization', `Bearer ${token}`);
+        }
+    }
 
     if (hasBody && !headers.has('Content-Type')) {
         headers.set('Content-Type', 'application/json');
@@ -241,6 +260,39 @@ export async function getHistoricalPrices(
         },
         signal: options?.signal,
     });
+}
+
+async function getAuthorizationToken(): Promise<string | null> {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+
+    if (window.localStorage.getItem('vnibb_dev_user')) {
+        return null;
+    }
+
+    if (authProvider === 'appwrite') {
+        if (!isAppwriteConfigured) {
+            return null;
+        }
+
+        try {
+            return await appwriteCreateJWT();
+        } catch (error) {
+            if (isAppwriteUnauthorizedError(error)) {
+                appwriteClearSessionHint();
+                return null;
+            }
+            throw error;
+        }
+    }
+
+    if (!supabase || !isSupabaseConfigured) {
+        return null;
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token || null;
 }
 
 export async function getProfile(symbol: string, signal?: AbortSignal): Promise<EquityProfileResponse> {
@@ -587,19 +639,23 @@ export async function getScreenerData(options?: ScreenerFilterParams, signal?: A
 // ============ Dashboard API ============
 
 export async function getDashboards(userId = 'anonymous'): Promise<{ count: number; data: Dashboard[] }> {
-    return fetchAPI('/dashboards/', {
-        params: { user_id: userId },
+    void userId;
+    return fetchAPI('/dashboard/', {
+        auth: 'required',
     });
 }
 
 export async function getDashboard(id: number): Promise<Dashboard> {
-    return fetchAPI(`/dashboards/${id}`);
+    return fetchAPI(`/dashboard/${id}`, {
+        auth: 'required',
+    });
 }
 
 export async function createDashboard(data: DashboardCreate): Promise<Dashboard> {
-    return fetchAPI('/dashboards/', {
+    return fetchAPI('/dashboard/', {
         method: 'POST',
         body: JSON.stringify(data),
+        auth: 'required',
     });
 }
 
@@ -607,28 +663,32 @@ export async function updateDashboard(
     id: number,
     data: DashboardUpdate
 ): Promise<Dashboard> {
-    return fetchAPI(`/dashboards/${id}`, {
+    return fetchAPI(`/dashboard/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(data),
+        auth: 'required',
     });
 }
 
 export async function deleteDashboard(id: number): Promise<void> {
-    return fetchAPI(`/dashboards/${id}`, {
+    return fetchAPI(`/dashboard/${id}`, {
         method: 'DELETE',
+        auth: 'required',
     });
 }
 
 export async function addWidget(dashboardId: number, data: WidgetCreate): Promise<Dashboard> {
-    return fetchAPI(`/dashboards/${dashboardId}/widgets`, {
+    return fetchAPI(`/dashboard/${dashboardId}/widgets`, {
         method: 'POST',
         body: JSON.stringify(data),
+        auth: 'required',
     });
 }
 
 export async function removeWidget(dashboardId: number, widgetId: number): Promise<void> {
-    return fetchAPI(`/dashboards/${dashboardId}/widgets/${widgetId}`, {
+    return fetchAPI(`/dashboard/${dashboardId}/widgets/${widgetId}`, {
         method: 'DELETE',
+        auth: 'required',
     });
 }
 

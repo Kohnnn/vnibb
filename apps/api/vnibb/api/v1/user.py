@@ -1,46 +1,42 @@
-"""
-User API Endpoints
+"""User API endpoints."""
 
-Provides user profile and preferences management.
-"""
 
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.auth import User, get_current_user
 from vnibb.core.database import get_db
-
 
 router = APIRouter()
 
 
 class UserProfile(BaseModel):
     """User profile response model."""
+
     id: str
     email: str
-    display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
-    role: Optional[str] = None
-    created_at: Optional[str] = None
-    last_login_at: Optional[str] = None
+    display_name: str | None = None
+    avatar_url: str | None = None
+    role: str | None = None
+    created_at: str | None = None
+    last_login_at: str | None = None
 
 
 class UpdateProfileRequest(BaseModel):
     """Update user profile request."""
-    display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
+
+    display_name: str | None = None
+    avatar_url: str | None = None
 
 
 @router.get("/me", response_model=UserProfile)
 async def get_current_user_profile(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> UserProfile:
     """
     Get current user's profile.
-    
+
     Returns user information extracted from JWT token.
     In a full implementation, this would fetch additional data from the database.
     """
@@ -58,11 +54,11 @@ async def get_current_user_profile(
 async def update_user_profile(
     profile_update: UpdateProfileRequest,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ) -> UserProfile:
     """
     Update current user's profile.
-    
+
     In a full implementation, this would update a users table.
     For now, it returns the updated profile data.
     """
@@ -79,17 +75,11 @@ async def update_user_profile(
 
 @router.get("/dashboards")
 async def get_user_dashboards(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """
     Get all dashboards for the current user.
-    
-    This endpoint is a placeholder that delegates to the dashboard API.
-    The dashboard API should be updated to filter by user_id.
     """
-    from vnibb.api.v1.dashboard import get_dashboards
-    
-    # The dashboard endpoint should be updated to use current_user.id
-    # For now, this is a placeholder
-    return await get_dashboards(db=db)
+    from vnibb.api.v1.dashboard import list_dashboards
+
+    return await list_dashboards(db=db, current_user=current_user)

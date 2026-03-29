@@ -7,17 +7,15 @@ Provides endpoints for:
 - Layout persistence
 """
 
-from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, status, Query
-
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from vnibb.api.deps import DatabaseDep
-from vnibb.models.dashboard import UserDashboard, DashboardWidget
+from vnibb.core.auth import User, get_current_user
+from vnibb.models.dashboard import DashboardWidget, UserDashboard
 from vnibb.providers.vnstock.market_overview import (
     MarketIndexData,
 )
@@ -37,17 +35,17 @@ class WidgetLayout(BaseModel):
     y: int = Field(..., ge=0, description="Grid row position")
     w: int = Field(..., ge=1, description="Width in grid units")
     h: int = Field(..., ge=1, description="Height in grid units")
-    minW: Optional[int] = Field(None, description="Minimum width")
-    minH: Optional[int] = Field(None, description="Minimum height")
+    minW: int | None = Field(None, description="Minimum width")
+    minH: int | None = Field(None, description="Minimum height")
 
 
 class WidgetConfig(BaseModel):
     """Widget-specific configuration."""
 
-    symbol: Optional[str] = None
-    timeframe: Optional[str] = None
-    indicators: Optional[List[str]] = None
-    refreshInterval: Optional[int] = None
+    symbol: str | None = None
+    timeframe: str | None = None
+    indicators: list[str] | None = None
+    refreshInterval: int | None = None
 
 
 class WidgetCreate(BaseModel):
@@ -56,7 +54,7 @@ class WidgetCreate(BaseModel):
     widget_id: str = Field(..., description="Unique widget ID within dashboard")
     widget_type: str = Field(..., description="Widget type (price_chart, screener, etc)")
     layout: WidgetLayout
-    widget_config: Optional[WidgetConfig] = None
+    widget_config: WidgetConfig | None = None
 
 
 class WidgetResponse(BaseModel):
@@ -66,25 +64,25 @@ class WidgetResponse(BaseModel):
     widget_id: str
     widget_type: str
     layout: dict
-    widget_config: Optional[dict]
+    widget_config: dict | None
 
 
 class DashboardCreate(BaseModel):
     """Request body for creating a dashboard."""
 
     name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
+    description: str | None = Field(None, max_length=500)
     is_default: bool = False
-    layout_config: Optional[dict] = None
+    layout_config: dict | None = None
 
 
 class DashboardUpdate(BaseModel):
     """Request body for updating a dashboard."""
 
-    name: Optional[str] = Field(None, max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
-    is_default: Optional[bool] = None
-    layout_config: Optional[dict] = None
+    name: str | None = Field(None, max_length=100)
+    description: str | None = Field(None, max_length=500)
+    is_default: bool | None = None
+    layout_config: dict | None = None
 
 
 class DashboardResponse(BaseModel):
@@ -93,10 +91,10 @@ class DashboardResponse(BaseModel):
     id: int
     user_id: str
     name: str
-    description: Optional[str]
+    description: str | None
     is_default: bool
-    layout_config: Optional[dict]
-    widgets: List[WidgetResponse] = []
+    layout_config: dict | None
+    widgets: list[WidgetResponse] = []
 
     class Config:
         from_attributes = True
@@ -106,13 +104,13 @@ class DashboardListResponse(BaseModel):
     """List of dashboards response."""
 
     count: int
-    data: List[DashboardResponse]
+    data: list[DashboardResponse]
 
 
 class MarketOverviewResponse(BaseModel):
     """Market overview response model."""
 
-    indices: List[MarketIndexData]
+    indices: list[MarketIndexData]
     timestamp: str
 
 
@@ -121,8 +119,33 @@ class TopMoversResponse(BaseModel):
 
     type: str
     index: str
-    data: List[TopMoverData]
+    data: list[TopMoverData]
     timestamp: str
+
+
+async def _get_owned_dashboard(
+    db: DatabaseDep,
+    dashboard_id: int,
+    user_id: str,
+    *,
+    include_widgets: bool = False,
+) -> UserDashboard:
+    statement = select(UserDashboard).where(
+        UserDashboard.id == dashboard_id,
+        UserDashboard.user_id == user_id,
+    )
+    if include_widgets:
+        statement = statement.options(selectinload(UserDashboard.widgets))
+
+    result = await db.execute(statement)
+    dashboard = result.scalar_one_or_none()
+    if not dashboard:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dashboard {dashboard_id} not found",
+        )
+
+    return dashboard
 
 
 # ============ Dashboard Endpoints ============
@@ -136,13 +159,13 @@ class TopMoversResponse(BaseModel):
 )
 async def list_dashboards(
     db: DatabaseDep,
-    user_id: str = "anonymous",  # Placeholder for auth
+    current_user: User = Depends(get_current_user),
 ) -> DashboardListResponse:
     """Get all dashboards for a user."""
     result = await db.execute(
         select(UserDashboard)
         .options(selectinload(UserDashboard.widgets))
-        .where(UserDashboard.user_id == user_id)
+        .where(UserDashboard.user_id == current_user.id)
         .order_by(UserDashboard.is_default.desc(), UserDashboard.name)
     )
     dashboards = result.scalars().all()
@@ -151,6 +174,45 @@ async def list_dashboards(
         count=len(dashboards),
         data=[_to_response(d) for d in dashboards],
     )
+
+
+@router.post(
+    "/",
+    response_model=DashboardResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Dashboard",
+    description="Create a dashboard for the current user.",
+)
+async def create_dashboard(
+    data: DashboardCreate,
+    db: DatabaseDep,
+    current_user: User = Depends(get_current_user),
+) -> DashboardResponse:
+    """Create a dashboard for the authenticated user."""
+    if data.is_default:
+        await db.execute(
+            update(UserDashboard)
+            .where(UserDashboard.user_id == current_user.id)
+            .values(is_default=0)
+        )
+
+    dashboard = UserDashboard(
+        user_id=current_user.id,
+        name=data.name,
+        description=data.description,
+        is_default=1 if data.is_default else 0,
+        layout_config=data.layout_config or {},
+    )
+    db.add(dashboard)
+    await db.flush()
+    dashboard = await _get_owned_dashboard(
+        db,
+        dashboard.id,
+        current_user.id,
+        include_widgets=True,
+    )
+
+    return _to_response(dashboard)
 
 
 @router.get(
@@ -242,21 +304,15 @@ async def get_most_active(
 async def get_dashboard(
     dashboard_id: int,
     db: DatabaseDep,
+    current_user: User = Depends(get_current_user),
 ) -> DashboardResponse:
     """Get a dashboard by ID."""
-    result = await db.execute(
-        select(UserDashboard)
-        .options(selectinload(UserDashboard.widgets))
-        .where(UserDashboard.id == dashboard_id)
+    dashboard = await _get_owned_dashboard(
+        db,
+        dashboard_id,
+        current_user.id,
+        include_widgets=True,
     )
-    dashboard = result.scalar_one_or_none()
-
-    if not dashboard:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dashboard {dashboard_id} not found",
-        )
-
     return _to_response(dashboard)
 
 
@@ -270,16 +326,10 @@ async def update_dashboard(
     dashboard_id: int,
     data: DashboardUpdate,
     db: DatabaseDep,
+    current_user: User = Depends(get_current_user),
 ) -> DashboardResponse:
     """Update a dashboard."""
-    result = await db.execute(select(UserDashboard).where(UserDashboard.id == dashboard_id))
-    dashboard = result.scalar_one_or_none()
-
-    if not dashboard:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dashboard {dashboard_id} not found",
-        )
+    dashboard = await _get_owned_dashboard(db, dashboard_id, current_user.id)
 
     # Update fields if provided
     if data.name is not None:
@@ -300,7 +350,12 @@ async def update_dashboard(
         dashboard.is_default = 1 if data.is_default else 0
 
     await db.flush()
-    await db.refresh(dashboard)
+    dashboard = await _get_owned_dashboard(
+        db,
+        dashboard_id,
+        current_user.id,
+        include_widgets=True,
+    )
 
     return _to_response(dashboard)
 
@@ -314,17 +369,10 @@ async def update_dashboard(
 async def delete_dashboard(
     dashboard_id: int,
     db: DatabaseDep,
+    current_user: User = Depends(get_current_user),
 ) -> None:
     """Delete a dashboard."""
-    result = await db.execute(select(UserDashboard).where(UserDashboard.id == dashboard_id))
-    dashboard = result.scalar_one_or_none()
-
-    if not dashboard:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dashboard {dashboard_id} not found",
-        )
-
+    dashboard = await _get_owned_dashboard(db, dashboard_id, current_user.id)
     await db.delete(dashboard)
 
 
@@ -342,15 +390,10 @@ async def add_widget(
     dashboard_id: int,
     data: WidgetCreate,
     db: DatabaseDep,
+    current_user: User = Depends(get_current_user),
 ) -> WidgetResponse:
     """Add a widget to a dashboard."""
-    # Verify dashboard exists
-    result = await db.execute(select(UserDashboard).where(UserDashboard.id == dashboard_id))
-    if not result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dashboard {dashboard_id} not found",
-        )
+    await _get_owned_dashboard(db, dashboard_id, current_user.id)
 
     widget = DashboardWidget(
         dashboard_id=dashboard_id,
@@ -382,12 +425,15 @@ async def remove_widget(
     dashboard_id: int,
     widget_id: int,
     db: DatabaseDep,
+    current_user: User = Depends(get_current_user),
 ) -> None:
     """Remove a widget from a dashboard."""
     result = await db.execute(
         select(DashboardWidget)
+        .join(UserDashboard, DashboardWidget.dashboard_id == UserDashboard.id)
         .where(DashboardWidget.dashboard_id == dashboard_id)
         .where(DashboardWidget.id == widget_id)
+        .where(UserDashboard.user_id == current_user.id)
     )
     widget = result.scalar_one_or_none()
 
