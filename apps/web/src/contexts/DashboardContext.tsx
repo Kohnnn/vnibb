@@ -336,34 +336,46 @@ const MAIN_MACRO_TEMPLATE: TemplateWidget[] = [
 
 const MAIN_DEEP_DIVE_TEMPLATE: TemplateWidget[] = [
     {
-        type: 'price_chart',
-        syncGroupId: 1,
-        config: { timeframe: '1Y', chartType: 'candle' },
-        layout: { x: 0, y: 0, w: 16, h: 11, minW: 10, minH: 8 }
-    },
-    {
         type: 'ticker_info',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 5, w: 8, h: 6, minW: 6, minH: 4 }
+        layout: { x: 0, y: 0, w: 8, h: 5, minW: 6, minH: 4 }
     },
     {
-        type: 'ticker_profile',
+        type: 'price_chart',
         syncGroupId: 1,
-        config: {},
-        layout: { x: 16, y: 0, w: 8, h: 5, minW: 6, minH: 4 }
+        config: { timeframe: '1Y', chartType: 'candle' },
+        layout: { x: 8, y: 0, w: 16, h: 8, minW: 10, minH: 6 }
     },
     {
-        type: 'institutional_ownership',
+        type: 'key_metrics',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 11, w: 10, h: 5, minW: 8, minH: 3 }
+        layout: { x: 0, y: 5, w: 8, h: 9, minW: 6, minH: 8 }
     },
     {
-        type: 'financial_ratios',
+        type: 'unified_financials',
         syncGroupId: 1,
         config: {},
-        layout: { x: 10, y: 11, w: 14, h: 12, minW: 10, minH: 9 }
+        layout: { x: 8, y: 8, w: 16, h: 10, minW: 12, minH: 8 }
+    },
+    {
+        type: 'quick_stats',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 14, w: 8, h: 6, minW: 6, minH: 5 }
+    },
+    {
+        type: 'volume_analysis',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 18, w: 8, h: 6, minW: 6, minH: 5 }
+    },
+    {
+        type: 'momentum',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 18, w: 8, h: 6, minW: 6, minH: 5 }
     },
 ];
 
@@ -552,19 +564,19 @@ const MAIN_COMPARISON_TEMPLATE: TemplateWidget[] = [
         type: 'comparison_analysis',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 14, h: 11, minW: 10, minH: 8 }
+        layout: { x: 0, y: 0, w: 24, h: 10, minW: 12, minH: 8 }
     },
     {
         type: 'peer_comparison',
         syncGroupId: 1,
         config: {},
-        layout: { x: 14, y: 0, w: 10, h: 10, minW: 8, minH: 8 }
+        layout: { x: 0, y: 10, w: 16, h: 8, minW: 10, minH: 6 }
     },
     {
-        type: 'rs_ranking',
+        type: 'similar_stocks',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 11, w: 24, h: 10, minW: 10, minH: 8 }
+        layout: { x: 16, y: 10, w: 8, h: 8, minW: 6, minH: 6 }
     },
 ];
 

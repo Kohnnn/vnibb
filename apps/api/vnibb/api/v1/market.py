@@ -491,6 +491,44 @@ def _coerce_market_number(value: Any) -> Optional[float]:
         return None
 
 
+def _normalize_market_index_metrics(row: dict[str, Any]) -> dict[str, Any]:
+    current_value = _coerce_market_number(
+        row.get("current_value") or row.get("close") or row.get("price")
+    )
+    change = _coerce_market_number(row.get("change"))
+    change_pct = _coerce_market_number(row.get("change_pct"))
+    previous_close = _coerce_market_number(
+        row.get("previous_close") or row.get("prev_close") or row.get("ref_price")
+    )
+    open_price = _coerce_market_number(row.get("open"))
+
+    if change is None and current_value is not None and previous_close not in (None, 0):
+        change = current_value - previous_close
+
+    if previous_close in (None, 0) and current_value is not None and change is not None:
+        derived_previous_close = current_value - change
+        if derived_previous_close not in (None, 0):
+            previous_close = derived_previous_close
+
+    computed_change_pct = None
+    if current_value is not None and change is not None:
+        base_value = previous_close if previous_close not in (None, 0) else open_price
+        if base_value not in (None, 0):
+            computed_change_pct = (change / base_value) * 100
+
+    if computed_change_pct is not None and (
+        change_pct is None or (abs(change_pct) < 1e-9 and abs(change) > 1e-9)
+    ):
+        change_pct = computed_change_pct
+
+    return {
+        **row,
+        "current_value": current_value,
+        "change": change,
+        "change_pct": change_pct,
+    }
+
+
 def _is_suspicious_market_index_value(index_code: str, value: Optional[float]) -> bool:
     if value is None:
         return False
@@ -560,20 +598,29 @@ async def _load_latest_market_indices_from_db(db: AsyncSession) -> list[dict[str
             change = current_value - previous_close
 
         change_pct = _coerce_market_number(latest.change_pct)
-        if change_pct is None and change is not None and previous_close not in (None, 0):
-            change_pct = (change / previous_close) * 100
+        computed_change_pct = None
+        if change is not None and previous_close not in (None, 0):
+            computed_change_pct = (change / previous_close) * 100
+
+        if computed_change_pct is not None and (
+            change_pct is None or (abs(change_pct) < 1e-9 and abs(change) > 1e-9)
+        ):
+            change_pct = computed_change_pct
 
         results.append(
-            {
-                "index_name": code,
-                "current_value": current_value,
-                "change": change,
-                "change_pct": change_pct,
-                "volume": _coerce_market_number(latest.volume),
-                "high": _coerce_market_number(latest.high),
-                "low": _coerce_market_number(latest.low),
-                "time": latest.time,
-            }
+            _normalize_market_index_metrics(
+                {
+                    "index_name": code,
+                    "current_value": current_value,
+                    "change": change,
+                    "change_pct": change_pct,
+                    "volume": _coerce_market_number(latest.volume),
+                    "high": _coerce_market_number(latest.high),
+                    "low": _coerce_market_number(latest.low),
+                    "time": latest.time,
+                    "previous_close": previous_close,
+                }
+            )
         )
 
     return results
@@ -590,12 +637,12 @@ def _merge_market_index_rows(
         current_value = _coerce_market_number(row.get("current_value"))
         if not code or _is_suspicious_market_index_value(code, current_value):
             continue
-        merged[code] = {**row, "index_name": code}
+        merged[code] = _normalize_market_index_metrics({**row, "index_name": code})
 
     for row in db_rows:
         code = _normalize_market_index_code(row.get("index_name"))
         if code:
-            merged[code] = {**row, "index_name": code}
+            merged[code] = _normalize_market_index_metrics({**row, "index_name": code})
 
     ordered_codes = [code for code in MARKET_INDEX_ORDER if code in merged]
     extra_codes = sorted(code for code in merged.keys() if code not in ordered_codes)

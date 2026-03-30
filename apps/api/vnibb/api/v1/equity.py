@@ -74,7 +74,7 @@ from vnibb.providers.vnstock.foreign_trading import (
 from vnibb.providers.vnstock.subsidiaries import VnstockSubsidiariesFetcher, SubsidiariesQueryParams
 from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher
 from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
-from vnibb.providers.vnstock.trading_stats import VnstockTradingStatsFetcher
+from vnibb.providers.vnstock.trading_stats import TradingStatsData, VnstockTradingStatsFetcher
 from vnibb.providers.vnstock.ownership import VnstockOwnershipFetcher
 from vnibb.providers.vnstock.general_rating import VnstockGeneralRatingFetcher
 from vnibb.services.comparison_service import comparison_service
@@ -964,6 +964,41 @@ async def _load_historical_from_appwrite(
     return rows
 
 
+async def _load_rolling_price_window(
+    db: AsyncSession,
+    symbol: str,
+    *,
+    trading_days: int = 252,
+) -> List[EquityHistoricalData]:
+    end_date = date.today()
+    start_date = end_date - timedelta(days=max(380, trading_days + 30))
+
+    rows = await _load_historical_from_db(db, symbol, start_date, end_date, "1D")
+    if (
+        not rows
+        and settings.is_appwrite_configured
+        and settings.resolved_data_backend in {"appwrite", "hybrid"}
+    ):
+        rows = await _load_historical_from_appwrite(symbol, start_date, end_date, "1D")
+
+    if len(rows) > trading_days:
+        rows = rows[-trading_days:]
+
+    return rows
+
+
+async def _compute_rolling_high_low(
+    db: AsyncSession,
+    symbol: str,
+    *,
+    trading_days: int = 252,
+) -> tuple[Optional[float], Optional[float]]:
+    rows = await _load_rolling_price_window(db, symbol, trading_days=trading_days)
+    highs = [row.high for row in rows if row.high is not None]
+    lows = [row.low for row in rows if row.low is not None]
+    return (max(highs) if highs else None, min(lows) if lows else None)
+
+
 async def _load_historical_from_recent_cache(
     symbol: str,
     start_date: date,
@@ -1391,13 +1426,26 @@ def _build_quote_from_screener_snapshot(
         or getattr(snapshot_row, "created_at", None)
         or datetime.combine(snapshot_row.snapshot_date, datetime.min.time())
     )
+    latest_row_is_current = bool(
+        latest_row and latest_row.time is not None and latest_row.time >= snapshot_row.snapshot_date
+    )
 
     return StockQuoteData(
         symbol=str(snapshot_row.symbol or "").upper(),
         price=snapshot_row.price,
-        open=float(latest_row.open) if latest_row and latest_row.open is not None else None,
-        high=float(latest_row.high) if latest_row and latest_row.high is not None else None,
-        low=float(latest_row.low) if latest_row and latest_row.low is not None else None,
+        open=(
+            float(latest_row.open)
+            if latest_row_is_current and latest_row.open is not None
+            else None
+        ),
+        high=(
+            float(latest_row.high)
+            if latest_row_is_current and latest_row.high is not None
+            else None
+        ),
+        low=(
+            float(latest_row.low) if latest_row_is_current and latest_row.low is not None else None
+        ),
         prev_close=snapshot_prev_close,
         change=snapshot_change,
         change_pct=round(snapshot_change_pct, 2) if snapshot_change_pct is not None else None,
@@ -4629,17 +4677,49 @@ async def get_subsidiaries(symbol: str):
 
 
 @router.get("/{symbol}/trading-stats", response_model=StandardResponse[Any])
-async def get_trading_stats(symbol: str):
+async def get_trading_stats(symbol: str, db: AsyncSession = Depends(get_db)):
+    symbol_upper = symbol.upper()
+
+    async def _hydrate_range(data: Optional[TradingStatsData]) -> Optional[TradingStatsData]:
+        computed_high, computed_low = await _compute_rolling_high_low(
+            db, symbol_upper, trading_days=252
+        )
+
+        if data is None:
+            if computed_high is None and computed_low is None:
+                return None
+            return TradingStatsData(
+                symbol=symbol_upper, high_52w=computed_high, low_52w=computed_low
+            )
+
+        updates: dict[str, Any] = {}
+        if data.high_52w is None and computed_high is not None:
+            updates["high_52w"] = computed_high
+        if data.low_52w is None and computed_low is not None:
+            updates["low_52w"] = computed_low
+
+        return data.model_copy(update=updates) if updates else data
+
     try:
         data = await asyncio.wait_for(
-            VnstockTradingStatsFetcher.fetch(symbol=symbol.upper()),
-            timeout=30,
+            VnstockTradingStatsFetcher.fetch(symbol=symbol_upper), timeout=30
         )
+        data = await _hydrate_range(data)
         return StandardResponse(data=data, meta=MetaData(count=1 if data else 0))
     except (asyncio.TimeoutError, ProviderTimeoutError):
-        return StandardResponse(data=None, error="Request timed out")
+        fallback = await _hydrate_range(None)
+        return StandardResponse(
+            data=fallback,
+            meta=MetaData(count=1 if fallback else 0),
+            error="Request timed out",
+        )
     except Exception as e:
-        return StandardResponse(data=None, error=str(e))
+        fallback = await _hydrate_range(None)
+        return StandardResponse(
+            data=fallback,
+            meta=MetaData(count=1 if fallback else 0),
+            error=str(e),
+        )
 
 
 @router.get("/{symbol}/rating", response_model=StandardResponse[Any])
