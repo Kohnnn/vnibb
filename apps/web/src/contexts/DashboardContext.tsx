@@ -27,7 +27,7 @@ import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
 import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync } from '@/lib/useDashboardSync';
-import { autoFitGridItems, getWidgetDefaultLayout, preserveTemplateGridItems } from '@/lib/dashboardLayout';
+import { autoFitGridItems, findNextAvailableLayout, getWidgetDefaultLayout, preserveTemplateGridItems } from '@/lib/dashboardLayout';
 
 // ============================================================================
 // Storage Keys
@@ -1060,6 +1060,53 @@ const createDefaultTab = (name: string, order: number): DashboardTab => ({
     order,
     widgets: [],
 });
+
+function layoutsOverlap(
+    a: { x: number; y: number; w: number; h: number },
+    b: { x: number; y: number; w: number; h: number }
+) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function findSafeWidgetPlacement(
+    widgets: WidgetInstance[],
+    type: WidgetCreate['type'],
+    desired: { w: number; h: number; minW?: number; minH?: number }
+) {
+    const fallback = findNextAvailableLayout(widgets, type);
+    const normalizedWidgets = widgets
+        .map((widget) => widget.layout)
+        .filter((layout) => Number.isFinite(layout.x) && Number.isFinite(layout.y));
+
+    const maxY = normalizedWidgets.reduce((acc, item) => Math.max(acc, item.y + item.h), 0);
+    const searchLimit = maxY + desired.h + 48;
+
+    for (let y = 0; y <= searchLimit; y += 1) {
+        for (let x = 0; x <= 24 - desired.w; x += 1) {
+            const candidate = { x, y, w: desired.w, h: desired.h };
+            const hasOverlap = normalizedWidgets.some((item) => layoutsOverlap(candidate, item));
+            if (!hasOverlap) {
+                return {
+                    x,
+                    y,
+                    w: desired.w,
+                    h: desired.h,
+                    minW: desired.minW ?? fallback.minW,
+                    minH: desired.minH ?? fallback.minH,
+                };
+            }
+        }
+    }
+
+    return {
+        x: fallback.x,
+        y: fallback.y,
+        w: desired.w,
+        h: desired.h,
+        minW: desired.minW ?? fallback.minW,
+        minH: desired.minH ?? fallback.minH,
+    };
+}
 
 type SystemDashboardTabSpec = {
     idSuffix: string;
@@ -2190,9 +2237,46 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     // ========================================================================
 
     const addWidget = useCallback((dashboardId: string, tabId: string, data: WidgetCreate): WidgetInstance => {
-        // Get default layout constraints from WidgetRegistry
         const defaults = getWidgetDefaultLayout(data.type);
         const widgetId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const dashboard = state.dashboards.find((item) => item.id === dashboardId);
+        const tab = dashboard?.tabs.find((item) => item.id === tabId);
+        const existingWidgets = tab?.widgets ?? [];
+
+        const requestedLayout = {
+            w: data.layout?.w ?? defaults.w,
+            h: data.layout?.h ?? defaults.h,
+            minW: data.layout?.minW ?? defaults.minW ?? 3,
+            minH: data.layout?.minH ?? defaults.minH ?? 2,
+        };
+        const requestedPosition = {
+            x: data.layout?.x,
+            y: data.layout?.y,
+        };
+
+        const hasExplicitPosition = Number.isFinite(requestedPosition.x) && Number.isFinite(requestedPosition.y);
+        const proposedLayout = hasExplicitPosition
+            ? {
+                x: requestedPosition.x as number,
+                y: requestedPosition.y as number,
+                w: requestedLayout.w,
+                h: requestedLayout.h,
+            }
+            : null;
+        const overlapsExisting = proposedLayout
+            ? existingWidgets.some((widget) => layoutsOverlap(proposedLayout, widget.layout))
+            : false;
+
+        const placement = !hasExplicitPosition || requestedPosition.y === Infinity || overlapsExisting
+            ? findSafeWidgetPlacement(existingWidgets, data.type, requestedLayout)
+            : {
+                x: proposedLayout!.x,
+                y: proposedLayout!.y,
+                w: requestedLayout.w,
+                h: requestedLayout.h,
+                minW: requestedLayout.minW,
+                minH: requestedLayout.minH,
+            };
 
         const widget: WidgetInstance = {
             id: widgetId,
@@ -2202,17 +2286,17 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             config: data.config || {},
             layout: {
                 i: widgetId,
-                x: data.layout?.x ?? 0,
-                y: data.layout?.y ?? Infinity, // Place at bottom if not specified
-                w: data.layout?.w ?? defaults.w,
-                h: data.layout?.h ?? defaults.h,
-                minW: data.layout?.minW ?? defaults.minW ?? 3,
-                minH: data.layout?.minH ?? defaults.minH ?? 2,
+                x: placement.x,
+                y: placement.y,
+                w: placement.w,
+                h: placement.h,
+                minW: placement.minW,
+                minH: placement.minH,
             },
         };
         dispatch({ type: 'ADD_WIDGET', payload: { dashboardId, tabId, widget } });
         return widget;
-    }, []);
+    }, [state.dashboards]);
 
     const updateWidget = useCallback((
         dashboardId: string,
@@ -2252,14 +2336,20 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         if (!widget) return null;
 
         const newWidgetId = `widget-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+        const placement = findSafeWidgetPlacement(tab?.widgets ?? [], widget.type, {
+            w: widget.layout.w,
+            h: widget.layout.h,
+            minW: widget.layout.minW,
+            minH: widget.layout.minH,
+        });
         const clonedWidget: WidgetInstance = {
             ...widget,
             id: newWidgetId,
             layout: {
                 ...widget.layout,
                 i: newWidgetId,
-                x: widget.layout.x,
-                y: widget.layout.y + widget.layout.h, // Place below original
+                x: placement.x,
+                y: placement.y,
             },
         };
 
