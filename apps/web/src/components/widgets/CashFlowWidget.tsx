@@ -190,6 +190,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             columns={tableColumns}
             rows={tableRows}
             sortable
+            showTrend={false}
             storageKey={`cash-flow:${id}:${symbol}:${period}`}
             footerNote={unitNote}
             valueFormatter={(value) =>
