@@ -12,6 +12,7 @@ import { RateLimitAlert } from '@/components/ui/RateLimitAlert';
 import { RateLimitError } from '@/lib/api';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface KeyMetricsWidgetProps {
     id: string;
@@ -184,6 +185,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
     const hasHistory = Boolean(
         history && (history.roe?.length || history.roa?.length || history.pe_ratio?.length || history.pb_ratio?.length)
     );
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
     const highlightCards = activeCategory === 'valuation'
         ? [
@@ -238,7 +240,18 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                     </div>
                 )}
 
-                {isLoading && !hasData ? (
+                {timedOut && isLoading && !hasData ? (
+                    <div className="p-2">
+                        <WidgetError
+                            title="Loading timed out"
+                            error={new Error('Key metrics took too long to load.')}
+                            onRetry={() => {
+                                resetTimeout();
+                                refetch();
+                            }}
+                        />
+                    </div>
+                ) : isLoading && !hasData ? (
                     <TableSkeleton rows={8} />
                 ) : error && !hasData ? (
                     <div className="p-2">

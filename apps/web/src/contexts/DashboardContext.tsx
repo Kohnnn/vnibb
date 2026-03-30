@@ -1331,6 +1331,7 @@ type DashboardAction =
     | { type: 'REORDER_TABS'; payload: { dashboardId: string; tabs: DashboardTab[] } }
     | { type: 'ADD_WIDGET'; payload: { dashboardId: string; tabId: string; widget: WidgetInstance } }
     | { type: 'UPDATE_WIDGET'; payload: { dashboardId: string; tabId: string; widgetId: string; updates: Partial<WidgetInstance> } }
+    | { type: 'UPDATE_WIDGET_RUNTIME'; payload: { dashboardId: string; tabId: string; widgetId: string; updates: Partial<WidgetInstance> } }
     | { type: 'DELETE_WIDGET'; payload: { dashboardId: string; tabId: string; widgetId: string } }
     | { type: 'UPDATE_TAB_LAYOUT'; payload: { dashboardId: string; tabId: string; widgets: WidgetInstance[] } }
     | { type: 'RESET_TAB_LAYOUT'; payload: { dashboardId: string; tabId: string } }
@@ -1625,6 +1626,32 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
             };
         }
 
+        case 'UPDATE_WIDGET_RUNTIME': {
+            return {
+                ...state,
+                dashboards: state.dashboards.map((d) =>
+                    d.id === action.payload.dashboardId
+                        ? {
+                            ...d,
+                            tabs: d.tabs.map((t) =>
+                                t.id === action.payload.tabId
+                                    ? {
+                                        ...t,
+                                        widgets: t.widgets.map((w) =>
+                                            w.id === action.payload.widgetId
+                                                ? { ...w, ...action.payload.updates }
+                                                : w
+                                        ),
+                                    }
+                                    : t
+                            ),
+                            updatedAt: new Date().toISOString(),
+                        }
+                        : d
+                ),
+            };
+        }
+
         case 'DELETE_WIDGET': {
             if (!isEditableDashboardId(action.payload.dashboardId)) {
                 return state;
@@ -1827,6 +1854,7 @@ interface DashboardContextValue {
     // Widget actions
     addWidget: (dashboardId: string, tabId: string, widget: WidgetCreate) => WidgetInstance;
     updateWidget: (dashboardId: string, tabId: string, widgetId: string, updates: Partial<WidgetInstance>) => void;
+    updateWidgetRuntime: (dashboardId: string, tabId: string, widgetId: string, updates: Partial<WidgetInstance>) => void;
     deleteWidget: (dashboardId: string, tabId: string, widgetId: string) => void;
     cloneWidget: (dashboardId: string, tabId: string, widgetId: string) => WidgetInstance | null;
     updateTabLayout: (dashboardId: string, tabId: string, widgets: WidgetInstance[]) => void;
@@ -2183,6 +2211,15 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         dispatch({ type: 'UPDATE_WIDGET', payload: { dashboardId, tabId, widgetId, updates } });
     }, []);
 
+    const updateWidgetRuntime = useCallback((
+        dashboardId: string,
+        tabId: string,
+        widgetId: string,
+        updates: Partial<WidgetInstance>
+    ) => {
+        dispatch({ type: 'UPDATE_WIDGET_RUNTIME', payload: { dashboardId, tabId, widgetId, updates } });
+    }, []);
+
     const deleteWidget = useCallback((dashboardId: string, tabId: string, widgetId: string) => {
         dispatch({ type: 'DELETE_WIDGET', payload: { dashboardId, tabId, widgetId } });
     }, []);
@@ -2281,6 +2318,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         applyTemplate,
         addWidget,
         updateWidget,
+        updateWidgetRuntime,
         deleteWidget,
         cloneWidget,
         updateTabLayout,

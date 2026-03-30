@@ -2,16 +2,20 @@
 
 'use client';
 
+import { useEffect } from 'react';
 import { UserCircle, Briefcase } from 'lucide-react';
 import { useOfficers } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface OfficersManagementWidgetProps {
+    id?: string;
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function formatShares(shares: number | null | undefined): string {
@@ -21,12 +25,24 @@ function formatShares(shares: number | null | undefined): string {
     return shares.toLocaleString();
 }
 
-export function OfficersManagementWidget({ symbol }: OfficersManagementWidgetProps) {
+export function OfficersManagementWidget({ symbol, onDataChange }: OfficersManagementWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useOfficers(symbol, !!symbol);
 
     const officers = data?.data || [];
     const hasData = officers.length > 0;
     const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+
+    useEffect(() => {
+        onDataChange?.({
+            __widgetRuntime: {
+                layoutHint: {
+                    empty: !hasData,
+                    compactHeight: 3,
+                },
+            },
+        });
+    }, [hasData, onDataChange]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view officers" icon={<Briefcase size={18} />} />;
@@ -48,12 +64,26 @@ export function OfficersManagementWidget({ symbol }: OfficersManagementWidgetPro
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-1 pt-2">
-                {isLoading && !hasData ? (
+                {timedOut && isLoading && !hasData ? (
+                    <WidgetError
+                        title="Loading timed out"
+                        error={new Error('Officer data took too long to load.')}
+                        onRetry={() => {
+                            resetTimeout();
+                            refetch();
+                        }}
+                    />
+                ) : isLoading && !hasData ? (
                     <WidgetSkeleton lines={5} />
                 ) : error && !hasData ? (
                     <WidgetError error={error as Error} onRetry={() => refetch()} />
                 ) : !hasData ? (
-                    <WidgetEmpty message="No officers data" icon={<Briefcase size={18} />} />
+                    <WidgetEmpty
+                        message={`Data pending for ${symbol}`}
+                        detail="Executive roster appears when leadership disclosures are available."
+                        icon={<Briefcase size={18} />}
+                        size="compact"
+                    />
                 ) : (
                     officers.map((officer, index) => (
                         <div

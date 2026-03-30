@@ -2,16 +2,20 @@
 
 'use client';
 
+import { useEffect } from 'react';
 import { Users, Building2, User, Globe } from 'lucide-react';
 import { useShareholders } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface MajorShareholdersWidgetProps {
+    id?: string;
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function formatShares(shares: number | null | undefined): string {
@@ -35,7 +39,7 @@ function getTypeIcon(type: string | null | undefined) {
     return User;
 }
 
-export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps) {
+export function MajorShareholdersWidget({ symbol, onDataChange }: MajorShareholdersWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useShareholders(symbol, !!symbol);
 
     const shareholders = data?.data || [];
@@ -53,6 +57,18 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
     const hasData = shareholders.length > 0;
     const hasMeaningfulData = shareholders.length >= 2;
     const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+
+    useEffect(() => {
+        onDataChange?.({
+            __widgetRuntime: {
+                layoutHint: {
+                    empty: !hasMeaningfulData,
+                    compactHeight: 3,
+                },
+            },
+        });
+    }, [hasMeaningfulData, onDataChange]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view shareholders" icon={<Users size={18} />} />;
@@ -74,16 +90,30 @@ export function MajorShareholdersWidget({ symbol }: MajorShareholdersWidgetProps
             </div>
 
             <div className="flex-1 overflow-y-auto pt-2">
-                {isLoading && !hasData ? (
+                {timedOut && isLoading && !hasData ? (
+                    <WidgetError
+                        title="Loading timed out"
+                        error={new Error('Ownership data took too long to load.')}
+                        onRetry={() => {
+                            resetTimeout();
+                            refetch();
+                        }}
+                    />
+                ) : isLoading && !hasData ? (
                     <WidgetSkeleton lines={5} />
                 ) : error && !hasData ? (
                     <WidgetError error={error as Error} onRetry={() => refetch()} />
                 ) : !hasData ? (
-                    <WidgetEmpty message="No shareholders data" icon={<Users size={18} />} />
+                    <WidgetEmpty
+                        message={`Data pending for ${symbol}`}
+                        detail="Ownership disclosures are still limited for this issuer."
+                        icon={<Users size={18} />}
+                        size="compact"
+                    />
                 ) : !hasMeaningfulData ? (
                     <WidgetEmpty
                         message={`Data pending for ${symbol}`}
-                        detail="Ownership disclosures for this issuer are still sparse."
+                        detail="Ownership data is typically strongest for larger HOSE-listed issuers."
                         icon={<Users size={18} />}
                         size="compact"
                     />

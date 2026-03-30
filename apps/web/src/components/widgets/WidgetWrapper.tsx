@@ -2,7 +2,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useRef, type ReactNode } from 'react';
+import React, { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import {
     Download,
     FileJson,
@@ -48,6 +48,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { exportToCSV, exportToJSON, exportToPNG } from '@/lib/exportWidget';
+
+interface WidgetRuntimeLayoutHint {
+    compactHeight?: number;
+    empty?: boolean;
+}
+
+interface WidgetRuntimePayload {
+    __widgetRuntime?: {
+        layoutHint?: WidgetRuntimeLayoutHint;
+    };
+}
 
 
 // Multi-select parameter interface
@@ -111,7 +122,7 @@ export function WidgetWrapper({
     onCopilotClick,
     isCollapsed: initialCollapsed = false,
 }: WidgetWrapperProps) {
-    const { state, addWidget, cloneWidget, updateWidget } = useDashboard();
+    const { state, addWidget, cloneWidget, updateWidget, updateWidgetRuntime } = useDashboard();
     const { getColorForGroup, getSymbolForGroup, groups, setGroupSymbol } = useWidgetGroups();
     const [isMaximized, setIsMaximized] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(initialCollapsed);
@@ -120,6 +131,8 @@ export function WidgetWrapper({
     const [internalData, setInternalData] = useState<any>(widgetData);
     const [isContentVisible, setIsContentVisible] = useState(false);
     const contentHostRef = useRef<HTMLDivElement | null>(null);
+    const baseWidgetHeightRef = useRef<number | null>(null);
+    const runtimeWidgetIdRef = useRef<string | null>(null);
     const currentDashboard = state.dashboards.find((dashboard) => dashboard.id === dashboardId) || null;
     const currentTab = currentDashboard?.tabs.find((tab) => tab.id === tabId) || null;
     const currentWidget = currentTab?.widgets.find((widget) => widget.id === id) || null;
@@ -140,6 +153,17 @@ export function WidgetWrapper({
     useEffect(() => {
         if (widgetData) setInternalData(widgetData);
     }, [widgetData]);
+
+    useEffect(() => {
+        if (!currentWidget) {
+            return;
+        }
+
+        if (runtimeWidgetIdRef.current !== currentWidget.id) {
+            runtimeWidgetIdRef.current = currentWidget.id;
+            baseWidgetHeightRef.current = currentWidget.layout.h;
+        }
+    }, [currentWidget]);
 
     useEffect(() => {
         setIsCollapsed(initialCollapsed);
@@ -192,6 +216,35 @@ export function WidgetWrapper({
         };
     }, [isCollapsed, isContentVisible, isMaximized, shouldEagerMount]);
 
+    useEffect(() => {
+        if (!currentWidget) {
+            return;
+        }
+
+        const layoutHint = (internalData as WidgetRuntimePayload | null)?.__widgetRuntime?.layoutHint;
+        if (!layoutHint) {
+            return;
+        }
+
+        const baseHeight = baseWidgetHeightRef.current ?? currentWidget.layout.h;
+        const compactHeight = Math.max(
+            layoutHint.compactHeight ?? currentWidget.layout.minH ?? 3,
+            currentWidget.layout.minH ?? 2,
+        );
+        const targetHeight = layoutHint.empty ? compactHeight : baseHeight;
+
+        if (currentWidget.layout.h === targetHeight) {
+            return;
+        }
+
+        updateWidgetRuntime(dashboardId, tabId, id, {
+            layout: {
+                ...currentWidget.layout,
+                h: targetHeight,
+            },
+        });
+    }, [currentWidget, dashboardId, id, internalData, tabId, updateWidgetRuntime]);
+
     // Get current group details if assigned
     const effectiveSymbol = getSymbolForGroup(widgetGroup);
     // Priority: 
@@ -208,6 +261,19 @@ export function WidgetWrapper({
         rawExchangeBadge && rawExchangeBadge !== 'VN' && rawExchangeBadge !== 'UNKNOWN'
             ? rawExchangeBadge
             : null;
+    const exportableInternalData = useMemo(() => {
+        if (
+            internalData &&
+            typeof internalData === 'object' &&
+            !Array.isArray(internalData) &&
+            '__widgetRuntime' in (internalData as Record<string, unknown>)
+        ) {
+            const { __widgetRuntime, ...rest } = internalData as Record<string, unknown>;
+            return Object.keys(rest).length > 0 ? rest : undefined;
+        }
+
+        return internalData;
+    }, [internalData]);
 
 
 
@@ -283,7 +349,7 @@ export function WidgetWrapper({
 
     const handleExport = async (format: 'csv' | 'json' | 'png') => {
         const filename = `${title.replace(/\s+/g, '_')}_${displaySymbol}_${new Date().toISOString().split('T')[0]}`;
-        const dataToExport = internalData || widgetData;
+        const dataToExport = exportableInternalData || widgetData;
 
         switch (format) {
             case 'csv':
@@ -304,7 +370,7 @@ export function WidgetWrapper({
     };
 
     const buildCopilotContext = (): Record<string, unknown> => {
-        const sourceData = internalData ?? widgetData;
+        const sourceData = exportableInternalData ?? widgetData;
         let dataSample: unknown = null;
 
         if (Array.isArray(sourceData)) {

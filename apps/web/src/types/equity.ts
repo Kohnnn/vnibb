@@ -41,9 +41,16 @@ export interface CompanyNewsData {
   title: string;
   source?: string;
   published_at?: string;
+   published_date?: string;
   url?: string;
   summary?: string;
   category?: string;
+  sentiment?: 'positive' | 'negative' | 'neutral' | 'bullish' | 'bearish';
+  sentiment_score?: number | null;
+  ai_summary?: string | null;
+  relevance_score?: number | null;
+  matched_symbols?: string[];
+  is_market_wide_fallback?: boolean;
 }
 
 export interface CompanyNewsResponse {

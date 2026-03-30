@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vnibb.services.news_service import get_news_flow
+from vnibb.services.news_service import get_company_news_rows, get_news_flow
 
 
 @pytest.mark.asyncio
@@ -189,3 +189,117 @@ async def test_get_news_flow_uses_market_wide_fallback_when_no_relevant_rows(mon
     assert response.fallback_used is True
     assert response.items[0].is_market_wide_fallback is True
     assert response.items[0].relevance_score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_get_news_flow_enriches_runtime_sentiment(monkeypatch):
+    async def fake_latest_news(*, source=None, symbol, sentiment, limit, offset):
+        return [
+            {
+                "id": "row-2",
+                "title": "Vinamilk lợi nhuận tăng mạnh quý này",
+                "summary": "Biên lợi nhuận cải thiện rõ rệt.",
+                "source": "cafef",
+                "published_date": datetime(2026, 2, 16, 9, 30),
+                "url": "https://example.com/vnm-profit",
+                "related_symbols": [],
+                "sentiment": "neutral",
+                "sentiment_score": 0,
+            }
+        ]
+
+    async def fake_symbol_context(symbol: str):
+        return {
+            "symbol": symbol,
+            "peer_symbols": [],
+            "sector_keywords": ["consumer"],
+            "company_keywords": ["vinamilk"],
+        }
+
+    async def fake_analyze_batch(_articles, max_concurrent=5):
+        assert max_concurrent >= 1
+        return [
+            {
+                "sentiment": "bullish",
+                "confidence": 76,
+                "symbols": ["VNM"],
+                "sectors": ["Consumer"],
+                "ai_summary": "Vinamilk posts a strong profit rebound.",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.news_crawler.get_latest_news",
+        fake_latest_news,
+    )
+    monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", fake_symbol_context)
+    monkeypatch.setattr(
+        "vnibb.services.news_service.sentiment_analyzer.analyze_batch",
+        fake_analyze_batch,
+    )
+
+    response = await get_news_flow(symbols=["VNM"], limit=5)
+
+    assert response.total == 1
+    assert response.items[0].sentiment == "bullish"
+    assert response.items[0].sentiment_score == 76
+
+
+@pytest.mark.asyncio
+async def test_get_company_news_rows_filters_irrelevant_provider_articles(monkeypatch):
+    async def fake_company_news(_query):
+        return [
+            SimpleNamespace(
+                title="Volkswagen launches new SUV line",
+                summary="Automotive market update.",
+                source="cafef",
+                published_at=datetime(2026, 2, 17, 8, 0),
+                url="https://example.com/auto-news",
+                category="Auto",
+            ),
+            SimpleNamespace(
+                title="Vinamilk tăng trưởng lợi nhuận và mở rộng thị phần",
+                summary="Vinamilk posts stronger dairy demand.",
+                source="cafef",
+                published_at=datetime(2026, 2, 17, 9, 0),
+                url="https://example.com/vnm-growth",
+                category="Consumer",
+            ),
+        ]
+
+    async def fake_symbol_context(symbol: str):
+        return {
+            "symbol": symbol,
+            "peer_symbols": [],
+            "sector_keywords": ["dairy", "consumer"],
+            "company_keywords": ["vinamilk"],
+        }
+
+    async def fake_analyze_batch(_articles, max_concurrent=5):
+        return [
+            {
+                "sentiment": "bullish",
+                "confidence": 72,
+                "symbols": ["VNM"],
+                "sectors": ["Consumer"],
+                "ai_summary": "Vinamilk growth remains strong.",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.VnstockCompanyNewsFetcher.fetch",
+        fake_company_news,
+    )
+    monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", fake_symbol_context)
+    monkeypatch.setattr(
+        "vnibb.services.news_service.sentiment_analyzer.analyze_batch",
+        fake_analyze_batch,
+    )
+
+    rows = await get_company_news_rows("VNM", limit=5)
+
+    assert len(rows) == 1
+    assert rows[0]["title"].startswith("Vinamilk")
+    assert rows[0]["sentiment"] == "bullish"
+    assert rows[0]["sentiment_score"] == 72
+    assert rows[0]["relevance_score"] >= 0.8

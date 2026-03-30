@@ -1,12 +1,13 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useEffect } from 'react';
 import { useStockQuote, useProfile, useScreenerData, useTradingStats } from '@/lib/queries';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { formatNumber } from '@/lib/formatters';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { TrendingUp, TrendingDown, Info, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -40,9 +41,10 @@ interface TickerInfoWidgetProps {
   symbol: string;
   hideHeader?: boolean;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
-function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerInfoWidgetProps) {
+function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataChange }: TickerInfoWidgetProps) {
   const {
     data: quote,
     isLoading: quoteLoading,
@@ -79,12 +81,30 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
   const hasQuote = Boolean(quote?.symbol);
   const isFallback = Boolean(error && hasQuote);
   const updatedAt = quoteUpdatedAt || profileUpdatedAt;
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasQuote, { timeoutMs: 8_000 })
+  const screenerRow = screenerData?.data?.[0]
+  const profileData = profile?.data
+
+  useEffect(() => {
+    onDataChange?.({
+      quote,
+      profile: profileData,
+      screener: screenerRow,
+    })
+  }, [onDataChange, profileData, quote, screenerRow])
 
   const handleRetry = () => {
     refetchQuote();
     refetchProfile();
     refetchScreener();
   };
+
+  if (timedOut && isLoading && !hasQuote) {
+    return <WidgetError error={new Error('Ticker info took too long to load.')} title="Loading timed out" onRetry={() => {
+      resetTimeout()
+      handleRetry()
+    }} />;
+  }
 
   if (isLoading && !hasQuote) {
     return <WidgetSkeleton lines={4} />;
@@ -97,9 +117,6 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove }: TickerI
   if (!hasQuote) {
     return <WidgetEmpty message={`No quote data for ${symbol}`} />;
   }
-
-  const screenerRow = screenerData?.data?.[0]
-  const profileData = profile?.data
 
   const price = quote?.price
   const change = quote?.change
