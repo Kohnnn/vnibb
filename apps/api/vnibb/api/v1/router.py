@@ -16,6 +16,7 @@ from vnibb.api.v1.realtime import router as realtime_router
 from vnibb.api.v1.technical import router as technical_router
 from vnibb.api.v1.news import router as news_router
 from vnibb.api.v1.listing import router as listing_router
+from vnibb.api.v1.search import router as search_router
 from vnibb.api.v1.trading import router as trading_router
 from vnibb.api.v1.derivatives import router as derivatives_router
 from vnibb.api.v1.user import router as user_router
@@ -123,6 +124,12 @@ api_router.include_router(
     listing_router,
     prefix="/listing",
     tags=["Listing"],
+)
+
+api_router.include_router(
+    search_router,
+    prefix="/search",
+    tags=["Search"],
 )
 
 api_router.include_router(

@@ -254,9 +254,12 @@ export function WidgetWrapper({
     const displaySymbol = (widgetGroup !== 'global')
         ? effectiveSymbol
         : (symbol || effectiveSymbol);
+    const usesExternalTradingViewSymbol = widgetType === 'tradingview_chart' && displaySymbol.includes(':');
 
-    const { data: profileData } = useProfile(displaySymbol || '', Boolean(displaySymbol));
-    const rawExchangeBadge = profileData?.data?.exchange?.toString().trim().toUpperCase();
+    const { data: profileData } = useProfile(displaySymbol || '', Boolean(displaySymbol) && !usesExternalTradingViewSymbol);
+    const rawExchangeBadge = usesExternalTradingViewSymbol
+        ? displaySymbol.split(':')[0]?.trim().toUpperCase()
+        : profileData?.data?.exchange?.toString().trim().toUpperCase();
     const exchangeBadge =
         rawExchangeBadge && rawExchangeBadge !== 'VN' && rawExchangeBadge !== 'UNKNOWN'
             ? rawExchangeBadge

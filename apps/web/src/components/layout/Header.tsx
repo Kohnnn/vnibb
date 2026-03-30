@@ -414,7 +414,7 @@ export function Header({
                 if (isSearching) handleSearch()
               }, 150)
             }}
-            placeholder="Search symbol (e.g., VNM, FPT)"
+            placeholder="Search symbol or press Ctrl+K"
             className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-10 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/10"
           />
           {searchValue && searchValue !== currentSymbol && (

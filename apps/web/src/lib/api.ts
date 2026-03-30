@@ -1429,6 +1429,25 @@ export interface PeersResponse {
     peers: PeerCompany[];
 }
 
+export interface SearchTickerResult {
+    symbol: string;
+    name: string;
+    type: 'vn_stock' | 'crypto' | 'index' | 'us_stock';
+    exchange?: string | null;
+    tv_symbol?: string | null;
+}
+
+export interface SearchTickersResponse {
+    count: number;
+    results: SearchTickerResult[];
+}
+
+export async function searchTickers(query: string, options?: { limit?: number }): Promise<SearchTickersResponse> {
+    return fetchAPI<SearchTickersResponse>('/search/tickers', {
+        params: { q: query, limit: options?.limit },
+    });
+}
+
 export async function getPeerCompanies(symbol: string, limit = 5): Promise<PeersResponse> {
     return fetchAPI<PeersResponse>(`/equity/${symbol}/peers`, {
         params: { limit },

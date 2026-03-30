@@ -498,6 +498,10 @@ function DashboardContent() {
                                         const widgetType = widget.type;
                                         const WidgetComponent = widgetRegistry[widgetType];
                                         const widgetTitle = getWidgetDefinition(widgetType)?.name ?? widgetType.replace(/_/g, ' ');
+                                        const widgetSymbol =
+                                            widgetType === 'tradingview_chart' && typeof widget.config?.symbol === 'string'
+                                                ? widget.config.symbol
+                                                : globalSymbol;
                                         const parameters = getWidgetParameters(widget, (key, value) =>
                                             handleWidgetConfigChange(widget.id, key, value)
                                         );
@@ -513,7 +517,7 @@ function DashboardContent() {
                                                     id={widget.id}
                                                     title={widgetTitle}
                                                     widgetType={widgetType}
-                                                    symbol={globalSymbol}
+                                                    symbol={widgetSymbol}
                                                     tabId={activeTab.id}
                                                     dashboardId={activeDashboard.id}
                                                     widgetGroup={widget.widgetGroup}
@@ -537,7 +541,7 @@ function DashboardContent() {
                                                     {WidgetComponent ? (
                                                         <WidgetComponent 
                                                             id={widget.id}
-                                                            symbol={globalSymbol}
+                                                            symbol={widgetSymbol}
                                                         />
                                                     ) : (
                                                         <div className="p-4 text-[var(--text-muted)]">Widget not found: {widgetType}</div>

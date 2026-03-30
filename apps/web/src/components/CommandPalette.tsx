@@ -1,325 +1,368 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { Command } from 'cmdk';
-import { 
-  Search, Plus, LayoutGrid, Settings, Moon, Sun, 
-  RefreshCw, Download, Maximize2, Home, BarChart2,
-  TrendingUp, PieChart, Newspaper, Bell, Database,
-  ShieldAlert, Sigma,
-  Globe, User, Box, FileText, ChevronRight, X
+import { useQuery } from '@tanstack/react-query';
+import {
+  ArrowRightLeft,
+  Bitcoin,
+  ChartCandlestick,
+  Coins,
+  Command as CommandIcon,
+  ExternalLink,
+  Globe2,
+  LayoutGrid,
+  Newspaper,
+  Search,
+  Settings,
+  Sparkles,
+  TrendingUp,
+  X,
 } from 'lucide-react';
+
+import { searchTickers, type SearchTickerResult } from '@/lib/api';
+import {
+  buildTickerPaletteSections,
+  readCommandPaletteRecents,
+  saveRecentSearch,
+  writeCommandPaletteRecents,
+  type CommandPaletteActionItem,
+  type RecentSearchEntry,
+} from '@/lib/commandPalette';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
-import { widgetNames } from '@/components/widgets/WidgetRegistry';
-import type { WidgetType } from '@/types/dashboard';
-import { cn } from '@/lib/utils';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useDataSources } from '@/contexts/DataSourcesContext';
 
 interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-interface CommandItem {
-  id: string;
-  label: string;
-  icon?: React.ReactNode;
-  shortcut?: string;
-  action: () => void;
-  category: 'navigation' | 'widgets' | 'actions' | 'settings';
+function getTickerIcon(type: SearchTickerResult['type']) {
+  switch (type) {
+    case 'vn_stock':
+      return <span className="text-sm">VN</span>;
+    case 'crypto':
+      return <Bitcoin className="h-4 w-4 text-amber-300" />;
+    case 'index':
+      return <Globe2 className="h-4 w-4 text-cyan-300" />;
+    case 'us_stock':
+      return <TrendingUp className="h-4 w-4 text-emerald-300" />;
+    default:
+      return <Search className="h-4 w-4" />;
+  }
+}
+
+function highlightMatch(text: string, query: string): Array<string | ReactNode> {
+  const trimmed = query.trim();
+  if (!trimmed) return [text];
+
+  const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escaped})`, 'ig');
+  return text.split(regex).filter(Boolean).map((part, index) => (
+    part.toLowerCase() === trimmed.toLowerCase()
+      ? <mark key={`${part}-${index}`} className="rounded bg-blue-500/20 px-0.5 text-blue-100">{part}</mark>
+      : part
+  ));
 }
 
 export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+  const router = useRouter();
   const [search, setSearch] = useState('');
-  const { 
+  const [recentSearches, setRecentSearches] = useState<RecentSearchEntry[]>([]);
+  const {
     state,
     setActiveDashboard,
     addWidget,
   } = useDashboard();
   const { setGlobalSymbol } = useWidgetGroups();
-  const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
 
-  // Toggle the menu when ⌘K or Ctrl+K is pressed - handled in layout now, but keeping for standalone robustness
   useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        onOpenChange(!open);
-      }
-    };
+    if (open) {
+      setRecentSearches(readCommandPaletteRecents());
+    }
+  }, [open]);
 
-    document.addEventListener('keydown', down);
-    return () => document.removeEventListener('keydown', down);
-  }, [open, onOpenChange]);
+  const trimmedSearch = search.trim();
+  const tickerQuery = useQuery({
+    queryKey: ['command-palette-tickers', trimmedSearch],
+    queryFn: () => searchTickers(trimmedSearch, { limit: 12 }),
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  });
 
-  // Build command list
-  const commands = useMemo((): CommandItem[] => [
-    // Navigation
-    {
-      id: 'home',
-      label: 'Go to Home Dashboard',
-      icon: <Home className="w-4 h-4" />,
-      shortcut: '⌘H',
-      action: () => {
-        const homeDashboard = state.dashboards.find(d => d.isDefault);
-        if (homeDashboard) setActiveDashboard(homeDashboard.id);
-        onOpenChange(false);
-      },
-      category: 'navigation',
-    },
-    ...state.dashboards.map(d => ({
-      id: `dashboard-${d.id}`,
-      label: `Switch to: ${d.name}`,
-      icon: <LayoutGrid className="w-4 h-4" />,
-      action: () => {
-        setActiveDashboard(d.id);
-        onOpenChange(false);
-      },
-      category: 'navigation' as const,
-    })),
-    
-    // Widget commands
-    ...Object.entries(widgetNames).map(([type, name]) => ({
-      id: `add-widget-${type}`,
-      label: `Add Widget: ${name}`,
-      icon: getWidgetIcon(type as WidgetType),
-      action: () => {
-        if (state.activeDashboardId && state.activeTabId) {
-            addWidget(state.activeDashboardId, state.activeTabId, {
-                type: type as WidgetType,
-                tabId: state.activeTabId,
-                layout: { x: 0, y: 0, w: 4, h: 4 }
-            });
-        }
-        onOpenChange(false);
-      },
-      category: 'widgets' as const,
-    })),
+  const commandActions = useMemo(() => {
+    const actions = new Map<string, () => void>();
+    const items: CommandPaletteActionItem[] = [];
 
-    // Data Sources
-    {
-        id: 'source-kbs',
-        label: 'Set Data Source: KBS (Recommended)',
-        icon: <Database className="w-4 h-4" />,
-        action: () => {
-            setPreferredVnstockSource('KBS');
-            onOpenChange(false);
-        },
-        category: 'settings',
-    },
-    {
-        id: 'source-vci',
-        label: 'Set Data Source: VCI',
-        icon: <Database className="w-4 h-4" />,
-        action: () => {
-            setPreferredVnstockSource('VCI');
-            onOpenChange(false);
-        },
-        category: 'settings',
-    },
-
-    // Actions
-    {
-      id: 'refresh-all',
-      label: 'Refresh All Data',
-      icon: <RefreshCw className="w-4 h-4" />,
-      shortcut: '⌘R',
-      action: () => {
-        window.location.reload();
+    const defaultDashboard = state.dashboards.find((dashboard) => dashboard.isDefault) ?? state.dashboards[0];
+    if (defaultDashboard) {
+      const item: CommandPaletteActionItem = {
+        id: `workspace:${defaultDashboard.id}`,
+        type: 'workspace',
+        label: `Open ${defaultDashboard.name}`,
+        description: 'Default workspace',
+      };
+      actions.set(item.id, () => {
+        setActiveDashboard(defaultDashboard.id);
         onOpenChange(false);
-      },
-      category: 'actions',
-    },
-    {
-        id: 'search-ticker',
-        label: search ? `Search Ticker: ${search.toUpperCase()}` : 'Type ticker symbol...',
-        icon: <Search className="w-4 h-4" />,
-        action: () => {
-          if (search.length >= 2) {
-             setGlobalSymbol(search.toUpperCase());
-          }
+      });
+      items.push(item);
+    }
+
+    state.dashboards
+      .filter((dashboard) => !dashboard.isDefault)
+      .forEach((dashboard) => {
+        const item: CommandPaletteActionItem = {
+          id: `workspace:${dashboard.id}`,
+          type: 'workspace',
+          label: `Switch to ${dashboard.name}`,
+          description: 'Workspace',
+        };
+        actions.set(item.id, () => {
+          setActiveDashboard(dashboard.id);
           onOpenChange(false);
-        },
-        category: 'navigation',
-    },
+        });
+        items.push(item);
+      });
 
-    // Settings
-    {
-      id: 'settings',
-      label: 'Open Global Settings',
-      icon: <Settings className="w-4 h-4" />,
-      shortcut: '⌘,',
-      action: () => {
-        window.dispatchEvent(new CustomEvent('open-settings'));
-        onOpenChange(false);
-      },
-      category: 'settings',
-    },
-  ], [state.dashboards, state.activeDashboardId, state.activeTabId, setActiveDashboard, addWidget, onOpenChange, search, setPreferredVnstockSource]);
+    const settingsItem: CommandPaletteActionItem = {
+      id: 'command:settings',
+      type: 'command',
+      label: 'Open Settings',
+      description: 'Navigate to app settings',
+    };
+    actions.set(settingsItem.id, () => {
+      router.push('/settings');
+      onOpenChange(false);
+    });
+    items.push(settingsItem);
 
-  // Filter commands based on search
-  const filteredCommands = useMemo(() => 
-    commands.filter(cmd =>
-      cmd.label.toLowerCase().includes(search.toLowerCase())
-    ),
-    [commands, search]
+    const quantItem: CommandPaletteActionItem = {
+      id: 'command:add-quant-summary',
+      type: 'command',
+      label: 'Add Quant Summary Widget',
+      description: 'Pin a quant overview to the active tab',
+    };
+    actions.set(quantItem.id, () => {
+      if (state.activeDashboardId && state.activeTabId) {
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'quant_summary',
+          tabId: state.activeTabId,
+          layout: { x: 0, y: Infinity, w: 10, h: 8 },
+        });
+      }
+      onOpenChange(false);
+    });
+    items.push(quantItem);
+
+    const marketNewsItem: CommandPaletteActionItem = {
+      id: 'command:add-market-news',
+      type: 'command',
+      label: 'Add Market News Widget',
+      description: 'Fill the News & Events tab with market context',
+    };
+    actions.set(marketNewsItem.id, () => {
+      if (state.activeDashboardId && state.activeTabId) {
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'market_news',
+          tabId: state.activeTabId,
+          layout: { x: 0, y: Infinity, w: 12, h: 8 },
+        });
+      }
+      onOpenChange(false);
+    });
+    items.push(marketNewsItem);
+
+    const tradingViewItem: CommandPaletteActionItem = {
+      id: 'command:add-tradingview',
+      type: 'command',
+      label: 'Add TradingView Chart Widget',
+      description: 'Open a global asset chart widget on the current tab',
+    };
+    actions.set(tradingViewItem.id, () => {
+      if (state.activeDashboardId && state.activeTabId) {
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'tradingview_chart',
+          tabId: state.activeTabId,
+          config: { symbol: 'NASDAQ:AAPL' },
+          layout: { x: 0, y: Infinity, w: 10, h: 8 },
+        });
+      }
+      onOpenChange(false);
+    });
+    items.push(tradingViewItem);
+
+    return { items, actions };
+  }, [addWidget, onOpenChange, router, setActiveDashboard, state.activeDashboardId, state.activeTabId, state.dashboards]);
+
+  const sections = useMemo(
+    () => buildTickerPaletteSections(trimmedSearch, recentSearches, tickerQuery.data?.results || [], commandActions.items),
+    [commandActions.items, recentSearches, tickerQuery.data?.results, trimmedSearch],
   );
 
-  const groupedCommands = useMemo(() => ({
-    navigation: filteredCommands.filter(c => c.category === 'navigation'),
-    widgets: filteredCommands.filter(c => c.category === 'widgets'),
-    actions: filteredCommands.filter(c => c.category === 'actions'),
-    settings: filteredCommands.filter(c => c.category === 'settings'),
-  }), [filteredCommands]);
-
-  return (
-    <AnimatePresence>
-      {open && (
-        <div className="fixed inset-0 z-[100] flex items-start justify-center bg-[rgba(0,0,0,0.6)] p-4 pt-[15vh]">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95, y: -20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            className="w-full max-w-xl bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-xl shadow-2xl overflow-hidden"
-          >
-            <Command className="flex flex-col h-full">
-              <div className="flex items-center gap-3 px-4 border-b border-[var(--border-default)]">
-                <Search className="w-5 h-5 text-[var(--text-muted)]" />
-                <Command.Input
-                  value={search}
-                  onValueChange={setSearch}
-                  placeholder="Type a command or search..."
-                  aria-label="Command palette search"
-                  className="flex-1 h-12 bg-transparent text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none text-sm"
-                  autoFocus
-                />
-                <button
-                  onClick={() => onOpenChange(false)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      onOpenChange(false);
-                    }
-                  }}
-                  className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded"
-                  aria-label="Close command palette"
-                >
-                    <X size={16} />
-                </button>
-              </div>
-
-              <Command.List className="max-h-[400px] overflow-y-auto p-2 scrollbar-hide">
-                <Command.Empty className="py-10 text-center text-[var(--text-muted)] text-sm">
-                    <Box className="w-8 h-8 mx-auto mb-3 opacity-20" />
-                    No results found for "{search}"
-                </Command.Empty>
-
-                {groupedCommands.navigation.length > 0 && (
-                  <Command.Group heading="Navigation" className="mb-2">
-                    <div className="px-2 py-1.5 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
-                      Navigation
-                    </div>
-                    {groupedCommands.navigation.map(cmd => (
-                      <CommandItem key={cmd.id} command={cmd} />
-                    ))}
-                  </Command.Group>
-                )}
-
-                {groupedCommands.widgets.length > 0 && (
-                  <Command.Group heading="Add Widget" className="mb-2">
-                    <div className="px-2 py-1.5 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
-                      Add Widget
-                    </div>
-                    {groupedCommands.widgets.slice(0, 8).map(cmd => (
-                      <CommandItem key={cmd.id} command={cmd} />
-                    ))}
-                    {groupedCommands.widgets.length > 8 && (
-                       <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] italic">
-                         +{groupedCommands.widgets.length - 8} more widgets...
-                       </div>
-                    )}
-                  </Command.Group>
-                )}
-
-                {groupedCommands.actions.length > 0 && (
-                  <Command.Group heading="Actions" className="mb-2">
-                    <div className="px-2 py-1.5 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
-                      Actions
-                    </div>
-                    {groupedCommands.actions.map(cmd => (
-                      <CommandItem key={cmd.id} command={cmd} />
-                    ))}
-                  </Command.Group>
-                )}
-
-                {groupedCommands.settings.length > 0 && (
-                  <Command.Group heading="Settings">
-                    <div className="px-2 py-1.5 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
-                      Settings
-                    </div>
-                    {groupedCommands.settings.map(cmd => (
-                      <CommandItem key={cmd.id} command={cmd} />
-                    ))}
-                  </Command.Group>
-                )}
-              </Command.List>
-              
-              <div className="px-4 py-2 border-t border-[var(--border-default)] bg-[var(--bg-surface)]/90 flex items-center justify-between text-[10px] text-[var(--text-muted)]">
-                 <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-1">
-                        <kbd className="px-1 py-0.5 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded">↑↓</kbd> <span>Navigate</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                        <kbd className="px-1 py-0.5 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded">↵</kbd> <span>Select</span>
-                    </div>
-                 </div>
-                 <div className="font-mono">
-                    VNIBB Terminal
-                 </div>
-              </div>
-            </Command>
-          </motion.div>
-        </div>
-      )}
-    </AnimatePresence>
-  );
-}
-
-function CommandItem({ command }: { command: CommandItem }) {
-  return (
-    <Command.Item
-      onSelect={command.action}
-      className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer text-[var(--text-secondary)] aria-selected:bg-blue-600/10 aria-selected:text-blue-400 transition-colors group"
-    >
-      <div className="w-8 h-8 rounded bg-[var(--bg-secondary)] border border-[var(--border-default)] flex items-center justify-center group-aria-selected:border-blue-500/30">
-        {command.icon}
-      </div>
-      <span className="flex-1 text-sm font-medium">{command.label}</span>
-      {command.shortcut && (
-        <kbd className="px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] bg-[var(--bg-primary)] border border-[var(--border-default)] rounded font-sans">
-          {command.shortcut}
-        </kbd>
-      )}
-      <ChevronRight className="w-3 h-3 opacity-0 group-aria-selected:opacity-100 transition-opacity" />
-    </Command.Item>
-  );
-}
-
-function getWidgetIcon(type: WidgetType): React.ReactNode {
-  const iconMap: Partial<Record<WidgetType, React.ReactNode>> = {
-    price_chart: <BarChart2 className="w-4 h-4" />,
-    valuation_multiples_chart: <BarChart2 className="w-4 h-4" />,
-    screener: <Database className="w-4 h-4" />,
-    news_feed: <Newspaper className="w-4 h-4" />,
-    top_movers: <TrendingUp className="w-4 h-4" />,
-    sector_performance: <PieChart className="w-4 h-4" />,
-    price_alerts: <Bell className="w-4 h-4" />,
-    ticker_info: <User className="w-4 h-4" />,
-    financials: <FileText className="w-4 h-4" />,
-    drawdown_deep_dive: <ShieldAlert className="w-4 h-4" />,
-    hurst_market_structure: <Sigma className="w-4 h-4" />,
+  const saveRecent = (item: SearchTickerResult) => {
+    const next = saveRecentSearch(recentSearches, {
+      symbol: item.symbol,
+      label: item.name,
+      type: item.type,
+      exchange: item.exchange,
+      tvSymbol: item.tv_symbol,
+    });
+    setRecentSearches(next);
+    writeCommandPaletteRecents(next);
   };
-  return iconMap[type] || <Plus className="w-4 h-4" />;
+
+  const handleTickerSelect = (item: SearchTickerResult) => {
+    saveRecent(item);
+
+    if (item.type === 'vn_stock') {
+      setGlobalSymbol(item.symbol);
+      onOpenChange(false);
+      return;
+    }
+
+    if (state.activeDashboardId && state.activeTabId) {
+      addWidget(state.activeDashboardId, state.activeTabId, {
+        type: 'tradingview_chart',
+        tabId: state.activeTabId,
+        config: { symbol: item.tv_symbol || item.symbol },
+        layout: { x: 0, y: Infinity, w: 10, h: 8 },
+      });
+    }
+    onOpenChange(false);
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-[rgba(2,6,23,0.72)] p-4 pt-[12vh]">
+      <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] shadow-2xl">
+        <Command className="flex flex-col">
+          <div className="flex items-center gap-3 border-b border-[var(--border-default)] px-4 py-3">
+            <CommandIcon className="h-5 w-5 text-[var(--text-muted)]" />
+            <Command.Input
+              value={search}
+              onValueChange={setSearch}
+              placeholder="Search tickers, crypto, indices, or commands..."
+              aria-label="Command palette search"
+              autoFocus
+              className="h-11 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+            />
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+              aria-label="Close command palette"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <Command.List className="max-h-[480px] overflow-y-auto px-2 py-2 scrollbar-hide">
+            <Command.Empty className="flex flex-col items-center gap-2 py-10 text-center text-sm text-[var(--text-muted)]">
+              <Search className="h-8 w-8 opacity-30" />
+              <span>No results found for "{trimmedSearch}"</span>
+            </Command.Empty>
+
+            {sections.map((section) => (
+              <Command.Group key={section.key} heading={section.label}>
+                <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  {section.label}
+                </div>
+                {section.items.map((item) => {
+                  const tickerResult = (tickerQuery.data?.results || []).find(
+                    (result) => result.symbol === item.symbol && result.type === item.type,
+                  );
+                  const isTicker = item.type !== 'command' && item.type !== 'workspace';
+                  const icon = isTicker
+                    ? getTickerIcon(item.type as SearchTickerResult['type'])
+                    : item.type === 'workspace'
+                      ? <LayoutGrid className="h-4 w-4 text-cyan-300" />
+                      : item.id.includes('settings')
+                        ? <Settings className="h-4 w-4 text-amber-300" />
+                        : item.id.includes('market-news')
+                          ? <Newspaper className="h-4 w-4 text-emerald-300" />
+                          : item.id.includes('tradingview')
+                            ? <ChartCandlestick className="h-4 w-4 text-violet-300" />
+                            : item.id.includes('quant')
+                              ? <Sparkles className="h-4 w-4 text-indigo-300" />
+                              : <ArrowRightLeft className="h-4 w-4 text-[var(--text-muted)]" />;
+
+                  return (
+                    <Command.Item
+                      key={item.id}
+                      value={`${item.label} ${item.description || ''} ${item.symbol || ''}`}
+                      onSelect={() => {
+                        if (isTicker && item.symbol) {
+                          handleTickerSelect(
+                            tickerResult || {
+                              symbol: item.symbol,
+                              name: item.description || item.label,
+                              type: item.type as SearchTickerResult['type'],
+                              exchange: item.exchange,
+                              tv_symbol: item.tvSymbol,
+                            },
+                          );
+                          return;
+                        }
+                        commandActions.actions.get(item.id)?.();
+                      }}
+                      className="group flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-[var(--text-secondary)] outline-none transition-colors aria-selected:bg-blue-600/10 aria-selected:text-blue-300"
+                    >
+                      <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]">
+                        {icon}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+                          {highlightMatch(item.label, trimmedSearch)}
+                        </div>
+                        {item.description ? (
+                          <div className="truncate text-xs text-[var(--text-muted)]">
+                            {highlightMatch(item.description, trimmedSearch)}
+                          </div>
+                        ) : null}
+                      </div>
+                      {item.exchange ? (
+                        <span className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--text-muted)]">
+                          {item.exchange}
+                        </span>
+                      ) : null}
+                      {item.type === 'crypto' || item.type === 'index' || item.type === 'us_stock' ? (
+                        <ExternalLink className="h-3.5 w-3.5 opacity-60 transition-opacity group-aria-selected:opacity-100" />
+                      ) : null}
+                    </Command.Item>
+                  );
+                })}
+              </Command.Group>
+            ))}
+          </Command.List>
+
+          <div className="flex items-center justify-between border-t border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-4 py-2 text-[10px] text-[var(--text-muted)]">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1">
+                <kbd className="rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 py-0.5">Ctrl+K</kbd>
+                <span>Open</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <kbd className="rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 py-0.5">↑↓</kbd>
+                <span>Navigate</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <kbd className="rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 py-0.5">Enter</kbd>
+                <span>Select</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <kbd className="rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 py-0.5">Esc</kbd>
+                <span>Close</span>
+              </div>
+            </div>
+            <span className="font-mono">VNIBB Discover</span>
+          </div>
+        </Command>
+      </div>
+    </div>
+  );
 }
+
+export default CommandPalette;

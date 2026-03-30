@@ -71,6 +71,7 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   share_statistics: { preferredW: 6, preferredH: 5, minW: 5, minH: 4, maxW: 8, orientation: 'vertical', expandPriority: 1 },
   ticker_profile: { preferredW: 12, preferredH: 5, minW: 8, minH: 4, maxW: 14, orientation: 'horizontal', expandPriority: 3 },
   price_chart: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 5 },
+  tradingview_chart: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 5 },
   unified_financials: { preferredW: 24, preferredH: 10, minW: 14, minH: 8, orientation: 'horizontal', expandPriority: 6 },
   financial_ratios: { preferredW: 10, preferredH: 14, minW: 8, minH: 11, orientation: 'horizontal', expandPriority: 4 },
   income_statement: { preferredW: 14, preferredH: 14, minW: 10, minH: 9, orientation: 'horizontal', expandPriority: 4 },

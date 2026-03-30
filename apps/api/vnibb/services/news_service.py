@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -128,7 +128,38 @@ def _parse_published_at(value: Any) -> datetime:
         try:
             return datetime.fromisoformat(normalized)
         except ValueError:
-            pass
+            dmy = re.match(
+                r"^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$",
+                normalized,
+            )
+            if dmy:
+                year = int(dmy.group(3))
+                if year < 100:
+                    year += 2000
+                return datetime(
+                    year,
+                    int(dmy.group(2)),
+                    int(dmy.group(1)),
+                    int(dmy.group(4) or 0),
+                    int(dmy.group(5) or 0),
+                    int(dmy.group(6) or 0),
+                )
+
+            lower = normalized.lower()
+            relative_match = re.match(
+                r"^(\d+)\s*(phut|phút|min|minute|minutes|gio|giờ|hour|hours|ngay|ngày|day|days)\s*(truoc|trước|ago)$",
+                lower,
+            )
+            if relative_match:
+                amount = int(relative_match.group(1))
+                unit = relative_match.group(2)
+                now = datetime.now()
+                if unit in {"phut", "phút", "min", "minute", "minutes"}:
+                    return now - timedelta(minutes=amount)
+                if unit in {"gio", "giờ", "hour", "hours"}:
+                    return now - timedelta(hours=amount)
+                if unit in {"ngay", "ngày", "day", "days"}:
+                    return now - timedelta(days=amount)
 
     return datetime.now()
 
@@ -423,22 +454,49 @@ async def get_company_news_rows(symbol: str, limit: int = 20) -> list[dict[str, 
     )
 
     relevant_provider_rows = [
-        row for row in provider_rows if float(row.get("relevance_score") or 0) >= 0.8
+        row for row in provider_rows if float(row.get("relevance_score") or 0) >= 0.65
     ]
-    if relevant_provider_rows:
-        return await _enrich_sentiment_rows(relevant_provider_rows[:limit])
 
     ranked_rows, _ = await get_ranked_news_rows(
         symbol=upper_symbol,
-        limit=limit,
+        limit=max(limit * 2, 12),
         offset=0,
         mode="related",
     )
-    return [
+    ranked_rows = [
         {**row, "symbol": upper_symbol}
         for row in ranked_rows
         if not row.get("is_market_wide_fallback")
-    ][:limit]
+    ]
+
+    merged_rows: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+
+    def append_rows(rows: list[dict[str, Any]]) -> None:
+        for row in rows:
+            key = str(row.get("url") or row.get("title") or row.get("id") or "").strip().lower()
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            merged_rows.append({**row, "symbol": upper_symbol})
+            if len(merged_rows) >= limit:
+                break
+
+    append_rows(relevant_provider_rows)
+    if len(merged_rows) < limit:
+        append_rows(ranked_rows)
+    if len(merged_rows) == 0:
+        append_rows(await _hydrate_company_news_fallback(symbol=upper_symbol, limit=limit))
+
+    merged_rows.sort(
+        key=lambda row: (
+            float(row.get("relevance_score") or 0),
+            _parse_published_at(row.get("published_date") or row.get("published_at")),
+        ),
+        reverse=True,
+    )
+
+    return await _enrich_sentiment_rows(merged_rows[:limit])
 
 
 async def get_ranked_news_rows(
@@ -455,7 +513,7 @@ async def get_ranked_news_rows(
 
     try:
         if related_mode:
-            candidate_limit = min(max(limit * 5, 40), 120)
+            candidate_limit = min(max(limit * 6, 60), 180)
             results = await news_crawler.get_latest_news(
                 source=source,
                 sentiment=sentiment,
