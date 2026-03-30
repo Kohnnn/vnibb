@@ -50,6 +50,7 @@ export const queryKeys = {
     incomeStatement: (symbol: string, period: string) => ['incomeStatement', symbol, period] as const,
     cashFlow: (symbol: string, period: string) => ['cashFlow', symbol, period] as const,
     marketOverview: () => ['marketOverview'] as const,
+    marketBreadth: () => ['marketBreadth'] as const,
     industryBubble: (params?: Record<string, unknown>) => ['industryBubble', params] as const,
     worldIndices: () => ['worldIndices'] as const,
     forexRates: () => ['forexRates'] as const,
@@ -383,6 +384,16 @@ export function useMarketOverview(enabled = true) {
         queryFn: ({ signal }) => api.getMarketOverview(signal),
         enabled,
         staleTime: 60 * 1000, // 1 minute
+    });
+}
+
+export function useMarketBreadth(enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.marketBreadth(),
+        queryFn: () => api.getMarketBreadth(),
+        enabled,
+        staleTime: 60 * 1000,
+        retry: 2,
     });
 }
 

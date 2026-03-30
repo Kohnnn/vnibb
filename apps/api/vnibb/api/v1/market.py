@@ -43,6 +43,7 @@ from vnibb.models.company import Company
 from vnibb.models.financials import IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.models.trading import FinancialRatio
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
@@ -197,6 +198,26 @@ class MarketTopMoversResponse(BaseModel):
 class MarketSectorPerformanceResponse(BaseModel):
     count: int
     data: List[dict[str, Any]]
+    error: Optional[str] = None
+
+
+class MarketBreadthExchangeData(BaseModel):
+    exchange: str
+    total: int
+    advancers: int
+    decliners: int
+    unchanged: int
+    ad_ratio: Optional[float] = None
+    pct_above_sma20: Optional[float] = None
+    pct_above_sma50: Optional[float] = None
+    new_highs_52w: int = 0
+    new_lows_52w: int = 0
+
+
+class MarketBreadthResponse(BaseModel):
+    count: int
+    data: List[MarketBreadthExchangeData]
+    updated_at: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -1302,6 +1323,229 @@ async def _load_latest_screener_rows_from_db(limit: int = 500) -> List[dict[str,
     return [row for row in normalized_rows if row.get("symbol")]
 
 
+async def _fetch_market_screener_rows(limit: int = 1500) -> List[dict[str, Any]]:
+    cache_manager = CacheManager()
+    screener_rows: List[dict[str, Any]] = []
+
+    try:
+        cache_result = await cache_manager.get_screener_data(
+            symbol=None,
+            source=settings.vnstock_source,
+            allow_stale=True,
+        )
+        if cache_result.data:
+            screener_rows = [_normalize_screener_row(item) for item in cache_result.data]
+    except Exception as exc:
+        logger.warning("Market breadth cache lookup failed: %s", exc)
+
+    try:
+        db_rows = await _load_latest_screener_rows_from_db(limit=limit)
+        if db_rows:
+            merged_rows = {row["symbol"]: row for row in db_rows if row.get("symbol")}
+            for row in screener_rows:
+                ticker = row.get("symbol")
+                if not ticker:
+                    continue
+                merged_rows[ticker] = {**merged_rows.get(ticker, {}), **row}
+            screener_rows = list(merged_rows.values())
+    except Exception as exc:
+        logger.warning("Market breadth DB screener fallback failed: %s", exc)
+
+    if not screener_rows:
+        params = StockScreenerParams(
+            symbol=None,
+            exchange="ALL",
+            limit=limit,
+            source=settings.vnstock_source,
+        )
+        try:
+            screener_data = await asyncio.wait_for(
+                VnstockScreenerFetcher.fetch(params),
+                timeout=HEATMAP_FETCH_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError as exc:
+            raise ProviderTimeoutError("vnstock", HEATMAP_FETCH_TIMEOUT_SECONDS) from exc
+
+        screener_rows = [_normalize_screener_row(item) for item in screener_data]
+
+    screener_rows = [row for row in screener_rows if row.get("symbol")]
+    symbols = [row["symbol"] for row in screener_rows]
+    metadata_map = await _load_stock_metadata(symbols)
+    change_map = await _load_change_pct_map(symbols)
+
+    for row in screener_rows:
+        symbol = row["symbol"]
+        metadata = metadata_map.get(symbol) or {}
+        if not row.get("exchange") and metadata.get("exchange"):
+            row["exchange"] = metadata.get("exchange")
+        if not row.get("industry") and metadata.get("industry"):
+            row["industry"] = metadata.get("industry")
+        if not row.get("sector") and metadata.get("sector"):
+            row["sector"] = metadata.get("sector")
+        if row.get("change_pct") is None and symbol in change_map:
+            row["change_pct"] = change_map[symbol]
+
+    return screener_rows
+
+
+async def _load_latest_technical_indicator_map(
+    symbols: List[str],
+) -> Dict[str, Dict[str, Optional[float]]]:
+    unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
+    if not unique_symbols:
+        return {}
+
+    async with async_session_maker() as session:
+        ranked_indicators = (
+            select(
+                TechnicalIndicator.symbol.label("symbol"),
+                TechnicalIndicator.calc_date.label("calc_date"),
+                TechnicalIndicator.sma_20.label("sma_20"),
+                TechnicalIndicator.sma_50.label("sma_50"),
+                func.row_number()
+                .over(
+                    partition_by=TechnicalIndicator.symbol,
+                    order_by=TechnicalIndicator.calc_date.desc(),
+                )
+                .label("rn"),
+            )
+            .where(TechnicalIndicator.symbol.in_(unique_symbols))
+            .subquery()
+        )
+
+        rows = (
+            (await session.execute(select(ranked_indicators).where(ranked_indicators.c.rn == 1)))
+            .mappings()
+            .all()
+        )
+
+    return {
+        _normalize_symbol(row.get("symbol")): {
+            "calc_date": _serialize_datetime_like(row.get("calc_date")),
+            "sma_20": _to_float(row.get("sma_20")),
+            "sma_50": _to_float(row.get("sma_50")),
+        }
+        for row in rows
+        if row.get("symbol")
+    }
+
+
+async def _load_52_week_range_map(
+    symbols: List[str],
+    lookback_days: int = 380,
+) -> Dict[str, Dict[str, Optional[float]]]:
+    unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
+    if not unique_symbols:
+        return {}
+
+    start_date = date.today() - timedelta(days=lookback_days)
+
+    async with async_session_maker() as session:
+        rows = (
+            await session.execute(
+                select(
+                    StockPrice.symbol,
+                    func.max(StockPrice.high).label("high_52w"),
+                    func.min(StockPrice.low).label("low_52w"),
+                )
+                .where(StockPrice.symbol.in_(unique_symbols))
+                .where(StockPrice.interval == "1D")
+                .where(StockPrice.time >= start_date)
+                .group_by(StockPrice.symbol)
+            )
+        ).all()
+
+    return {
+        _normalize_symbol(symbol): {
+            "high_52w": _to_float(high_52w),
+            "low_52w": _to_float(low_52w),
+        }
+        for symbol, high_52w, low_52w in rows
+        if symbol
+    }
+
+
+def _build_market_breadth_rows(
+    screener_rows: List[dict[str, Any]],
+    technical_map: Dict[str, Dict[str, Optional[float]]],
+    range_map: Dict[str, Dict[str, Optional[float]]],
+) -> List[MarketBreadthExchangeData]:
+    rows_by_exchange: Dict[str, List[dict[str, Any]]] = {"HOSE": [], "HNX": [], "UPCOM": []}
+
+    for row in screener_rows:
+        exchange = _normalize_text(row.get("exchange"))
+        if exchange in rows_by_exchange:
+            rows_by_exchange[exchange].append(row)
+
+    payload: List[MarketBreadthExchangeData] = []
+    for exchange in ["HOSE", "HNX", "UPCOM"]:
+        exchange_rows = rows_by_exchange[exchange]
+        total = len(exchange_rows)
+        advancers = 0
+        decliners = 0
+        unchanged = 0
+        above_sma20 = 0
+        above_sma50 = 0
+        sma20_eligible = 0
+        sma50_eligible = 0
+        new_highs_52w = 0
+        new_lows_52w = 0
+
+        for row in exchange_rows:
+            symbol = _normalize_symbol(row.get("symbol"))
+            change_pct = _to_float(row.get("change_pct")) or 0.0
+            price = _to_float(row.get("price"))
+
+            if change_pct > 0:
+                advancers += 1
+            elif change_pct < 0:
+                decliners += 1
+            else:
+                unchanged += 1
+
+            technicals = technical_map.get(symbol) or {}
+            sma_20 = _to_float(technicals.get("sma_20"))
+            sma_50 = _to_float(technicals.get("sma_50"))
+            if price not in (None, 0):
+                if sma_20 not in (None, 0):
+                    sma20_eligible += 1
+                    if price > sma_20:
+                        above_sma20 += 1
+                if sma_50 not in (None, 0):
+                    sma50_eligible += 1
+                    if price > sma_50:
+                        above_sma50 += 1
+
+                ranges = range_map.get(symbol) or {}
+                high_52w = _to_float(ranges.get("high_52w"))
+                low_52w = _to_float(ranges.get("low_52w"))
+                if high_52w not in (None, 0) and price >= high_52w * 0.999:
+                    new_highs_52w += 1
+                if low_52w not in (None, 0) and price <= low_52w * 1.001:
+                    new_lows_52w += 1
+
+        payload.append(
+            MarketBreadthExchangeData(
+                exchange=exchange,
+                total=total,
+                advancers=advancers,
+                decliners=decliners,
+                unchanged=unchanged,
+                ad_ratio=(round(advancers / decliners, 2) if decliners > 0 else None),
+                pct_above_sma20=(
+                    round((above_sma20 / sma20_eligible) * 100, 1) if sma20_eligible > 0 else None
+                ),
+                pct_above_sma50=(
+                    round((above_sma50 / sma50_eligible) * 100, 1) if sma50_eligible > 0 else None
+                ),
+                new_highs_52w=new_highs_52w,
+                new_lows_52w=new_lows_52w,
+            )
+        )
+
+    return payload
+
+
 def _resolve_industry_bubble_metric(
     row: dict[str, Any],
     ratio_metrics: dict[str, Optional[float]],
@@ -2012,6 +2256,33 @@ async def get_market_indices(
                 error=str(e),
             )
         return MarketIndicesResponse(count=0, data=[], error=str(e))
+
+
+@router.get("/breadth", response_model=MarketBreadthResponse)
+@cached(ttl=300, key_prefix="market_breadth")
+async def get_market_breadth() -> MarketBreadthResponse:
+    try:
+        screener_rows = await _fetch_market_screener_rows(limit=1500)
+        symbols = [row["symbol"] for row in screener_rows if row.get("symbol")]
+        technical_map = await _load_latest_technical_indicator_map(symbols)
+        range_map = await _load_52_week_range_map(symbols)
+        rows = _build_market_breadth_rows(screener_rows, technical_map, range_map)
+
+        latest_updates = [row.get("updated_at") for row in screener_rows]
+        latest_updates.extend(
+            technical.get("calc_date")
+            for technical in technical_map.values()
+            if technical.get("calc_date")
+        )
+
+        return MarketBreadthResponse(
+            count=len(rows),
+            data=rows,
+            updated_at=_latest_timestamp(latest_updates),
+        )
+    except Exception as exc:
+        logger.warning("Market breadth fetch failed: %s", exc)
+        return MarketBreadthResponse(count=0, data=[], error=str(exc))
 
 
 @router.get("/industry-bubble", response_model=IndustryBubbleResponse)
