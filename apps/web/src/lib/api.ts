@@ -1870,6 +1870,30 @@ export interface HeatmapResponse {
     updated_at?: string | null;
 }
 
+export interface MarketBreadthExchangeRow {
+    exchange: 'HOSE' | 'HNX' | 'UPCOM';
+    total: number;
+    advancers: number;
+    decliners: number;
+    unchanged: number;
+    ad_ratio?: number | null;
+    pct_above_sma20?: number | null;
+    pct_above_sma50?: number | null;
+    new_highs_52w: number;
+    new_lows_52w: number;
+}
+
+export interface MarketBreadthResponse {
+    count: number;
+    data: MarketBreadthExchangeRow[];
+    updated_at?: string | null;
+    error?: string | null;
+}
+
+export async function getMarketBreadth(): Promise<MarketBreadthResponse> {
+    return fetchAPI<MarketBreadthResponse>('/market/breadth');
+}
+
 export async function getMarketHeatmap(options?: {
     group_by?: 'sector' | 'industry' | 'vn30' | 'hnx30';
     color_metric?: 'change_pct' | 'weekly_pct' | 'monthly_pct' | 'ytd_pct';

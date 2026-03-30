@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useMemo, useRef, memo } from 'react';
-import { LayoutGrid, Download } from 'lucide-react';
+import { ChevronLeft, Download, LayoutGrid } from 'lucide-react';
 import { hierarchy, treemap } from 'd3-hierarchy';
 import html2canvas from 'html2canvas';
 import { useMarketHeatmap } from '@/lib/queries';
@@ -40,6 +40,7 @@ function getHeatmapColor(change: number): string {
 function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmapWidgetProps) {
     const [groupBy, setGroupBy] = useState<'sector' | 'industry'>('sector');
     const [exchange, setExchange] = useState<'HOSE' | 'HNX' | 'UPCOM' | 'ALL'>('HOSE');
+    const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
     const heatmapRef = useRef<HTMLDivElement>(null);
     const { setLinkedSymbol } = useWidgetSymbolLink();
 
@@ -60,24 +61,36 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
     const treemapData = useMemo(() => {
         if (!data?.sectors) return null;
 
-        return {
-            name: 'Market',
-            children: data.sectors.map((sector: SectorGroup) => ({
-                name: sector.sector,
-                changePct: sector.avg_change_pct,
-                stockCount: sector.stock_count,
-                children: sector.stocks.map((stock) => ({
+        if (selectedGroup) {
+            const group = data.sectors.find((sector: SectorGroup) => sector.sector === selectedGroup);
+            if (!group) return null;
+
+            return {
+                name: group.sector,
+                children: group.stocks.map((stock) => ({
                     name: stock.symbol,
                     symbol: stock.symbol,
-                    sector: sector.sector,
+                    sector: group.sector,
                     value: stock.market_cap || 0,
                     changePct: stock.change_pct,
                     price: stock.price,
                     volume: stock.volume,
                 })),
+            };
+        }
+
+        return {
+            name: 'Market',
+            children: data.sectors.map((sector: SectorGroup) => ({
+                name: sector.sector,
+                sector: sector.sector,
+                changePct: sector.avg_change_pct,
+                stockCount: sector.stock_count,
+                value: sector.total_market_cap,
+                avgMarketCap: sector.total_market_cap,
             })),
         };
-    }, [data]);
+    }, [data, selectedGroup]);
 
     const treemapLayout = useMemo(() => {
         if (!treemapData) return null;
@@ -114,7 +127,10 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
         <div className="flex items-center gap-2 mr-2">
             <select
                 value={groupBy}
-                onChange={(e) => setGroupBy(e.target.value as any)}
+                onChange={(e) => {
+                    setGroupBy(e.target.value as any)
+                    setSelectedGroup(null)
+                }}
                 aria-label="Heatmap grouping"
                 className="bg-[var(--bg-secondary)] text-[9px] font-black uppercase text-[var(--text-secondary)] border border-[var(--border-default)] rounded px-1.5 py-0.5 outline-none hover:text-[var(--text-primary)] transition-colors"
             >
@@ -123,10 +139,13 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
             </select>
 
             <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-default)]">
-                {['HOSE', 'HNX', 'ALL'].map(m => (
+                {['HOSE', 'HNX', 'UPCOM', 'ALL'].map(m => (
                     <button
                         key={m}
-                        onClick={() => setExchange(m as any)}
+                        onClick={() => {
+                            setExchange(m as any)
+                            setSelectedGroup(null)
+                        }}
                         className={cn(
                             "px-2 py-0.5 text-[9px] font-bold rounded transition-all",
                             exchange === m ? "bg-blue-600 text-white shadow-sm" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
@@ -162,7 +181,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
         >
             <div className="h-full flex flex-col bg-[var(--bg-primary)]">
                 <div className="flex-1 overflow-hidden relative">
-                    {isLoading && !hasData ? (
+                {isLoading && !hasData ? (
                         <div className="mx-auto mt-6 max-h-[200px] max-w-[560px] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70">
                             <WidgetSkeleton variant="chart" />
                         </div>
@@ -173,7 +192,26 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                             <WidgetEmpty message="Market data unavailable" icon={<LayoutGrid size={18} />} size="compact" />
                         </div>
                     ) : (
-                        <div ref={heatmapRef} className="w-full h-full p-2">
+                        <div ref={heatmapRef} className="flex h-full w-full flex-col p-2">
+                            <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                                <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                                    {selectedGroup ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectedGroup(null)}
+                                            className="inline-flex items-center gap-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                        >
+                                            <ChevronLeft size={12} />
+                                            Back
+                                        </button>
+                                    ) : null}
+                                    <span>{selectedGroup ? `${selectedGroup} Constituents` : `${groupBy === 'sector' ? 'Sector' : 'Industry'} Heatmap`}</span>
+                                </div>
+                                <span className="text-[10px] text-[var(--text-muted)]">
+                                    {selectedGroup ? 'Click a stock to sync the dashboard symbol' : 'Click a block to drill down'}
+                                </span>
+                            </div>
+                            <div className="min-h-0 flex-1">
                             <svg width="100%" height="100%" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet">
                                 {treemapLayout.leaves().map((node: any, i: number) => {
                                     const width = node.x1 - node.x0;
@@ -198,13 +236,20 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                 strokeWidth={1}
                                                 rx={8}
                                                 ry={8}
-                                                onClick={() => node.data.symbol ? setLinkedSymbol(node.data.symbol) : undefined}
+                                                onClick={() => {
+                                                    if (selectedGroup && node.data.symbol) {
+                                                        setLinkedSymbol(node.data.symbol)
+                                                        return
+                                                    }
+                                                    setSelectedGroup(node.data.sector || node.data.name)
+                                                }}
                                             >
                                                 <title>
                                                     {node.data.symbol || node.data.name}
                                                     {node.data.sector ? `\nSector: ${node.data.sector}` : ''}
                                                     {'\n'}Change: {changePct.toFixed(2)}%
-                                                    {'\n'}Value: {(node.data.value / 1e9).toFixed(1)}B
+                                                    {'\n'}Value: {((node.data.value || 0) / 1e9).toFixed(1)}B
+                                                    {!selectedGroup && node.data.stockCount ? `\nStocks: ${node.data.stockCount}` : ''}
                                                 </title>
                                             </rect>
                                             {canShowTitle && (
@@ -240,13 +285,16 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                     fill="rgba(255,255,255,0.78)"
                                                     style={{ fontSize: 10 }}
                                                 >
-                                                    {`${node.data.sector || node.data.name} • ${(node.data.value / 1e9).toFixed(1)}B`}
+                                                    {selectedGroup
+                                                        ? `${node.data.sector || selectedGroup} • ${((node.data.value || 0) / 1e9).toFixed(1)}B`
+                                                        : `${node.data.stockCount || 0} stocks • ${((node.data.value || 0) / 1e9).toFixed(1)}B`}
                                                 </text>
                                             )}
                                         </g>
                                     );
                                 })}
                             </svg>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -269,7 +317,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                             <div className="flex items-center gap-2 text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                                 <span className="text-[var(--text-secondary)]">{data.count}</span> Stocks
                                 <span className="text-[var(--text-muted)]">•</span>
-                                <span className="text-[var(--text-secondary)]">{data.sectors.length}</span> Groups
+                                <span className="text-[var(--text-secondary)]">{selectedGroup ? 1 : data.sectors.length}</span> Groups
                             </div>
                         )}
                         <WidgetMeta

@@ -2018,6 +2018,143 @@ async def test_market_top_movers_mode_alias_overrides_type(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_market_top_movers_gainers_and_losers_diverge_from_same_source_payload(
+    client, monkeypatch
+):
+    async def fake_top_movers_fetch(*, type: str, index: str, limit: int):
+        _ = type, index, limit
+        return [
+            {
+                "symbol": "AAA",
+                "last_price": 12.0,
+                "price_change": 1.2,
+                "price_change_pct": 11.0,
+            },
+            {
+                "symbol": "BBB",
+                "last_price": 8.5,
+                "price_change": -0.9,
+                "price_change_pct": -9.6,
+            },
+            {
+                "symbol": "CCC",
+                "last_price": 15.0,
+                "price_change": 0.3,
+                "price_change_pct": 2.0,
+            },
+        ]
+
+    async def fake_change_pct_map(_symbols):
+        return {}
+
+    async def fake_snapshot_metrics(_symbols):
+        return {}
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.market.VnstockTopMoversFetcher.fetch",
+        fake_top_movers_fetch,
+    )
+    monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", fake_change_pct_map)
+    monkeypatch.setattr("vnibb.api.v1.market._load_latest_snapshot_metrics", fake_snapshot_metrics)
+
+    gainers_response = await client.get(
+        "/api/v1/market/top-movers?type=gainer&index=VNINDEX&limit=2"
+    )
+    losers_response = await client.get("/api/v1/market/top-movers?type=loser&index=VNINDEX&limit=2")
+
+    assert gainers_response.status_code == 200
+    assert losers_response.status_code == 200
+
+    gainers_payload = gainers_response.json()
+    losers_payload = losers_response.json()
+
+    assert gainers_payload["data"][0]["symbol"] == "AAA"
+    assert losers_payload["data"][0]["symbol"] == "BBB"
+    assert gainers_payload["data"][0]["symbol"] != losers_payload["data"][0]["symbol"]
+    assert gainers_payload["data"][0]["price_change_pct"] > 0
+    assert losers_payload["data"][0]["price_change_pct"] < 0
+
+
+@pytest.mark.asyncio
+async def test_market_breadth_endpoint_returns_dma_and_52_week_stats(client, monkeypatch):
+    async def fake_market_rows(limit=1500):
+        _ = limit
+        return [
+            {
+                "symbol": "AAA",
+                "exchange": "HOSE",
+                "price": 10.0,
+                "change_pct": 1.1,
+                "updated_at": "2026-03-30T15:20:00",
+            },
+            {
+                "symbol": "BBB",
+                "exchange": "HOSE",
+                "price": 8.0,
+                "change_pct": -2.2,
+                "updated_at": "2026-03-30T15:20:00",
+            },
+            {
+                "symbol": "CCC",
+                "exchange": "HOSE",
+                "price": 5.0,
+                "change_pct": 0.0,
+                "updated_at": "2026-03-30T15:20:00",
+            },
+            {
+                "symbol": "DDD",
+                "exchange": "HNX",
+                "price": 14.0,
+                "change_pct": 0.9,
+                "updated_at": "2026-03-30T15:20:00",
+            },
+        ]
+
+    async def fake_technical_map(_symbols):
+        return {
+            "AAA": {"sma_20": 9.0, "sma_50": 8.0, "calc_date": "2026-03-30"},
+            "BBB": {"sma_20": 10.0, "sma_50": 9.0, "calc_date": "2026-03-30"},
+            "CCC": {"sma_20": 4.0, "sma_50": 6.0, "calc_date": "2026-03-30"},
+            "DDD": {"sma_20": 12.0, "sma_50": 11.0, "calc_date": "2026-03-30"},
+        }
+
+    async def fake_range_map(_symbols):
+        return {
+            "AAA": {"high_52w": 10.0, "low_52w": 6.5},
+            "BBB": {"high_52w": 11.5, "low_52w": 8.0},
+            "CCC": {"high_52w": 6.0, "low_52w": 4.5},
+            "DDD": {"high_52w": 14.0, "low_52w": 9.0},
+        }
+
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_market_screener_rows", fake_market_rows)
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._load_latest_technical_indicator_map",
+        fake_technical_map,
+    )
+    monkeypatch.setattr("vnibb.api.v1.market._load_52_week_range_map", fake_range_map)
+
+    response = await client.get("/api/v1/market/breadth")
+    assert response.status_code == 200
+    payload = response.json()
+
+    hose_row = next(item for item in payload["data"] if item["exchange"] == "HOSE")
+    hnx_row = next(item for item in payload["data"] if item["exchange"] == "HNX")
+
+    assert hose_row["advancers"] == 1
+    assert hose_row["decliners"] == 1
+    assert hose_row["unchanged"] == 1
+    assert hose_row["ad_ratio"] == 1.0
+    assert hose_row["pct_above_sma20"] == pytest.approx(66.7)
+    assert hose_row["pct_above_sma50"] == pytest.approx(33.3)
+    assert hose_row["new_highs_52w"] == 1
+    assert hose_row["new_lows_52w"] == 1
+
+    assert hnx_row["advancers"] == 1
+    assert hnx_row["pct_above_sma20"] == 100.0
+    assert hnx_row["new_highs_52w"] == 1
+
+
+@pytest.mark.asyncio
 async def test_market_top_movers_uses_snapshot_fallback_when_provider_has_no_signal(
     client, monkeypatch
 ):
