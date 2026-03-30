@@ -9,13 +9,14 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { cn } from '@/lib/utils';
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 
 interface ForeignTradingWidgetProps {
     id: string;
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function formatVolume(vol: number | null | undefined): string {
@@ -35,7 +36,7 @@ function formatDate(dateStr: string | null | undefined): string {
     }
 }
 
-function ForeignTradingWidgetComponent({ id, symbol, onRemove }: ForeignTradingWidgetProps) {
+function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: ForeignTradingWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useForeignTrading(symbol, { limit: 100 });
 
     const trades = useMemo(() => {
@@ -104,6 +105,17 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove }: ForeignTradingW
     const hasData = trades.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+
+    useEffect(() => {
+        onDataChange?.({
+            __widgetRuntime: {
+                layoutHint: {
+                    empty: !hasData,
+                    compactHeight: 3,
+                },
+            },
+        });
+    }, [hasData, onDataChange]);
 
     return (
         <WidgetContainer

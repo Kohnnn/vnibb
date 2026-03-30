@@ -49,7 +49,6 @@ from vnibb.providers.vnstock.financials import (
 )
 from vnibb.services.financial_service import get_financials_with_ttm
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher, StockQuoteData
-from vnibb.providers.vnstock.company_news import VnstockCompanyNewsFetcher, CompanyNewsQueryParams
 from vnibb.providers.vnstock.company_events import (
     VnstockCompanyEventsFetcher,
     CompanyEventsQueryParams,
@@ -78,6 +77,7 @@ from vnibb.providers.vnstock.trading_stats import TradingStatsData, VnstockTradi
 from vnibb.providers.vnstock.ownership import VnstockOwnershipFetcher
 from vnibb.providers.vnstock.general_rating import VnstockGeneralRatingFetcher
 from vnibb.services.comparison_service import comparison_service
+from vnibb.services.news_service import get_company_news_rows
 
 # Models for Fallback
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
@@ -4155,9 +4155,7 @@ async def get_growth_rates(
 @cached(ttl=settings.news_retention_days * 86400, key_prefix="company_news_v26")
 async def get_company_news(symbol: str, limit: int = Query(20)):
     try:
-        data = await VnstockCompanyNewsFetcher.fetch(
-            CompanyNewsQueryParams(symbol=symbol, limit=limit)
-        )
+        data = await get_company_news_rows(symbol, limit=limit)
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
         return StandardResponse(data=[], error=str(e))

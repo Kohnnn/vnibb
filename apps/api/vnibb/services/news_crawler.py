@@ -9,12 +9,13 @@ Enhanced with AI sentiment analysis.
 """
 
 import asyncio
+import importlib
 import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any
 
+from sqlalchemy import and_, desc, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import select, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.database import async_session_maker
@@ -51,8 +52,7 @@ class NewsCrawlerService:
     def _check_vnstock_news(self):
         """Check if vnstock_news is available."""
         try:
-            from vnstock_news import EnhancedNewsCrawler
-
+            importlib.import_module("vnstock_news")
             self._news_available = True
             logger.info("vnstock_news premium package detected")
         except ImportError:
@@ -60,7 +60,7 @@ class NewsCrawlerService:
 
     async def crawl_market_news(
         self,
-        sources: Optional[List[str]] = None,
+        sources: list[str] | None = None,
         limit: int = 50,
         analyze_sentiment: bool = True,
     ) -> int:
@@ -92,13 +92,13 @@ class NewsCrawlerService:
 
     async def _crawl_with_vnstock_news(
         self,
-        sources: List[str],
+        sources: list[str],
         limit: int,
     ) -> int:
         """Crawl using vnstock_news premium package."""
 
         def _sync_crawl():
-            from vnstock_news import EnhancedNewsCrawler, SITES_CONFIG
+            from vnstock_news import SITES_CONFIG, EnhancedNewsCrawler
 
             all_articles = []
             crawler = EnhancedNewsCrawler()
@@ -179,7 +179,7 @@ class NewsCrawlerService:
     async def _store_article(
         self,
         session: AsyncSession,
-        article: Dict[str, Any],
+        article: dict[str, Any],
     ):
         """Store a single news article."""
         # Parse published date
@@ -234,7 +234,7 @@ class NewsCrawlerService:
             # Get unprocessed articles
             query = (
                 select(MarketNews)
-                .where(MarketNews.is_processed == False)
+                .where(MarketNews.is_processed.is_(False))
                 .order_by(desc(MarketNews.published_date))
                 .limit(max_articles)
             )
@@ -245,20 +245,6 @@ class NewsCrawlerService:
             if not articles:
                 logger.debug("No unprocessed articles found")
                 return 0
-
-            if sentiment_analyzer.is_paused:
-                for article in articles:
-                    article.sentiment = "neutral"
-                    article.sentiment_score = 0
-                    article.ai_summary = article.summary or article.title
-                    article.is_processed = True
-
-                await session.commit()
-                logger.info(
-                    "AI sentiment analysis paused; marked %s articles as neutral",
-                    len(articles),
-                )
-                return len(articles)
 
             logger.info(f"Analyzing sentiment for {len(articles)} articles")
 
@@ -279,7 +265,7 @@ class NewsCrawlerService:
 
             # Update articles with sentiment data
             count = 0
-            for article, sentiment in zip(articles, sentiment_results):
+            for article, sentiment in zip(articles, sentiment_results, strict=False):
                 try:
                     article.sentiment = sentiment.get("sentiment")
                     article.sentiment_score = sentiment.get("confidence")
@@ -312,7 +298,7 @@ class NewsCrawlerService:
 
     async def seed_from_company_news(
         self,
-        symbols: List[str],
+        symbols: list[str],
         limit_per_symbol: int = 5,
     ) -> int:
         """
@@ -322,8 +308,8 @@ class NewsCrawlerService:
             return 0
 
         from vnibb.providers.vnstock.company_news import (
-            VnstockCompanyNewsFetcher,
             CompanyNewsQueryParams,
+            VnstockCompanyNewsFetcher,
         )
 
         total = 0
@@ -363,12 +349,12 @@ class NewsCrawlerService:
 
     async def get_latest_news(
         self,
-        source: Optional[str] = None,
-        sentiment: Optional[str] = None,
-        symbol: Optional[str] = None,
+        source: str | None = None,
+        sentiment: str | None = None,
+        symbol: str | None = None,
         limit: int = 20,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Get latest news from database with filters.
 
@@ -405,11 +391,11 @@ class NewsCrawlerService:
         self,
         symbol: str,
         limit: int = 20,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Search news related to a specific stock."""
         return await self.get_latest_news(symbol=symbol, limit=limit)
 
-    async def get_market_sentiment(self) -> Dict[str, Any]:
+    async def get_market_sentiment(self) -> dict[str, Any]:
         """
         Get aggregate market sentiment from recent news.
 
@@ -419,7 +405,7 @@ class NewsCrawlerService:
             # Get last 100 processed articles
             query = (
                 select(MarketNews)
-                .where(MarketNews.is_processed == True)
+                .where(MarketNews.is_processed.is_(True))
                 .order_by(desc(MarketNews.published_date))
                 .limit(100)
             )
@@ -436,14 +422,43 @@ class NewsCrawlerService:
                     "total_articles": 0,
                 }
 
-            # Convert to dicts for sentiment calculation
             article_dicts = [
                 {"sentiment": a.sentiment, "sentiment_score": a.sentiment_score} for a in articles
             ]
 
+            pending_indexes: list[int] = []
+            pending_articles: list[dict[str, Any]] = []
+            for index, article in enumerate(articles):
+                if article.sentiment in {
+                    "bullish",
+                    "bearish",
+                    "positive",
+                    "negative",
+                } and article.sentiment_score not in {None, 0}:
+                    continue
+                if article.sentiment == "neutral" and article.sentiment_score not in {None, 0}:
+                    continue
+
+                pending_indexes.append(index)
+                pending_articles.append(
+                    {
+                        "title": article.title,
+                        "content": article.content,
+                        "summary": article.summary,
+                    }
+                )
+
+            if pending_articles:
+                sentiments = await sentiment_analyzer.analyze_batch(
+                    pending_articles, max_concurrent=6
+                )
+                for index, sentiment in zip(pending_indexes, sentiments, strict=False):
+                    article_dicts[index]["sentiment"] = sentiment.get("sentiment", "neutral")
+                    article_dicts[index]["sentiment_score"] = sentiment.get("confidence")
+
             return sentiment_analyzer.calculate_market_sentiment(article_dicts)
 
-    async def analyze_trending(self) -> Dict[str, Any]:
+    async def analyze_trending(self) -> dict[str, Any]:
         """
         Analyze trending topics from recent news.
 

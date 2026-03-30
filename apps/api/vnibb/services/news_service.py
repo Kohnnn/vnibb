@@ -1,7 +1,7 @@
 import logging
 import re
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel
@@ -11,11 +11,12 @@ from vnibb.core.database import async_session_maker
 from vnibb.models.stock import Stock
 from vnibb.providers.vnstock.company_news import CompanyNewsQueryParams, VnstockCompanyNewsFetcher
 from vnibb.services.news_crawler import news_crawler
+from vnibb.services.sentiment_analyzer import sentiment_analyzer
 
 logger = logging.getLogger(__name__)
 
 
-class NewsSentiment(str, Enum):
+class NewsSentiment(StrEnum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
     NEUTRAL = "neutral"
@@ -150,6 +151,84 @@ def _to_news_item(row: dict[str, Any]) -> NewsItem:
         match_reason=row.get("match_reason"),
         is_market_wide_fallback=bool(row.get("is_market_wide_fallback", False)),
     )
+
+
+def _needs_runtime_sentiment(row: dict[str, Any]) -> bool:
+    sentiment = str(row.get("sentiment") or "").strip().lower()
+    score = row.get("sentiment_score")
+    try:
+        numeric_score = float(score) if score is not None else None
+    except (TypeError, ValueError):
+        numeric_score = None
+
+    if sentiment in {"bullish", "bearish", "positive", "negative"}:
+        return numeric_score in (None, 0.0)
+
+    return sentiment not in {"neutral"} or numeric_score in (None, 0.0)
+
+
+async def _enrich_sentiment_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_rows = [dict(row) for row in rows]
+    pending_indexes: list[int] = []
+    pending_articles: list[dict[str, Any]] = []
+
+    for index, row in enumerate(normalized_rows):
+        if not _needs_runtime_sentiment(row):
+            continue
+
+        pending_indexes.append(index)
+        pending_articles.append(
+            {
+                "title": row.get("title", ""),
+                "content": row.get("content"),
+                "summary": row.get("summary"),
+            }
+        )
+
+    if not pending_articles:
+        return normalized_rows
+
+    sentiments = await sentiment_analyzer.analyze_batch(pending_articles, max_concurrent=6)
+
+    for index, sentiment in zip(pending_indexes, sentiments, strict=False):
+        row = normalized_rows[index]
+        row["sentiment"] = sentiment.get("sentiment", row.get("sentiment") or "neutral")
+        row["sentiment_score"] = sentiment.get("confidence", row.get("sentiment_score"))
+
+        if sentiment.get("ai_summary") and not row.get("ai_summary"):
+            row["ai_summary"] = sentiment["ai_summary"]
+
+        existing_symbols = _parse_symbols(row.get("related_symbols"))
+        inferred_symbols = _parse_symbols(sentiment.get("symbols"))
+        if inferred_symbols:
+            row["related_symbols"] = list(dict.fromkeys([*existing_symbols, *inferred_symbols]))[
+                :10
+            ]
+
+        if sentiment.get("sectors") and not row.get("sectors"):
+            row["sectors"] = sentiment.get("sectors", [])
+
+    return normalized_rows
+
+
+def _serialize_company_news_item(item: Any, symbol: str, index: int) -> dict[str, Any]:
+    return {
+        "id": f"{symbol}-{index}",
+        "symbol": symbol,
+        "title": getattr(item, "title", "") or "Untitled",
+        "summary": getattr(item, "summary", None),
+        "content": getattr(item, "summary", None),
+        "source": getattr(item, "source", None) or "vnstock",
+        "published_at": getattr(item, "published_at", None),
+        "published_date": getattr(item, "published_at", None),
+        "url": getattr(item, "url", None),
+        "category": getattr(item, "category", None),
+        "related_symbols": [],
+        "matched_symbols": [],
+        "relevance_score": 0.0,
+        "match_reason": None,
+        "is_market_wide_fallback": False,
+    }
 
 
 async def _load_symbol_context(symbol: str) -> dict[str, Any]:
@@ -314,6 +393,54 @@ async def _hydrate_company_news_fallback(symbol: str | None, limit: int) -> list
     return hydrated
 
 
+async def get_company_news_rows(symbol: str, limit: int = 20) -> list[dict[str, Any]]:
+    upper_symbol = symbol.upper().strip()
+    if not upper_symbol:
+        return []
+
+    try:
+        provider_items = await VnstockCompanyNewsFetcher.fetch(
+            CompanyNewsQueryParams(symbol=upper_symbol, limit=max(limit * 2, 12))
+        )
+    except Exception as error:
+        logger.warning(
+            "Company news provider failed",
+            extra={"symbol": upper_symbol, "error": str(error)},
+        )
+        provider_items = []
+
+    context = await _load_symbol_context(upper_symbol)
+    provider_rows = [
+        _score_news_row(_serialize_company_news_item(item, upper_symbol, index), context)
+        for index, item in enumerate(provider_items)
+    ]
+    provider_rows.sort(
+        key=lambda row: (
+            float(row.get("relevance_score") or 0),
+            _parse_published_at(row.get("published_date") or row.get("published_at")),
+        ),
+        reverse=True,
+    )
+
+    relevant_provider_rows = [
+        row for row in provider_rows if float(row.get("relevance_score") or 0) >= 0.8
+    ]
+    if relevant_provider_rows:
+        return await _enrich_sentiment_rows(relevant_provider_rows[:limit])
+
+    ranked_rows, _ = await get_ranked_news_rows(
+        symbol=upper_symbol,
+        limit=limit,
+        offset=0,
+        mode="related",
+    )
+    return [
+        {**row, "symbol": upper_symbol}
+        for row in ranked_rows
+        if not row.get("is_market_wide_fallback")
+    ][:limit]
+
+
 async def get_ranked_news_rows(
     *,
     source: str | None = None,
@@ -349,7 +476,8 @@ async def get_ranked_news_rows(
                 reverse=True,
             )
             if relevant_rows:
-                return relevant_rows[offset : offset + limit], False
+                enriched_rows = await _enrich_sentiment_rows(relevant_rows[offset : offset + limit])
+                return enriched_rows, False
 
             market_rows = await news_crawler.get_latest_news(
                 source=source,
@@ -367,7 +495,8 @@ async def get_ranked_news_rows(
                 enriched["is_market_wide_fallback"] = True
                 fallback_rows.append(enriched)
             if fallback_rows:
-                return fallback_rows, True
+                enriched_fallback_rows = await _enrich_sentiment_rows(fallback_rows)
+                return enriched_fallback_rows, True
         else:
             results = await news_crawler.get_latest_news(
                 source=source,
@@ -376,7 +505,8 @@ async def get_ranked_news_rows(
                 limit=limit,
                 offset=offset,
             )
-            return results, False
+            enriched_results = await _enrich_sentiment_rows(results)
+            return enriched_results, False
     except Exception as error:
         logger.warning(
             "Primary news query failed",
@@ -389,7 +519,8 @@ async def get_ranked_news_rows(
         )
 
     fallback_rows = await _hydrate_company_news_fallback(symbol=upper_symbol, limit=limit)
-    return fallback_rows[offset : offset + limit], False
+    enriched_fallback_rows = await _enrich_sentiment_rows(fallback_rows[offset : offset + limit])
+    return enriched_fallback_rows, False
 
 
 async def get_news_flow(

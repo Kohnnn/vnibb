@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useMemo } from 'react';
 import { Newspaper, BadgeDollarSign } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -9,11 +10,24 @@ import { useCompanyNews, useDividends, useInsiderDeals } from '@/lib/queries';
 import { formatTimestamp } from '@/lib/format';
 import { formatNumber, formatPercent, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface NewsCorporateActionsWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
+}
+
+function getSentimentClasses(sentiment: string | null | undefined): string {
+  const normalized = String(sentiment || 'neutral').toLowerCase();
+  if (normalized === 'bullish' || normalized === 'positive') {
+    return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
+  }
+  if (normalized === 'bearish' || normalized === 'negative') {
+    return 'border-rose-500/20 bg-rose-500/10 text-rose-300';
+  }
+  return 'border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-muted)]';
 }
 
 function formatDividendType(type: string | null | undefined): string {
@@ -40,7 +54,7 @@ function formatDividendValue(row: DividendRecord): string {
   return '-';
 }
 
-export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorporateActionsWidgetProps) {
+export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange }: NewsCorporateActionsWidgetProps) {
   const {
     data: newsData,
     isLoading: newsLoading,
@@ -79,10 +93,31 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
   const isLoading = newsLoading || dividendsLoading || insiderLoading;
   const isFetching = newsFetching || dividendsFetching || insiderFetching;
   const error = newsError || dividendsError || insiderError;
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
   const updatedAt = [newsUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
     .filter(Boolean)
     .sort((a, b) => Number(b) - Number(a))[0];
+  const recentNewsCount = useMemo(() => {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return news.filter((item) => {
+      const rawDate = item.published_at || item.published_date;
+      if (!rawDate) return false;
+      const parsed = new Date(rawDate).getTime();
+      return Number.isFinite(parsed) && parsed >= cutoff;
+    }).length;
+  }, [news]);
+
+  useEffect(() => {
+    onDataChange?.({
+      __widgetRuntime: {
+        layoutHint: {
+          empty: !hasData,
+          compactHeight: 4,
+        },
+      },
+    });
+  }, [hasData, onDataChange]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view news and actions" />;
@@ -113,7 +148,18 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
           />
         </div>
 
-        {isLoading && !hasData ? (
+        {timedOut && isLoading && !hasData ? (
+          <WidgetError
+            title="Loading timed out"
+            error={new Error('News and corporate actions took too long to load.')}
+            onRetry={() => {
+              resetTimeout();
+              refetchNews();
+              refetchDividends();
+              refetchInsider();
+            }}
+          />
+        ) : isLoading && !hasData ? (
           <div className="p-3">
             <WidgetSkeleton lines={6} />
           </div>
@@ -129,7 +175,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
                   <Newspaper size={14} className="text-blue-400" />
                   <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Company News</span>
                 </div>
-                <span className="text-[10px] text-[var(--text-muted)]">{news.length} items</span>
+                <span className="text-[10px] text-[var(--text-muted)]">{recentNewsCount}/{news.length} in 7d</span>
               </div>
 
               {newsLoading && !hasNews ? (
@@ -149,6 +195,17 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove }: NewsCorpora
                       className="block rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors"
                     >
                       <div className="text-xs font-semibold text-[var(--text-primary)] line-clamp-2">{item.title}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+                        <span className={`rounded border px-1.5 py-0.5 font-semibold uppercase ${getSentimentClasses(item.sentiment)}`}>
+                          {item.sentiment || 'neutral'}
+                          {typeof item.sentiment_score === 'number' ? ` ${Math.round(item.sentiment_score)}` : ''}
+                        </span>
+                        {typeof item.relevance_score === 'number' && item.relevance_score > 0 ? (
+                          <span className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 font-semibold uppercase text-blue-300">
+                            {(item.relevance_score * 100).toFixed(0)}% match
+                          </span>
+                        ) : null}
+                      </div>
                       <div className="mt-1 flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         {item.source && <span>{item.source}</span>}
                         {item.published_at && <span>• {formatTimestamp(item.published_at)}</span>}

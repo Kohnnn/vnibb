@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
     ExternalLink,
     Newspaper,
@@ -21,9 +21,10 @@ import { formatTimestamp } from '@/lib/format';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface NewsArticle {
-    id: number;
+    id: number | string;
     title: string;
     summary?: string;
     content?: string;
@@ -94,11 +95,12 @@ function formatPublishedTime(dateStr: string | null | undefined): string {
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 
 export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetProps) {
-    const [expandedId, setExpandedId] = useState<number | null>(null);
+    const [expandedId, setExpandedId] = useState<number | string | null>(null);
     const [sourceFilter, setSourceFilter] = useState<string>('');
     const [sentimentFilter, setSentimentFilter] = useState<string>('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [bookmarkedIds, setBookmarkedIds] = useState<Set<number>>(new Set());
+    const [bookmarkedIds, setBookmarkedIds] = useState<Set<number | string>>(new Set());
+    const requestMode = symbol ? 'related' : 'all';
 
     // Fetch news feed with filters
     const {
@@ -109,12 +111,13 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
         isFetching,
         dataUpdatedAt,
     } = useQuery({
-        queryKey: ['news-feed', symbol, sourceFilter, sentimentFilter],
+        queryKey: ['news-feed', symbol, sourceFilter, sentimentFilter, requestMode],
         queryFn: async () => {
             const params = new URLSearchParams();
             if (symbol) params.append('symbol', symbol);
             if (sourceFilter) params.append('source', sourceFilter);
             if (sentimentFilter) params.append('sentiment', sentimentFilter);
+            params.append('mode', requestMode);
             params.append('limit', '30');
 
             const response = await fetch(`${API_BASE_URL}/news/feed?${params}`);
@@ -138,6 +141,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
     const newsItems: NewsArticle[] = data?.articles || [];
     const hasData = newsItems.length > 0;
     const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
     // Filter by search query
     const filteredNews = newsItems.filter(item =>
@@ -147,7 +151,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
     );
 
     // Toggle bookmark
-    const toggleBookmark = (id: number) => {
+    const toggleBookmark = (id: number | string) => {
         setBookmarkedIds(prev => {
             const next = new Set(prev);
             if (next.has(id)) {
@@ -161,6 +165,45 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
 
     // Available sources from data
     const sources = Array.from(new Set(newsItems.map(n => n.source)));
+    const recentArticleCount = useMemo(() => {
+        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        return newsItems.filter((item) => {
+            if (!item.published_date) return false;
+            const parsed = new Date(item.published_date).getTime();
+            return Number.isFinite(parsed) && parsed >= cutoff;
+        }).length;
+    }, [newsItems]);
+    const momentumBars = useMemo(() => {
+        const buckets = Array.from({ length: 7 }, (_, index) => {
+            const date = new Date();
+            date.setHours(0, 0, 0, 0);
+            date.setDate(date.getDate() - (6 - index));
+            return {
+                key: date.toISOString().slice(0, 10),
+                label: date.toLocaleDateString('en-US', { weekday: 'short' }).slice(0, 2),
+                count: 0,
+            };
+        });
+        const bucketMap = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+
+        newsItems.forEach((item) => {
+            if (!item.published_date) return;
+            const parsed = new Date(item.published_date);
+            if (Number.isNaN(parsed.getTime())) return;
+            parsed.setHours(0, 0, 0, 0);
+            const key = parsed.toISOString().slice(0, 10);
+            const bucket = bucketMap.get(key);
+            if (bucket) {
+                bucket.count += 1;
+            }
+        });
+
+        const peak = Math.max(...buckets.map((bucket) => bucket.count), 1);
+        return buckets.map((bucket) => ({
+            ...bucket,
+            height: `${Math.max(18, Math.round((bucket.count / peak) * 100))}%`,
+        }));
+    }, [newsItems]);
 
     return (
         <WidgetContainer
@@ -194,10 +237,29 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={symbol ? `${symbol} feed` : 'Market feed'}
+                        note={symbol ? `${symbol} related feed` : 'Market feed'}
                         align="right"
                     />
                 </div>
+
+                {hasData && (
+                    <div className="mx-2 mb-2 mt-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/50 px-3 py-2">
+                        <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                            <span>{symbol ? `${symbol} news momentum` : 'News momentum'}</span>
+                            <span>{recentArticleCount}/{newsItems.length} articles in 7d</span>
+                        </div>
+                        <div className="mt-2 flex items-end gap-1.5 h-16">
+                            {momentumBars.map((bucket) => (
+                                <div key={bucket.key} className="flex flex-1 flex-col items-center gap-1">
+                                    <div className="relative flex w-full flex-1 items-end rounded bg-[var(--bg-primary)]/80">
+                                        <div className="w-full rounded bg-blue-500/50 transition-all" style={{ height: bucket.height }} />
+                                    </div>
+                                    <span className="text-[9px] text-[var(--text-muted)]">{bucket.label}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* Filters */}
                 <div className="px-2 py-2 space-y-2 border-b border-border/60">
@@ -250,7 +312,16 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
 
                 {/* News List */}
                 <div className="flex-1 overflow-y-auto">
-                    {isLoading && !hasData ? (
+                    {timedOut && isLoading && !hasData ? (
+                        <WidgetError
+                            title="Loading timed out"
+                            error={new Error('News feed took too long to load.')}
+                            onRetry={() => {
+                                resetTimeout();
+                                refetch();
+                            }}
+                        />
+                    ) : isLoading && !hasData ? (
                         <WidgetSkeleton lines={6} />
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />

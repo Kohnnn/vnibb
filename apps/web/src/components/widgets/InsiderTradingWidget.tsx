@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TrendingUp, TrendingDown, RefreshCw, AlertCircle } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { getInsiderDeals, getInsiderSentiment } from '@/lib/api';
@@ -10,11 +10,14 @@ import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface InsiderTradingWidgetProps {
+  id?: string;
   symbol?: string;
   isEditing?: boolean;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 function formatCurrency(value: number | null | undefined): string {
@@ -46,7 +49,7 @@ function getSentimentLabel(score: number): string {
   return 'Very Bearish';
 }
 
-export function InsiderTradingWidget({ symbol = DEFAULT_TICKER }: InsiderTradingWidgetProps) {
+export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: InsiderTradingWidgetProps) {
   const [filter, setFilter] = useState<'all' | 'buy' | 'sell'>('all');
 
   const {
@@ -89,6 +92,18 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER }: InsiderTrading
   const isFetching = dealsFetching || sentimentFetching;
   const hasData = deals.length > 0;
   const isFallback = Boolean(error && hasData);
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+
+  useEffect(() => {
+    onDataChange?.({
+      __widgetRuntime: {
+        layoutHint: {
+          empty: filteredDeals.length === 0,
+          compactHeight: 3,
+        },
+      },
+    })
+  }, [filteredDeals.length, onDataChange])
 
   return (
     <div className="h-full flex flex-col">
@@ -164,7 +179,13 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER }: InsiderTrading
 
       {/* Deals List */}
       <div className="flex-1 overflow-y-auto">
-        {isLoading && !hasData ? (
+        {timedOut && isLoading && !hasData ? (
+          <WidgetError error={new Error('Insider activity took too long to load.')} title="Loading timed out" onRetry={() => {
+            resetTimeout()
+            refetchDeals()
+            refetchSentiment()
+          }} />
+        ) : isLoading && !hasData ? (
           <WidgetSkeleton lines={5} />
         ) : error && !hasData ? (
           <WidgetError error={error as Error} onRetry={() => refetchDeals()} />

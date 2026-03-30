@@ -131,13 +131,9 @@ Trả về CHÍNH XÁC theo định dạng JSON sau (không thêm markdown hay t
         summary: str | None = None,
     ) -> dict[str, Any]:
         text = summary or content or title
-        return {
-            "sentiment": "neutral",
-            "confidence": 0,
-            "symbols": re.findall(r"\b([A-Z]{3})\b", f"{title} {text[:500]}")[:5],
-            "sectors": [],
-            "ai_summary": (summary or title)[:200],
-        }
+        result = self._analyze_with_rules(title, text)
+        result["ai_summary"] = (summary or title)[:200]
+        return result
 
     async def analyze_article(
         self,
