@@ -4,14 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
-from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 from vnibb.models.company import Company, Shareholder
-from vnibb.models.news import Dividend
 from vnibb.models.comparison import StockComparison
-from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.news import Dividend
 from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
+from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
 from vnibb.providers.vnstock.equity_profile import EquityProfileData
 from vnibb.providers.vnstock.equity_screener import ScreenerData
@@ -21,6 +21,7 @@ from vnibb.providers.vnstock.foreign_trading import ForeignTradingData
 from vnibb.providers.vnstock.intraday import IntradayTradeData
 from vnibb.providers.vnstock.price_depth import OrderLevel, PriceDepthData
 from vnibb.providers.vnstock.stock_quote import StockQuoteData
+from vnibb.providers.vnstock.trading_stats import TradingStatsData
 from vnibb.services.sector_service import SectorPerformance, StockBrief
 
 
@@ -553,8 +554,75 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
     payload = response.json()
     assert payload["data"]["symbol"] == "FPT"
     assert payload["data"]["price"] == 77.0
+    assert payload["data"]["high"] is None
+    assert payload["data"]["low"] is None
     assert payload["data"]["volume"] == 9026000
     assert payload["data"]["updated_at"].startswith("2026-03-14T13:18:00")
+
+
+@pytest.mark.asyncio
+async def test_trading_stats_backfills_52_week_range_from_price_history(
+    client, test_db, monkeypatch
+):
+    test_db.add(Stock(id=10, symbol="VCI", exchange="HOSE", company_name="VCI"))
+    test_db.add_all(
+        [
+            StockPrice(
+                id=10,
+                stock_id=10,
+                symbol="VCI",
+                time=date(2026, 3, 3),
+                open=24.0,
+                high=28.5,
+                low=23.8,
+                close=27.9,
+                volume=1_000_000,
+                interval="1D",
+                source="vnstock",
+            ),
+            StockPrice(
+                id=11,
+                stock_id=10,
+                symbol="VCI",
+                time=date(2026, 3, 4),
+                open=27.9,
+                high=31.25,
+                low=27.1,
+                close=30.7,
+                volume=1_200_000,
+                interval="1D",
+                source="vnstock",
+            ),
+            StockPrice(
+                id=12,
+                stock_id=10,
+                symbol="VCI",
+                time=date(2026, 3, 5),
+                open=30.7,
+                high=30.9,
+                low=22.45,
+                close=26.7,
+                volume=1_400_000,
+                interval="1D",
+                source="vnstock",
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    async def fake_trading_stats_fetch(symbol: str):
+        return TradingStatsData(symbol=symbol)
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockTradingStatsFetcher.fetch",
+        fake_trading_stats_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VCI/trading-stats")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["high52w"] == pytest.approx(31.25)
+    assert payload["data"]["low52w"] == pytest.approx(22.45)
 
 
 @pytest.mark.asyncio
@@ -709,7 +777,7 @@ async def test_income_statement_falls_back_to_db_on_timeout(client, test_db, mon
     async def fake_get_financials_with_ttm(
         *, symbol: str, statement_type: str, period: str, limit: int
     ):
-        raise asyncio.TimeoutError("provider timed out")
+        raise TimeoutError("provider timed out")
 
     monkeypatch.setattr(
         "vnibb.api.v1.equity.get_financials_with_ttm",
@@ -750,7 +818,7 @@ async def test_shareholders_falls_back_to_db_on_timeout(client, test_db, monkeyp
     await test_db.commit()
 
     async def fake_shareholders_fetch(_params):
-        raise asyncio.TimeoutError("provider timed out")
+        raise TimeoutError("provider timed out")
 
     monkeypatch.setattr(
         "vnibb.api.v1.equity.VnstockShareholdersFetcher.fetch",
@@ -1470,6 +1538,56 @@ async def test_market_indices_prefer_db_rows_over_scaled_provider_payload(
     assert payload["data"][0]["current_value"] == pytest.approx(1829.04)
     assert payload["data"][1]["index_name"] == "VN30"
     assert payload["data"][1]["current_value"] == pytest.approx(2029.81)
+
+
+@pytest.mark.asyncio
+async def test_market_indices_recompute_zero_change_pct_from_db_history(
+    client, test_db, monkeypatch
+):
+    test_db.add_all(
+        [
+            StockIndex(
+                id=101,
+                index_code="VNINDEX",
+                time=date(2026, 3, 20),
+                open=1320.0,
+                high=1338.0,
+                low=1318.0,
+                close=1334.0,
+                volume=1_500_000,
+                change=14.0,
+                change_pct=0.0,
+            ),
+            StockIndex(
+                id=102,
+                index_code="VNINDEX",
+                time=date(2026, 3, 19),
+                open=1310.0,
+                high=1325.0,
+                low=1308.0,
+                close=1320.0,
+                volume=1_450_000,
+                change=6.0,
+                change_pct=0.46,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    async def fake_market_overview_fetch(_params):
+        return [
+            {"index_name": "VNINDEX", "current_value": 1334.0, "change": 14.0, "change_pct": 0.0}
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.market.VnstockMarketOverviewFetcher.fetch",
+        fake_market_overview_fetch,
+    )
+
+    response = await client.get("/api/v1/market/indices?limit=1")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"][0]["change_pct"] == pytest.approx((14.0 / 1320.0) * 100)
 
 
 def test_market_overview_rejects_compact_index_payloads():

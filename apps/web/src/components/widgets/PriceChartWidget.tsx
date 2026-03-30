@@ -91,9 +91,9 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
   const metrics = screenerData?.data?.[0] as ScreenerData | undefined;
   const latestRatio = ratiosData?.data?.[0] as FinancialRatioData | undefined;
   const snapshotMetrics: SnapshotMetric = {
-    pe: firstFinite(metrics?.pe, latestRatio?.pe),
-    pb: firstFinite(metrics?.pb, latestRatio?.pb),
-    roe: firstFinite(metrics?.roe, latestRatio?.roe),
+    pe: firstFinite(latestRatio?.pe, metrics?.pe),
+    pb: firstFinite(latestRatio?.pb, metrics?.pb),
+    roe: firstFinite(latestRatio?.roe, metrics?.roe),
     dividendYield: firstFinite(
       normalizeDividendYield(latestRatio?.dividend_yield),
       normalizeDividendYield(metrics?.dividend_yield)
@@ -203,7 +203,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
             <WidgetMeta
               updatedAt={metricsUpdatedAt}
               isFetching={metricsFetching && hasMetrics}
-              note="Screener"
+              note="Ratios prioritized"
               align="right"
             />
           </div>
