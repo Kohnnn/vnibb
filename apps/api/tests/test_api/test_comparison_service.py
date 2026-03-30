@@ -5,11 +5,12 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
 from vnibb.models.trading import FinancialRatio
 from vnibb.services.cache_manager import CacheResult
-from vnibb.services.comparison_service import ComparisonService
+from vnibb.services.comparison_service import ComparisonService, StockMetrics, get_comparison_data
 
 
 @pytest.mark.asyncio
@@ -156,3 +157,104 @@ async def test_get_sector_averages_falls_back_to_latest_ratio_rows(
     assert averages["pe"] == pytest.approx(11.0)
     assert averages["roic"] == pytest.approx(15.0)
     assert averages["bvps"] == pytest.approx(20_000.0)
+
+
+@pytest.mark.asyncio
+async def test_get_comparison_data_derives_missing_metrics_and_sanitizes_negative_debt_equity(
+    test_engine,
+    test_db,
+    monkeypatch,
+):
+    test_db.add(
+        Stock(
+            symbol="VIC",
+            exchange="HOSE",
+            company_name="Vingroup",
+            industry="Real Estate",
+        )
+    )
+    test_db.add_all(
+        [
+            IncomeStatement(
+                id=100,
+                symbol="VIC",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                revenue=1_200.0,
+                gross_profit=624.0,
+                operating_income=240.0,
+                net_income=180.0,
+                interest_expense=30.0,
+            ),
+            IncomeStatement(
+                id=101,
+                symbol="VIC",
+                period="2023",
+                period_type="year",
+                fiscal_year=2023,
+                revenue=1_000.0,
+                net_income=150.0,
+            ),
+            BalanceSheet(
+                id=100,
+                symbol="VIC",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                total_assets=2_000.0,
+                total_liabilities=900.0,
+                total_equity=1_100.0,
+            ),
+            CashFlow(
+                id=100,
+                symbol="VIC",
+                period="2024",
+                period_type="year",
+                fiscal_year=2024,
+                operating_cash_flow=210.0,
+                free_cash_flow=130.0,
+                debt_repayment=-40.0,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    async def fake_get_stock_metrics(_symbol: str, source: str = "KBS"):
+        _ = source
+        return StockMetrics(
+            symbol="VIC",
+            name="Vingroup",
+            industry="Real Estate",
+            metrics={
+                "market_cap": 2_500.0,
+                "gross_margin": 51.99,
+                "debt_to_equity": -27.1419,
+            },
+        )
+
+    async def fake_fetch_ratios(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.comparison_service.get_stock_metrics",
+        fake_get_stock_metrics,
+    )
+    monkeypatch.setattr(
+        "vnibb.providers.vnstock.financial_ratios.VnstockFinancialRatiosFetcher.fetch",
+        fake_fetch_ratios,
+    )
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.async_session_maker",
+        async_sessionmaker(test_engine, expire_on_commit=False),
+    )
+
+    results = await get_comparison_data(["VIC"], period="FY")
+
+    metrics = results[0].metrics
+    assert metrics["gross_margin"] == pytest.approx(51.99)
+    assert metrics["asset_turnover"] == pytest.approx(0.6)
+    assert metrics["debt_assets"] == pytest.approx(45.0)
+    assert metrics["fcf_yield"] == pytest.approx((130.0 / 2_500.0) * 100)
+    assert metrics["ocf_sales"] == pytest.approx((210.0 / 1_200.0) * 100)
+    assert metrics["debt_equity"] == pytest.approx(900.0 / 1_100.0)

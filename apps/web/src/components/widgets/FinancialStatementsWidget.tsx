@@ -10,7 +10,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useUnit } from '@/contexts/UnitContext';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
-import { formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import { calculatePercentChange, EMPTY_VALUE, formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
@@ -53,8 +53,7 @@ const LABELS: Record<StatementType, { key: string; label: string; isHeader?: boo
 };
 
 function getYoYChange(current: number | null | undefined, previous: number | null | undefined) {
-    if (!current || !previous || previous === 0) return 0;
-    return ((current - previous) / Math.abs(previous)) * 100;
+    return calculatePercentChange(current, previous, { minimumBase: 0.001, clamp: 'yoy_change' });
 }
 
 export function FinancialStatementsWidget({ symbol = DEFAULT_TICKER }: FinancialStatementsWidgetProps) {
@@ -244,9 +243,9 @@ export function FinancialStatementsWidget({ symbol = DEFAULT_TICKER }: Financial
                                                 </td>
                                             ))}
                                             <td
-                                                className={`text-right px-3 py-2 font-mono ${yoyChange > 0 ? 'text-green-400' : yoyChange < 0 ? 'text-red-400' : 'text-[var(--text-muted)]'}`}
+                                                className={`text-right px-3 py-2 font-mono ${yoyChange !== null && yoyChange > 0 ? 'text-green-400' : yoyChange !== null && yoyChange < 0 ? 'text-red-400' : 'text-[var(--text-muted)]'}`}
                                             >
-                                                {yoyChange > 0 ? '+' : ''}{formatPercent(yoyChange, { decimals: 1, input: 'percent' })}
+                                                {yoyChange === null ? EMPTY_VALUE : `${yoyChange > 0 ? '+' : ''}${formatPercent(yoyChange, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}`}
                                             </td>
                                             <td className="text-center px-3 py-2">
                                                 {points.length < 2 ? (

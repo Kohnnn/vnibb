@@ -26,8 +26,14 @@ function formatRatio(value: number | null | undefined, decimals = 2): string {
     return formatNumber(value, { decimals });
 }
 
-function formatPct(value: number | null | undefined): string {
-    return formatPercent(value, { decimals: 2, input: 'percent' });
+function formatPct(metricKey: string, value: number | null | undefined): string {
+    const clamp = metricKey === 'dividend_yield' || metricKey === 'fcf_yield'
+        ? 'yield'
+        : metricKey === 'revenue_growth' || metricKey === 'earnings_growth'
+            ? 'yoy_change'
+            : 'margin';
+
+    return formatPercent(value, { decimals: 2, input: 'auto', clamp });
 }
 
 const ratioLabels: Record<string, string> = {
@@ -306,7 +312,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                                     }
                                     const isPercentMetric = percentKeys.has(row.id);
                                     return isPercentMetric
-                                        ? formatPct(value as number | null | undefined)
+                                        ? formatPct(row.id, value as number | null | undefined)
                                         : formatRatio(value as number | null | undefined);
                                 }}
                             />

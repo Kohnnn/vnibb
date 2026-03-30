@@ -233,7 +233,7 @@ function ComparisonAnalysisWidgetComponent({
         symbols.map(async (ticker) => {
           try {
             const response = await getFinancialRatios(ticker, { period })
-            const latest = Array.isArray(response?.data) ? response.data[0] ?? null : null
+            const latest = Array.isArray(response?.data) ? response.data.at(-1) ?? null : null
             return { symbol: ticker, ratios: latest as FinancialRatioData | null }
           } catch {
             return { symbol: ticker, ratios: null }
@@ -622,7 +622,7 @@ function ComparisonAnalysisWidgetComponent({
                       {symbols.map((ticker) => {
                         const stock = stockBySymbol[ticker]
                         const value = stock?.metrics?.[metricId]
-                        const label = formatMetric(value, metricFormat)
+                        const label = formatMetric(value, metricFormat, metricId)
                         const isMissing = label === EMPTY_VALUE
                         const isBest = value !== null && value !== undefined && value === best && symbols.length > 1
                         const isWorst = value !== null && value !== undefined && value === worst && symbols.length > 1
@@ -741,7 +741,7 @@ function ComparisonAnalysisWidgetComponent({
                             typeof rawValue === 'number' && Number.isFinite(rawValue)
                               ? rawValue
                               : null
-                          const label = formatRatioGridValue(numericValue, column.format)
+                          const label = formatRatioGridValue(numericValue, column.format, String(column.key))
                           const isBest = numericValue !== null && best !== null && numericValue === best
                           const isWorst = numericValue !== null && worst !== null && numericValue === worst
                           const trendSeries = symbolTrendMap[ticker] || []
@@ -785,30 +785,43 @@ function ComparisonAnalysisWidgetComponent({
 
 function formatRatioGridValue(
   value: number | null | undefined,
-  format: RatioColumn['format']
+  format: RatioColumn['format'],
+  metricKey: string
 ): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return EMPTY_VALUE
   }
 
+  const clamp = metricKey === 'dividend_yield'
+    ? 'yield'
+    : metricKey === 'revenue_growth' || metricKey === 'earnings_growth'
+      ? 'yoy_change'
+      : 'margin'
+
   if (format === 'percent-auto') {
-    return formatPercent(value, { decimals: 2, input: 'auto' })
+    return formatPercent(value, { decimals: 2, input: 'auto', clamp })
   }
 
   if (format === 'percent') {
-    return formatPercent(value, { decimals: 2, input: 'percent' })
+    return formatPercent(value, { decimals: 2, input: 'auto', clamp })
   }
 
   return formatNumber(value, { decimals: 2 })
 }
 
-function formatMetric(value: number | null | undefined, format: string): string {
+function formatMetric(value: number | null | undefined, format: string, metricKey: string): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return EMPTY_VALUE
   }
 
+  const clamp = metricKey === 'dividend_yield'
+    ? 'yield'
+    : metricKey === 'revenue_growth' || metricKey === 'earnings_growth'
+      ? 'yoy_change'
+      : 'margin'
+
   if (format === 'percent') {
-    return formatPercent(value, { decimals: 2, input: 'ratio' })
+    return formatPercent(value, { decimals: 2, input: 'auto', clamp })
   }
 
   if (format === 'currency' || format === 'large_number') {

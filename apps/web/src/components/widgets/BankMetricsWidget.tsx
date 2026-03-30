@@ -64,7 +64,7 @@ const METRIC_GROUPS = [
 
 function formatMetricValue(metricKey: string, value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return 'N/A';
-  if (PERCENT_KEYS.has(metricKey)) return formatPercent(value, { decimals: 2, input: 'percent' });
+  if (PERCENT_KEYS.has(metricKey)) return formatPercent(value, { decimals: 2, input: 'auto', clamp: 'margin' });
   if (RATIO_KEYS.has(metricKey)) return formatNumber(value, { decimals: 2 });
   return formatNumber(value, { decimals: 2 });
 }

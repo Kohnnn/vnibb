@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
 import { Sparkline } from '@/components/ui/Sparkline'
-import { EMPTY_VALUE } from '@/lib/units'
+import { calculatePercentChange, EMPTY_VALUE } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
 export interface DenseTableColumn {
@@ -370,15 +370,12 @@ export function DenseFinancialTable({
                         ? asNumber(row.values[visibleColumns[index - 1].key])
                         : null
 
-                    let growthPct: number | null = null
-                    if (
-                      showGrowth &&
-                      currentNumber !== null &&
-                      previousNumber !== null &&
-                      previousNumber !== 0
-                    ) {
-                      growthPct = ((currentNumber - previousNumber) / Math.abs(previousNumber)) * 100
-                    }
+                    const growthPct = showGrowth
+                      ? calculatePercentChange(currentNumber, previousNumber, {
+                          minimumBase: 0.001,
+                          clamp: 'yoy_change',
+                        })
+                      : null
 
                     return (
                       <td

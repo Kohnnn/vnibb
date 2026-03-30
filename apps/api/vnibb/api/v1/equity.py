@@ -1653,6 +1653,27 @@ def _dedupe_ratio_rows(rows: List[FinancialRatioData]) -> List[FinancialRatioDat
     )
 
 
+def _filter_ratio_rows_for_period(
+    rows: List[FinancialRatioData],
+    requested_period: str,
+) -> List[FinancialRatioData]:
+    period_upper = str(requested_period or "year").strip().upper()
+    if period_upper in {"YEAR", "FY"}:
+        return [row for row in rows if "Q" not in str(row.period or "").upper()]
+
+    if period_upper == "QUARTER":
+        return [row for row in rows if "Q" in str(row.period or "").upper()]
+
+    if period_upper in {"Q1", "Q2", "Q3", "Q4"}:
+        return [row for row in rows if period_upper in str(row.period or "").upper()]
+
+    if period_upper == "TTM":
+        ttm_rows = [row for row in rows if "TTM" in str(row.period or "").upper()]
+        return ttm_rows if ttm_rows else rows
+
+    return rows
+
+
 def _derive_dividend_yield_from_dps(dps: Any, latest_price: Any) -> Optional[float]:
     dps_value = _coerce_optional_float(dps)
     price_vnd = _price_to_vnd_units(latest_price, dps_hint=dps_value)
@@ -4783,6 +4804,7 @@ async def get_financial_ratios(
             )
             data = [item for item in data if VALID_RATIO_PERIOD_RE.match(str(item.period or ""))]
             data = _dedupe_ratio_rows(data)
+            data = _filter_ratio_rows_for_period(data, period)
             usable_data = [item for item in data if _ratio_has_metric_value(item)]
             if usable_data:
                 return StandardResponse(
@@ -4819,6 +4841,7 @@ async def get_financial_ratios(
         )
         data = [item for item in data if VALID_RATIO_PERIOD_RE.match(str(item.period or ""))]
         data = _dedupe_ratio_rows(data)
+        data = _filter_ratio_rows_for_period(data, period)
         usable_data = [item for item in data if _ratio_has_metric_value(item)]
         payload = usable_data if usable_data else data
         if not payload:

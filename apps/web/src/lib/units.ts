@@ -163,10 +163,71 @@ interface PercentFormatOptions {
   decimals?: number
   locale?: string
   input?: 'auto' | 'ratio' | 'percent'
+  clamp?: 'yoy_change' | 'margin' | 'yield' | 'ratio'
 }
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
+}
+
+export function clampPercentage(
+  value: number | null | undefined,
+  type: 'yoy_change' | 'margin' | 'yield' | 'ratio' = 'yoy_change'
+): number | null {
+  if (!isFiniteNumber(value)) return null
+
+  const limits: Record<'yoy_change' | 'margin' | 'yield' | 'ratio', [number, number]> = {
+    yoy_change: [-999, 999],
+    margin: [-200, 200],
+    yield: [-100, 100],
+    ratio: [-1000, 1000],
+  }
+
+  const [min, max] = limits[type]
+  if (value < min || value > max) return null
+  return value
+}
+
+export function normalizePercentValue(
+  value: number | null | undefined,
+  options: Pick<PercentFormatOptions, 'input' | 'clamp'> = {}
+): number | null {
+  if (!isFiniteNumber(value)) return null
+
+  const mode = options.input ?? 'auto'
+  let normalized = mode === 'ratio'
+    ? value * 100
+    : mode === 'percent'
+      ? value
+      : Math.abs(value) <= 1
+        ? value * 100
+        : value
+
+  if (options.clamp === 'margin' || options.clamp === 'yield') {
+    const threshold = options.clamp === 'margin' ? 200 : 100
+    while (Math.abs(normalized) > threshold && Math.abs(normalized / 100) <= threshold) {
+      normalized /= 100
+    }
+  }
+
+  return options.clamp ? clampPercentage(normalized, options.clamp) : normalized
+}
+
+export function calculatePercentChange(
+  current: number | null | undefined,
+  previous: number | null | undefined,
+  options: {
+    minimumBase?: number
+    clamp?: 'yoy_change' | 'margin' | 'yield' | 'ratio'
+  } = {}
+): number | null {
+  if (!isFiniteNumber(current) || !isFiniteNumber(previous)) return null
+
+  const minimumBase = options.minimumBase ?? 0.001
+  if (Math.abs(previous) < minimumBase) return null
+
+  const change = ((current - previous) / Math.abs(previous)) * 100
+  return options.clamp ? clampPercentage(change, options.clamp) : change
 }
 
 export function formatNumber(
@@ -187,16 +248,8 @@ export function formatPercent(
   value: number | null | undefined,
   options: PercentFormatOptions = {}
 ): string {
-  if (!isFiniteNumber(value)) return EMPTY_VALUE
-
-  const mode = options.input ?? 'auto'
-  const normalized = mode === 'ratio'
-    ? value * 100
-    : mode === 'percent'
-      ? value
-      : Math.abs(value) <= 1
-        ? value * 100
-        : value
+  const normalized = normalizePercentValue(value, options)
+  if (!isFiniteNumber(normalized)) return EMPTY_VALUE
 
   const decimals = options.decimals ?? 2
   const body = normalized.toLocaleString(options.locale ?? 'en-US', {
