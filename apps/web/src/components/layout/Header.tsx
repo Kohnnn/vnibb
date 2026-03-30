@@ -4,6 +4,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import {
+  Command,
   Search,
   User,
   X,
@@ -435,6 +436,17 @@ export function Header({
           </div>
 
           <div className="flex items-center gap-2 justify-self-end">
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new Event('vnibb:open-command-palette'))}
+            className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            title="Open command palette (Ctrl+K)"
+            aria-label="Open command palette"
+          >
+            <Command size={13} />
+            <span className="hidden md:inline">Ctrl+K</span>
+          </button>
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
