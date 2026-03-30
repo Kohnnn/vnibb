@@ -100,6 +100,7 @@ import { EarningsQualityWidget } from './EarningsQualityWidget';
 import { SmartMoneyWidget } from './SmartMoneyWidget';
 import { RelativeRotationWidget } from './RelativeRotationWidget';
 import { RiskDashboardWidget } from './RiskDashboardWidget';
+import { QuantSummaryWidget } from './QuantSummaryWidget';
 import type { ComponentType } from 'react';
 import dynamic from 'next/dynamic';
 
@@ -249,6 +250,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     smart_money: SmartMoneyWidget as ComponentType<WidgetProps>,
     relative_rotation: RelativeRotationWidget as ComponentType<WidgetProps>,
     risk_dashboard: RiskDashboardWidget as ComponentType<WidgetProps>,
+    quant_summary: QuantSummaryWidget as ComponentType<WidgetProps>,
     similar_stocks: SimilarStocksWidget as ComponentType<WidgetProps>,
     quick_stats: QuickStatsWidget as ComponentType<WidgetProps>,
 
@@ -351,6 +353,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     smart_money: { w: 6, h: 6, minW: 4, minH: 5 },
     relative_rotation: { w: 6, h: 6, minW: 4, minH: 5 },
     risk_dashboard: { w: 8, h: 8, minW: 6, minH: 6 },
+    quant_summary: { w: 10, h: 8, minW: 8, minH: 6 },
     forex_rates: { w: 5, h: 7, minW: 4, minH: 5 },
     commodities: { w: 5, h: 7, minW: 4, minH: 5 },
     similar_stocks: { w: 4, h: 6, minW: 3, minH: 5 },
@@ -460,6 +463,7 @@ export const widgetNames: Record<WidgetType, string> = {
     smart_money: 'Smart Money',
     relative_rotation: 'Relative Rotation',
     risk_dashboard: 'Risk Dashboard',
+    quant_summary: 'Quant Summary',
     forex_rates: 'Forex Rates',
     commodities: 'Commodities',
     similar_stocks: 'Similar Stocks',
@@ -566,6 +570,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     smart_money: 'Foreign flow and block-trade bias to infer accumulation vs distribution',
     relative_rotation: 'Relative Strength rating trend and quadrant classification',
     risk_dashboard: 'Composite view of drawdown, volatility, Sortino, and Hurst-style structure risk',
+    quant_summary: 'Radar view of momentum, volatility, flow, seasonality, and regime context',
     forex_rates: 'Currency exchange (VND pairs)',
     commodities: 'Gold, oil, and metals',
     similar_stocks: 'Stocks with high correlation',

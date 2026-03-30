@@ -300,6 +300,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
+        type: 'quant_summary',
+        name: 'Quant Summary',
+        description: 'Radar summary of momentum, Hurst, volatility, flow, seasonality, and recovery context',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 }
+    },
+    {
         type: 'foreign_trading',
         name: 'Foreign Trading',
         description: 'Foreign investor buy/sell volumes and net flow',
