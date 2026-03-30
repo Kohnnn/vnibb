@@ -29,6 +29,8 @@ import { SubsidiariesWidget } from './SubsidiariesWidget';
 import { BalanceSheetWidget } from './BalanceSheetWidget';
 import { IncomeStatementWidget } from './IncomeStatementWidget';
 import { CashFlowWidget } from './CashFlowWidget';
+import { IncomeSankeyWidget } from './IncomeSankeyWidget';
+import { CashflowWaterfallWidget } from './CashflowWaterfallWidget';
 import { MarketOverviewWidget } from './MarketOverviewWidget';
 import { WatchlistWidget } from './WatchlistWidget';
 import { AICopilotWidget } from './AICopilotWidget';
@@ -236,6 +238,8 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     income_statement: IncomeStatementWidget as ComponentType<WidgetProps>,
     balance_sheet: BalanceSheetWidget as ComponentType<WidgetProps>,
     cash_flow: CashFlowWidget as ComponentType<WidgetProps>,
+    income_sankey: IncomeSankeyWidget as ComponentType<WidgetProps>,
+    cashflow_waterfall: CashflowWaterfallWidget as ComponentType<WidgetProps>,
     financial_ratios: FinancialRatiosWidget as ComponentType<WidgetProps>,
     bank_metrics: BankMetricsWidget as ComponentType<WidgetProps>,
     transaction_flow: TransactionFlowWidget as ComponentType<WidgetProps>,
@@ -382,6 +386,8 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     balance_sheet: { w: 7, h: 7, minW: 5, minH: 5 },
     income_statement: { w: 7, h: 7, minW: 5, minH: 5 },
     cash_flow: { w: 7, h: 7, minW: 5, minH: 5 },
+    income_sankey: { w: 10, h: 8, minW: 8, minH: 6 },
+    cashflow_waterfall: { w: 10, h: 8, minW: 8, minH: 6 },
     market_overview: { w: 5, h: 7, minW: 4, minH: 5 },
     watchlist: { w: 4, h: 7, minW: 3, minH: 5 },
     peer_comparison: { w: 8, h: 6, minW: 6, minH: 5 },
@@ -492,6 +498,8 @@ export const widgetNames: Record<WidgetType, string> = {
     balance_sheet: 'Balance Sheet',
     income_statement: 'Income Statement',
     cash_flow: 'Cash Flow',
+    income_sankey: 'Income Sankey',
+    cashflow_waterfall: 'Cash Flow Waterfall',
     market_overview: 'Market Overview',
     watchlist: 'Watchlist',
     peer_comparison: 'Peer Comparison',
@@ -599,6 +607,8 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     balance_sheet: 'Assets, liabilities, and equity',
     income_statement: 'P&L, revenue and profits',
     cash_flow: 'Operating and free cash flow',
+    income_sankey: 'Revenue-to-profit flow diagram showing how sales convert into net income',
+    cashflow_waterfall: 'Waterfall bridge from operating, investing, and financing cash flow to net change',
     market_overview: 'Vietnam market index ribbon',
     watchlist: 'Custom symbol monitoring',
     peer_comparison: 'Sector relative performance',

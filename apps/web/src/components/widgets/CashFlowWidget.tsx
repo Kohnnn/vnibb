@@ -30,6 +30,8 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
 import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
+import { buildCashFlowWaterfallModel } from '@/lib/financialVisualizations';
+import { CashFlowWaterfallChart } from '@/components/widgets/charts/CashFlowWaterfallChart';
 
 interface CashFlowWidgetProps {
     id: string;
@@ -199,7 +201,8 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
         />
     );
 
-    const [chartType, setChartType] = useState<'overview' | 'fcf'>('overview');
+    const waterfallModel = useMemo(() => buildCashFlowWaterfallModel(orderedItems), [orderedItems]);
+    const [chartType, setChartType] = useState<'overview' | 'fcf' | 'waterfall'>('overview');
 
     const renderChart = () => {
         if (!chartData.length) {
@@ -222,10 +225,21 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                     >
                         <option value="overview">Cash Flows</option>
                         <option value="fcf">Free Cash Flow</option>
+                        <option value="waterfall">Waterfall</option>
                     </select>
                 </div>
 
                 <div className="flex-1 min-h-[132px]">
+                    {chartType === 'waterfall' ? (
+                        waterfallModel ? (
+                            <CashFlowWaterfallChart
+                                model={waterfallModel}
+                                formatValue={(value) => formatUnitValuePlain(value, tableScale, unitConfig)}
+                            />
+                        ) : (
+                            <div className="flex h-full items-center justify-center text-[var(--text-muted)]">Waterfall data unavailable</div>
+                        )
+                    ) : (
                     <ChartMountGuard className="h-full" minHeight={120}>
                         <ResponsiveContainer width="99%" height="100%" minWidth={240} minHeight={120}>
                             {chartType === 'overview' ? (
@@ -280,6 +294,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                             )}
                         </ResponsiveContainer>
                     </ChartMountGuard>
+                    )}
                 </div>
             </div>
         );

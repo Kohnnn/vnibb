@@ -35,6 +35,8 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
+import { buildIncomeSankeyModel } from '@/lib/financialVisualizations';
+import { IncomeSankeyChart } from '@/components/widgets/charts/IncomeSankeyChart';
 
 interface IncomeStatementWidgetProps {
     id: string;
@@ -273,7 +275,8 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
         />
     );
 
-    const [chartType, setChartType] = useState<'overview' | 'margins'>('overview');
+    const sankeyModel = useMemo(() => buildIncomeSankeyModel(orderedItems), [orderedItems]);
+    const [chartType, setChartType] = useState<'overview' | 'margins' | 'sankey'>('overview');
 
     const renderChart = () => {
         if (!chartData.length) {
@@ -296,10 +299,21 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                     >
                         <option value="overview">Revenue & Profit</option>
                         <option value="margins">Margins %</option>
+                        <option value="sankey">Sankey Flow</option>
                     </select>
                 </div>
 
                 <div className="flex-1 min-h-[132px]">
+                    {chartType === 'sankey' ? (
+                        sankeyModel ? (
+                            <IncomeSankeyChart
+                                model={sankeyModel}
+                                formatValue={(value) => formatUnitValuePlain(value, tableScale, unitConfig)}
+                            />
+                        ) : (
+                            <div className="flex h-full items-center justify-center text-[var(--text-muted)]">Flow data unavailable</div>
+                        )
+                    ) : (
                     <ChartMountGuard className="h-full" minHeight={120}>
                         <ResponsiveContainer width="99%" height="100%" minWidth={240} minHeight={120}>
                             {chartType === 'overview' ? (
@@ -352,6 +366,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                             )}
                         </ResponsiveContainer>
                     </ChartMountGuard>
+                    )}
                 </div>
             </div>
         );
