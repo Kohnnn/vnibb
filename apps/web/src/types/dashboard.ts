@@ -58,6 +58,8 @@ export type WidgetType =
     | 'balance_sheet'
     | 'income_statement'
     | 'cash_flow'
+    | 'income_sankey'
+    | 'cashflow_waterfall'
     | 'market_overview'
     | 'watchlist'
     | 'peer_comparison'

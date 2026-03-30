@@ -342,12 +342,28 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 }
     },
     {
+        type: 'income_sankey',
+        name: 'Income Sankey',
+        description: 'Sankey-style flow from revenue through cost, operating income, tax, and net income',
+        category: 'core_data',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 }
+    },
+    {
         type: 'cash_flow',
         name: 'Cash Flow',
         description: 'Operating, investing, and financing cash flows',
         category: 'core_data',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 }
+    },
+    {
+        type: 'cashflow_waterfall',
+        name: 'Cash Flow Waterfall',
+        description: 'Waterfall bridge from operating, investing, and financing cash flow to net cash change',
+        category: 'core_data',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 }
     },
 
     // Market Data
