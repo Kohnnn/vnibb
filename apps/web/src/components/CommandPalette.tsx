@@ -42,6 +42,9 @@ interface RenderItem extends CommandPaletteActionItem {
   sectionKey: string;
 }
 
+const GLOBAL_MARKETS_DASHBOARD_NAME = 'Global Markets';
+const GLOBAL_MARKETS_TAB_NAME = 'Global Markets';
+
 function getTickerIcon(type: SearchTickerResult['type']): ReactNode {
   switch (type) {
     case 'vn_stock':
@@ -89,8 +92,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const {
     state,
+    activeDashboard,
+    activeTab,
     setActiveDashboard,
+    setActiveTab,
+    createDashboard,
+    createTab,
+    updateTab,
     addWidget,
+    updateWidget,
   } = useDashboard();
   const { setGlobalSymbol } = useWidgetGroups();
 
@@ -109,6 +119,49 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     enabled: open,
     staleTime: 5 * 60 * 1000,
   });
+
+  const resolveTradingViewDestination = () => {
+    let dashboard =
+      (activeDashboard && activeDashboard.isEditable !== false ? activeDashboard : null) ??
+      state.dashboards.find(
+        (item) => item.name === GLOBAL_MARKETS_DASHBOARD_NAME && item.isEditable !== false,
+      ) ??
+      state.dashboards.find((item) => item.isEditable !== false) ??
+      null;
+
+    if (!dashboard) {
+      dashboard = createDashboard({
+        name: GLOBAL_MARKETS_DASHBOARD_NAME,
+        description: 'Charts and macro context for crypto, indices, and global assets.',
+      });
+    }
+
+    let tab =
+      dashboard.tabs.find((item) => item.name === GLOBAL_MARKETS_TAB_NAME) ??
+      null;
+
+    if (!tab) {
+      const firstTab = dashboard.tabs[0] ?? null;
+      if (firstTab && dashboard.name === GLOBAL_MARKETS_DASHBOARD_NAME && firstTab.widgets.length === 0) {
+        updateTab(dashboard.id, firstTab.id, { name: GLOBAL_MARKETS_TAB_NAME });
+        tab = { ...firstTab, name: GLOBAL_MARKETS_TAB_NAME };
+      } else {
+        tab = createTab(dashboard.id, GLOBAL_MARKETS_TAB_NAME);
+      }
+    }
+
+    const existingWidget = tab.widgets.find((item) => item.type === 'tradingview_chart') ?? null;
+
+    setActiveDashboard(dashboard.id);
+    setActiveTab(tab.id);
+
+    return {
+      dashboardId: dashboard.id,
+      tabId: tab.id,
+      existingWidgetId: existingWidget?.id ?? null,
+      existingConfig: existingWidget?.config ?? {},
+    };
+  };
 
   const commandActions = useMemo(() => {
     const actions = new Map<string, () => void>();
@@ -197,15 +250,20 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       id: 'command:add-tradingview',
       type: 'command',
       label: 'Add TradingView Chart Widget',
-      description: 'Open a global asset chart widget on the current tab',
+      description: 'Open a global asset chart widget in the Global Markets tab',
     };
     actions.set(tradingViewItem.id, () => {
-      if (state.activeDashboardId && state.activeTabId) {
-        addWidget(state.activeDashboardId, state.activeTabId, {
+      const destination = resolveTradingViewDestination();
+      if (destination.existingWidgetId) {
+        updateWidget(destination.dashboardId, destination.tabId, destination.existingWidgetId, {
+          config: { ...destination.existingConfig, symbol: 'NASDAQ:AAPL' },
+        });
+      } else {
+        addWidget(destination.dashboardId, destination.tabId, {
           type: 'tradingview_chart',
-          tabId: state.activeTabId,
+          tabId: destination.tabId,
           config: { symbol: 'NASDAQ:AAPL' },
-          layout: { x: 0, y: Infinity, w: 10, h: 8 },
+          layout: { x: 0, y: Infinity, w: 10, h: 8, minW: 8, minH: 6 },
         });
       }
       onOpenChange(false);
@@ -213,7 +271,19 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     items.push(tradingViewItem);
 
     return { items, actions };
-  }, [addWidget, onOpenChange, router, setActiveDashboard, state.activeDashboardId, state.activeTabId, state.dashboards]);
+  }, [
+    activeDashboard,
+    addWidget,
+    createDashboard,
+    createTab,
+    onOpenChange,
+    router,
+    setActiveDashboard,
+    setActiveTab,
+    state.dashboards,
+    updateTab,
+    updateWidget,
+  ]);
 
   const sections = useMemo(
     () => buildTickerPaletteSections(trimmedSearch, recentSearches, tickerQuery.data?.results || [], commandActions.items),
@@ -294,12 +364,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       return;
     }
 
-    if (state.activeDashboardId && state.activeTabId) {
-      addWidget(state.activeDashboardId, state.activeTabId, {
+    const destination = resolveTradingViewDestination();
+    if (destination.existingWidgetId) {
+      updateWidget(destination.dashboardId, destination.tabId, destination.existingWidgetId, {
+        config: { ...destination.existingConfig, symbol: item.tv_symbol || item.symbol },
+      });
+    } else {
+      addWidget(destination.dashboardId, destination.tabId, {
         type: 'tradingview_chart',
-        tabId: state.activeTabId,
+        tabId: destination.tabId,
         config: { symbol: item.tv_symbol || item.symbol },
-        layout: { x: 0, y: Infinity, w: 10, h: 8 },
+        layout: { x: 0, y: Infinity, w: 10, h: 8, minW: 8, minH: 6 },
       });
     }
     onOpenChange(false);

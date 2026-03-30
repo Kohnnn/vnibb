@@ -8,6 +8,7 @@ import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { useCashFlow } from '@/lib/queries';
 import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
@@ -43,6 +44,7 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove }: CashflowWate
     [orderedItems, unitConfig],
   );
   const model = useMemo(() => buildCashFlowWaterfallModel(orderedItems), [orderedItems]);
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 10000 });
   const latestLabel = model
     ? formatFinancialPeriodLabel(model.period, { mode: periodMode, index: orderedItems.length - 1, total: orderedItems.length })
     : period === 'FY'
@@ -76,7 +78,16 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove }: CashflowWate
         </div>
 
         <div className="flex-1 overflow-auto pt-1">
-          {isLoading && !hasData ? (
+          {timedOut && isLoading && !hasData ? (
+            <WidgetError
+              title="Loading timed out"
+              error={new Error('Cash flow waterfall took too long to load.')}
+              onRetry={() => {
+                resetTimeout();
+                refetch();
+              }}
+            />
+          ) : isLoading && !hasData ? (
             <WidgetSkeleton lines={6} />
           ) : error && !hasData ? (
             <WidgetError error={error as Error} onRetry={() => refetch()} />
