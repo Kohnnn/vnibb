@@ -340,12 +340,13 @@ export function useSubsidiaries(symbol: string, enabled = true) {
 
 export function useBalanceSheet(
     symbol: string,
-    options?: { period?: string; enabled?: boolean }
+    options?: { period?: string; enabled?: boolean; limit?: number }
 ) {
     const period = options?.period || 'FY';
+    const limit = options?.limit;
     return useQuery({
-        queryKey: queryKeys.balanceSheet(symbol, period),
-        queryFn: () => api.getBalanceSheet(symbol, { period }),
+        queryKey: [...queryKeys.balanceSheet(symbol, period), limit],
+        queryFn: () => api.getBalanceSheet(symbol, { period, limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000, // 1 hour
     });
@@ -353,12 +354,13 @@ export function useBalanceSheet(
 
 export function useIncomeStatement(
     symbol: string,
-    options?: { period?: string; enabled?: boolean }
+    options?: { period?: string; enabled?: boolean; limit?: number }
 ) {
     const period = options?.period || 'FY';
+    const limit = options?.limit;
     return useQuery({
-        queryKey: queryKeys.incomeStatement(symbol, period),
-        queryFn: () => api.getIncomeStatement(symbol, { period }),
+        queryKey: [...queryKeys.incomeStatement(symbol, period), limit],
+        queryFn: () => api.getIncomeStatement(symbol, { period, limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000, // 1 hour
     });
@@ -366,12 +368,13 @@ export function useIncomeStatement(
 
 export function useCashFlow(
     symbol: string,
-    options?: { period?: string; enabled?: boolean }
+    options?: { period?: string; enabled?: boolean; limit?: number }
 ) {
     const period = options?.period || 'FY';
+    const limit = options?.limit;
     return useQuery({
-        queryKey: queryKeys.cashFlow(symbol, period),
-        queryFn: () => api.getCashFlow(symbol, { period }),
+        queryKey: [...queryKeys.cashFlow(symbol, period), limit],
+        queryFn: () => api.getCashFlow(symbol, { period, limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 60 * 60 * 1000, // 1 hour
     });

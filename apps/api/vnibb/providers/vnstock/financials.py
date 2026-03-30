@@ -53,7 +53,7 @@ class FinancialsQueryParams(BaseModel):
     limit: int = Field(
         default=5,
         ge=1,
-        le=20,
+        le=40,
         description="Number of periods to return",
     )
 

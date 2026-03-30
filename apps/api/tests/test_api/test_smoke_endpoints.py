@@ -232,6 +232,89 @@ async def test_balance_and_cash_flow_endpoints_enrich_fields_and_order_oldest_fi
 
 
 @pytest.mark.asyncio
+async def test_income_statement_endpoint_supports_sequential_quarter_alias(
+    client, test_db, monkeypatch
+):
+    test_db.add_all(
+        [
+            IncomeStatement(
+                id=300,
+                symbol="VNM",
+                period="2024-Q1",
+                period_type="quarter",
+                fiscal_year=2024,
+                fiscal_quarter=1,
+                revenue=100.0,
+            ),
+            IncomeStatement(
+                id=301,
+                symbol="VNM",
+                period="2024-Q2",
+                period_type="quarter",
+                fiscal_year=2024,
+                fiscal_quarter=2,
+                revenue=110.0,
+            ),
+            IncomeStatement(
+                id=302,
+                symbol="VNM",
+                period="2024-Q3",
+                period_type="quarter",
+                fiscal_year=2024,
+                fiscal_quarter=3,
+                revenue=120.0,
+            ),
+            IncomeStatement(
+                id=303,
+                symbol="VNM",
+                period="2024-Q4",
+                period_type="quarter",
+                fiscal_year=2024,
+                fiscal_quarter=4,
+                revenue=130.0,
+            ),
+            IncomeStatement(
+                id=304,
+                symbol="VNM",
+                period="2025-Q1",
+                period_type="quarter",
+                fiscal_year=2025,
+                fiscal_quarter=1,
+                revenue=140.0,
+            ),
+            IncomeStatement(
+                id=305,
+                symbol="VNM",
+                period="2025-Q2",
+                period_type="quarter",
+                fiscal_year=2025,
+                fiscal_quarter=2,
+                revenue=150.0,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    async def fake_get_financials_with_ttm(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", fake_get_financials_with_ttm)
+
+    response = await client.get("/api/v1/equity/VNM/income-statement?period=Q&limit=8")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [row["period"] for row in payload["data"]] == [
+        "2024-Q1",
+        "2024-Q2",
+        "2024-Q3",
+        "2024-Q4",
+        "2025-Q1",
+        "2025-Q2",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_profile_sync_succeeds_when_appwrite_mirror_fails(client, monkeypatch):
     async def fake_sync_company_profiles(*, symbols=None):
         assert symbols == ["VCI"]

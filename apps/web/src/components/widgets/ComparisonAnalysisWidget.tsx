@@ -18,7 +18,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { CompanyLogo } from '@/components/ui/CompanyLogo'
-import { PeriodToggle, type Period } from '@/components/ui/PeriodToggle'
+import { PeriodToggle, type ExtendedPeriod } from '@/components/ui/PeriodToggle'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { Sparkline } from '@/components/ui/Sparkline'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
@@ -68,6 +68,7 @@ const CATEGORY_DEFINITIONS = [
 
 const COLOR_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#14b8a6', '#06b6d4']
 const PERFORMANCE_PERIODS = ['1M', '3M', '6M', '1Y', '3Y', '5Y', 'YTD', 'ALL'] as const
+const COMPARISON_PERIOD_OPTIONS: ExtendedPeriod[] = ['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM']
 const MAX_SYMBOLS = 5
 const MIN_SYMBOLS = 2
 const LOWER_IS_BETTER_METRICS = new Set([
@@ -201,7 +202,7 @@ function ComparisonAnalysisWidgetComponent({
       .filter((item): item is string => Boolean(item))
     return Array.from(new Set(seeded)).slice(0, MAX_SYMBOLS)
   })
-  const [period, setPeriod] = useState<Period>('FY')
+  const [period, setPeriod] = useState<ExtendedPeriod>('FY')
   const [performancePeriod, setPerformancePeriod] = useState<PerformancePeriod>('1M')
   const [activeCategory, setActiveCategory] = useState('valuation')
   const [newSymbol, setNewSymbol] = useState('')
@@ -429,7 +430,7 @@ function ComparisonAnalysisWidgetComponent({
             )}
 
             <div className="ml-auto flex items-center gap-2">
-              <PeriodToggle value={period} onChange={setPeriod} compact />
+              <PeriodToggle value={period} onChange={setPeriod} compact options={COMPARISON_PERIOD_OPTIONS} />
               <WidgetMeta
                 updatedAt={comparisonQuery.dataUpdatedAt}
                 isFetching={(comparisonQuery.isFetching || performanceQuery.isFetching) && hasData}

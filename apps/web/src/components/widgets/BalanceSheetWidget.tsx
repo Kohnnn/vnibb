@@ -58,17 +58,23 @@ const labels: Record<string, string> = {
 };
 
 const TABLE_YEAR_LIMIT = 10;
+const QUARTER_PERIOD_LIMIT = 28;
+const QUARTER_CHART_POINTS = 16;
+const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
 function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: BalanceSheetWidgetProps) {
     const { period, setPeriod } = usePeriodState({
         widgetId: id || 'balance_sheet',
         defaultPeriod: 'FY',
+        validPeriods: [...STATEMENT_PERIOD_OPTIONS],
     });
     const [viewMode, setViewMode] = useState<ViewMode>('table');
     const { config: unitConfig } = useUnit();
     
-    const apiPeriod = period === 'FY' ? 'year' : period;
+    const apiPeriod = period === 'FY' ? 'year' : period === 'Q' ? 'quarter' : period;
     const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
+    const visiblePeriodLimit = period === 'Q' ? QUARTER_PERIOD_LIMIT : TABLE_YEAR_LIMIT;
+    const chartPointLimit = period === 'Q' ? QUARTER_CHART_POINTS : 5;
 
     const {
         data,
@@ -77,7 +83,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
         refetch,
         isFetching,
         dataUpdatedAt,
-    } = useBalanceSheet(symbol, { period: apiPeriod });
+    } = useBalanceSheet(symbol, { period: apiPeriod, limit: visiblePeriodLimit });
 
     const items = data?.data || [];
     const orderedItems = useMemo(
@@ -90,7 +96,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
 
     const chartData = useMemo(() => {
         if (!orderedItems.length) return [];
-        const recentItems = orderedItems.slice(-5);
+        const recentItems = orderedItems.slice(-chartPointLimit);
         return recentItems.map((d, index) => {
             const equityValue = d.total_equity ?? d.equity ?? 0
             const liabilities = d.total_liabilities ?? 0
@@ -108,7 +114,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                 debtToEquity: liabilities > 0 && equityValue !== 0 ? liabilities / equityValue : 0,
             }
         });
-    }, [orderedItems, periodMode]);
+    }, [chartPointLimit, orderedItems, periodMode]);
 
     const tableScale = useMemo(() => {
         const values = orderedItems.flatMap((item) => [
@@ -140,16 +146,16 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
 
     const tableColumns = useMemo(
         () =>
-            orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => ({
+            orderedItems.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
                     index,
-                    total: Math.min(orderedItems.length, TABLE_YEAR_LIMIT),
+                    total: Math.min(orderedItems.length, visiblePeriodLimit),
                 }),
                 align: 'right' as const,
             })),
-        [orderedItems, periodMode]
+        [orderedItems, periodMode, visiblePeriodLimit]
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
@@ -158,7 +164,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
             if (metricKey === 'accounts_receivable') return entry.accounts_receivable ?? entry.receivables
             return entry[metricKey as keyof typeof entry]
         }
-        const recentItems = orderedItems.slice(-TABLE_YEAR_LIMIT)
+        const recentItems = orderedItems.slice(-visiblePeriodLimit)
         const hasMetricData = (metricKey: string) =>
             recentItems.some((entry) => {
                 const value = valueFor(entry, metricKey)
@@ -204,7 +210,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
             createRow('group:equity', 'total_equity'),
             createRow('group:equity', 'retained_earnings'),
         ].filter(Boolean) as DenseTableRow[];
-    }, [orderedItems, tableColumns]);
+    }, [orderedItems, tableColumns, visiblePeriodLimit]);
 
     const renderTable = () => (
         <DenseFinancialTable
@@ -342,7 +348,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                     <BarChart3 size={12} />
                 </button>
             </div>
-            <PeriodToggle value={period} onChange={setPeriod} compact />
+            <PeriodToggle value={period} onChange={setPeriod} compact options={[...STATEMENT_PERIOD_OPTIONS]} />
         </div>
     );
 

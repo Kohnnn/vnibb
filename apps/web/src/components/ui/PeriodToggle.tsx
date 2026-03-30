@@ -4,22 +4,25 @@ import { memo } from 'react';
 import { cn } from '@/lib/utils';
 
 export type Period = 'FY' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'TTM';
+export type ExtendedPeriod = Period | 'Q';
 
 interface PeriodToggleProps {
-  value: Period;
-  onChange: (period: Period) => void;
+  value: ExtendedPeriod;
+  onChange: (period: ExtendedPeriod) => void;
   compact?: boolean;
+  options?: ExtendedPeriod[];
 }
 
 const PERIODS: Period[] = ['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'];
+const EXTENDED_PERIODS: ExtendedPeriod[] = ['FY', 'Q', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'];
 
-function PeriodToggleComponent({ value, onChange, compact = false }: PeriodToggleProps) {
+function PeriodToggleComponent({ value, onChange, compact = false, options = EXTENDED_PERIODS }: PeriodToggleProps) {
   return (
     <div className={cn(
         "flex bg-[var(--bg-tertiary)] rounded-md p-0.5 border border-[var(--border-color)]",
         compact ? "gap-0.5" : "gap-1"
     )}>
-      {PERIODS.map(period => (
+      {options.map(period => (
         <button
           key={period}
           onClick={() => onChange(period)}

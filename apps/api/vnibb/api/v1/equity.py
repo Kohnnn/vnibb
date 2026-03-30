@@ -263,7 +263,7 @@ async def _load_financial_statement_fallback(
         return []
 
     normalized_period = "year"
-    if period_upper in {"QUARTER", "Q1", "Q2", "Q3", "Q4", "TTM"}:
+    if period_upper in {"QUARTER", "Q", "Q1", "Q2", "Q3", "Q4", "TTM"}:
         normalized_period = "quarter"
 
     quarter_filter: Optional[int] = None
@@ -1661,7 +1661,7 @@ def _filter_ratio_rows_for_period(
     if period_upper in {"YEAR", "FY"}:
         return [row for row in rows if "Q" not in str(row.period or "").upper()]
 
-    if period_upper == "QUARTER":
+    if period_upper in {"QUARTER", "Q"}:
         return [row for row in rows if "Q" in str(row.period or "").upper()]
 
     if period_upper in {"Q1", "Q2", "Q3", "Q4"}:
@@ -4760,7 +4760,7 @@ async def get_rating(symbol: str):
 @cached(ttl=86400, key_prefix="ratios_v2")
 async def get_financial_ratios(
     symbol: str,
-    period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
+    period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
     db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.upper()
@@ -5004,8 +5004,8 @@ async def get_metrics_history(
 @cached(ttl=86400, key_prefix="income_statement_v2")
 async def get_income_statement(
     symbol: str,
-    period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
-    limit: int = Query(5, ge=1, le=20),
+    period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
+    limit: int = Query(5, ge=1, le=40),
     db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.upper()
@@ -5087,8 +5087,8 @@ async def get_income_statement(
 @cached(ttl=86400, key_prefix="balance_sheet_v2")
 async def get_balance_sheet(
     symbol: str,
-    period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
-    limit: int = Query(5, ge=1, le=20),
+    period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
+    limit: int = Query(5, ge=1, le=40),
     db: AsyncSession = Depends(get_db),
 ):
     last_data_date = await _get_model_last_updated(db, BalanceSheet, symbol)
@@ -5141,8 +5141,8 @@ async def get_balance_sheet(
 @cached(ttl=86400, key_prefix="cash_flow_v2")
 async def get_cash_flow(
     symbol: str,
-    period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
-    limit: int = Query(5, ge=1, le=20),
+    period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
+    limit: int = Query(5, ge=1, le=40),
     db: AsyncSession = Depends(get_db),
 ):
     last_data_date = await _get_model_last_updated(db, CashFlow, symbol)

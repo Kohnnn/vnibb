@@ -57,17 +57,23 @@ const labels: Record<string, string> = {
 };
 
 const TABLE_YEAR_LIMIT = 10;
+const QUARTER_PERIOD_LIMIT = 28;
+const QUARTER_CHART_POINTS = 16;
+const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
 function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWidgetProps) {
     const { period, setPeriod } = usePeriodState({
         widgetId: id || 'cash_flow',
         defaultPeriod: 'FY',
+        validPeriods: [...STATEMENT_PERIOD_OPTIONS],
     });
     const [viewMode, setViewMode] = useState<ViewMode>('table');
     const { config: unitConfig } = useUnit();
     
-    const apiPeriod = period === 'FY' ? 'year' : period;
+    const apiPeriod = period === 'FY' ? 'year' : period === 'Q' ? 'quarter' : period;
     const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
+    const visiblePeriodLimit = period === 'Q' ? QUARTER_PERIOD_LIMIT : TABLE_YEAR_LIMIT;
+    const chartPointLimit = period === 'Q' ? QUARTER_CHART_POINTS : 5;
 
     const {
         data,
@@ -76,7 +82,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
         refetch,
         isFetching,
         dataUpdatedAt,
-    } = useCashFlow(symbol, { period: apiPeriod });
+    } = useCashFlow(symbol, { period: apiPeriod, limit: visiblePeriodLimit });
 
     const items = data?.data || [];
     const orderedItems = useMemo(
@@ -89,7 +95,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
 
     const chartData = useMemo(() => {
         if (!orderedItems.length) return [];
-        const recentItems = orderedItems.slice(-5);
+        const recentItems = orderedItems.slice(-chartPointLimit);
         return recentItems.map((d, index) => ({
             period: formatFinancialPeriodLabel(d.period, {
                 mode: periodMode,
@@ -102,7 +108,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             freeCashFlow: d.free_cash_flow || 0,
             netCashFlow: d.net_change_in_cash ?? d.net_cash_flow ?? 0,
         }));
-    }, [orderedItems, periodMode]);
+    }, [chartPointLimit, orderedItems, periodMode]);
 
     const tableScale = useMemo(() => {
         const values = orderedItems.flatMap((item) => [
@@ -129,16 +135,16 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
 
     const tableColumns = useMemo(
         () =>
-            orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => ({
+            orderedItems.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
                     index,
-                    total: Math.min(orderedItems.length, TABLE_YEAR_LIMIT),
+                    total: Math.min(orderedItems.length, visiblePeriodLimit),
                 }),
                 align: 'right' as const,
             })),
-        [orderedItems, periodMode]
+        [orderedItems, periodMode, visiblePeriodLimit]
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
@@ -147,7 +153,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             if (metricKey === 'capex') return entry.capex ?? entry.capital_expenditure
             return entry[metricKey as keyof typeof entry]
         }
-        const recentItems = orderedItems.slice(-TABLE_YEAR_LIMIT)
+        const recentItems = orderedItems.slice(-visiblePeriodLimit)
         const hasMetricData = (metricKey: string) =>
             recentItems.some((entry) => {
                 const value = valueFor(entry, metricKey)
@@ -185,7 +191,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             createRow('group:summary', 'dividends_paid'),
             createRow('group:summary', 'debt_repayment'),
         ].filter(Boolean) as DenseTableRow[];
-    }, [orderedItems, tableColumns]);
+    }, [orderedItems, tableColumns, visiblePeriodLimit]);
 
     const renderTable = () => (
         <DenseFinancialTable
@@ -328,7 +334,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                     <BarChart3 size={12} />
                 </button>
             </div>
-            <PeriodToggle value={period} onChange={setPeriod} compact />
+            <PeriodToggle value={period} onChange={setPeriod} compact options={[...STATEMENT_PERIOD_OPTIONS]} />
         </div>
     );
 
