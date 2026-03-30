@@ -6,7 +6,6 @@ import { TickerInfoWidget } from './TickerInfoWidget';
 import { TickerProfileWidget } from './TickerProfileWidget';
 import { KeyMetricsWidget } from './KeyMetricsWidget';
 import { ShareStatisticsWidget } from './ShareStatisticsWidget';
-import { ScreenerWidget } from './ScreenerWidget';
 import { EarningsHistoryWidget } from './EarningsHistoryWidget';
 import { DividendPaymentWidget } from './DividendPaymentWidget';
 import { ValuationWidget } from './ValuationWidget';
@@ -15,7 +14,6 @@ import { ValuationBandWidget } from './ValuationBandWidget';
 import { StockSplitsWidget } from './StockSplitsWidget';
 
 import { CompanyFilingsWidget } from './CompanyFilingsWidget';
-import { NewsFeedWidget } from './NewsFeedWidget';
 import { EventsCalendarWidget } from './EventsCalendarWidget';
 import { AnalystEstimatesWidget } from './AnalystEstimatesWidget';
 import { MajorShareholdersWidget } from './MajorShareholdersWidget';
@@ -24,8 +22,6 @@ import { IntradayTradesWidget } from './IntradayTradesWidget';
 import { FinancialRatiosWidget } from './FinancialRatiosWidget';
 import { BankMetricsWidget } from './BankMetricsWidget';
 import { TransactionFlowWidget } from './TransactionFlowWidget';
-import { IndustryBubbleWidget } from './IndustryBubbleWidget';
-import { SectorBoardWidget } from './SectorBoardWidget';
 import { MoneyFlowTrendWidget } from './MoneyFlowTrendWidget';
 import { CorrelationMatrixWidget } from './CorrelationMatrixWidget';
 import { ForeignTradingWidget } from './ForeignTradingWidget';
@@ -35,14 +31,10 @@ import { IncomeStatementWidget } from './IncomeStatementWidget';
 import { CashFlowWidget } from './CashFlowWidget';
 import { MarketOverviewWidget } from './MarketOverviewWidget';
 import { WatchlistWidget } from './WatchlistWidget';
-import { PeerComparisonWidget } from './PeerComparisonWidget';
-import { ComparisonWidget } from './ComparisonWidget';
 import { AICopilotWidget } from './AICopilotWidget';
 import { TopMoversWidget } from './TopMoversWidget';
 import { WorldIndicesWidget } from './WorldIndicesWidget';
 import { SectorPerformanceWidget } from './SectorPerformanceWidget';
-import { PortfolioTrackerWidget } from './PortfolioTrackerWidget';
-import { PriceAlertsWidget } from './PriceAlertsWidget';
 import { EconomicCalendarWidget } from './EconomicCalendarWidget';
 import { VolumeAnalysisWidget } from './VolumeAnalysisWidget';
 import { VolumeProfileWidget } from './VolumeProfileWidget';
@@ -65,7 +57,6 @@ import { RSRankingWidget } from './RSRankingWidget';
 import { InsiderTradingWidget } from './InsiderTradingWidget';
 import { BlockTradeWidget } from './BlockTradeWidget';
 import { AlertSettingsPanel } from './AlertSettingsPanel';
-import { MarketHeatmapWidget } from './MarketHeatmapWidget';
 import { DatabaseInspectorWidget } from './DatabaseInspectorWidget';
 import { OrderbookWidget } from './OrderbookWidget';
 import { IndexComparisonWidget } from './IndexComparisonWidget';
@@ -74,7 +65,6 @@ import { SectorBreakdownWidget } from './SectorBreakdownWidget';
 import { MarketMoversSectorsWidget } from './MarketMoversSectorsWidget';
 import { NewsFlowWidget } from './NewsFlowWidget';
 import { AIAnalysisWidget } from './AIAnalysisWidget';
-import { DatabaseBrowserWidget } from './DatabaseBrowserWidget';
 import { NewsCorporateActionsWidget } from './NewsCorporateActionsWidget';
 import { DividendLadderWidget } from './DividendLadderWidget';
 import { InsiderDealTimelineWidget } from './InsiderDealTimelineWidget';
@@ -141,6 +131,86 @@ const ResearchBrowserWidget = dynamic(() => import('./ResearchBrowserWidget'), {
     ssr: false,
     loading: () => null,
 }) as ComponentType<WidgetProps>;
+
+const ScreenerWidget = dynamic(
+    () => import('./ScreenerWidget').then((m) => m.ScreenerWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
+
+const NewsFeedWidget = dynamic(
+    () => import('./NewsFeedWidget').then((m) => m.NewsFeedWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
+
+const IndustryBubbleWidget = dynamic(
+    () => import('./IndustryBubbleWidget').then((m) => m.IndustryBubbleWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
+
+const SectorBoardWidget = dynamic(
+    () => import('./SectorBoardWidget').then((m) => m.SectorBoardWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
+
+const PeerComparisonWidget = dynamic(
+    () => import('./PeerComparisonWidget').then((m) => m.PeerComparisonWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
+
+const ComparisonWidget = dynamic(
+    () => import('./ComparisonWidget').then((m) => m.ComparisonWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
+
+const PortfolioTrackerWidget = dynamic(
+    () => import('./PortfolioTrackerWidget').then((m) => m.PortfolioTrackerWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
+
+const PriceAlertsWidget = dynamic(
+    () => import('./PriceAlertsWidget').then((m) => m.PriceAlertsWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
+
+const MarketHeatmapWidget = dynamic(
+    () => import('./MarketHeatmapWidget').then((m) => m.MarketHeatmapWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
+
+const DatabaseBrowserWidget = dynamic(
+    () => import('./DatabaseBrowserWidget').then((m) => m.DatabaseBrowserWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
 
 // Main widget registry
 export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
