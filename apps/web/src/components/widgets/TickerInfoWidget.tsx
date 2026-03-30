@@ -8,6 +8,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { formatNumber } from '@/lib/formatters';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { useQuantRegime } from '@/hooks/useQuantRegime';
 import { TrendingUp, TrendingDown, Info, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -74,6 +75,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     enabled: Boolean(symbol),
   });
   const { data: tradingStats } = useTradingStats(symbol, Boolean(symbol));
+  const quantRegime = useQuantRegime(symbol, { period: '1Y', enabled: Boolean(symbol) })
 
   const isLoading = quoteLoading || profileLoading;
   const isFetching = quoteFetching || profileFetching || screenerFetching;
@@ -301,6 +303,21 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             {marketCapSource === 'Derived' && (
               <span className="inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
                 MCap derived
+              </span>
+            )}
+            {quantRegime.hasData && (
+              <span
+                className={cn(
+                  'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                  quantRegime.momentum.shortLabel === 'Bull'
+                    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                    : quantRegime.momentum.shortLabel === 'Bear'
+                      ? 'border-rose-500/20 bg-rose-500/10 text-rose-300'
+                      : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300'
+                )}
+                title={quantRegime.action}
+              >
+                {quantRegime.regimeLabel}
               </span>
             )}
           </div>

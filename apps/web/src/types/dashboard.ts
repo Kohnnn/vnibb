@@ -100,6 +100,7 @@ export type WidgetType =
     | 'smart_money'
     | 'relative_rotation'
     | 'risk_dashboard'
+    | 'quant_summary'
     | 'forex_rates'
     | 'commodities'
     | 'similar_stocks'

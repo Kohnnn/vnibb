@@ -381,52 +381,58 @@ const MAIN_DEEP_DIVE_TEMPLATE: TemplateWidget[] = [
 
 const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
     {
+        type: 'quant_summary',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 24, h: 8, minW: 10, minH: 6 }
+    },
+    {
         type: 'seasonality_heatmap',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 14, h: 12, minW: 10, minH: 9 }
+        layout: { x: 0, y: 8, w: 14, h: 12, minW: 10, minH: 9 }
     },
     {
         type: 'sortino_monthly',
         syncGroupId: 1,
         config: {},
-        layout: { x: 14, y: 0, w: 10, h: 11, minW: 8, minH: 9 }
+        layout: { x: 14, y: 8, w: 10, h: 11, minW: 8, minH: 9 }
     },
     {
         type: 'volume_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 12, w: 8, h: 10, minW: 6, minH: 8 }
+        layout: { x: 0, y: 20, w: 8, h: 10, minW: 6, minH: 8 }
     },
     {
         type: 'volume_flow',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 12, w: 8, h: 10, minW: 6, minH: 8 }
+        layout: { x: 8, y: 20, w: 8, h: 10, minW: 6, minH: 8 }
     },
     {
         type: 'momentum',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 12, w: 8, h: 10, minW: 6, minH: 8 }
+        layout: { x: 16, y: 20, w: 8, h: 10, minW: 6, minH: 8 }
     },
     {
         type: 'gap_analysis',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 22, w: 8, h: 9, minW: 6, minH: 7 }
+        layout: { x: 0, y: 30, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'drawdown_recovery',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 22, w: 8, h: 10, minW: 6, minH: 8 }
+        layout: { x: 8, y: 30, w: 8, h: 10, minW: 6, minH: 8 }
     },
     {
         type: 'gap_fill_stats',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 22, w: 8, h: 9, minW: 6, minH: 7 }
+        layout: { x: 16, y: 30, w: 8, h: 9, minW: 6, minH: 7 }
     },
 ];
 
@@ -696,40 +702,46 @@ const INITIAL_TECHNICAL_TEMPLATE: TemplateWidget[] = [
 
 const INITIAL_QUANT_TEMPLATE: TemplateWidget[] = [
     {
+        type: 'quant_summary',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 24, h: 8, minW: 10, minH: 6 }
+    },
+    {
         type: 'seasonality_heatmap',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 14, h: 12, minW: 10, minH: 9 }
+        layout: { x: 0, y: 8, w: 14, h: 12, minW: 10, minH: 9 }
     },
     {
         type: 'sortino_monthly',
         syncGroupId: 1,
         config: {},
-        layout: { x: 14, y: 0, w: 10, h: 11, minW: 8, minH: 9 }
+        layout: { x: 14, y: 8, w: 10, h: 11, minW: 8, minH: 9 }
     },
     {
         type: 'drawdown_recovery',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 12, w: 7, h: 12, minW: 6, minH: 9 }
+        layout: { x: 0, y: 20, w: 7, h: 12, minW: 6, minH: 9 }
     },
     {
         type: 'gap_analysis',
         syncGroupId: 1,
         config: {},
-        layout: { x: 7, y: 12, w: 7, h: 10, minW: 6, minH: 8 }
+        layout: { x: 7, y: 20, w: 7, h: 10, minW: 6, minH: 8 }
     },
     {
         type: 'correlation_matrix',
         syncGroupId: 1,
         config: {},
-        layout: { x: 14, y: 12, w: 10, h: 13, minW: 9, minH: 10 }
+        layout: { x: 14, y: 20, w: 10, h: 13, minW: 9, minH: 10 }
     },
     {
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 25, w: 24, h: 6, minW: 12, minH: 4 }
+        layout: { x: 0, y: 33, w: 24, h: 6, minW: 12, minH: 4 }
     },
 ];
 

@@ -123,6 +123,7 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   parkinson_volatility: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   amihud_illiquidity: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   risk_dashboard: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
+  quant_summary: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
   signal_summary: { preferredW: 24, preferredH: 4, minW: 12, minH: 4, orientation: 'horizontal', expandPriority: 6 },
 }
 
