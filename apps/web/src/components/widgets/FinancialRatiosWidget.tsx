@@ -77,7 +77,9 @@ const ratioLabels: Record<string, string> = {
 };
 
 const TABLE_YEAR_LIMIT = 10;
+const QUARTER_PERIOD_LIMIT = 28;
 const NULL_LIKE_RATIO_KEYS = new Set(['pe', 'pb', 'ps', 'peg_ratio', 'ev_sales', 'ev_ebitda']);
+const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
 const VALID_RATIO_PERIOD_RE = /^20\d{2}(?:-Q[1-4])?$/
 
@@ -100,10 +102,12 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
     const { period, setPeriod } = usePeriodState({
         widgetId: id || 'financial_ratios',
         defaultPeriod: 'FY',
+        validPeriods: [...STATEMENT_PERIOD_OPTIONS],
     });
     
-    const apiPeriod = period;
+    const apiPeriod = period === 'Q' ? 'Q' : period;
     const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
+    const visiblePeriodLimit = period === 'Q' ? QUARTER_PERIOD_LIMIT : TABLE_YEAR_LIMIT;
 
     const {
         data,
@@ -197,29 +201,29 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
 
     const headerActions = (
         <div className="mr-1">
-            <PeriodToggle value={period} onChange={setPeriod} compact />
+            <PeriodToggle value={period} onChange={setPeriod} compact options={[...STATEMENT_PERIOD_OPTIONS]} />
         </div>
     );
 
     const tableColumns = useMemo(
         () =>
-            ratios.slice(-TABLE_YEAR_LIMIT).map((entry, index) => ({
+            ratios.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
                     index,
-                    total: Math.min(ratios.length, TABLE_YEAR_LIMIT),
+                    total: Math.min(ratios.length, visiblePeriodLimit),
                 }),
                 align: 'right' as const,
             })),
-        [ratios, periodMode]
+        [periodMode, ratios, visiblePeriodLimit]
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
         const rows: DenseTableRow[] = [];
 
         const hasMetricData = (metricKey: string) =>
-            ratios.slice(-TABLE_YEAR_LIMIT).some((entry) => {
+            ratios.slice(-visiblePeriodLimit).some((entry) => {
                 const value = entry[metricKey as keyof typeof entry];
                 return typeof value === 'number' && Number.isFinite(value);
             });
@@ -245,7 +249,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                     parentId: groupId,
                     indent: 12,
                     values: Object.fromEntries(
-                        ratios.slice(-TABLE_YEAR_LIMIT).map((entry, index) => [
+                        ratios.slice(-visiblePeriodLimit).map((entry, index) => [
                             tableColumns[index]?.key ?? `period_${index}`,
                             entry[metricKey as keyof typeof entry],
                         ])
@@ -255,7 +259,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
         });
 
         return rows;
-    }, [categoryLabels, categoryMetrics, ratios, tableColumns]);
+    }, [categoryLabels, categoryMetrics, ratios, tableColumns, visiblePeriodLimit]);
 
     return (
         <WidgetContainer

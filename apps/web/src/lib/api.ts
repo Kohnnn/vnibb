@@ -386,7 +386,7 @@ export async function getFinancialRatios(
     signal?: AbortSignal
 ): Promise<FinancialRatiosResponse> {
     return fetchAPI<FinancialRatiosResponse>(`/equity/${symbol}/ratios`, {
-        params: { period: options?.period },
+        params: { period: normalizeFinancialRatioPeriod(options?.period) },
         signal
     });
 }
@@ -465,33 +465,42 @@ export async function getSubsidiaries(symbol: string): Promise<SubsidiariesRespo
 
 function normalizeFinancialStatementPeriod(period?: string): string | undefined {
     if (!period) return undefined;
-    return period === 'FY' ? 'year' : period;
+    if (period === 'FY') return 'year';
+    if (period === 'Q') return 'quarter';
+    return period;
+}
+
+function normalizeFinancialRatioPeriod(period?: string): string | undefined {
+    if (!period) return undefined;
+    if (period === 'FY') return 'FY';
+    if (period === 'Q') return 'quarter';
+    return period;
 }
 
 export async function getBalanceSheet(
     symbol: string,
-    options?: { period?: string }
+    options?: { period?: string; limit?: number }
 ): Promise<BalanceSheetResponse> {
     return fetchAPI<BalanceSheetResponse>(`/equity/${symbol}/balance-sheet`, {
-        params: { period: normalizeFinancialStatementPeriod(options?.period) },
+        params: { period: normalizeFinancialStatementPeriod(options?.period), limit: options?.limit },
     });
 }
 
 export async function getIncomeStatement(
     symbol: string,
-    options?: { period?: string }
+    options?: { period?: string; limit?: number }
 ): Promise<IncomeStatementResponse> {
     return fetchAPI<IncomeStatementResponse>(`/equity/${symbol}/income-statement`, {
-        params: { period: normalizeFinancialStatementPeriod(options?.period) },
+        params: { period: normalizeFinancialStatementPeriod(options?.period), limit: options?.limit },
     });
 }
 
 export async function getCashFlow(
     symbol: string,
-    options?: { period?: string }
+    options?: { period?: string; limit?: number }
 ): Promise<CashFlowResponse> {
     return fetchAPI<CashFlowResponse>(`/equity/${symbol}/cash-flow`, {
-        params: { period: normalizeFinancialStatementPeriod(options?.period) },
+        params: { period: normalizeFinancialStatementPeriod(options?.period), limit: options?.limit },
     });
 }
 

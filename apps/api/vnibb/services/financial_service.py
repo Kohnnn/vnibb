@@ -203,6 +203,8 @@ async def get_financials_with_ttm(
     is_specific_quarter = normalized_period in {"Q1", "Q2", "Q3", "Q4"}
     if normalized_period == "FY":
         period = "year"
+    if normalized_period in {"Q", "QUARTER"}:
+        period = "quarter"
     if normalized_period == "TTM":
         try:
             return await calculate_ttm(symbol, statement_type)
