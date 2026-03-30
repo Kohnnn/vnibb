@@ -396,7 +396,7 @@ function formatRatio(value: number | null | undefined): string {
 }
 
 function formatPct(value: number | null | undefined): string {
-    return formatPercent(value, { decimals: 2, input: 'percent' });
+    return formatPercent(value, { decimals: 2, input: 'auto', clamp: 'margin' });
 }
 
 function periodSortKey(period?: string): number {

@@ -21,6 +21,7 @@ import {
 import { useComparison, usePeers, usePeerStorage } from '@/hooks/useComparison';
 import { ExportButton } from '@/components/common/ExportButton';
 import { exportPeers } from '@/lib/api';
+import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -151,7 +152,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
         }));
     }, [compData?.metrics]);
 
-    const sectorAverages = useMemo(() => {
+    const { sectorAverages, sectorAverageCounts } = useMemo(() => {
         const accumulator: Record<string, number[]> = {};
         Object.values(comparisonData).forEach((stock) => {
             Object.entries(stock.metrics || {}).forEach(([key, value]) => {
@@ -161,12 +162,17 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
             });
         });
 
-        return Object.fromEntries(
-            Object.entries(accumulator).map(([key, values]) => [
-                key,
-                values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null,
-            ])
-        );
+        return {
+            sectorAverages: Object.fromEntries(
+                Object.entries(accumulator).map(([key, values]) => [
+                    key,
+                    values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null,
+                ])
+            ),
+            sectorAverageCounts: Object.fromEntries(
+                Object.entries(accumulator).map(([key, values]) => [key, values.length])
+            ),
+        };
     }, [comparisonData]);
 
     const hasData = Boolean(normalizedMetrics.length);
@@ -331,10 +337,10 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                             <th className="text-right py-2 px-2 font-medium min-w-[84px] text-amber-400/80 border-l border-[var(--border-subtle)]">
                                 <div className="flex flex-col">
                                     <button type="button" onClick={() => handleSort('sector')} className="inline-flex items-center justify-end gap-1 hover:text-amber-300">
-                                        <span>Sector</span>
+                                    <span>Sector Avg</span>
                                         {sortIndicator('sector')}
                                     </button>
-                                    <span className="text-[8px] font-normal opacity-60">Avg</span>
+                                    <span className="text-[8px] font-normal opacity-60">Excludes N/A</span>
                                 </div>
                             </th>
                         </tr>
@@ -377,6 +383,9 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                     })}
                                     <td className="text-right px-2 font-mono text-amber-400/60 border-l border-[var(--border-subtle)]">
                                         {sectorValue !== undefined ? formatCellValue(sectorValue, metric.format) : '-'}
+                                        {sectorAverageCounts?.[metric.key] ? (
+                                            <span className="ml-1 text-[8px] text-[var(--text-muted)]">(n={sectorAverageCounts[metric.key]})</span>
+                                        ) : null}
                                     </td>
                                 </tr>
                             );
@@ -682,7 +691,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
 
 // Helper: Format cell values based on metric format type
 function formatCellValue(value: any, format: string) {
-    if (value === null || value === undefined) return 'N/A';
+    if (value === null || value === undefined) return EMPTY_VALUE;
     if (typeof value !== 'number') return String(value);
 
     switch (format) {
@@ -690,16 +699,16 @@ function formatCellValue(value: any, format: string) {
             if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
             return value.toLocaleString();
         case 'percent':
-            return `${(value * 100).toFixed(1)}%`;
+            return formatPercent(value, { decimals: 1, input: 'auto', clamp: 'margin' });
         case 'large_number':
             if (value >= 1e12) return `${(value / 1e12).toFixed(1)}T`;
             if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
             if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
             return value.toLocaleString();
         case 'ratio':
-            return value.toFixed(2);
+            return formatNumber(value, { decimals: 2 });
         default:
-            return value.toLocaleString();
+            return formatNumber(value, { decimals: 2 });
     }
 }
 

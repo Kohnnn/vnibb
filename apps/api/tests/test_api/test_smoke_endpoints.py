@@ -631,7 +631,7 @@ async def test_ratios_smoke_returns_data(client, monkeypatch):
         return [
             FinancialRatioData(
                 symbol="AAA",
-                period="2024",
+                period="2024-Q1",
                 pe=15.2,
                 pb=2.7,
                 roe=18.4,
@@ -648,7 +648,7 @@ async def test_ratios_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload.get("error") is None, payload
     assert payload["meta"]["count"] == 1
-    assert payload["data"][0]["period"] == "2024"
+    assert payload["data"][0]["period"] == "2024-Q1"
     assert payload["data"][0]["pe"] == 15.2
 
 
@@ -2152,6 +2152,28 @@ async def test_market_breadth_endpoint_returns_dma_and_52_week_stats(client, mon
     assert hnx_row["advancers"] == 1
     assert hnx_row["pct_above_sma20"] == 100.0
     assert hnx_row["new_highs_52w"] == 1
+
+
+@pytest.mark.asyncio
+async def test_financial_ratios_endpoint_filters_specific_quarter_periods(client, monkeypatch):
+    async def fake_ratio_fetch(_params):
+        return [
+            FinancialRatioData(symbol="VCI", period="2023-Q1", pe=8.5),
+            FinancialRatioData(symbol="VCI", period="2023-Q2", pe=8.8),
+            FinancialRatioData(symbol="VCI", period="2024-Q1", pe=9.2),
+            FinancialRatioData(symbol="VCI", period="2024-Q2", pe=9.6),
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockFinancialRatiosFetcher.fetch",
+        fake_ratio_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VCI/ratios?period=Q1")
+    assert response.status_code == 200
+    payload = response.json()
+    periods = [item["period"] for item in payload["data"]]
+    assert periods == ["2023-Q1", "2024-Q1"]
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ Uses CacheManager for efficient data retrieval instead of fetching
 2000 stocks from the live API every time.
 """
 
+import asyncio
 import logging
 import re
 import unicodedata
@@ -16,13 +17,14 @@ from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 
-from vnibb.core.database import async_session_maker
-from vnibb.services.cache_manager import CacheManager
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker
 from vnibb.core.vn_sectors import VN_SECTORS
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
 from vnibb.models.trading import FinancialRatio
+from vnibb.services.cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,261 @@ def _normalize_text(value: Any) -> str:
     normalized = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized.strip()
+
+
+PERCENT_METRIC_LIMITS = {
+    "roe": 200.0,
+    "roa": 200.0,
+    "roic": 200.0,
+    "gross_margin": 200.0,
+    "net_margin": 200.0,
+    "operating_margin": 200.0,
+    "debt_assets": 200.0,
+    "dividend_yield": 100.0,
+    "fcf_yield": 100.0,
+    "ocf_sales": 200.0,
+    "revenue_growth": 999.0,
+    "earnings_growth": 999.0,
+    "foreign_ownership": 100.0,
+}
+
+
+def _normalize_comparison_metric(metric_key: str, value: Any) -> Optional[float]:
+    numeric = _coerce_number(value)
+    if numeric is None:
+        return None
+
+    if metric_key in PERCENT_METRIC_LIMITS:
+        if 0 < abs(numeric) <= 1:
+            numeric *= 100
+
+        limit = PERCENT_METRIC_LIMITS[metric_key]
+        while abs(numeric) > limit and abs(numeric / 100) <= limit:
+            numeric /= 100
+
+        if abs(numeric) > limit:
+            return None
+
+    if metric_key == "debt_to_equity" and (numeric <= 0 or abs(numeric) > 1000):
+        return None
+
+    return numeric
+
+
+def _first_metric_value(metric_key: str, *values: Any) -> Optional[float]:
+    for value in values:
+        normalized = _normalize_comparison_metric(metric_key, value)
+        if normalized is not None:
+            return normalized
+    return None
+
+
+def _normalize_ratio_period(period: str) -> tuple[str, Optional[int], bool]:
+    normalized = str(period or "FY").strip().upper()
+    if normalized in {"FY", "YEAR"}:
+        return "year", None, False
+    if normalized in {"Q1", "Q2", "Q3", "Q4"}:
+        return "quarter", int(normalized[-1]), False
+    if normalized == "TTM":
+        return "quarter", None, True
+    return "quarter", None, False
+
+
+def _matches_requested_quarter(
+    period_value: str, fiscal_quarter: Optional[int], requested_quarter: int
+) -> bool:
+    if fiscal_quarter == requested_quarter:
+        return True
+    return f"Q{requested_quarter}" in str(period_value or "").upper()
+
+
+def _metric_from_ratio_row(row: Any, metric_key: str) -> Optional[float]:
+    attribute_map = {
+        "pe": "pe_ratio",
+        "pb": "pb_ratio",
+        "ps": "ps_ratio",
+        "debt_to_equity": "debt_to_equity",
+        "debt_assets": "debt_to_assets",
+    }
+    attribute = attribute_map.get(metric_key, metric_key)
+    raw_payload = getattr(row, "raw_data", None)
+    raw_data = raw_payload if isinstance(raw_payload, dict) else {}
+
+    return _first_metric_value(
+        metric_key,
+        getattr(row, attribute, None),
+        raw_data.get(metric_key),
+        raw_data.get(attribute),
+    )
+
+
+def _build_statement_snapshot(
+    rows: List[Any], statement_type: str, *, ttm: bool
+) -> Optional[dict[str, Optional[float]]]:
+    if not rows:
+        return None
+
+    if statement_type == "balance":
+        latest = rows[0]
+        return {
+            "total_assets": _coerce_number(getattr(latest, "total_assets", None)),
+            "total_liabilities": _coerce_number(getattr(latest, "total_liabilities", None)),
+            "total_equity": _coerce_number(
+                getattr(latest, "total_equity", None) or getattr(latest, "equity", None)
+            ),
+        }
+
+    metric_keys = [
+        "revenue",
+        "gross_profit",
+        "operating_income",
+        "net_income",
+        "interest_expense",
+        "operating_cash_flow",
+        "free_cash_flow",
+        "debt_repayment",
+    ]
+
+    if not ttm:
+        latest = rows[0]
+        return {
+            metric_key: _coerce_number(getattr(latest, metric_key, None))
+            for metric_key in metric_keys
+        }
+
+    recent_rows = rows[:4]
+    if len(recent_rows) < 4:
+        return None
+
+    snapshot: dict[str, Optional[float]] = {}
+    for metric_key in metric_keys:
+        values = [_coerce_number(getattr(row, metric_key, None)) for row in recent_rows]
+        valid_values = [value for value in values if value is not None]
+        snapshot[metric_key] = sum(valid_values) if valid_values else None
+
+    return snapshot
+
+
+async def _load_statement_rows(
+    symbol: str,
+    model: Any,
+    period_type: str,
+    requested_quarter: Optional[int],
+    *,
+    limit: int,
+) -> List[Any]:
+    async with async_session_maker() as session:
+        stmt = select(model).where(model.symbol == symbol, model.period_type == period_type)
+        if requested_quarter is not None and hasattr(model, "fiscal_quarter"):
+            stmt = stmt.where(model.fiscal_quarter == requested_quarter)
+
+        stmt = stmt.order_by(desc(model.fiscal_year), desc(model.fiscal_quarter))
+        result = await session.execute(stmt.limit(limit))
+        return result.scalars().all()
+
+
+async def _build_comparison_backfill(
+    symbol: str,
+    period: str,
+    market_cap: Optional[float],
+) -> Dict[str, Optional[float]]:
+    period_type, requested_quarter, use_ttm = _normalize_ratio_period(period)
+    row_limit = 8 if use_ttm else 2
+
+    income_rows, balance_rows, cash_rows = await asyncio.gather(
+        _load_statement_rows(
+            symbol, IncomeStatement, period_type, requested_quarter, limit=row_limit
+        ),
+        _load_statement_rows(
+            symbol,
+            BalanceSheet,
+            period_type,
+            requested_quarter,
+            limit=1 if use_ttm else row_limit,
+        ),
+        _load_statement_rows(symbol, CashFlow, period_type, requested_quarter, limit=row_limit),
+    )
+
+    current_income = _build_statement_snapshot(income_rows, "income", ttm=use_ttm) or {}
+    previous_income = (
+        _build_statement_snapshot(income_rows[1:5], "income", ttm=use_ttm)
+        if use_ttm and len(income_rows) >= 8
+        else _build_statement_snapshot(income_rows[1:2], "income", ttm=False)
+    ) or {}
+    current_balance = _build_statement_snapshot(balance_rows, "balance", ttm=use_ttm) or {}
+    current_cash = _build_statement_snapshot(cash_rows, "cash", ttm=use_ttm) or {}
+
+    revenue = current_income.get("revenue")
+    gross_profit = current_income.get("gross_profit")
+    operating_income = current_income.get("operating_income")
+    net_income = current_income.get("net_income")
+    interest_expense = current_income.get("interest_expense")
+    total_assets = current_balance.get("total_assets")
+    total_liabilities = current_balance.get("total_liabilities")
+    total_equity = current_balance.get("total_equity")
+    operating_cash_flow = current_cash.get("operating_cash_flow")
+    free_cash_flow = current_cash.get("free_cash_flow")
+    debt_repayment = current_cash.get("debt_repayment")
+    previous_revenue = previous_income.get("revenue")
+    previous_net_income = previous_income.get("net_income")
+
+    backfill = {
+        "gross_margin": None,
+        "operating_margin": None,
+        "net_margin": None,
+        "asset_turnover": None,
+        "debt_assets": None,
+        "debt_to_equity": None,
+        "interest_coverage": None,
+        "debt_service_coverage": None,
+        "ocf_sales": None,
+        "fcf_yield": None,
+        "revenue_growth": None,
+        "earnings_growth": None,
+    }
+
+    if revenue not in (None, 0) and gross_profit is not None:
+        backfill["gross_margin"] = (gross_profit / revenue) * 100
+    if revenue not in (None, 0) and operating_income is not None:
+        backfill["operating_margin"] = (operating_income / revenue) * 100
+    if revenue not in (None, 0) and net_income is not None:
+        backfill["net_margin"] = (net_income / revenue) * 100
+    if revenue not in (None, 0) and total_assets not in (None, 0):
+        backfill["asset_turnover"] = revenue / total_assets
+    if total_liabilities not in (None, 0) and total_assets not in (None, 0):
+        backfill["debt_assets"] = (total_liabilities / total_assets) * 100
+    if total_liabilities not in (None, 0) and total_equity not in (None, 0):
+        backfill["debt_to_equity"] = total_liabilities / total_equity
+    if operating_income is not None and interest_expense not in (None, 0):
+        backfill["interest_coverage"] = operating_income / abs(interest_expense)
+    if operating_income is not None:
+        debt_service = 0.0
+        if interest_expense not in (None, 0):
+            debt_service += abs(interest_expense)
+        if debt_repayment not in (None, 0):
+            debt_service += abs(debt_repayment)
+        if debt_service > 0:
+            backfill["debt_service_coverage"] = operating_income / debt_service
+    if operating_cash_flow is not None and revenue not in (None, 0):
+        backfill["ocf_sales"] = (operating_cash_flow / revenue) * 100
+    if free_cash_flow is not None and market_cap not in (None, 0):
+        backfill["fcf_yield"] = (free_cash_flow / market_cap) * 100
+    if (
+        revenue not in (None, 0)
+        and previous_revenue not in (None, 0)
+        and abs(previous_revenue) >= 0.001
+    ):
+        backfill["revenue_growth"] = ((revenue - previous_revenue) / abs(previous_revenue)) * 100
+    if (
+        net_income not in (None, 0)
+        and previous_net_income not in (None, 0)
+        and abs(previous_net_income) >= 0.001
+    ):
+        backfill["earnings_growth"] = (
+            (net_income - previous_net_income) / abs(previous_net_income)
+        ) * 100
+
+    return {key: _normalize_comparison_metric(key, value) for key, value in backfill.items()}
 
 
 class MetricDefinition(BaseModel):
@@ -293,8 +550,13 @@ class ComparisonService:
                 "revenue_growth": _record_value(data, "revenue_growth", "revenueGrowth"),
                 "earnings_growth": _record_value(data, "earnings_growth", "earningsGrowth"),
                 "debt_to_equity": _record_value(data, "debt_to_equity", "debtToEquity"),
+                "debt_assets": _record_value(data, "debt_assets", "debtToAssets", "debt_to_asset"),
                 "current_ratio": _record_value(data, "current_ratio", "currentRatio"),
                 "quick_ratio": _record_value(data, "quick_ratio", "quickRatio"),
+                "asset_turnover": _record_value(data, "asset_turnover", "assetTurnover"),
+                "interest_coverage": _record_value(data, "interest_coverage", "interestCoverage"),
+                "fcf_yield": _record_value(data, "fcf_yield", "fcfYield"),
+                "ocf_sales": _record_value(data, "ocf_sales", "ocfSales"),
                 "eps": _record_value(data, "eps"),
                 "bvps": _record_value(data, "bvps", "book_value_per_share"),
                 "dividend_yield": _record_value(data, "dividend_yield", "dividendYield"),
@@ -333,8 +595,13 @@ class ComparisonService:
                     "revenue_growth": ratio_row.revenue_growth,
                     "earnings_growth": ratio_row.earnings_growth,
                     "debt_to_equity": ratio_row.debt_to_equity,
+                    "debt_assets": ratio_row.debt_to_assets,
                     "current_ratio": ratio_row.current_ratio,
                     "quick_ratio": ratio_row.quick_ratio,
+                    "asset_turnover": getattr(ratio_row, "asset_turnover", None),
+                    "interest_coverage": getattr(ratio_row, "interest_coverage", None),
+                    "fcf_yield": _record_value(ratio_row.raw_data or {}, "fcf_yield", "fcfYield"),
+                    "ocf_sales": _record_value(ratio_row.raw_data or {}, "ocf_sales", "ocfSales"),
                     "eps": ratio_row.eps,
                     "bvps": ratio_row.bvps,
                 }
@@ -342,7 +609,12 @@ class ComparisonService:
                     if metrics_dict.get(key) is None and value is not None:
                         metrics_dict[key] = value
 
-            metrics_dict = {key: value for key, value in metrics_dict.items() if value is not None}
+            normalized_metrics: Dict[str, float] = {}
+            for key, value in metrics_dict.items():
+                normalized = _normalize_comparison_metric(key, value)
+                if normalized is not None:
+                    normalized_metrics[key] = normalized
+            metrics_dict = normalized_metrics
 
             name = _record_value(data, "company_name", "organ_name", "organName")
             industry = _record_value(data, "industry", "industry_name", "industryName")
@@ -879,7 +1151,8 @@ class ComparisonService:
             for key in metric_keys:
                 values = []
                 for stock in sector_stocks:
-                    val = _coerce_number(
+                    val = _normalize_comparison_metric(
+                        key,
                         _record_value(
                             stock,
                             key,
@@ -889,7 +1162,7 @@ class ComparisonService:
                                 "pb": "pb_ratio",
                                 "ps": "ps_ratio",
                             }.get(key, ""),
-                        )
+                        ),
                     )
                     if val is not None:
                         values.append(val)
@@ -946,7 +1219,7 @@ class ComparisonService:
                     if not attr:
                         continue
                     values = [
-                        _coerce_number(getattr(ratio_row, attr, None))
+                        _normalize_comparison_metric(key, getattr(ratio_row, attr, None))
                         for ratio_row in latest_ratios.values()
                     ]
                     clean_values = [value for value in values if value is not None]
@@ -1038,107 +1311,244 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
     from vnibb.models.comparison import StockComparison
 
     results = []
-    ratio_period = "year" if period in {"FY", "year"} else "quarter"
-
-    def pick_value(*values: Optional[float]) -> Optional[float]:
-        for value in values:
-            if value is not None:
-                return value
-        return None
+    ratio_period, requested_quarter, _use_ttm = _normalize_ratio_period(period)
 
     for symbol in symbols:
         stock_metrics = await comparison_service.get_stock_metrics(symbol)
 
         ratio_snapshot: dict[str, Any] = {}
+        derived_metrics = await _build_comparison_backfill(
+            symbol,
+            period,
+            _coerce_number(stock_metrics.metrics.get("market_cap")),
+        )
         backfill_needed = any(
-            stock_metrics.metrics.get(key) is None
+            _normalize_comparison_metric(key, stock_metrics.metrics.get(key)) is None
             for key in (
+                "gross_margin",
+                "operating_margin",
+                "net_margin",
+                "asset_turnover",
+                "debt_assets",
+                "debt_to_equity",
                 "interest_coverage",
                 "debt_service_coverage",
                 "ocf_debt",
                 "fcf_yield",
                 "ocf_sales",
+                "revenue_growth",
+                "earnings_growth",
             )
         )
 
         if backfill_needed:
             try:
-                from vnibb.providers.vnstock.financial_ratios import (
-                    VnstockFinancialRatiosFetcher,
-                    FinancialRatiosQueryParams,
-                )
+                async with async_session_maker() as session:
+                    stmt = (
+                        select(FinancialRatio)
+                        .where(
+                            FinancialRatio.symbol == symbol,
+                            FinancialRatio.period_type == ratio_period,
+                        )
+                        .order_by(
+                            desc(FinancialRatio.fiscal_year),
+                            desc(FinancialRatio.fiscal_quarter),
+                            desc(FinancialRatio.updated_at),
+                        )
+                    )
+                    db_rows = (await session.execute(stmt)).scalars().all()
 
-                ratios = await VnstockFinancialRatiosFetcher.fetch(
-                    FinancialRatiosQueryParams(symbol=symbol, period=ratio_period)
-                )
-                if ratios:
-                    latest = ratios[0]
-                    ratio_snapshot = latest.model_dump() if hasattr(latest, "model_dump") else {}
+                if requested_quarter is not None:
+                    db_rows = [
+                        row
+                        for row in db_rows
+                        if _matches_requested_quarter(
+                            row.period, row.fiscal_quarter, requested_quarter
+                        )
+                    ]
+
+                if db_rows:
+                    latest = db_rows[0]
+                    ratio_snapshot = {
+                        "pe": _metric_from_ratio_row(latest, "pe"),
+                        "pb": _metric_from_ratio_row(latest, "pb"),
+                        "ps": _metric_from_ratio_row(latest, "ps"),
+                        "ev_ebitda": _metric_from_ratio_row(latest, "ev_ebitda"),
+                        "roe": _metric_from_ratio_row(latest, "roe"),
+                        "roa": _metric_from_ratio_row(latest, "roa"),
+                        "roic": _metric_from_ratio_row(latest, "roic"),
+                        "gross_margin": _metric_from_ratio_row(latest, "gross_margin"),
+                        "net_margin": _metric_from_ratio_row(latest, "net_margin"),
+                        "operating_margin": _metric_from_ratio_row(latest, "operating_margin"),
+                        "current_ratio": _metric_from_ratio_row(latest, "current_ratio"),
+                        "quick_ratio": _metric_from_ratio_row(latest, "quick_ratio"),
+                        "asset_turnover": _metric_from_ratio_row(latest, "asset_turnover"),
+                        "inventory_turnover": _metric_from_ratio_row(latest, "inventory_turnover"),
+                        "debt_to_equity": _metric_from_ratio_row(latest, "debt_to_equity"),
+                        "debt_assets": _metric_from_ratio_row(latest, "debt_assets"),
+                        "interest_coverage": _metric_from_ratio_row(latest, "interest_coverage"),
+                        "debt_service_coverage": _metric_from_ratio_row(
+                            latest, "debt_service_coverage"
+                        ),
+                        "ocf_debt": _metric_from_ratio_row(latest, "ocf_debt"),
+                        "fcf_yield": _metric_from_ratio_row(latest, "fcf_yield"),
+                        "ocf_sales": _metric_from_ratio_row(latest, "ocf_sales"),
+                        "revenue_growth": _metric_from_ratio_row(latest, "revenue_growth"),
+                        "earnings_growth": _metric_from_ratio_row(latest, "earnings_growth"),
+                    }
+
+                if not ratio_snapshot:
+                    from vnibb.providers.vnstock.financial_ratios import (
+                        FinancialRatiosQueryParams,
+                        VnstockFinancialRatiosFetcher,
+                    )
+
+                    ratios = await VnstockFinancialRatiosFetcher.fetch(
+                        FinancialRatiosQueryParams(symbol=symbol, period=ratio_period)
+                    )
+                    if requested_quarter is not None:
+                        ratios = [
+                            row
+                            for row in ratios
+                            if _matches_requested_quarter(
+                                getattr(row, "period", None),
+                                None,
+                                requested_quarter,
+                            )
+                        ]
+                    if ratios:
+                        latest = ratios[0]
+                        ratio_snapshot = (
+                            latest.model_dump() if hasattr(latest, "model_dump") else {}
+                        )
+
+                for metric_key, metric_value in list(ratio_snapshot.items()):
+                    ratio_snapshot[metric_key] = _normalize_comparison_metric(
+                        metric_key, metric_value
+                    )
             except Exception as ratio_err:
                 logger.warning(f"Ratio backfill failed for {symbol}: {ratio_err}")
 
         # Map existing metrics to the new structure
         metrics_map = {
-            "pe_ratio": pick_value(stock_metrics.metrics.get("pe"), ratio_snapshot.get("pe")),
-            "pb_ratio": pick_value(stock_metrics.metrics.get("pb"), ratio_snapshot.get("pb")),
-            "ps_ratio": pick_value(stock_metrics.metrics.get("ps"), ratio_snapshot.get("ps")),
-            "ev_ebitda": pick_value(
-                stock_metrics.metrics.get("ev_ebitda"), ratio_snapshot.get("ev_ebitda")
+            "pe_ratio": _first_metric_value(
+                "pe", stock_metrics.metrics.get("pe"), ratio_snapshot.get("pe")
             ),
-            "market_cap": stock_metrics.metrics.get("market_cap"),
-            "roe": pick_value(stock_metrics.metrics.get("roe"), ratio_snapshot.get("roe")),
-            "roa": pick_value(stock_metrics.metrics.get("roa"), ratio_snapshot.get("roa")),
-            "gross_margin": pick_value(
-                stock_metrics.metrics.get("gross_margin"), ratio_snapshot.get("gross_margin")
+            "pb_ratio": _first_metric_value(
+                "pb", stock_metrics.metrics.get("pb"), ratio_snapshot.get("pb")
             ),
-            "net_margin": pick_value(
-                stock_metrics.metrics.get("net_margin"), ratio_snapshot.get("net_margin")
+            "ps_ratio": _first_metric_value(
+                "ps", stock_metrics.metrics.get("ps"), ratio_snapshot.get("ps")
             ),
-            "operating_margin": pick_value(
+            "ev_ebitda": _first_metric_value(
+                "ev_ebitda",
+                stock_metrics.metrics.get("ev_ebitda"),
+                ratio_snapshot.get("ev_ebitda"),
+            ),
+            "market_cap": _first_metric_value(
+                "market_cap", stock_metrics.metrics.get("market_cap")
+            ),
+            "roe": _first_metric_value(
+                "roe", stock_metrics.metrics.get("roe"), ratio_snapshot.get("roe")
+            ),
+            "roa": _first_metric_value(
+                "roa", stock_metrics.metrics.get("roa"), ratio_snapshot.get("roa")
+            ),
+            "gross_margin": _first_metric_value(
+                "gross_margin",
+                stock_metrics.metrics.get("gross_margin"),
+                ratio_snapshot.get("gross_margin"),
+                derived_metrics.get("gross_margin"),
+            ),
+            "net_margin": _first_metric_value(
+                "net_margin",
+                stock_metrics.metrics.get("net_margin"),
+                ratio_snapshot.get("net_margin"),
+                derived_metrics.get("net_margin"),
+            ),
+            "operating_margin": _first_metric_value(
+                "operating_margin",
                 stock_metrics.metrics.get("operating_margin"),
                 ratio_snapshot.get("operating_margin"),
+                derived_metrics.get("operating_margin"),
             ),
-            "current_ratio": pick_value(
-                stock_metrics.metrics.get("current_ratio"), ratio_snapshot.get("current_ratio")
+            "current_ratio": _first_metric_value(
+                "current_ratio",
+                stock_metrics.metrics.get("current_ratio"),
+                ratio_snapshot.get("current_ratio"),
             ),
-            "quick_ratio": pick_value(
-                stock_metrics.metrics.get("quick_ratio"), ratio_snapshot.get("quick_ratio")
+            "quick_ratio": _first_metric_value(
+                "quick_ratio",
+                stock_metrics.metrics.get("quick_ratio"),
+                ratio_snapshot.get("quick_ratio"),
             ),
-            "asset_turnover": pick_value(
-                stock_metrics.metrics.get("asset_turnover"), ratio_snapshot.get("asset_turnover")
+            "asset_turnover": _first_metric_value(
+                "asset_turnover",
+                stock_metrics.metrics.get("asset_turnover"),
+                ratio_snapshot.get("asset_turnover"),
+                derived_metrics.get("asset_turnover"),
             ),
-            "inventory_turnover": pick_value(
+            "inventory_turnover": _first_metric_value(
+                "inventory_turnover",
                 stock_metrics.metrics.get("inventory_turnover"),
                 ratio_snapshot.get("inventory_turnover"),
             ),
-            "debt_equity": pick_value(
+            "debt_equity": _first_metric_value(
+                "debt_to_equity",
                 stock_metrics.metrics.get("debt_to_equity"),
                 stock_metrics.metrics.get("debt_equity"),
                 ratio_snapshot.get("debt_equity"),
+                ratio_snapshot.get("debt_to_equity"),
+                derived_metrics.get("debt_to_equity"),
             ),
-            "debt_assets": pick_value(
+            "debt_assets": _first_metric_value(
+                "debt_assets",
                 stock_metrics.metrics.get("debt_assets"),
                 stock_metrics.metrics.get("debt_to_asset"),
                 ratio_snapshot.get("debt_assets"),
+                derived_metrics.get("debt_assets"),
             ),
-            "interest_coverage": pick_value(
+            "interest_coverage": _first_metric_value(
+                "interest_coverage",
                 stock_metrics.metrics.get("interest_coverage"),
                 ratio_snapshot.get("interest_coverage"),
+                derived_metrics.get("interest_coverage"),
             ),
-            "debt_service_coverage": pick_value(
+            "debt_service_coverage": _first_metric_value(
+                "debt_service_coverage",
                 stock_metrics.metrics.get("debt_service_coverage"),
                 ratio_snapshot.get("debt_service_coverage"),
+                derived_metrics.get("debt_service_coverage"),
             ),
-            "ocf_debt": pick_value(
+            "ocf_debt": _first_metric_value(
+                "ocf_debt",
                 stock_metrics.metrics.get("ocf_debt"),
                 stock_metrics.metrics.get("ocf_to_debt"),
                 ratio_snapshot.get("ocf_debt"),
             ),
-            "fcf_yield": pick_value(
-                stock_metrics.metrics.get("fcf_yield"), ratio_snapshot.get("fcf_yield")
+            "fcf_yield": _first_metric_value(
+                "fcf_yield",
+                stock_metrics.metrics.get("fcf_yield"),
+                ratio_snapshot.get("fcf_yield"),
+                derived_metrics.get("fcf_yield"),
             ),
-            "ocf_sales": pick_value(
-                stock_metrics.metrics.get("ocf_sales"), ratio_snapshot.get("ocf_sales")
+            "ocf_sales": _first_metric_value(
+                "ocf_sales",
+                stock_metrics.metrics.get("ocf_sales"),
+                ratio_snapshot.get("ocf_sales"),
+                derived_metrics.get("ocf_sales"),
+            ),
+            "revenue_growth": _first_metric_value(
+                "revenue_growth",
+                stock_metrics.metrics.get("revenue_growth"),
+                ratio_snapshot.get("revenue_growth"),
+                derived_metrics.get("revenue_growth"),
+            ),
+            "earnings_growth": _first_metric_value(
+                "earnings_growth",
+                stock_metrics.metrics.get("earnings_growth"),
+                ratio_snapshot.get("earnings_growth"),
+                derived_metrics.get("earnings_growth"),
             ),
         }
 
