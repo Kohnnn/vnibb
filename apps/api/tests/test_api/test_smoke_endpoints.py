@@ -2177,6 +2177,34 @@ async def test_financial_ratios_endpoint_filters_specific_quarter_periods(client
 
 
 @pytest.mark.asyncio
+async def test_search_tickers_returns_vn_and_global_matches(client, test_db):
+    test_db.add(
+        Stock(
+            symbol="VCI",
+            exchange="HOSE",
+            company_name="Vietcap Securities",
+            short_name="Vietcap",
+            industry="Financial Services",
+        )
+    )
+    await test_db.commit()
+
+    vn_response = await client.get("/api/v1/search/tickers?q=vci")
+    assert vn_response.status_code == 200
+    vn_payload = vn_response.json()
+    assert any(
+        item["symbol"] == "VCI" and item["type"] == "vn_stock" for item in vn_payload["results"]
+    )
+
+    crypto_response = await client.get("/api/v1/search/tickers?q=btc")
+    assert crypto_response.status_code == 200
+    crypto_payload = crypto_response.json()
+    assert any(
+        item["symbol"] == "BTC" and item["type"] == "crypto" for item in crypto_payload["results"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_market_top_movers_uses_snapshot_fallback_when_provider_has_no_signal(
     client, monkeypatch
 ):

@@ -111,6 +111,38 @@ export function parseFlexibleDate(
   const raw = String(value).trim();
   if (!raw) return null;
 
+  const lower = raw.toLowerCase();
+  const now = new Date();
+  if (['just now', 'vua xong', 'vừa xong', 'moi dang', 'mới đăng'].includes(lower)) {
+    return now;
+  }
+
+  const relativeMatch = lower.match(/^(\d+)\s*(phut|phút|min|minute|minutes|gio|giờ|hour|hours|ngay|ngày|day|days)\s*(truoc|trước|ago)$/);
+  if (relativeMatch) {
+    const amount = Number(relativeMatch[1]);
+    const unit = relativeMatch[2];
+    const parsed = new Date(now);
+
+    if (['phut', 'phút', 'min', 'minute', 'minutes'].includes(unit)) {
+      parsed.setMinutes(parsed.getMinutes() - amount);
+      return parsed;
+    }
+    if (['gio', 'giờ', 'hour', 'hours'].includes(unit)) {
+      parsed.setHours(parsed.getHours() - amount);
+      return parsed;
+    }
+    if (['ngay', 'ngày', 'day', 'days'].includes(unit)) {
+      parsed.setDate(parsed.getDate() - amount);
+      return parsed;
+    }
+  }
+
+  if (lower === 'yesterday' || lower === 'hom qua' || lower === 'hôm qua') {
+    const parsed = new Date(now);
+    parsed.setDate(parsed.getDate() - 1);
+    return parsed;
+  }
+
   const direct = new Date(raw);
   if (!Number.isNaN(direct.getTime())) return direct;
 

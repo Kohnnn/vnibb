@@ -291,6 +291,14 @@ async def test_get_company_news_rows_filters_irrelevant_provider_articles(monkey
         fake_company_news,
     )
     monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", fake_symbol_context)
+
+    async def fake_ranked_rows(**_kwargs):
+        return ([], False)
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.get_ranked_news_rows",
+        fake_ranked_rows,
+    )
     monkeypatch.setattr(
         "vnibb.services.news_service.sentiment_analyzer.analyze_batch",
         fake_analyze_batch,
@@ -303,3 +311,75 @@ async def test_get_company_news_rows_filters_irrelevant_provider_articles(monkey
     assert rows[0]["sentiment"] == "bullish"
     assert rows[0]["sentiment_score"] == 72
     assert rows[0]["relevance_score"] >= 0.8
+
+
+@pytest.mark.asyncio
+async def test_get_company_news_rows_merges_provider_and_ranked_related_results(monkeypatch):
+    async def fake_company_news(_query):
+        return [
+            SimpleNamespace(
+                title="Vietcap expands prime brokerage operations",
+                summary="VCI boosts institutional coverage.",
+                source="cafef",
+                published_at=datetime(2026, 3, 30, 8, 0),
+                url="https://example.com/vci-prime",
+                category="Brokerage",
+            )
+        ]
+
+    async def fake_symbol_context(symbol: str):
+        return {
+            "symbol": symbol,
+            "peer_symbols": ["SSI"],
+            "sector_keywords": ["brokerage", "securities"],
+            "company_keywords": ["vietcap", "ban viet"],
+        }
+
+    async def fake_ranked_rows(**_kwargs):
+        return (
+            [
+                {
+                    "id": "ranked-1",
+                    "title": "VCI margin lending demand improves",
+                    "summary": "Retail activity rises in March.",
+                    "source": "vietstock",
+                    "published_date": datetime(2026, 3, 29, 10, 0),
+                    "url": "https://example.com/vci-margin",
+                    "relevance_score": 0.91,
+                    "matched_symbols": ["VCI"],
+                    "is_market_wide_fallback": False,
+                    "sentiment": "neutral",
+                    "sentiment_score": None,
+                }
+            ],
+            False,
+        )
+
+    async def fake_analyze_batch(articles, max_concurrent=5):
+        _ = max_concurrent
+        return [
+            {
+                "sentiment": "bullish",
+                "confidence": 70,
+                "symbols": ["VCI"],
+                "sectors": ["Financial Services"],
+                "ai_summary": article["title"],
+            }
+            for article in articles
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.VnstockCompanyNewsFetcher.fetch",
+        fake_company_news,
+    )
+    monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", fake_symbol_context)
+    monkeypatch.setattr("vnibb.services.news_service.get_ranked_news_rows", fake_ranked_rows)
+    monkeypatch.setattr(
+        "vnibb.services.news_service.sentiment_analyzer.analyze_batch",
+        fake_analyze_batch,
+    )
+
+    rows = await get_company_news_rows("VCI", limit=5)
+
+    assert len(rows) == 2
+    assert {row["source"] for row in rows} == {"cafef", "vietstock"}

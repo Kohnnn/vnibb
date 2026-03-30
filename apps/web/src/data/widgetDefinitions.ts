@@ -114,6 +114,14 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 8, h: 6, minW: 6, minH: 4 }
     },
     {
+        type: 'tradingview_chart',
+        name: 'TradingView Chart',
+        description: 'TradingView advanced chart for crypto, global indices, and external symbols',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 }
+    },
+    {
         type: 'valuation_multiples_chart',
         name: 'Valuation Multiples Chart',
         description: 'Historical P/E, P/B, P/S and EV multiples trend',
