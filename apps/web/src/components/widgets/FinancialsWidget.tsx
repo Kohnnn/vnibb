@@ -368,6 +368,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                 columns={denseColumns}
                                 rows={denseRows}
                                 maxYears={denseColumns.length || 1}
+                                showTrend={false}
                                 storageKey={`financials:${symbol}:${activeTab}:${period}`}
                                 footerNote={activeTab !== 'ratios' ? `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS` : undefined}
                                 valueFormatter={(value, row) => {

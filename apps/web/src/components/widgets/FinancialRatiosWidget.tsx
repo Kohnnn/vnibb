@@ -297,6 +297,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: Fin
                                 columns={tableColumns}
                                 rows={tableRows}
                                 sortable
+                                showTrend={false}
                                 storageKey={`ratios:${id}:${symbol}:${period}`}
                                 footerNote={`Note: Ratio history by ${period}. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
                                 valueFormatter={(value, row) => {

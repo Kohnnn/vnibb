@@ -261,6 +261,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
             columns={tableColumns}
             rows={tableRows}
             sortable
+            showTrend={false}
             storageKey={`income:${id}:${symbol}:${period}`}
             footerNote={unitNote}
             valueFormatter={(value, row) => {

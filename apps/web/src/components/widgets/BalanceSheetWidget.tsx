@@ -211,6 +211,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
             columns={tableColumns}
             rows={tableRows}
             sortable
+            showTrend={false}
             storageKey={`balance:${id}:${symbol}:${period}`}
             footerNote={unitNote}
             valueFormatter={(value) =>
