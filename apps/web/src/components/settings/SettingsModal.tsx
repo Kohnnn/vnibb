@@ -38,7 +38,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [preferenceStatus, setPreferenceStatus] = useState<string | null>(null);
   const [isTickerMenuOpen, setIsTickerMenuOpen] = useState(false);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
-  const { resolvedTheme, setTheme } = useTheme();
+  const { resolvedTheme } = useTheme();
   const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
   const { globalSymbol, setGlobalSymbol } = useSymbolLink();
   const { setGlobalSymbol: setWidgetGroupGlobalSymbol } = useWidgetGroups();
@@ -389,31 +389,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <div className="space-y-6">
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Theme</h4>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setTheme('dark')}
-                      className={cn(
-                        "px-4 py-2 rounded-lg border text-sm font-bold transition-colors",
-                        resolvedTheme === 'dark'
-                          ? "bg-blue-600/20 border-blue-500 text-blue-400"
-                          : "bg-[var(--bg-secondary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]"
-                      )}
-                    >
-                      Dark
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTheme('light')}
-                      className={cn(
-                        "px-4 py-2 rounded-lg border text-sm font-bold transition-colors",
-                        resolvedTheme === 'light'
-                          ? "bg-blue-600/20 border-blue-500 text-blue-400"
-                          : "bg-[var(--bg-secondary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]"
-                      )}
-                    >
-                      Light
-                    </button>
+                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <div className="text-sm font-bold text-blue-300">Dark mode only</div>
+                    <div className="mt-1 text-xs text-[var(--text-muted)]">
+                      Light mode is temporarily disabled to keep layout, chart, and widget rendering consistent.
+                    </div>
+                    <div className="mt-3 inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[11px] font-semibold text-blue-300">
+                      Active theme: {resolvedTheme}
+                    </div>
                   </div>
                 </div>
               </div>

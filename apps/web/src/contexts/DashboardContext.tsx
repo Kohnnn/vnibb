@@ -428,58 +428,52 @@ const MAIN_DEEP_DIVE_TEMPLATE: TemplateWidget[] = [
 
 const MAIN_QUANT_TEMPLATE: TemplateWidget[] = [
     {
-        type: 'quant_summary',
+        type: 'risk_dashboard',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 24, h: 8, minW: 10, minH: 6 }
-    },
-    {
-        type: 'seasonality_heatmap',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 8, w: 14, h: 12, minW: 10, minH: 9 }
-    },
-    {
-        type: 'sortino_monthly',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 14, y: 8, w: 10, h: 11, minW: 8, minH: 9 }
+        layout: { x: 0, y: 0, w: 12, h: 10, minW: 8, minH: 8 }
     },
     {
         type: 'volume_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 20, w: 8, h: 10, minW: 6, minH: 8 }
+        layout: { x: 12, y: 0, w: 12, h: 10, minW: 8, minH: 8 }
     },
     {
         type: 'volume_flow',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 20, w: 8, h: 10, minW: 6, minH: 8 }
+        layout: { x: 0, y: 10, w: 8, h: 10, minW: 6, minH: 8 }
     },
     {
         type: 'momentum',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 20, w: 8, h: 10, minW: 6, minH: 8 }
-    },
-    {
-        type: 'gap_analysis',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 30, w: 8, h: 9, minW: 6, minH: 7 }
+        layout: { x: 8, y: 10, w: 8, h: 10, minW: 6, minH: 8 }
     },
     {
         type: 'drawdown_recovery',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 30, w: 8, h: 10, minW: 6, minH: 8 }
+        layout: { x: 16, y: 10, w: 8, h: 10, minW: 6, minH: 8 }
+    },
+    {
+        type: 'gap_analysis',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 20, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'gap_fill_stats',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 30, w: 8, h: 9, minW: 6, minH: 7 }
+        layout: { x: 8, y: 20, w: 8, h: 9, minW: 6, minH: 7 }
+    },
+    {
+        type: 'signal_summary',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 20, w: 8, h: 9, minW: 6, minH: 7 }
     },
 ];
 
@@ -701,46 +695,28 @@ const MAIN_COMPARISON_TEMPLATE: TemplateWidget[] = [
 
 const MAIN_FUNDAMENTALS_TEMPLATE: TemplateWidget[] = [
     {
-        type: 'quick_stats',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 0, w: 6, h: 6, minW: 6, minH: 5 }
-    },
-    {
-        type: 'income_sankey',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 6, y: 0, w: 9, h: 6, minW: 8, minH: 5 }
-    },
-    {
-        type: 'cashflow_waterfall',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 15, y: 0, w: 9, h: 6, minW: 8, minH: 5 }
-    },
-    {
         type: 'financial_ratios',
         syncGroupId: 1,
-        config: { periodSyncGroup: 'fundamental-core' },
-        layout: { x: 0, y: 6, w: 10, h: 16, minW: 8, minH: 12 }
+        config: { periodSyncGroup: 'fundamental-core', hidePeriodToggle: true },
+        layout: { x: 0, y: 0, w: 10, h: 18, minW: 8, minH: 14 }
     },
     {
         type: 'income_statement',
         syncGroupId: 1,
-        config: { periodSyncGroup: 'fundamental-core' },
-        layout: { x: 10, y: 6, w: 14, h: 16, minW: 10, minH: 12 }
+        config: { periodSyncGroup: 'fundamental-core', hidePeriodToggle: true },
+        layout: { x: 10, y: 0, w: 14, h: 18, minW: 10, minH: 14 }
     },
     {
         type: 'balance_sheet',
         syncGroupId: 1,
-        config: { periodSyncGroup: 'fundamental-core' },
-        layout: { x: 0, y: 22, w: 14, h: 14, minW: 10, minH: 10 }
+        config: { periodSyncGroup: 'fundamental-core', hidePeriodToggle: true },
+        layout: { x: 0, y: 18, w: 14, h: 16, minW: 10, minH: 12 }
     },
     {
         type: 'cash_flow',
         syncGroupId: 1,
-        config: { periodSyncGroup: 'fundamental-core' },
-        layout: { x: 14, y: 22, w: 10, h: 14, minW: 8, minH: 10 }
+        config: { periodSyncGroup: 'fundamental-core', hidePeriodToggle: true },
+        layout: { x: 14, y: 18, w: 10, h: 16, minW: 8, minH: 12 }
     },
 ];
 
@@ -776,25 +752,25 @@ const INITIAL_FUNDAMENTAL_TEMPLATE: TemplateWidget[] = [
         type: 'ticker_info',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 8, h: 7, minW: 6, minH: 5 }
+        layout: { x: 0, y: 0, w: 9, h: 8, minW: 7, minH: 6 }
     },
     {
         type: 'key_metrics',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 0, w: 7, h: 7, minW: 6, minH: 6 }
+        layout: { x: 9, y: 0, w: 7, h: 8, minW: 6, minH: 7 }
     },
     {
         type: 'ticker_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 15, y: 0, w: 9, h: 7, minW: 8, minH: 6 }
+        layout: { x: 16, y: 0, w: 8, h: 8, minW: 7, minH: 6 }
     },
     {
         type: 'unified_financials',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 7, w: 24, h: 15, minW: 14, minH: 10 }
+        layout: { x: 0, y: 8, w: 24, h: 18, minW: 16, minH: 12 }
     },
 ];
 
@@ -848,31 +824,31 @@ const INITIAL_QUANT_TEMPLATE: TemplateWidget[] = [
         type: 'sortino_monthly',
         syncGroupId: 1,
         config: {},
-        layout: { x: 14, y: 8, w: 10, h: 11, minW: 8, minH: 9 }
+        layout: { x: 14, y: 8, w: 10, h: 12, minW: 8, minH: 9 }
     },
     {
         type: 'drawdown_recovery',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 20, w: 7, h: 12, minW: 6, minH: 9 }
+        layout: { x: 0, y: 20, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'gap_analysis',
         syncGroupId: 1,
         config: {},
-        layout: { x: 7, y: 20, w: 7, h: 10, minW: 6, minH: 8 }
+        layout: { x: 8, y: 20, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'correlation_matrix',
         syncGroupId: 1,
         config: {},
-        layout: { x: 14, y: 20, w: 10, h: 13, minW: 9, minH: 10 }
+        layout: { x: 16, y: 20, w: 8, h: 11, minW: 7, minH: 8 }
     },
     {
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 33, w: 24, h: 6, minW: 12, minH: 4 }
+        layout: { x: 0, y: 31, w: 24, h: 6, minW: 12, minH: 4 }
     },
 ];
 
@@ -2022,10 +1998,6 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
         }
 
         case 'UPDATE_SYNC_GROUP': {
-            if (!isEditableDashboardId(action.payload.dashboardId)) {
-                return state;
-            }
-
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>

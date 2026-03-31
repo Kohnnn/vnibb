@@ -38,10 +38,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // Load theme from localStorage on mount
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(THEME_STORAGE_KEY) as Theme | null;
-      const initialTheme: Theme = stored === 'light' ? 'light' : 'dark';
-      setThemeState(initialTheme);
-      setResolvedTheme(getResolvedTheme(initialTheme));
+      localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+      setThemeState('dark');
+      setResolvedTheme('dark');
       setMounted(true);
     } catch (error) {
       console.error('Failed to load theme from localStorage:', error);
@@ -85,13 +84,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     };
   }, [theme, mounted]);
 
-  const setTheme = (newTheme: Theme) => {
+  const setTheme = (_newTheme: Theme) => {
     try {
-      localStorage.setItem(THEME_STORAGE_KEY, newTheme);
-      setThemeState(newTheme);
+      localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+      setThemeState('dark');
+      setResolvedTheme('dark');
     } catch (error) {
       console.error('Failed to save theme to localStorage:', error);
-      setThemeState(newTheme);
+      setThemeState('dark');
+      setResolvedTheme('dark');
     }
   };
 
@@ -118,11 +119,11 @@ export const ThemeScript = () => {
   const script = `
     (function() {
       try {
-        var theme = localStorage.getItem('${THEME_STORAGE_KEY}') || 'dark';
-        var resolved = theme === 'light' ? 'light' : 'dark';
+        localStorage.setItem('${THEME_STORAGE_KEY}', 'dark');
+        var resolved = 'dark';
         
         document.documentElement.classList.remove('light', 'dark');
-        document.documentElement.classList.add(resolved);
+        document.documentElement.classList.add('dark');
         document.documentElement.setAttribute('data-theme', resolved);
       } catch (e) {
         console.error('Theme initialization error:', e);

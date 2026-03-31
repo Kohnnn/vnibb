@@ -3,7 +3,7 @@
 
 import { memo, useMemo } from 'react';
 import { BarChart3 } from 'lucide-react';
-import { useFinancialRatios } from '@/lib/queries';
+import { useFinancialRatios, useIncomeStatement } from '@/lib/queries';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -111,6 +111,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         validPeriods: [...STATEMENT_PERIOD_OPTIONS],
         sharedKey: periodSyncGroup ? `${periodSyncGroup}:${symbol.toUpperCase()}` : undefined,
     });
+    const showPeriodToggle = config?.hidePeriodToggle !== true;
     
     const apiPeriod = period === 'Q' ? 'Q' : period;
     const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
@@ -124,6 +125,11 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         isFetching,
         dataUpdatedAt,
     } = useFinancialRatios(symbol, { period: apiPeriod });
+    const referencePeriodsQuery = useIncomeStatement(symbol, {
+        period: period === 'FY' ? 'year' : period === 'Q' ? 'quarter' : 'TTM',
+        enabled: period !== 'TTM',
+        limit: visiblePeriodLimit,
+    });
 
     const rawRatios = data?.data || [];
     const ratios = useMemo(() => {
@@ -206,32 +212,57 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         'provision_coverage',
     ]);
 
-    const headerActions = (
+    const headerActions = showPeriodToggle ? (
         <div className="mr-1">
             <PeriodToggle value={period} onChange={setPeriod} compact options={[...STATEMENT_PERIOD_OPTIONS]} />
         </div>
+    ) : undefined;
+
+    const displayPeriods = useMemo(() => {
+        const periodSet = new Set<string>();
+        ratios.forEach((entry) => {
+            if (entry.period) periodSet.add(entry.period);
+        });
+        (referencePeriodsQuery.data?.data || []).forEach((entry) => {
+            if (entry.period) {
+                const normalizedPeriod = normalizeRatioPeriod(String(entry.period)) ?? String(entry.period);
+                periodSet.add(normalizedPeriod);
+            }
+        });
+        return Array.from(periodSet).sort((left, right) => periodSortKey(left) - periodSortKey(right));
+    }, [ratios, referencePeriodsQuery.data?.data]);
+
+    const visiblePeriods = useMemo(
+        () => displayPeriods.slice(-visiblePeriodLimit),
+        [displayPeriods, visiblePeriodLimit]
+    );
+
+    const ratioLookup = useMemo(
+        () => new Map(ratios.map((entry) => [entry.period, entry])),
+        [ratios]
     );
 
     const tableColumns = useMemo(
         () =>
-            ratios.slice(-visiblePeriodLimit).map((entry, index) => ({
-                key: entry.period ?? `period_${index}`,
-                label: formatFinancialPeriodLabel(entry.period, {
+            visiblePeriods.map((periodValue, index) => ({
+                key: periodValue ?? `period_${index}`,
+                label: formatFinancialPeriodLabel(periodValue, {
                     mode: periodMode,
                     index,
-                    total: Math.min(ratios.length, visiblePeriodLimit),
+                    total: visiblePeriods.length,
                 }),
                 align: 'right' as const,
             })),
-        [periodMode, ratios, visiblePeriodLimit]
+        [periodMode, visiblePeriods]
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
         const rows: DenseTableRow[] = [];
 
         const hasMetricData = (metricKey: string) =>
-            ratios.slice(-visiblePeriodLimit).some((entry) => {
-                const value = entry[metricKey as keyof typeof entry];
+            visiblePeriods.some((periodValue) => {
+                const entry = ratioLookup.get(periodValue);
+                const value = entry?.[metricKey as keyof typeof entry];
                 return typeof value === 'number' && Number.isFinite(value);
             });
 
@@ -256,18 +287,20 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                     parentId: groupId,
                     indent: 12,
                     values: Object.fromEntries(
-                        ratios.slice(-visiblePeriodLimit).map((entry, index) => [
-                            tableColumns[index]?.key ?? `period_${index}`,
-                            entry[metricKey as keyof typeof entry],
-                        ])
+                        visiblePeriods.map((periodValue, index) => {
+                            const entry = ratioLookup.get(periodValue);
+                            return [
+                                tableColumns[index]?.key ?? `period_${index}`,
+                                entry?.[metricKey as keyof typeof entry] ?? null,
+                            ];
+                        })
                     ),
                 });
             });
         });
 
         return rows;
-    }, [categoryLabels, categoryMetrics, ratios, tableColumns, visiblePeriodLimit]);
-
+    }, [categoryLabels, categoryMetrics, ratioLookup, tableColumns, visiblePeriods]);
     return (
         <WidgetContainer
             title="Financial Ratios"

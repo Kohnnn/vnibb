@@ -7,7 +7,6 @@ import { Sidebar, Header, TabBar, RightSidebar, MobileNav } from '@/components/l
 import { OnboardingWalkthrough } from '@/components/onboarding/OnboardingWalkthrough';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
-import { useTheme } from '@/contexts/ThemeContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import {
     TickerInfoWidget,
@@ -41,6 +40,8 @@ import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
 import { autoFitGridItems, findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { PeriodToggle } from '@/components/ui/PeriodToggle';
+import { usePeriodState } from '@/hooks/usePeriodState';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import {
     DASHBOARD_WALKTHROUGH_RESTART_EVENT,
@@ -60,6 +61,9 @@ export default function DashboardPage() {
 }
 
 const RIGHT_SIDEBAR_WIDTH = 350;
+const MAIN_FUNDAMENTAL_DASHBOARD_ID = 'default-fundamental';
+const FUNDAMENTALS_TAB_NAME = 'Fundamentals';
+const FUNDAMENTALS_PERIOD_SYNC_GROUP = 'fundamental-core';
 
 function DashboardContent() {
     const {
@@ -80,7 +84,6 @@ function DashboardContent() {
 
     const { setGlobalSymbol: setContextGlobalSymbol } = useWidgetGroups();
     const { globalSymbol, setGlobalSymbol } = useSymbolLink();
-    const { resolvedTheme, setTheme } = useTheme();
     const { config: unitConfig, setUnit } = useUnit();
 
     const [isEditing, setIsEditing] = useState(false);
@@ -186,6 +189,30 @@ function DashboardContent() {
         };
     }, [activeDashboard, activeTab, mounted, openWalkthrough, sidebarWidth]);
 
+    const applySelectedSymbol = useCallback((rawSymbol: string) => {
+        const normalizedSymbol = rawSymbol.trim().toUpperCase();
+        if (!normalizedSymbol) return;
+
+        setGlobalSymbol(normalizedSymbol);
+        setContextGlobalSymbol(normalizedSymbol);
+        if (activeDashboard) {
+            updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
+        }
+    }, [activeDashboard, setContextGlobalSymbol, setGlobalSymbol, updateSyncGroupSymbol]);
+
+    const isSystemFundamentalsTab =
+        activeDashboard?.id === MAIN_FUNDAMENTAL_DASHBOARD_ID &&
+        activeTab?.name === FUNDAMENTALS_TAB_NAME;
+    const sharedFundamentalPeriodKey = isSystemFundamentalsTab
+        ? `${FUNDAMENTALS_PERIOD_SYNC_GROUP}:${globalSymbol.toUpperCase()}`
+        : undefined;
+    const { period: sharedFundamentalPeriod, setPeriod: setSharedFundamentalPeriod } = usePeriodState({
+        widgetId: `dashboard-period-${activeDashboard?.id ?? 'none'}-${activeTab?.id ?? 'none'}`,
+        defaultPeriod: 'FY',
+        validPeriods: ['FY', 'Q', 'TTM'],
+        sharedKey: sharedFundamentalPeriodKey,
+    });
+
     useEffect(() => {
         if (!mounted) return;
 
@@ -228,17 +255,6 @@ function DashboardContent() {
                 }
             }
 
-            if (
-                (event.metaKey || event.ctrlKey) &&
-                !event.altKey &&
-                !event.shiftKey &&
-                event.key.toLowerCase() === 'l'
-            ) {
-                event.preventDefault();
-                setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
-                return;
-            }
-
             if (!event.metaKey && !event.ctrlKey && !event.altKey) {
                 if (event.key === 'Tab' && activeTab?.widgets?.length) {
                     const focusableWidgets = Array.from(
@@ -260,7 +276,7 @@ function DashboardContent() {
 
         window.addEventListener('keydown', handleKeyboardNavigation);
         return () => window.removeEventListener('keydown', handleKeyboardNavigation);
-    }, [activeDashboard?.tabs, activeTab?.widgets, mounted, resolvedTheme, setActiveTab, setTheme]);
+    }, [activeDashboard?.tabs, activeTab?.widgets, mounted, setActiveTab]);
 
     const handleLayoutChange = useCallback((newLayout: LayoutItem[]) => {
         if (!activeDashboard || !activeTab) return;
@@ -286,17 +302,8 @@ function DashboardContent() {
     }, [activeDashboard, activeTab, updateTabLayout]);
 
     const handleSymbolChange = useCallback((symbol: string) => {
-        if (activeDashboard) {
-            setGlobalSymbol(symbol);
-            setContextGlobalSymbol(symbol);
-            updateSyncGroupSymbol(activeDashboard.id, 1, symbol);
-        }
-    }, [
-        activeDashboard,
-        updateSyncGroupSymbol,
-        setGlobalSymbol,
-        setContextGlobalSymbol,
-    ]);
+        applySelectedSymbol(symbol);
+    }, [applySelectedSymbol]);
 
     const handleEditToggle = useCallback(() => {
         if (activeDashboard?.isEditable === false) {
@@ -552,9 +559,28 @@ function DashboardContent() {
 
                 <TabBar symbol={globalSymbol} />
 
-                <div className="flex-1 p-3 sm:p-4 overflow-hidden bg-[var(--bg-primary)]">
+                <div className="flex-1 overflow-hidden bg-[var(--bg-primary)] p-3 sm:p-4">
                     {activeDashboard && activeTab ? (
                         <div className="h-full w-full overflow-y-auto scrollbar-hide">
+                            {isSystemFundamentalsTab ? (
+                                <div className="mb-3 flex flex-col gap-2 rounded-2xl border border-blue-500/20 bg-[linear-gradient(135deg,rgba(30,41,59,0.92),rgba(15,23,42,0.92))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.22)]">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div>
+                                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300/80">
+                                                Financial Period View
+                                            </div>
+                                            <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                                                Syncs Financial Ratios, Income Statement, Balance Sheet, and Cash Flow for {globalSymbol}.
+                                            </div>
+                                        </div>
+                                        <PeriodToggle
+                                            value={sharedFundamentalPeriod}
+                                            onChange={setSharedFundamentalPeriod}
+                                            options={['FY', 'Q', 'TTM']}
+                                        />
+                                    </div>
+                                </div>
+                            ) : null}
                             {activeTab.widgets.length > 0 ? (
                                 <ResponsiveDashboardGrid
                                     layouts={memoizedLayouts}
@@ -592,7 +618,7 @@ function DashboardContent() {
                                                     widgetGroup={widget.widgetGroup}
                                                     isEditing={isEditing}
                                                     isCollapsed={Boolean(widget.config?.collapsed)}
-                                                    onRemove={activeDashboard.isEditable === false
+                                                    onRemove={activeDashboard.isEditable === false || !isEditing
                                                         ? undefined
                                                         : () => deleteWidget(activeDashboard.id, activeTab.id, widget.id)}
                                                     onSymbolChange={handleSymbolChange}
