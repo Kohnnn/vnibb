@@ -240,36 +240,6 @@ Important context:
 - current roadmap focus is Phase 11 UX/workflow refinement
 ```
 
-## Multi-Agent Orchestration
-
-VNIBB is especially suitable for multi-agent workflows because the repo already contains planning structure, phased docs, and task-oriented context.
-
-### Agent Delegation
-
-Recommended split for parallel work:
-
-- **frontend agent** - dashboard UX, widget composition, layout polish, React state flows
-- **backend agent** - endpoint logic, provider fallback handling, schema normalization, tests
-- **ops agent** - deployment, OCI, caching, smoke checks, reliability gates
-- **docs/product agent** - README, docs, journals, parity notes, roadmap synthesis
-
-### Agent Teams
-
-For larger tasks, a practical agent team structure is:
-
-1. **planner** - reads `AGENTS.md`, docs, and active phase context
-2. **implementer** - makes the actual code changes
-3. **validator** - runs the narrowest relevant tests and then `pnpm run ci:gate`
-4. **documenter** - updates docs or the development journal when product behavior changes
-
-Good handoff files:
-
-- `AGENTS.md`
-- `../docs/README.md`
-- `../docs/DEVELOPMENT_JOURNAL.md`
-- `.agent/memory_bank/active_context.md`
-- `.agent/phases/PHASE_OVERVIEW.md`
-
 ## Built-in Tools
 
 ### Workspace scripts
