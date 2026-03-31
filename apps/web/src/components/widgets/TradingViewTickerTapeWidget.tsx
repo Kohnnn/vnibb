@@ -26,6 +26,8 @@ const TICKER_TAPE_SYMBOLS = [
   { description: 'WTI Oil', proName: 'TVC:USOIL' },
 ] as const;
 
+const TICKER_TAPE_GROUPS = ['VN Core', 'Global Macro', 'FX', 'Crypto'] as const;
+
 export function TradingViewTickerTapeWidget({ id, onRemove }: TradingViewTickerTapeWidgetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -65,8 +67,21 @@ export function TradingViewTickerTapeWidget({ id, onRemove }: TradingViewTickerT
             sourceLabel="TradingView ticker tape"
             align="right"
           />
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {TICKER_TAPE_GROUPS.map((group) => (
+              <span
+                key={group}
+                className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]"
+              >
+                {group}
+              </span>
+            ))}
+          </div>
         </div>
-        <div className="flex-1 min-h-[92px] px-2 py-2">
+        <div
+          className="flex-1 min-h-[92px] px-2 py-2"
+          style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.08), transparent)' }}
+        >
           <div ref={containerRef} className="tradingview-widget-container h-full w-full" />
         </div>
       </div>
