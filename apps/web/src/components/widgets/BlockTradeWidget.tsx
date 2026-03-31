@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TrendingUp, TrendingDown, RefreshCw, AlertTriangle, Globe, Building2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { getBlockTrades } from '@/lib/api';
@@ -15,6 +15,7 @@ interface BlockTradeWidgetProps {
   symbol?: string;
   isEditing?: boolean;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 function formatCurrency(value: number | null | undefined): string {
@@ -35,7 +36,7 @@ function formatQuantity(qty: number): string {
   return qty.toLocaleString();
 }
 
-export function BlockTradeWidget({ symbol }: BlockTradeWidgetProps) {
+export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps) {
   const [minThreshold, setMinThreshold] = useState<number>(10); // VND billions
 
   const {
@@ -70,6 +71,17 @@ export function BlockTradeWidget({ symbol }: BlockTradeWidgetProps) {
     .filter((t) => t.side === 'SELL')
     .reduce((sum, t) => sum + (t.value || 0), 0);
   const netValue = totalBuyValue - totalSellValue;
+
+  useEffect(() => {
+    onDataChange?.({
+      __widgetRuntime: {
+        layoutHint: {
+          empty: filteredTrades.length === 0,
+          compactHeight: 4,
+        },
+      },
+    });
+  }, [filteredTrades.length, onDataChange]);
 
   return (
     <div className="h-full flex flex-col">

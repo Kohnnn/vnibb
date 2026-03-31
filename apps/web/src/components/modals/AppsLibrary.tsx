@@ -27,12 +27,12 @@ const APP_TEMPLATES: AppTemplate[] = [
         color: '#8B5CF6',
         widgets: [
             { type: 'tradingview_ticker_tape', layout: { x: 0, y: 0, w: 24, h: 4 } },
-            { type: 'tradingview_chart', config: { symbol: 'SP:SPX' }, layout: { x: 0, y: 4, w: 14, h: 8 } },
-            { type: 'world_indices', layout: { x: 14, y: 4, w: 10, h: 5 } },
-            { type: 'forex_rates', layout: { x: 14, y: 9, w: 5, h: 5 } },
-            { type: 'commodities', layout: { x: 19, y: 9, w: 5, h: 5 } },
-            { type: 'market_news', layout: { x: 0, y: 12, w: 12, h: 6 } },
-            { type: 'market_overview', layout: { x: 12, y: 14, w: 12, h: 4 } },
+            { type: 'tradingview_chart', config: { symbol: 'NASDAQ:QQQ' }, layout: { x: 0, y: 4, w: 14, h: 8 } },
+            { type: 'world_indices', layout: { x: 14, y: 4, w: 10, h: 8 } },
+            { type: 'forex_rates', layout: { x: 0, y: 12, w: 8, h: 6 } },
+            { type: 'commodities', layout: { x: 8, y: 12, w: 8, h: 6 } },
+            { type: 'market_overview', layout: { x: 16, y: 12, w: 8, h: 6 } },
+            { type: 'market_news', config: { mode: 'all' }, layout: { x: 0, y: 18, w: 24, h: 6 } },
         ],
     },
     {

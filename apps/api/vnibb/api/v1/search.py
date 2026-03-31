@@ -39,7 +39,7 @@ GLOBAL_ASSET_RESULTS: list[SearchTickerResult] = [
         symbol="SOL", name="Solana", type="crypto", exchange="CRYPTO", tv_symbol="BINANCE:SOLUSDT"
     ),
     SearchTickerResult(
-        symbol="SPX", name="S&P 500 Index", type="index", exchange="INDEX", tv_symbol="SP:SPX"
+        symbol="SPX", name="S&P 500 Index (SPY proxy)", type="index", exchange="INDEX", tv_symbol="AMEX:SPY"
     ),
     SearchTickerResult(
         symbol="NASDAQ",

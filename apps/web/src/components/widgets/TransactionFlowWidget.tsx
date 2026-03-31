@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { Activity, Building2, Landmark, Wallet } from 'lucide-react';
 import {
   Bar,
@@ -27,6 +27,7 @@ interface TransactionFlowWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const SCOPE_OPTIONS = [
@@ -76,7 +77,7 @@ function getScopeValue(row: any, scope: FlowScope, mode: FlowMode): number | nul
   return mode === 'value' ? row.domestic_net_value ?? null : row.domestic_net_volume ?? null;
 }
 
-function TransactionFlowWidgetComponent({ id, symbol, onRemove }: TransactionFlowWidgetProps) {
+function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: TransactionFlowWidgetProps) {
   const [scope, setScope] = useState<FlowScope>('total');
   const [mode, setMode] = useState<FlowMode>('value');
   const upperSymbol = symbol?.toUpperCase() || '';
@@ -147,6 +148,17 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove }: TransactionFlo
       ].some((value) => value !== null && value !== undefined)
     ));
   }, [mode, rows]);
+
+  useEffect(() => {
+    onDataChange?.({
+      __widgetRuntime: {
+        layoutHint: {
+          empty: !hasRenderableFlowData,
+          compactHeight: 4,
+        },
+      },
+    });
+  }, [hasRenderableFlowData, onDataChange]);
 
   return (
     <WidgetContainer

@@ -18,6 +18,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 interface FinancialRatiosWidgetProps {
     id: string;
     symbol: string;
+    config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
 }
@@ -98,11 +99,17 @@ function normalizeRatioPeriod(period: string | null | undefined): string | null 
     return null
 }
 
-function FinancialRatiosWidgetComponent({ id, symbol, isEditing, onRemove }: FinancialRatiosWidgetProps) {
+function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemove }: FinancialRatiosWidgetProps) {
+    const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
+    const defaultPeriod =
+        config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
+            ? (config.defaultPeriod as 'Q' | 'TTM')
+            : 'FY';
     const { period, setPeriod } = usePeriodState({
         widgetId: id || 'financial_ratios',
-        defaultPeriod: 'FY',
+        defaultPeriod,
         validPeriods: [...STATEMENT_PERIOD_OPTIONS],
+        sharedKey: periodSyncGroup ? `${periodSyncGroup}:${symbol.toUpperCase()}` : undefined,
     });
     
     const apiPeriod = period === 'Q' ? 'Q' : period;

@@ -319,6 +319,24 @@ MARKET_INDEX_MIN_EXPECTED_VALUE = {
 YAHOO_MARKET_INDEX_SYMBOLS = {
     "VNINDEX": "^VNINDEX.VN",
 }
+YAHOO_WORLD_INDEX_SYMBOLS: list[tuple[str, str]] = [
+    ("^DJI", "Dow Jones"),
+    ("^GSPC", "S&P 500"),
+    ("^IXIC", "Nasdaq Composite"),
+    ("^N225", "Nikkei 225"),
+    ("^HSI", "Hang Seng"),
+    ("^FTSE", "FTSE 100"),
+    ("^GDAXI", "DAX"),
+    ("^STOXX50E", "Euro Stoxx 50"),
+]
+YAHOO_COMMODITY_SYMBOLS: list[tuple[str, str]] = [
+    ("GC=F", "Gold Futures"),
+    ("SI=F", "Silver Futures"),
+    ("CL=F", "WTI Crude Oil"),
+    ("BZ=F", "Brent Crude Oil"),
+    ("NG=F", "Natural Gas"),
+    ("HG=F", "Copper Futures"),
+]
 YAHOO_FINANCE_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
 YAHOO_FINANCE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
 TOP_MOVER_TYPE_ALIASES = {
@@ -543,8 +561,8 @@ def _coerce_market_number(value: Any) -> Optional[float]:
         return None
 
 
-async def _fetch_yahoo_market_indices() -> list[dict[str, Any]]:
-    if not YAHOO_MARKET_INDEX_SYMBOLS:
+async def _fetch_yahoo_quote_rows(symbols: list[str]) -> list[dict[str, Any]]:
+    if not symbols:
         return []
 
     try:
@@ -555,14 +573,21 @@ async def _fetch_yahoo_market_indices() -> list[dict[str, Any]]:
         ) as client:
             response = await client.get(
                 YAHOO_FINANCE_QUOTE_URL,
-                params={"symbols": ",".join(YAHOO_MARKET_INDEX_SYMBOLS.values())},
+                params={"symbols": ",".join(symbols)},
             )
             response.raise_for_status()
     except Exception as exc:
-        logger.warning("Yahoo Finance index fetch failed: %s", exc)
+        logger.warning("Yahoo Finance quote fetch failed: %s", exc)
         return []
 
-    payload = response.json().get("quoteResponse", {}).get("result", [])
+    return response.json().get("quoteResponse", {}).get("result", [])
+
+
+async def _fetch_yahoo_market_indices() -> list[dict[str, Any]]:
+    if not YAHOO_MARKET_INDEX_SYMBOLS:
+        return []
+
+    payload = await _fetch_yahoo_quote_rows(list(YAHOO_MARKET_INDEX_SYMBOLS.values()))
     symbol_lookup = {symbol: code for code, symbol in YAHOO_MARKET_INDEX_SYMBOLS.items()}
     rows: list[dict[str, Any]] = []
     for item in payload:
@@ -586,6 +611,65 @@ async def _fetch_yahoo_market_indices() -> list[dict[str, Any]]:
                 "volume": _coerce_market_number(item.get("regularMarketVolume")),
                 "time": updated_at,
                 "source": "yahoo_finance",
+            }
+        )
+
+    return rows
+
+
+async def _fetch_yahoo_world_indices(limit: int) -> list[dict[str, Any]]:
+    symbol_lookup = {symbol.upper(): name for symbol, name in YAHOO_WORLD_INDEX_SYMBOLS[:limit]}
+    payload = await _fetch_yahoo_quote_rows(list(symbol_lookup.keys()))
+    rows: list[dict[str, Any]] = []
+
+    for item in payload:
+        raw_symbol = str(item.get("symbol") or "").upper()
+        if raw_symbol not in symbol_lookup:
+            continue
+        market_time = item.get("regularMarketTime")
+        updated_at = None
+        if isinstance(market_time, (int, float)):
+            updated_at = datetime.utcfromtimestamp(market_time).isoformat()
+
+        rows.append(
+            {
+                "symbol": raw_symbol,
+                "name": symbol_lookup[raw_symbol],
+                "value": _coerce_market_number(item.get("regularMarketPrice")),
+                "change": _coerce_market_number(item.get("regularMarketChange")),
+                "change_pct": _coerce_market_number(item.get("regularMarketChangePercent")),
+                "updated_at": updated_at,
+            }
+        )
+
+    return rows
+
+
+async def _fetch_yahoo_commodities(limit: int) -> list[dict[str, Any]]:
+    symbol_lookup = {symbol.upper(): name for symbol, name in YAHOO_COMMODITY_SYMBOLS[:limit]}
+    payload = await _fetch_yahoo_quote_rows(list(symbol_lookup.keys()))
+    rows: list[dict[str, Any]] = []
+
+    for item in payload:
+        raw_symbol = str(item.get("symbol") or "").upper()
+        if raw_symbol not in symbol_lookup:
+            continue
+        market_time = item.get("regularMarketTime")
+        updated_at = None
+        if isinstance(market_time, (int, float)):
+            updated_at = datetime.utcfromtimestamp(market_time).isoformat()
+
+        price = _coerce_market_number(item.get("regularMarketPrice"))
+        previous_close = _coerce_market_number(item.get("regularMarketPreviousClose"))
+        rows.append(
+            {
+                "source": "Yahoo Finance",
+                "name": symbol_lookup[raw_symbol],
+                "symbol": raw_symbol,
+                "buy_price": price,
+                "sell_price": price,
+                "reference_price": previous_close,
+                "time": updated_at,
             }
         )
 
@@ -3399,6 +3483,10 @@ async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> World
     ]
 
     try:
+        yahoo_rows = await _fetch_yahoo_world_indices(limit)
+        if yahoo_rows:
+            return WorldIndicesResponse(count=len(yahoo_rows), data=yahoo_rows, source="yahoo_finance:world_indices")
+
         tasks = [_fetch_world_index_point(symbol, name) for symbol, name in symbols[:limit]]
         fetched = await asyncio.gather(*tasks)
         rows = [item for item in fetched if item is not None]
@@ -3406,7 +3494,6 @@ async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> World
         if rows:
             return WorldIndicesResponse(count=len(rows), data=rows, source="vnstock:world_index")
 
-        # Fallback to Vietnam market indices so widget still remains data-backed.
         vn_indices = await asyncio.wait_for(
             VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
             timeout=WORLD_INDEX_FALLBACK_TIMEOUT_SECONDS,
@@ -3433,7 +3520,7 @@ async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> World
         )
     except Exception as e:
         logger.warning(f"World indices fetch failed: {e}")
-        return WorldIndicesResponse(count=0, data=[], source="vnstock", error=str(e))
+        return WorldIndicesResponse(count=0, data=[], source="yahoo_finance:world_indices", error=str(e))
 
 
 @router.get("/forex-rates", response_model=ForexRatesResponse)
@@ -3479,14 +3566,6 @@ async def get_forex_rates(limit: int = Query(default=12, ge=1, le=30)) -> ForexR
 
 @router.get("/commodities", response_model=CommoditiesResponse)
 async def get_commodities(limit: int = Query(default=20, ge=1, le=40)) -> CommoditiesResponse:
-    if btmc_goldprice is None and sjc_gold_price is None:
-        return CommoditiesResponse(
-            count=0,
-            data=[],
-            source="vnstock:gold_price",
-            error="gold price helpers unavailable",
-        )
-
     def _sync_fetch() -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
 
@@ -3525,11 +3604,23 @@ async def get_commodities(limit: int = Query(default=20, ge=1, le=40)) -> Commod
         return rows[:limit]
 
     try:
+        yahoo_rows = await _fetch_yahoo_commodities(limit)
+        if yahoo_rows:
+            return CommoditiesResponse(count=len(yahoo_rows), data=yahoo_rows, source="yahoo_finance:commodities")
+
+        if btmc_goldprice is None and sjc_gold_price is None:
+            return CommoditiesResponse(
+                count=0,
+                data=[],
+                source="vnstock:gold_price",
+                error="gold price helpers unavailable",
+            )
+
         data = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=20)
         return CommoditiesResponse(count=len(data), data=data, source="vnstock:gold_price")
     except Exception as e:
         logger.warning(f"Commodities fetch failed: {e}")
-        return CommoditiesResponse(count=0, data=[], source="vnstock:gold_price", error=str(e))
+        return CommoditiesResponse(count=0, data=[], source="yahoo_finance:commodities", error=str(e))
 
 
 @router.get("/research/rss-feed", response_model=ResearchRssFeedResponse)

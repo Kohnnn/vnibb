@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Gauge } from 'lucide-react'
 import { useMomentumProfile } from '@/lib/queries'
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
@@ -12,6 +12,7 @@ interface MomentumWidgetProps {
   symbol: string
   isEditing?: boolean
   onRemove?: () => void
+  onDataChange?: (data: unknown) => void
 }
 
 function formatPct(value: number | null): string {
@@ -35,7 +36,7 @@ function scoreLabel(score: number): string {
   return 'Sideways'
 }
 
-export function MomentumWidget({ symbol }: MomentumWidgetProps) {
+export function MomentumWidget({ symbol, onDataChange }: MomentumWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
 
@@ -59,6 +60,17 @@ export function MomentumWidget({ symbol }: MomentumWidgetProps) {
 
   const trendLabel = payload?.trend_label ?? scoreLabel(momentumScore)
   const hasData = Boolean(payload && (r20 !== null || r60 !== null || r120 !== null || r252 !== null))
+
+  useEffect(() => {
+    onDataChange?.({
+      __widgetRuntime: {
+        layoutHint: {
+          empty: !hasData,
+          compactHeight: 4,
+        },
+      },
+    })
+  }, [hasData, onDataChange])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view momentum" icon={<Gauge size={18} />} />

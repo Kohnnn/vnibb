@@ -19,10 +19,11 @@ interface TradingViewChartWidgetProps {
 const SCRIPT_SRC = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
 
 const PRESET_SYMBOLS = [
-  { label: 'VCI', symbol: 'HOSE:VCI', tone: 'text-sky-300' },
-  { label: 'SPX', symbol: 'SP:SPX', tone: 'text-cyan-300' },
+  { label: 'QQQ', symbol: 'NASDAQ:QQQ', tone: 'text-cyan-300' },
+  { label: 'SPY', symbol: 'AMEX:SPY', tone: 'text-sky-300' },
+  { label: 'DXY', symbol: 'TVC:DXY', tone: 'text-emerald-300' },
   { label: 'BTC', symbol: 'BINANCE:BTCUSDT', tone: 'text-amber-300' },
-  { label: 'USD/VND', symbol: 'FX:USDVND', tone: 'text-emerald-300' },
+  { label: 'USD/VND', symbol: 'FX:USDVND', tone: 'text-lime-300' },
   { label: 'Gold', symbol: 'TVC:GOLD', tone: 'text-yellow-300' },
 ] as const;
 

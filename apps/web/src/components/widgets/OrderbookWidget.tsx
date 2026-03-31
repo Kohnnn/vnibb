@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -11,9 +11,10 @@ import { usePriceDepth } from '@/lib/queries';
 interface OrderbookWidgetProps {
   symbol?: string;
   widgetId?: string;
+  onDataChange?: (data: unknown) => void;
 }
 
-function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId }: OrderbookWidgetProps) {
+function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataChange }: OrderbookWidgetProps) {
   const {
     data: orderbook,
     isLoading,
@@ -33,6 +34,17 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId }: Orderbo
       ...entries.map((e: any) => Math.max(e.bid_vol || 0, e.ask_vol || 0))
     );
   }, [entries]);
+
+  useEffect(() => {
+    onDataChange?.({
+      __widgetRuntime: {
+        layoutHint: {
+          empty: !hasData,
+          compactHeight: 4,
+        },
+      },
+    });
+  }, [hasData, onDataChange]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view order book" />;

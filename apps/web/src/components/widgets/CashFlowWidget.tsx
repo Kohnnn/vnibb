@@ -37,6 +37,7 @@ import type { CashFlowData } from '@/types/equity';
 interface CashFlowWidgetProps {
     id: string;
     symbol: string;
+    config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
 }
@@ -117,11 +118,17 @@ function getRawMetric(entry: CashFlowData, metricKey: string): number | null {
     return null;
 }
 
-function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWidgetProps) {
+function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: CashFlowWidgetProps) {
+    const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
+    const defaultPeriod =
+        config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
+            ? (config.defaultPeriod as 'Q' | 'TTM')
+            : 'FY';
     const { period, setPeriod } = usePeriodState({
         widgetId: id || 'cash_flow',
-        defaultPeriod: 'FY',
+        defaultPeriod,
         validPeriods: [...STATEMENT_PERIOD_OPTIONS],
+        sharedKey: periodSyncGroup ? `${periodSyncGroup}:${symbol.toUpperCase()}` : undefined,
     });
     const [viewMode, setViewMode] = useState<ViewMode>('table');
     const { config: unitConfig } = useUnit();

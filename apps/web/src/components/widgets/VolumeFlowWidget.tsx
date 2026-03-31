@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowDownRight, ArrowUpRight, Waves } from 'lucide-react'
 import {
   Bar,
@@ -24,6 +24,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface VolumeFlowWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -43,7 +44,7 @@ function formatCompact(value: number): string {
   return value.toFixed(2)
 }
 
-export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
+export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
@@ -76,6 +77,17 @@ export function VolumeFlowWidget({ symbol }: VolumeFlowWidgetProps) {
   const maxAbs = Math.max(...monthRows.map((row) => Math.abs(row.value)), 1)
   const hasData = monthRows.some((row) => row.value !== 0)
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+
+  useEffect(() => {
+    onDataChange?.({
+      __widgetRuntime: {
+        layoutHint: {
+          empty: !hasData,
+          compactHeight: 4,
+        },
+      },
+    })
+  }, [hasData, onDataChange])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume flow" icon={<Waves size={18} />} />

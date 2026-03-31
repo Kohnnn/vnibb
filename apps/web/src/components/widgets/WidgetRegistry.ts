@@ -1,6 +1,6 @@
 // Widget Registry - maps widget types to components
 
-import type { WidgetType } from '@/types/dashboard';
+import type { WidgetConfig, WidgetType } from '@/types/dashboard';
 import type { WidgetGroupId } from '@/types/widget';
 import { TickerInfoWidget } from './TickerInfoWidget';
 import { TickerProfileWidget } from './TickerProfileWidget';
@@ -100,6 +100,7 @@ import dynamic from 'next/dynamic';
 export interface WidgetProps {
     id: string;
     symbol?: string;
+    config?: WidgetConfig;
     onSymbolClick?: (symbol: string) => void;
     hideHeader?: boolean;
     onRemove?: () => void;
@@ -377,7 +378,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
 
     price_chart: { w: 8, h: 8, minW: 6, minH: 6 },
     tradingview_chart: { w: 10, h: 8, minW: 8, minH: 6 },
-    tradingview_ticker_tape: { w: 12, h: 4, minW: 8, minH: 3 },
+    tradingview_ticker_tape: { w: 24, h: 4, minW: 12, minH: 3 },
     key_metrics: { w: 4, h: 10, minW: 3, minH: 8 },
     share_statistics: { w: 4, h: 7, minW: 3, minH: 5 },
     screener: { w: 12, h: 10, minW: 8, minH: 8 },
@@ -403,7 +404,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     sector_board: { w: 12, h: 8, minW: 8, minH: 6 },
     money_flow_trend: { w: 9, h: 7, minW: 6, minH: 5 },
     correlation_matrix: { w: 8, h: 7, minW: 6, minH: 5 },
-    foreign_trading: { w: 5, h: 7, minW: 4, minH: 5 },
+    foreign_trading: { w: 8, h: 8, minW: 6, minH: 6 },
     subsidiaries: { w: 5, h: 6, minW: 4, minH: 5 },
     balance_sheet: { w: 7, h: 7, minW: 5, minH: 5 },
     income_statement: { w: 7, h: 7, minW: 5, minH: 5 },
@@ -414,7 +415,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     watchlist: { w: 4, h: 7, minW: 3, minH: 5 },
     peer_comparison: { w: 8, h: 6, minW: 6, minH: 5 },
     top_movers: { w: 5, h: 7, minW: 4, minH: 5 },
-    world_indices: { w: 5, h: 7, minW: 4, minH: 5 },
+    world_indices: { w: 10, h: 8, minW: 8, minH: 6 },
     sector_performance: { w: 5, h: 7, minW: 4, minH: 5 },
     sector_rotation_radar: { w: 6, h: 7, minW: 4, minH: 5 },
     market_breadth: { w: 5, h: 6, minW: 4, minH: 5 },
@@ -452,10 +453,10 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     relative_rotation: { w: 6, h: 6, minW: 4, minH: 5 },
     risk_dashboard: { w: 8, h: 8, minW: 6, minH: 6 },
     quant_summary: { w: 10, h: 8, minW: 8, minH: 6 },
-    forex_rates: { w: 5, h: 7, minW: 4, minH: 5 },
-    commodities: { w: 5, h: 7, minW: 4, minH: 5 },
+    forex_rates: { w: 8, h: 6, minW: 6, minH: 5 },
+    commodities: { w: 8, h: 6, minW: 6, minH: 5 },
     similar_stocks: { w: 4, h: 6, minW: 3, minH: 5 },
-    quick_stats: { w: 5, h: 7, minW: 4, minH: 5 },
+    quick_stats: { w: 6, h: 6, minW: 6, minH: 5 },
     notes: { w: 4, h: 6, minW: 3, minH: 5 },
     research_browser: { w: 8, h: 8, minW: 6, minH: 6 },
     sector_top_movers: { w: 10, h: 7, minW: 8, minH: 6 },
@@ -466,7 +467,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     block_trade: { w: 6, h: 7, minW: 4, minH: 5 },
     ownership_changes: { w: 5, h: 6, minW: 4, minH: 5 },
     alert_settings: { w: 4, h: 7, minW: 3, minH: 6 },
-    market_heatmap: { w: 8, h: 8, minW: 6, minH: 6 },
+    market_heatmap: { w: 14, h: 10, minW: 10, minH: 8 },
     database_inspector: { w: 6, h: 8, minW: 4, minH: 6 },
     orderbook: { w: 4, h: 8, minW: 3, minH: 6 },
     index_comparison: { w: 4, h: 4, minW: 3, minH: 3 },
@@ -604,7 +605,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     ticker_profile: 'Detailed company description',
     price_chart: 'Professional candlestick charting',
     tradingview_chart: 'TradingView-powered chart for global assets and external symbols',
-    tradingview_ticker_tape: 'VN-first ticker tape with global macro and crypto symbols',
+    tradingview_ticker_tape: 'Global macro ticker tape with FX, commodities, and crypto context',
     key_metrics: 'Summary of critical financial ratios',
     share_statistics: 'Share float and ownership data',
     screener: 'Filter stocks by 80+ criteria',
