@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Gem } from 'lucide-react';
 import { useCommodities } from '@/lib/queries';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -11,12 +12,23 @@ function formatPrice(value: number | null | undefined): string {
     return value.toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
 
-export function CommoditiesWidget() {
+export function CommoditiesWidget({ onDataChange }: { onDataChange?: (data: unknown) => void }) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useCommodities();
 
     const rows = data?.data || [];
     const hasData = rows.length > 0;
     const isFallback = Boolean(data?.error);
+
+    useEffect(() => {
+        onDataChange?.({
+            __widgetRuntime: {
+                layoutHint: {
+                    empty: !hasData,
+                    compactHeight: 4,
+                },
+            },
+        });
+    }, [hasData, onDataChange]);
 
     return (
         <div className="h-full flex flex-col">

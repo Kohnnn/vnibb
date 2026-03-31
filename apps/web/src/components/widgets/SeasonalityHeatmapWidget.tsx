@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CalendarDays } from 'lucide-react'
 import { useQuantMetrics } from '@/lib/queries'
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
@@ -11,6 +11,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface SeasonalityHeatmapWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 interface MonthlyReturnRow {
@@ -36,7 +37,7 @@ function getCellClass(value: number | null): string {
   return 'bg-rose-500/20 text-rose-200'
 }
 
-export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetProps) {
+export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHeatmapWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
@@ -80,6 +81,17 @@ export function SeasonalityHeatmapWidget({ symbol }: SeasonalityHeatmapWidgetPro
   }, [monthlyReturns, years])
 
   const monthlyAverages = MONTH_LABELS.map((month) => metric?.monthly_average_return_pct?.[month] ?? null)
+
+  useEffect(() => {
+    onDataChange?.({
+      __widgetRuntime: {
+        layoutHint: {
+          empty: !hasData,
+          compactHeight: 4,
+        },
+      },
+    })
+  }, [hasData, onDataChange])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view seasonality heatmap" icon={<CalendarDays size={18} />} />

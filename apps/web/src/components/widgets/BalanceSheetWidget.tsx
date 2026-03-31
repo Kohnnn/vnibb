@@ -32,6 +32,7 @@ import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFi
 interface BalanceSheetWidgetProps {
     id: string;
     symbol: string;
+    config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
 }
@@ -62,11 +63,17 @@ const QUARTER_PERIOD_LIMIT = 28;
 const QUARTER_CHART_POINTS = 16;
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
-function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: BalanceSheetWidgetProps) {
+function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }: BalanceSheetWidgetProps) {
+    const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
+    const defaultPeriod =
+        config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
+            ? (config.defaultPeriod as 'Q' | 'TTM')
+            : 'FY';
     const { period, setPeriod } = usePeriodState({
         widgetId: id || 'balance_sheet',
-        defaultPeriod: 'FY',
+        defaultPeriod,
         validPeriods: [...STATEMENT_PERIOD_OPTIONS],
+        sharedKey: periodSyncGroup ? `${periodSyncGroup}:${symbol.toUpperCase()}` : undefined,
     });
     const [viewMode, setViewMode] = useState<ViewMode>('table');
     const { config: unitConfig } = useUnit();

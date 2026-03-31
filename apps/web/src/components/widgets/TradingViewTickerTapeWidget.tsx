@@ -14,19 +14,18 @@ interface TradingViewTickerTapeWidgetProps {
 const SCRIPT_SRC = 'https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js';
 
 const TICKER_TAPE_SYMBOLS = [
-  { description: 'VCI', proName: 'HOSE:VCI' },
-  { description: 'VNM', proName: 'HOSE:VNM' },
-  { description: 'FPT', proName: 'HOSE:FPT' },
-  { description: 'TCB', proName: 'HOSE:TCB' },
-  { description: 'S&P 500', proName: 'SP:SPX' },
-  { description: 'Nasdaq 100', proName: 'NASDAQ:QQQ' },
+  { description: 'SPY', proName: 'AMEX:SPY' },
+  { description: 'QQQ', proName: 'NASDAQ:QQQ' },
+  { description: 'DXY', proName: 'TVC:DXY' },
+  { description: 'EUR/USD', proName: 'FX:EURUSD' },
   { description: 'USD/VND', proName: 'FX:USDVND' },
   { description: 'Bitcoin', proName: 'BINANCE:BTCUSDT' },
+  { description: 'Ethereum', proName: 'BINANCE:ETHUSDT' },
   { description: 'Gold', proName: 'TVC:GOLD' },
   { description: 'WTI Oil', proName: 'TVC:USOIL' },
 ] as const;
 
-const TICKER_TAPE_GROUPS = ['VN Core', 'Global Macro', 'FX', 'Crypto'] as const;
+const TICKER_TAPE_GROUPS = ['Equity', 'FX', 'Crypto', 'Commodities'] as const;
 
 export function TradingViewTickerTapeWidget({ id, onRemove }: TradingViewTickerTapeWidgetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -63,7 +62,7 @@ export function TradingViewTickerTapeWidget({ id, onRemove }: TradingViewTickerT
       <div className="flex h-full flex-col bg-[var(--bg-primary)]">
         <div className="border-b border-[var(--border-subtle)] px-3 py-2">
           <WidgetMeta
-            note="VN-first tape with global macro symbols via TradingView"
+            note="Global macro tape with VND cross; VN cash indices remain native below"
             sourceLabel="TradingView ticker tape"
             align="right"
           />

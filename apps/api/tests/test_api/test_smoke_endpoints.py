@@ -2637,6 +2637,9 @@ async def test_market_sector_performance_cached_rows_use_extended_metrics_and_me
 
 @pytest.mark.asyncio
 async def test_market_world_indices_smoke_returns_data(client, monkeypatch):
+    async def fake_yahoo_world_indices(limit: int):
+        return []
+
     async def fake_world_index_point(symbol: str, name: str):
         return {
             "symbol": symbol,
@@ -2647,6 +2650,7 @@ async def test_market_world_indices_smoke_returns_data(client, monkeypatch):
             "updated_at": "2026-02-15",
         }
 
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_world_indices", fake_yahoo_world_indices)
     monkeypatch.setattr(
         "vnibb.api.v1.market._fetch_world_index_point",
         fake_world_index_point,
@@ -2657,6 +2661,29 @@ async def test_market_world_indices_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload["count"] == 2
     assert payload["data"][0]["value"] == 1234.5
+
+
+@pytest.mark.asyncio
+async def test_market_world_indices_use_yahoo_fallback_when_available(client, monkeypatch):
+    async def fake_yahoo_world_indices(limit: int):
+        return [
+            {
+                "symbol": "^GSPC",
+                "name": "S&P 500",
+                "value": 5200.5,
+                "change": 35.2,
+                "change_pct": 0.68,
+                "updated_at": "2026-03-31T21:00:00",
+            }
+        ]
+
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_world_indices", fake_yahoo_world_indices)
+
+    response = await client.get("/api/v1/market/world-indices?limit=1")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "yahoo_finance:world_indices"
+    assert payload["data"][0]["symbol"] == "^GSPC"
 
 
 @pytest.mark.asyncio
@@ -2705,6 +2732,9 @@ async def test_market_commodities_smoke_returns_data(client, monkeypatch):
             assert orient == "records"
             return self._rows
 
+    async def fake_yahoo_commodities(limit: int):
+        return []
+
     def fake_btmc_goldprice():
         return FakeFrame(
             [
@@ -2722,6 +2752,7 @@ async def test_market_commodities_smoke_returns_data(client, monkeypatch):
     def fake_sjc_gold_price():
         return FakeFrame([])
 
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_commodities", fake_yahoo_commodities)
     monkeypatch.setattr("vnibb.api.v1.market.btmc_goldprice", fake_btmc_goldprice)
     monkeypatch.setattr("vnibb.api.v1.market.sjc_gold_price", fake_sjc_gold_price)
 
@@ -2734,9 +2765,36 @@ async def test_market_commodities_smoke_returns_data(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_market_commodities_use_yahoo_fallback_when_available(client, monkeypatch):
+    async def fake_yahoo_commodities(limit: int):
+        return [
+            {
+                "source": "Yahoo Finance",
+                "name": "Gold Futures",
+                "symbol": "GC=F",
+                "buy_price": 2350.5,
+                "sell_price": 2350.5,
+                "reference_price": 2338.2,
+                "time": "2026-03-31T21:00:00",
+            }
+        ]
+
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_commodities", fake_yahoo_commodities)
+
+    response = await client.get("/api/v1/market/commodities?limit=1")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "yahoo_finance:commodities"
+    assert payload["data"][0]["symbol"] == "GC=F"
+
+
+@pytest.mark.asyncio
 async def test_request_timeout_middleware_returns_504(client, monkeypatch):
     monkeypatch.setattr("vnibb.api.v1.market.WORLD_INDEX_POINT_TIMEOUT_SECONDS", 2)
     monkeypatch.setattr("vnibb.core.config.settings.api_request_timeout_seconds", 0.01)
+
+    async def fake_yahoo_world_indices(limit: int):
+        return []
 
     async def fake_world_index_point(symbol: str, name: str):
         await asyncio.sleep(0.05)
@@ -2749,6 +2807,7 @@ async def test_request_timeout_middleware_returns_504(client, monkeypatch):
             "updated_at": "2026-02-15",
         }
 
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_world_indices", fake_yahoo_world_indices)
     monkeypatch.setattr("vnibb.api.v1.market._fetch_world_index_point", fake_world_index_point)
 
     response = await client.get("/api/v1/market/world-indices?limit=1")

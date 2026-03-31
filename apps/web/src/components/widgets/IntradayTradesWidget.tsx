@@ -7,13 +7,14 @@ import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/Virtua
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 
 interface IntradayTradesWidgetProps {
     id: string;
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function formatTime(timeStr: string | null | undefined): string {
@@ -35,7 +36,7 @@ function formatVolume(vol: number | null | undefined): string {
     return vol.toLocaleString('vi-VN');
 }
 
-function IntradayTradesWidgetComponent({ id, symbol, onRemove }: IntradayTradesWidgetProps) {
+function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: IntradayTradesWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useIntraday(symbol, { limit: 1000 });
 
     const trades = useMemo(() => {
@@ -104,6 +105,17 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove }: IntradayTradesW
 
     const hasData = trades.length > 0;
     const isFallback = Boolean(error && hasData);
+
+    useEffect(() => {
+        onDataChange?.({
+            __widgetRuntime: {
+                layoutHint: {
+                    empty: !hasData,
+                    compactHeight: 4,
+                },
+            },
+        });
+    }, [hasData, onDataChange]);
 
     return (
         <WidgetContainer

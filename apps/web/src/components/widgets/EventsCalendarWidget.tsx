@@ -62,7 +62,7 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
         refetch,
         isFetching,
         dataUpdatedAt,
-    } = useCompanyEvents(symbol, { limit: 20, enabled: !!symbol });
+    } = useCompanyEvents(symbol, { limit: 30, enabled: !!symbol });
 
     const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
     const events = useMemo(() => {

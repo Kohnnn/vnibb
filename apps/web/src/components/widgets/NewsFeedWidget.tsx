@@ -45,6 +45,7 @@ interface NewsArticle {
 
 interface NewsFeedWidgetProps {
     symbol?: string;
+    config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
 }
@@ -118,7 +119,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
             if (sourceFilter) params.append('source', sourceFilter);
             if (sentimentFilter) params.append('sentiment', sentimentFilter);
             params.append('mode', requestMode);
-            params.append('limit', '30');
+            params.append('limit', '40');
 
             const response = await fetch(`${API_BASE_URL}/news/feed?${params}`);
             if (!response.ok) throw new Error('Failed to fetch news');
@@ -207,7 +208,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
 
     return (
         <WidgetContainer
-            title="Market News"
+            title={symbol ? 'Company News' : 'Market News'}
             symbol={symbol}
             onRefresh={() => refetch()}
             onClose={onRemove}
@@ -271,7 +272,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
                         />
                         <input
                             type="text"
-                            placeholder="Search news..."
+                            placeholder={symbol ? 'Search company news...' : 'Search news...'}
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full pl-7 pr-2 py-1.5 text-xs rounded bg-background/80 border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40"

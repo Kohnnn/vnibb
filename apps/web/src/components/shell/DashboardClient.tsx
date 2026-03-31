@@ -544,6 +544,7 @@ function DashboardContent() {
                                                         <WidgetComponent 
                                                             id={widget.id}
                                                             symbol={widgetSymbol}
+                                                            config={widget.config}
                                                         />
                                                     ) : (
                                                         <div className="p-4 text-[var(--text-muted)]">Widget not found: {widgetType}</div>

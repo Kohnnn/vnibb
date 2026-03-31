@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BarChart3 } from 'lucide-react'
 import { Bar, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis, BarChart } from 'recharts'
 import { useQuantMetrics } from '@/lib/queries'
@@ -13,10 +13,11 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface SortinoMonthlyWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
+export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
@@ -49,6 +50,17 @@ export function SortinoMonthlyWidget({ symbol }: SortinoMonthlyWidgetProps) {
   )
   const hasData = rows.some((row) => row.sortino !== null || row.sharpe !== null)
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+
+  useEffect(() => {
+    onDataChange?.({
+      __widgetRuntime: {
+        layoutHint: {
+          empty: !hasData,
+          compactHeight: 4,
+        },
+      },
+    })
+  }, [hasData, onDataChange])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Sortino profile" icon={<BarChart3 size={18} />} />

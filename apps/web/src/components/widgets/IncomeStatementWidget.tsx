@@ -41,6 +41,7 @@ import { IncomeSankeyChart } from '@/components/widgets/charts/IncomeSankeyChart
 interface IncomeStatementWidgetProps {
     id: string;
     symbol: string;
+    config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
 }
@@ -70,11 +71,17 @@ const QUARTER_PERIOD_LIMIT = 28;
 const QUARTER_CHART_POINTS = 16;
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
-function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: IncomeStatementWidgetProps) {
+function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemove }: IncomeStatementWidgetProps) {
+    const periodSyncGroup = typeof config?.periodSyncGroup === 'string' ? config.periodSyncGroup : undefined;
+    const defaultPeriod =
+        config?.defaultPeriod === 'Q' || config?.defaultPeriod === 'TTM'
+            ? (config.defaultPeriod as 'Q' | 'TTM')
+            : 'FY';
     const { period, setPeriod } = usePeriodState({
         widgetId: id || 'income_statement',
-        defaultPeriod: 'FY',
+        defaultPeriod,
         validPeriods: [...STATEMENT_PERIOD_OPTIONS],
+        sharedKey: periodSyncGroup ? `${periodSyncGroup}:${symbol.toUpperCase()}` : undefined,
     });
     const [viewMode, setViewMode] = useState<ViewMode>('table');
     const { config: unitConfig } = useUnit();

@@ -65,20 +65,22 @@ const FALLBACK_BEHAVIOR: LayoutBehavior = {
 
 const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   screener: { preferredW: 24, preferredH: 12, minW: 16, minH: 8, orientation: 'horizontal', expandPriority: 6 },
-  ticker_info: { preferredW: 6, preferredH: 4, minW: 5, minH: 4, maxW: 8, orientation: 'balanced', expandPriority: 2 },
+  ticker_info: { preferredW: 8, preferredH: 6, minW: 6, minH: 5, maxW: 10, orientation: 'balanced', expandPriority: 2 },
   valuation_band: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
   key_metrics: { preferredW: 8, preferredH: 9, minW: 6, minH: 8, maxW: 10, orientation: 'vertical', expandPriority: 1 },
   share_statistics: { preferredW: 6, preferredH: 5, minW: 5, minH: 4, maxW: 8, orientation: 'vertical', expandPriority: 1 },
   ticker_profile: { preferredW: 12, preferredH: 5, minW: 8, minH: 4, maxW: 14, orientation: 'horizontal', expandPriority: 3 },
   price_chart: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 5 },
   tradingview_chart: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 5 },
+  tradingview_ticker_tape: { preferredW: 24, preferredH: 4, minW: 12, minH: 3, orientation: 'horizontal', expandPriority: 6 },
   earnings_season_monitor: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 5 },
-  unified_financials: { preferredW: 24, preferredH: 10, minW: 14, minH: 8, orientation: 'horizontal', expandPriority: 6 },
-  financial_ratios: { preferredW: 10, preferredH: 14, minW: 8, minH: 11, orientation: 'horizontal', expandPriority: 4 },
-  income_statement: { preferredW: 14, preferredH: 14, minW: 10, minH: 9, orientation: 'horizontal', expandPriority: 4 },
+  unified_financials: { preferredW: 24, preferredH: 15, minW: 14, minH: 10, orientation: 'horizontal', expandPriority: 6 },
+  quick_stats: { preferredW: 6, preferredH: 6, minW: 6, minH: 5, maxW: 8, orientation: 'vertical', expandPriority: 2 },
+  financial_ratios: { preferredW: 10, preferredH: 16, minW: 8, minH: 12, orientation: 'horizontal', expandPriority: 4 },
+  income_statement: { preferredW: 14, preferredH: 16, minW: 10, minH: 12, orientation: 'horizontal', expandPriority: 4 },
   income_sankey: { preferredW: 14, preferredH: 10, minW: 10, minH: 7, orientation: 'horizontal', expandPriority: 4 },
-  balance_sheet: { preferredW: 14, preferredH: 12, minW: 10, minH: 9, orientation: 'horizontal', expandPriority: 4 },
-  cash_flow: { preferredW: 10, preferredH: 12, minW: 8, minH: 8, orientation: 'horizontal', expandPriority: 4 },
+  balance_sheet: { preferredW: 14, preferredH: 14, minW: 10, minH: 10, orientation: 'horizontal', expandPriority: 4 },
+  cash_flow: { preferredW: 10, preferredH: 14, minW: 8, minH: 10, orientation: 'horizontal', expandPriority: 4 },
   cashflow_waterfall: { preferredW: 14, preferredH: 10, minW: 10, minH: 7, orientation: 'horizontal', expandPriority: 4 },
   institutional_ownership: { preferredW: 10, preferredH: 6, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
   major_shareholders: { preferredW: 10, preferredH: 6, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
@@ -86,20 +88,20 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   officers_management: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, maxW: 14, orientation: 'vertical', expandPriority: 2 },
   news_feed: { preferredW: 10, preferredH: 7, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
   news_corporate_actions: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
-  events_calendar: { preferredW: 12, preferredH: 5, minW: 8, minH: 3, orientation: 'vertical', expandPriority: 2 },
-  market_news: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  events_calendar: { preferredW: 12, preferredH: 8, minW: 8, minH: 5, orientation: 'vertical', expandPriority: 2 },
+  market_news: { preferredW: 12, preferredH: 10, minW: 8, minH: 7, orientation: 'vertical', expandPriority: 2 },
   peer_comparison: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
   comparison_analysis: { preferredW: 10, preferredH: 8, minW: 8, minH: 6, maxW: 12, orientation: 'vertical', expandPriority: 2 },
   rs_ranking: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
   transaction_flow: { preferredW: 12, preferredH: 8, minW: 8, minH: 4, orientation: 'horizontal', expandPriority: 4 },
-  foreign_trading: { preferredW: 5, preferredH: 8, minW: 4, minH: 6, maxW: 7, orientation: 'vertical', expandPriority: 1 },
+  foreign_trading: { preferredW: 8, preferredH: 8, minW: 6, minH: 6, maxW: 12, orientation: 'vertical', expandPriority: 1 },
   orderbook: { preferredW: 8, preferredH: 8, minW: 6, minH: 6, maxW: 10, orientation: 'vertical', expandPriority: 1 },
   intraday_trades: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 3 },
   block_trade: { preferredW: 12, preferredH: 7, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 3 },
   market_overview: { preferredW: 8, preferredH: 9, minW: 6, minH: 6, maxW: 10, orientation: 'balanced', expandPriority: 2 },
   top_movers: { preferredW: 8, preferredH: 9, minW: 6, minH: 7, maxW: 10, orientation: 'vertical', expandPriority: 1 },
   market_breadth: { preferredW: 8, preferredH: 7, minW: 6, minH: 5, maxW: 10, orientation: 'balanced', expandPriority: 2 },
-  market_heatmap: { preferredW: 14, preferredH: 10, minW: 10, minH: 8, orientation: 'horizontal', expandPriority: 4 },
+  market_heatmap: { preferredW: 14, preferredH: 13, minW: 10, minH: 10, orientation: 'horizontal', expandPriority: 4 },
   sector_board: { preferredW: 10, preferredH: 12, minW: 8, minH: 10, orientation: 'vertical', expandPriority: 2 },
   money_flow_trend: { preferredW: 14, preferredH: 10, minW: 10, minH: 8, orientation: 'horizontal', expandPriority: 3 },
   industry_bubble: { preferredW: 10, preferredH: 10, minW: 8, minH: 8, orientation: 'balanced', expandPriority: 2 },
@@ -128,6 +130,9 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   amihud_illiquidity: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   risk_dashboard: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
   quant_summary: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
+  world_indices: { preferredW: 10, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  forex_rates: { preferredW: 8, preferredH: 6, minW: 6, minH: 5, orientation: 'vertical', expandPriority: 2 },
+  commodities: { preferredW: 8, preferredH: 6, minW: 6, minH: 5, orientation: 'vertical', expandPriority: 2 },
   signal_summary: { preferredW: 24, preferredH: 4, minW: 12, minH: 4, orientation: 'horizontal', expandPriority: 6 },
 }
 
@@ -353,5 +358,36 @@ export function autoFitGridItems<T extends CompactableLayoutItem>(items: T[], co
 }
 
 export function compactGridItems<T extends CompactableLayoutItem>(items: T[], cols = 24): T[] {
-  return autoFitGridItems(items, cols)
+  const normalized = items
+    .map((item) => normalizeItemLayout(item, cols))
+    .sort((left, right) => left.layout.y - right.layout.y || left.layout.x - right.layout.x)
+
+  const compacted: T[] = []
+
+  normalized.forEach((item) => {
+    const placedItem = {
+      ...item,
+      layout: {
+        ...item.layout,
+        x: clamp(item.layout.x || 0, 0, Math.max(cols - item.layout.w, 0)),
+        y: item.layout.y || 0,
+      },
+    }
+
+    for (let nextY = 0; nextY <= placedItem.layout.y; nextY += 1) {
+      const candidate = {
+        ...placedItem.layout,
+        y: nextY,
+      }
+      const hasOverlap = compacted.some((existing) => layoutsOverlap(candidate, existing.layout))
+      if (!hasOverlap) {
+        placedItem.layout.y = nextY
+        break
+      }
+    }
+
+    compacted.push(placedItem)
+  })
+
+  return compacted
 }

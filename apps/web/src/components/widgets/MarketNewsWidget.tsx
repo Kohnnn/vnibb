@@ -81,13 +81,18 @@ interface MarketNewsFeed {
   mode: 'all' | 'related';
 }
 
-function MarketNewsWidgetComponent({ symbol }: { symbol?: string }) {
+function MarketNewsWidgetComponent({ symbol, config }: { symbol?: string; config?: Record<string, unknown> }) {
   const upperSymbol = symbol?.toUpperCase() || '';
-  const [mode, setMode] = useState<'all' | 'related'>(upperSymbol ? 'related' : 'all');
+  const preferredMode: 'all' | 'related' = config?.mode === 'all' || config?.mode === 'related'
+    ? (config.mode as 'all' | 'related')
+    : upperSymbol
+      ? 'related'
+      : 'all';
+  const [mode, setMode] = useState<'all' | 'related'>(preferredMode);
 
   useEffect(() => {
-    setMode(upperSymbol ? 'related' : 'all');
-  }, [upperSymbol]);
+    setMode(preferredMode);
+  }, [preferredMode]);
 
   const {
     data: news,
@@ -99,8 +104,8 @@ function MarketNewsWidgetComponent({ symbol }: { symbol?: string }) {
   } = useQuery({
     queryKey: ['market-news-global', upperSymbol, mode],
     queryFn: async () => {
-      const params = new URLSearchParams({ limit: '20', mode });
-      if (upperSymbol) {
+      const params = new URLSearchParams({ limit: '30', mode });
+      if (upperSymbol && mode === 'related') {
         params.set('symbol', upperSymbol);
       }
 
@@ -148,9 +153,11 @@ function MarketNewsWidgetComponent({ symbol }: { symbol?: string }) {
     [articles]
   );
 
+  const widgetTitle = mode === 'related' && upperSymbol ? `${upperSymbol} Market News` : 'Global Market News';
+
   return (
     <WidgetContainer
-      title="Global Market News"
+      title={widgetTitle}
       exportData={exportRows}
       exportFilename="market_news"
       onRefresh={() => refetch()}
@@ -218,7 +225,7 @@ function MarketNewsWidgetComponent({ symbol }: { symbol?: string }) {
                 >
                   <div className="mb-1 flex flex-wrap items-start gap-1.5">
                     <div className="text-sm text-[var(--text-primary)] font-medium line-clamp-2 group-hover:text-blue-400 transition-colors">
-                      {item.title}
+                      {renderHighlightedText(item.title, highlightTokens)}
                     </div>
                     {item.matchedSymbols.slice(0, 3).map((matchedSymbol: string) => (
                       <span

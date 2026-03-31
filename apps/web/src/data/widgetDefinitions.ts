@@ -133,7 +133,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'tradingview_ticker_tape',
         name: 'TradingView Ticker Tape',
-        description: 'VN-first ticker tape with global macro, FX, commodity, and crypto symbols',
+        description: 'Global macro ticker tape with FX, commodity, and crypto symbols plus VND cross context',
         category: 'global_markets',
         defaultConfig: {},
         defaultLayout: { w: 12, h: 4, minW: 8, minH: 3 },
