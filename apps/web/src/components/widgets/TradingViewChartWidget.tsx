@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useProfile } from '@/lib/queries';
 import { toTradingViewSymbol } from '@/lib/tradingView';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { cn } from '@/lib/utils';
 
 interface TradingViewChartWidgetProps {
   id: string;
@@ -16,8 +18,17 @@ interface TradingViewChartWidgetProps {
 
 const SCRIPT_SRC = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
 
+const PRESET_SYMBOLS = [
+  { label: 'VCI', symbol: 'HOSE:VCI', tone: 'text-sky-300' },
+  { label: 'SPX', symbol: 'SP:SPX', tone: 'text-cyan-300' },
+  { label: 'BTC', symbol: 'BINANCE:BTCUSDT', tone: 'text-amber-300' },
+  { label: 'USD/VND', symbol: 'FX:USDVND', tone: 'text-emerald-300' },
+  { label: 'Gold', symbol: 'TVC:GOLD', tone: 'text-yellow-300' },
+] as const;
+
 export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChartWidgetProps) {
   const shouldResolveProfile = Boolean(symbol) && !symbol.includes(':');
+  const { state, activeDashboard, activeTab, updateWidget } = useDashboard();
   const { data: profileData, isFetching, dataUpdatedAt } = useProfile(symbol, shouldResolveProfile);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -28,6 +39,29 @@ export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChar
   const exchangeLabel = resolvedSymbol.includes(':')
     ? resolvedSymbol.split(':')[0]
     : profileData?.data?.exchange;
+  const widgetLocation = useMemo(() => {
+    for (const dashboard of state.dashboards) {
+      for (const tab of dashboard.tabs) {
+        if (tab.widgets.some((widget) => widget.id === id)) {
+          return { dashboardId: dashboard.id, tabId: tab.id };
+        }
+      }
+    }
+
+    if (activeDashboard && activeTab) {
+      return { dashboardId: activeDashboard.id, tabId: activeTab.id };
+    }
+
+    return null;
+  }, [activeDashboard, activeTab, id, state.dashboards]);
+
+  const handlePresetSelect = useCallback((nextSymbol: string) => {
+    if (!widgetLocation) return;
+    updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, {
+      config: { symbol: nextSymbol },
+      type: 'tradingview_chart',
+    });
+  }, [id, updateWidget, widgetLocation]);
 
   useEffect(() => {
     if (!containerRef.current || !resolvedSymbol) return;
@@ -82,13 +116,36 @@ export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChar
       noPadding
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
-        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
+        <div className="border-b border-[var(--border-subtle)] px-3 py-2">
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching}
             note={exchangeLabel ? `${exchangeLabel.toUpperCase()} TradingView chart` : 'TradingView advanced chart'}
             align="right"
           />
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+              Quick markets
+            </span>
+            {PRESET_SYMBOLS.map((preset) => {
+              const active = resolvedSymbol === preset.symbol;
+              return (
+                <button
+                  key={preset.symbol}
+                  type="button"
+                  onClick={() => handlePresetSelect(preset.symbol)}
+                  className={cn(
+                    'rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors',
+                    active
+                      ? 'border-blue-500/40 bg-blue-500/10 text-blue-200'
+                      : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]',
+                  )}
+                >
+                  <span className={cn('mr-1', preset.tone)}>{preset.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="flex-1 min-h-[320px]">
           <div ref={containerRef} className="tradingview-widget-container h-full w-full" />
