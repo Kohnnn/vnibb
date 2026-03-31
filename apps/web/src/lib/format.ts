@@ -96,26 +96,6 @@ export function formatTimestamp(
   return formatAbsoluteTimestamp(date);
 }
 
-export function formatRelativeTime(
-  date: Date | string | number | null | undefined
-): string {
-  const parsed = parseFlexibleDate(date);
-  if (!parsed) return '-';
-
-  const diffMs = Date.now() - parsed.getTime();
-  const diffMinutes = Math.round(diffMs / 60000);
-  if (diffMinutes < 1) return 'just now';
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-
-  const diffHours = Math.round(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-
-  const diffDays = Math.round(diffHours / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-
-  return formatAbsoluteTimestamp(parsed);
-}
-
 export function parseFlexibleDate(
   value: Date | string | number | null | undefined
 ): Date | null {
@@ -177,7 +157,7 @@ export function parseFlexibleDate(
   }
 
   const dmy = raw.match(
-    /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:[\sT]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
+    /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
   );
   if (dmy) {
     const year = Number(dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3]);
