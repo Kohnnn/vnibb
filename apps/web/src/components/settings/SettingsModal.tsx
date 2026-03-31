@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, Settings as SettingsIcon, Database, Bell, Palette } from 'lucide-react';
+import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -12,6 +12,8 @@ import { useDashboard } from '@/contexts/DashboardContext';
 import { searchStocks } from '@/data/stockData';
 import { DEFAULT_TICKER, normalizeTickerSymbol } from '@/lib/defaultTicker';
 import {
+  requestDashboardWalkthroughRestart,
+  resetDashboardWalkthroughPreference,
   DEFAULT_TAB_OPTIONS,
   type DefaultTabPreference,
   findPreferredDashboardId,
@@ -62,6 +64,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   }, [preferenceStatus]);
   
   if (!isOpen) return null;
+
+  const handleRestartWalkthrough = () => {
+    resetDashboardWalkthroughPreference();
+    onClose();
+    window.setTimeout(() => {
+      requestDashboardWalkthroughRestart();
+    }, 180);
+  };
 
   const applyPreferences = () => {
     const normalized = normalizeTickerSymbol(defaultTickerInput);
@@ -275,6 +285,26 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <option value="30">30 seconds</option>
                     <option value="60">1 minute</option>
                   </select>
+                </div>
+
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h4 className="text-sm font-bold text-[var(--text-primary)]">Quick Walkthrough</h4>
+                      <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                        Replay the first-run tour for workspaces, header tools, tabs, and widget settings.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      data-tour="settings-restart-walkthrough"
+                      onClick={handleRestartWalkthrough}
+                      className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2 text-[11px] font-bold text-blue-300 transition-colors hover:bg-blue-600/25"
+                    >
+                      <RotateCcw size={14} />
+                      Restart Walkthrough
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

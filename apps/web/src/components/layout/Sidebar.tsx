@@ -612,7 +612,7 @@ export function Sidebar({
                 <div className="flex-1 overflow-y-auto px-2 py-1">
                     {!collapsed && (
                         <>
-                            <div className="space-y-0.5">
+                            <div className="space-y-0.5" data-tour="sidebar-workspaces">
                                 <div className="mb-3 border-b border-[var(--border-color)] pb-2">
                                     <div className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                                         Customize

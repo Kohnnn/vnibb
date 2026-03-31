@@ -8,17 +8,24 @@ import {
   Globe, 
   Shield, 
   Save,
-  ArrowLeft
+  ArrowLeft,
+  RotateCcw,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { Button } from '@/components/ui/button';
 import { env } from '@/lib/env';
+import { resetDashboardWalkthroughPreference } from '@/lib/userPreferences';
 
 export default function SettingsPage() {
   const router = useRouter();
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const [apiUrl, setApiUrl] = useState(env.apiUrl);
+
+  const handleRestartWalkthrough = () => {
+    resetDashboardWalkthroughPreference();
+    router.push('/');
+  };
 
   const VNSTOCK_SOURCES: { value: VnstockSource; label: string; description: string }[] = [
     { value: 'KBS', label: 'KBS (Korea)', description: 'Recommended - default in vnstock 3.5.0+' },
@@ -78,7 +85,32 @@ export default function SettingsPage() {
 
           {/* Content */}
           <main className="md:col-span-3 space-y-8">
-            {/* Appearance Section */}
+            {/* Walkthrough Section */}
+            <section className="overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
+                <h2 className="font-semibold flex items-center gap-2">
+                  <RotateCcw size={18} className="text-blue-500" />
+                  Walkthrough
+                </h2>
+              </div>
+              <div className="p-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h3 className="text-sm font-medium">Restart onboarding</h3>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    Replay the quick VNIBB tour from the dashboard homepage.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleRestartWalkthrough}
+                  className="gap-2 bg-blue-600 hover:bg-blue-500 text-white"
+                >
+                  <RotateCcw size={16} />
+                  Restart Walkthrough
+                </Button>
+              </div>
+            </section>
+
             <section className="overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
               <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
                 <h2 className="font-semibold flex items-center gap-2">

@@ -294,7 +294,7 @@ export function TabBar(_props: TabBarProps) {
 
     return (
         <>
-            <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80" {...swipeHandlers}>
+            <div data-tour="tab-bar" className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80" {...swipeHandlers}>
                 <div className="flex items-center gap-0.5 px-3">
                     {/* Tabs */}
                     <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">

@@ -1,6 +1,8 @@
 import { DEFAULT_TICKER, normalizeTickerSymbol, writeStoredTicker } from '@/lib/defaultTicker'
 
 export const USER_PREFERENCES_STORAGE_KEY = 'vnibb-user-preferences'
+export const DASHBOARD_WALKTHROUGH_VERSION = 1
+export const DASHBOARD_WALKTHROUGH_RESTART_EVENT = 'vnibb:restart-dashboard-walkthrough'
 
 export type DefaultTabPreference =
   | 'overview'
@@ -16,6 +18,15 @@ export type DefaultTabPreference =
 export interface UserPreferences {
   defaultTicker: string
   defaultTab: DefaultTabPreference
+  onboarding: DashboardOnboardingPreference
+}
+
+export interface DashboardOnboardingPreference {
+  dashboardWalkthroughVersion: number
+}
+
+type UserPreferencesUpdate = Partial<Omit<UserPreferences, 'onboarding'>> & {
+  onboarding?: Partial<DashboardOnboardingPreference>
 }
 
 export const DEFAULT_TAB: DefaultTabPreference = 'fundamentals'
@@ -76,6 +87,15 @@ function normalizeTabKey(rawValue: string | null | undefined): DefaultTabPrefere
   }
 }
 
+function normalizeWalkthroughVersion(rawValue: unknown): number {
+  const parsed = Number(rawValue)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0
+  }
+
+  return Math.floor(parsed)
+}
+
 function readRawPreferences(): Partial<UserPreferences> {
   if (typeof window === 'undefined') {
     return {}
@@ -99,14 +119,26 @@ export function readStoredUserPreferences(): UserPreferences {
   return {
     defaultTicker: normalizeTickerSymbol(raw.defaultTicker) || DEFAULT_TICKER,
     defaultTab: normalizeTabKey(raw.defaultTab) || DEFAULT_TAB,
+    onboarding: {
+      dashboardWalkthroughVersion: normalizeWalkthroughVersion(
+        raw.onboarding && typeof raw.onboarding === 'object'
+          ? raw.onboarding.dashboardWalkthroughVersion
+          : undefined
+      ),
+    },
   }
 }
 
-export function writeStoredUserPreferences(next: Partial<UserPreferences>): UserPreferences {
+export function writeStoredUserPreferences(next: UserPreferencesUpdate): UserPreferences {
   const current = readStoredUserPreferences()
   const resolved: UserPreferences = {
     defaultTicker: normalizeTickerSymbol(next.defaultTicker) || current.defaultTicker || DEFAULT_TICKER,
     defaultTab: normalizeTabKey(next.defaultTab) || current.defaultTab || DEFAULT_TAB,
+    onboarding: {
+      dashboardWalkthroughVersion: normalizeWalkthroughVersion(
+        next.onboarding?.dashboardWalkthroughVersion ?? current.onboarding.dashboardWalkthroughVersion
+      ),
+    },
   }
 
   if (typeof window !== 'undefined') {
@@ -115,6 +147,36 @@ export function writeStoredUserPreferences(next: Partial<UserPreferences>): User
 
   writeStoredTicker(resolved.defaultTicker)
   return resolved
+}
+
+export function shouldShowDashboardWalkthrough(version = DASHBOARD_WALKTHROUGH_VERSION): boolean {
+  return readStoredUserPreferences().onboarding.dashboardWalkthroughVersion < version
+}
+
+export function markDashboardWalkthroughCompleted(
+  version = DASHBOARD_WALKTHROUGH_VERSION
+): UserPreferences {
+  return writeStoredUserPreferences({
+    onboarding: {
+      dashboardWalkthroughVersion: version,
+    },
+  })
+}
+
+export function resetDashboardWalkthroughPreference(): UserPreferences {
+  return writeStoredUserPreferences({
+    onboarding: {
+      dashboardWalkthroughVersion: 0,
+    },
+  })
+}
+
+export function requestDashboardWalkthroughRestart(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.dispatchEvent(new Event(DASHBOARD_WALKTHROUGH_RESTART_EVENT))
 }
 
 export function findPreferredTabId<T extends { id: string; name: string }>(

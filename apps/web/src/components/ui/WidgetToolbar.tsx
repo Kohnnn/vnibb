@@ -185,8 +185,10 @@ export function WidgetToolbar({
         {onSettings && (
           <button
             onClick={onSettings}
+            data-tour="widget-settings-trigger"
             className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors"
             title="Settings"
+            aria-label="Widget settings"
           >
             <Settings size={12} />
           </button>

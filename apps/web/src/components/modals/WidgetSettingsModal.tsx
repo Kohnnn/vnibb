@@ -64,7 +64,7 @@ export function WidgetSettingsModal({
     if (!isOpen || !widget) return null;
 
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm p-4 animate-in fade-in duration-200">
+        <div data-tour="widget-settings-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="w-full max-w-lg bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-modal)]">

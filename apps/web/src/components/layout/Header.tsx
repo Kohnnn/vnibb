@@ -299,7 +299,7 @@ export function Header({
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85">
       <div className="px-4 py-2">
-        <div className="grid min-h-[2.75rem] grid-cols-[minmax(0,1fr)_minmax(160px,240px)_auto] items-center gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,380px)_auto] md:gap-3">
+        <div data-tour="header-bar" className="grid min-h-[2.75rem] grid-cols-[minmax(0,1fr)_minmax(160px,240px)_auto] items-center gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,380px)_auto] md:gap-3">
           <div className="flex min-w-0 items-center gap-2 overflow-hidden">
           <div className="inline-flex shrink-0 items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-secondary)]">
             <span className="h-2 w-2 rounded-full bg-sky-500" />
@@ -385,7 +385,7 @@ export function Header({
           </div>
           </div>
 
-          <div className="relative w-full max-w-md justify-self-center">
+          <div data-tour="header-search" className="relative w-full max-w-md justify-self-center">
           <Search
             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
             size={14}
@@ -435,7 +435,7 @@ export function Header({
           )}
           </div>
 
-          <div className="flex items-center gap-2 justify-self-end">
+          <div data-tour="header-tools" className="flex items-center gap-2 justify-self-end">
           <button
             type="button"
             onClick={() => window.dispatchEvent(new Event('vnibb:open-command-palette'))}
