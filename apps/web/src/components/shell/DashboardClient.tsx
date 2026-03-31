@@ -2,8 +2,9 @@
 
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Sidebar, Header, TabBar, RightSidebar, MobileNav } from '@/components/layout';
+import { OnboardingWalkthrough } from '@/components/onboarding/OnboardingWalkthrough';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -41,6 +42,11 @@ import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
 import { autoFitGridItems, findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
+import {
+    DASHBOARD_WALKTHROUGH_RESTART_EVENT,
+    markDashboardWalkthroughCompleted,
+    shouldShowDashboardWalkthrough,
+} from '@/lib/userPreferences';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
 import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '@/types/dashboard-templates';
 import { Grid3X3, PlusCircle, RefreshCw } from 'lucide-react';
@@ -87,10 +93,12 @@ function DashboardContent() {
     const [copilotWidgetData, setCopilotWidgetData] = useState<Record<string, unknown> | undefined>(undefined);
     const [sidebarWidth, setSidebarWidth] = useState(208);
     const [mounted, setMounted] = useState(false);
+    const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
     const [widgetSettingsState, setWidgetSettingsState] = useState<{
         widgetId: string;
         tabId: string;
     } | null>(null);
+    const autoWalkthroughQueuedRef = useRef(false);
 
     const starterTemplates = useMemo(() => {
         const preferredIds = ['getting-started', 'fundamental-analyst', 'global-markets', 'earnings-season'];
@@ -118,6 +126,65 @@ function DashboardContent() {
         window.addEventListener('resize', updateSidebarWidth);
         return () => window.removeEventListener('resize', updateSidebarWidth);
     }, [updateSidebarWidth]);
+
+    const openWalkthrough = useCallback(() => {
+        if (!mounted || sidebarWidth === 0) {
+            return;
+        }
+
+        setIsWidgetLibraryOpen(false);
+        setIsAppsLibraryOpen(false);
+        setIsPromptsLibraryOpen(false);
+        setIsTemplateSelectorOpen(false);
+        setWidgetSettingsState(null);
+        setShowAICopilot(false);
+        setIsWalkthroughOpen(true);
+    }, [mounted, sidebarWidth]);
+
+    const closeWalkthrough = useCallback(() => {
+        markDashboardWalkthroughCompleted();
+        setIsWalkthroughOpen(false);
+    }, []);
+
+    useEffect(() => {
+        if (
+            !mounted ||
+            sidebarWidth === 0 ||
+            !activeDashboard ||
+            !activeTab ||
+            autoWalkthroughQueuedRef.current ||
+            !shouldShowDashboardWalkthrough()
+        ) {
+            return;
+        }
+
+        autoWalkthroughQueuedRef.current = true;
+
+        const timeoutId = window.setTimeout(() => {
+            window.requestAnimationFrame(() => {
+                openWalkthrough();
+            });
+        }, 240);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [activeDashboard, activeTab, mounted, openWalkthrough, sidebarWidth]);
+
+    useEffect(() => {
+        const handleRestartWalkthrough = () => {
+            if (!mounted || sidebarWidth === 0 || !activeDashboard || !activeTab) {
+                return;
+            }
+
+            window.requestAnimationFrame(() => {
+                openWalkthrough();
+            });
+        };
+
+        window.addEventListener(DASHBOARD_WALKTHROUGH_RESTART_EVENT, handleRestartWalkthrough);
+        return () => {
+            window.removeEventListener(DASHBOARD_WALKTHROUGH_RESTART_EVENT, handleRestartWalkthrough);
+        };
+    }, [activeDashboard, activeTab, mounted, openWalkthrough, sidebarWidth]);
 
     useEffect(() => {
         if (!mounted) return;
@@ -653,6 +720,11 @@ function DashboardContent() {
                 widgetId={widgetSettingsState?.widgetId ?? null}
                 dashboardId={activeDashboard?.id ?? null}
                 tabId={widgetSettingsState?.tabId ?? null}
+            />
+
+            <OnboardingWalkthrough
+                open={isWalkthroughOpen}
+                onComplete={closeWalkthrough}
             />
         </div>
     );
