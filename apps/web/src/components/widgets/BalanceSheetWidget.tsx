@@ -75,6 +75,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
         validPeriods: [...STATEMENT_PERIOD_OPTIONS],
         sharedKey: periodSyncGroup ? `${periodSyncGroup}:${symbol.toUpperCase()}` : undefined,
     });
+    const showPeriodToggle = config?.hidePeriodToggle !== true;
     const [viewMode, setViewMode] = useState<ViewMode>('table');
     const { config: unitConfig } = useUnit();
     
@@ -355,7 +356,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
                     <BarChart3 size={12} />
                 </button>
             </div>
-            <PeriodToggle value={period} onChange={setPeriod} compact options={[...STATEMENT_PERIOD_OPTIONS]} />
+            {showPeriodToggle ? <PeriodToggle value={period} onChange={setPeriod} compact options={[...STATEMENT_PERIOD_OPTIONS]} /> : null}
         </div>
     );
 

@@ -31,6 +31,7 @@ import {
 } from '@/lib/commandPalette';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
+import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { cn } from '@/lib/utils';
 
 interface CommandPaletteProps {
@@ -101,8 +102,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     updateTab,
     addWidget,
     updateWidget,
+    updateSyncGroupSymbol,
   } = useDashboard();
-  const { setGlobalSymbol } = useWidgetGroups();
+  const { setGlobalSymbol: setWidgetGroupGlobalSymbol } = useWidgetGroups();
+  const { setGlobalSymbol: setLinkedGlobalSymbol } = useSymbolLink();
 
   useEffect(() => {
     if (!open) return;
@@ -362,11 +365,21 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     writeCommandPaletteRecents(next);
   };
 
+  const applyVietnamSymbol = (symbol: string) => {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    if (!normalizedSymbol) return;
+    setWidgetGroupGlobalSymbol(normalizedSymbol);
+    setLinkedGlobalSymbol(normalizedSymbol);
+    if (activeDashboard) {
+      updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
+    }
+  };
+
   const handleTickerSelect = (item: SearchTickerResult) => {
     saveRecent(item);
 
     if (item.type === 'vn_stock') {
-      setGlobalSymbol(item.symbol);
+      applyVietnamSymbol(item.symbol);
       onOpenChange(false);
       return;
     }

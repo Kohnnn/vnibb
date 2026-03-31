@@ -132,7 +132,7 @@ export function Header({
   const hasActionMenu = Boolean(
     onResetLayout || onCollapseAll || onExpandAll || onAIClick
   )
-  const { resolvedTheme, setTheme } = useTheme()
+  const { resolvedTheme } = useTheme()
   const [marketClock, setMarketClock] = useState(() => Date.now())
   const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('checking')
 
@@ -291,10 +291,6 @@ export function Header({
     },
     [handleSearch, currentSymbol]
   )
-
-  const toggleTheme = useCallback(() => {
-    setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')
-  }, [resolvedTheme, setTheme])
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85">
@@ -457,8 +453,8 @@ export function Header({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-[180px]">
-              <DropdownMenuItem onClick={toggleTheme} className="text-xs">
-                Theme: {resolvedTheme === 'dark' ? 'Light mode' : 'Dark mode'}
+              <DropdownMenuItem className="text-xs text-[var(--text-muted)] focus:bg-transparent focus:text-[var(--text-muted)]">
+                Theme: Dark only
               </DropdownMenuItem>
               {onUnitDisplayChange && (
                 <>
