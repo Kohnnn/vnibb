@@ -122,6 +122,14 @@ const TradingViewChartWidget = dynamic(
     }
 ) as ComponentType<WidgetProps>;
 
+const TradingViewTickerTapeWidget = dynamic(
+    () => import('./TradingViewTickerTapeWidget').then((m) => m.TradingViewTickerTapeWidget as any),
+    {
+        ssr: false,
+        loading: () => null,
+    }
+) as ComponentType<WidgetProps>;
+
 const FinancialsWidget = dynamic(
     () => import('./FinancialsWidget').then((m) => m.FinancialsWidget as any),
     {
@@ -230,6 +238,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     ticker_profile: TickerProfileWidget as ComponentType<WidgetProps>,
     price_chart: PriceChartWidget as ComponentType<WidgetProps>,
     tradingview_chart: TradingViewChartWidget as ComponentType<WidgetProps>,
+    tradingview_ticker_tape: TradingViewTickerTapeWidget as ComponentType<WidgetProps>,
     key_metrics: KeyMetricsWidget as ComponentType<WidgetProps>,
     share_statistics: ShareStatisticsWidget as ComponentType<WidgetProps>,
     screener: ScreenerWidget as ComponentType<WidgetProps>,
@@ -368,6 +377,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
 
     price_chart: { w: 8, h: 8, minW: 6, minH: 6 },
     tradingview_chart: { w: 10, h: 8, minW: 8, minH: 6 },
+    tradingview_ticker_tape: { w: 12, h: 4, minW: 8, minH: 3 },
     key_metrics: { w: 4, h: 10, minW: 3, minH: 8 },
     share_statistics: { w: 4, h: 7, minW: 3, minH: 5 },
     screener: { w: 12, h: 10, minW: 8, minH: 8 },
@@ -482,6 +492,7 @@ export const widgetNames: Record<WidgetType, string> = {
 
     price_chart: 'Price Chart',
     tradingview_chart: 'TradingView Chart',
+    tradingview_ticker_tape: 'TradingView Ticker Tape',
     key_metrics: 'Key Metrics',
     share_statistics: 'Share Statistics',
     screener: 'Stock Screener',
@@ -593,6 +604,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     ticker_profile: 'Detailed company description',
     price_chart: 'Professional candlestick charting',
     tradingview_chart: 'TradingView-powered chart for global assets and external symbols',
+    tradingview_ticker_tape: 'VN-first ticker tape with global macro and crypto symbols',
     key_metrics: 'Summary of critical financial ratios',
     share_statistics: 'Share float and ownership data',
     screener: 'Filter stocks by 80+ criteria',

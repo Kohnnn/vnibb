@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { ExtendedPeriod } from '@/components/ui/PeriodToggle';
 
-const STORAGE_KEY_PREFIX = 'vnibb_period_v1_';
+const STORAGE_KEY_PREFIX = 'vnibb_period_v2_';
 
 interface UsePeriodStateOptions {
   widgetId: string;
@@ -23,6 +23,9 @@ export function usePeriodState({
       const saved = localStorage.getItem(storageKey);
       if (saved && validPeriods.includes(saved as ExtendedPeriod)) {
         return saved as ExtendedPeriod;
+      }
+      if (saved) {
+        localStorage.removeItem(storageKey);
       }
     }
     return defaultPeriod;

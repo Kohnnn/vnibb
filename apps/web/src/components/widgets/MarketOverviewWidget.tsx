@@ -42,6 +42,7 @@ export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
   const isFallback = Boolean(error && hasData);
   const sourceUpdatedAt =
     getLatestTimestampValue([data?.updated_at, ...indices.map((item) => item.time)]) ?? dataUpdatedAt;
+  const sourceLabel = data?.source?.includes('yahoo_finance') ? 'Yahoo fast path' : 'Indices snapshot';
 
   return (
     <WidgetContainer
@@ -57,7 +58,7 @@ export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
             updatedAt={sourceUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
-            note="Indices snapshot"
+            note={sourceLabel}
             align="right"
           />
         </div>

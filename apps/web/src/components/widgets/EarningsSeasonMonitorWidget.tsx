@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { CalendarClock, Filter, Sparkles } from 'lucide-react';
+import { ArrowUpDown, CalendarClock, Search, Sparkles } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
@@ -22,8 +22,11 @@ interface EarningsSeasonMonitorWidgetProps {
 }
 
 const EXCHANGES = ['ALL', 'HOSE', 'HNX', 'UPCOM'] as const;
+const SIGNALS = ['ALL', 'High Conviction', 'Watch', 'Mixed', 'Caution'] as const;
 
 type ExchangeFilter = (typeof EXCHANGES)[number];
+type SignalFilter = (typeof SIGNALS)[number];
+type SortMode = 'newest' | 'score' | 'revenue' | 'earnings';
 
 function signalTone(signal: string): string {
   if (signal === 'High Conviction') return 'text-emerald-300 border-emerald-500/20 bg-emerald-500/10';
@@ -34,6 +37,9 @@ function signalTone(signal: string): string {
 
 export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove }: EarningsSeasonMonitorWidgetProps) {
   const [exchange, setExchange] = useState<ExchangeFilter>('ALL');
+  const [signalFilter, setSignalFilter] = useState<SignalFilter>('ALL');
+  const [sortMode, setSortMode] = useState<SortMode>('newest');
+  const [searchQuery, setSearchQuery] = useState('');
   const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useEarningsSeason({
     exchange: exchange === 'ALL' ? undefined : exchange,
@@ -41,14 +47,32 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove }: Earni
   });
 
   const rows = data?.data || [];
-  const hasData = rows.length > 0;
+  const filteredRows = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    const nextRows = rows.filter((row) => {
+      if (exchange !== 'ALL' && row.exchange !== exchange) return false;
+      if (signalFilter !== 'ALL' && row.signal !== signalFilter) return false;
+      if (!normalizedQuery) return true;
+      return `${row.symbol} ${row.name} ${row.period}`.toLowerCase().includes(normalizedQuery);
+    });
+
+    nextRows.sort((left, right) => {
+      if (sortMode === 'score') return (right.score ?? -999) - (left.score ?? -999);
+      if (sortMode === 'revenue') return (right.revenue_yoy ?? -999) - (left.revenue_yoy ?? -999);
+      if (sortMode === 'earnings') return (right.earnings_yoy ?? -999) - (left.earnings_yoy ?? -999);
+      return `${right.updated_at || ''}`.localeCompare(left.updated_at || '');
+    });
+
+    return nextRows;
+  }, [exchange, rows, searchQuery, signalFilter, sortMode]);
+  const hasData = filteredRows.length > 0;
 
   const summary = useMemo(() => {
-    const positiveRevenue = rows.filter((row) => (row.revenue_yoy ?? -999) > 0).length;
-    const positiveEarnings = rows.filter((row) => (row.earnings_yoy ?? -999) > 0).length;
-    const highConviction = rows.filter((row) => row.signal === 'High Conviction').length;
+    const positiveRevenue = filteredRows.filter((row) => (row.revenue_yoy ?? -999) > 0).length;
+    const positiveEarnings = filteredRows.filter((row) => (row.earnings_yoy ?? -999) > 0).length;
+    const highConviction = filteredRows.filter((row) => row.signal === 'High Conviction').length;
     return { positiveRevenue, positiveEarnings, highConviction };
-  }, [rows]);
+  }, [filteredRows]);
 
   return (
     <WidgetContainer
@@ -72,7 +96,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove }: Earni
             <WidgetMeta
               updatedAt={data?.updated_at || dataUpdatedAt}
               isFetching={isFetching && hasData}
-              note={`${rows.length} releases tracked`}
+              note={`${filteredRows.length} releases tracked`}
               align="right"
             />
           </div>
@@ -90,6 +114,42 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove }: Earni
             ))}
           </div>
 
+          <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+            <label className="flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] text-[var(--text-muted)]">
+              <Search className="h-3.5 w-3.5" />
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Filter symbol or period"
+                className="w-full bg-transparent text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+              />
+            </label>
+            <label className="flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] text-[var(--text-muted)]">
+              <ArrowUpDown className="h-3.5 w-3.5" />
+              <select
+                value={sortMode}
+                onChange={(event) => setSortMode(event.target.value as SortMode)}
+                className="bg-transparent text-xs font-semibold text-[var(--text-primary)] outline-none"
+              >
+                <option value="newest">Newest</option>
+                <option value="score">Top Score</option>
+                <option value="revenue">Revenue YoY</option>
+                <option value="earnings">Earnings YoY</option>
+              </select>
+            </label>
+            <label className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] text-[var(--text-muted)]">
+              <select
+                value={signalFilter}
+                onChange={(event) => setSignalFilter(event.target.value as SignalFilter)}
+                className="bg-transparent text-xs font-semibold text-[var(--text-primary)] outline-none"
+              >
+                {SIGNALS.map((signal) => (
+                  <option key={signal} value={signal}>{signal}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
             <SummaryCard label="Revenue Up" value={summary.positiveRevenue} tone="text-cyan-300" />
             <SummaryCard label="Earnings Up" value={summary.positiveEarnings} tone="text-emerald-300" />
@@ -104,13 +164,13 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove }: Earni
             <WidgetError error={error as Error} onRetry={() => refetch()} />
           ) : !hasData ? (
             <WidgetEmpty
-              message="No recent earnings releases available"
-              detail="This widget will populate as fresh quarterly statements land in the database."
+              message={rows.length > 0 ? 'No releases match the current filters' : 'No recent earnings releases available'}
+              detail={rows.length > 0 ? 'Try another exchange, signal, or search term.' : 'This widget will populate as fresh quarterly statements land in the database.'}
               icon={<Sparkles size={18} />}
             />
           ) : (
             <div className="space-y-2">
-              {rows.map((row) => (
+              {filteredRows.map((row) => (
                 <button
                   key={`${row.symbol}-${row.period}`}
                   type="button"

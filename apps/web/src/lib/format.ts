@@ -381,3 +381,23 @@ export function formatBytes(bytes: number, decimals: number = 2): string {
 
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
+
+export function formatRelativeTime(date: Date | string | number | null | undefined): string {
+  const parsed = parseFlexibleDate(date)
+  if (!parsed) return '-'
+
+  const diffMs = Date.now() - parsed.getTime()
+  if (!Number.isFinite(diffMs)) return '-'
+
+  const diffMinutes = Math.max(0, Math.floor(diffMs / 60000))
+  if (diffMinutes < 1) return 'just now'
+  if (diffMinutes < 60) return `${diffMinutes}m ago`
+
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+
+  const diffDays = Math.floor(diffHours / 24)
+  if (diffDays < 7) return `${diffDays}d ago`
+
+  return formatAbsoluteTimestamp(parsed)
+}

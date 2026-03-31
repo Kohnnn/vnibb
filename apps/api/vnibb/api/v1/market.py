@@ -183,6 +183,7 @@ class MarketIndicesResponse(BaseModel):
     count: int
     data: List[dict[str, Any]]
     updated_at: Optional[str] = None
+    source: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -315,6 +316,11 @@ MARKET_INDEX_MIN_EXPECTED_VALUE = {
     "HNX": 10.0,
     "UPCOM": 10.0,
 }
+YAHOO_MARKET_INDEX_SYMBOLS = {
+    "VNINDEX": "^VNINDEX.VN",
+}
+YAHOO_FINANCE_QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
+YAHOO_FINANCE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
 TOP_MOVER_TYPE_ALIASES = {
     "gainers": "gainer",
     "losers": "loser",
@@ -537,6 +543,55 @@ def _coerce_market_number(value: Any) -> Optional[float]:
         return None
 
 
+async def _fetch_yahoo_market_indices() -> list[dict[str, Any]]:
+    if not YAHOO_MARKET_INDEX_SYMBOLS:
+        return []
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=8.0,
+            follow_redirects=True,
+            headers={"User-Agent": YAHOO_FINANCE_USER_AGENT},
+        ) as client:
+            response = await client.get(
+                YAHOO_FINANCE_QUOTE_URL,
+                params={"symbols": ",".join(YAHOO_MARKET_INDEX_SYMBOLS.values())},
+            )
+            response.raise_for_status()
+    except Exception as exc:
+        logger.warning("Yahoo Finance index fetch failed: %s", exc)
+        return []
+
+    payload = response.json().get("quoteResponse", {}).get("result", [])
+    symbol_lookup = {symbol: code for code, symbol in YAHOO_MARKET_INDEX_SYMBOLS.items()}
+    rows: list[dict[str, Any]] = []
+    for item in payload:
+        code = symbol_lookup.get(str(item.get("symbol") or "").upper())
+        if not code:
+            continue
+
+        market_time = item.get("regularMarketTime")
+        updated_at = None
+        if isinstance(market_time, (int, float)):
+            updated_at = datetime.utcfromtimestamp(market_time).isoformat()
+
+        rows.append(
+            {
+                "index_name": code,
+                "current_value": _coerce_market_number(item.get("regularMarketPrice")),
+                "change": _coerce_market_number(item.get("regularMarketChange")),
+                "change_pct": _coerce_market_number(item.get("regularMarketChangePercent")),
+                "high": _coerce_market_number(item.get("regularMarketDayHigh")),
+                "low": _coerce_market_number(item.get("regularMarketDayLow")),
+                "volume": _coerce_market_number(item.get("regularMarketVolume")),
+                "time": updated_at,
+                "source": "yahoo_finance",
+            }
+        )
+
+    return rows
+
+
 def _normalize_market_index_metrics(row: dict[str, Any]) -> dict[str, Any]:
     current_value = _coerce_market_number(
         row.get("current_value") or row.get("close") or row.get("price")
@@ -687,8 +742,26 @@ def _merge_market_index_rows(
 
     for row in db_rows:
         code = _normalize_market_index_code(row.get("index_name"))
-        if code:
-            merged[code] = _normalize_market_index_metrics({**row, "index_name": code})
+        if not code:
+            continue
+
+        normalized_db_row = _normalize_market_index_metrics({**row, "index_name": code})
+        existing_row = merged.get(code)
+        if existing_row is None:
+            merged[code] = normalized_db_row
+            continue
+
+        combined_row = {**normalized_db_row, **existing_row}
+        provider_change = _coerce_market_number(existing_row.get("change"))
+        provider_change_pct = _coerce_market_number(existing_row.get("change_pct"))
+        db_change_pct = _coerce_market_number(normalized_db_row.get("change_pct"))
+
+        if provider_change_pct in (None, 0.0) and provider_change not in (None, 0.0) and db_change_pct is not None:
+            combined_row["change_pct"] = db_change_pct
+        for key in ["volume", "high", "low", "time"]:
+            if combined_row.get(key) is None and normalized_db_row.get(key) is not None:
+                combined_row[key] = normalized_db_row.get(key)
+        merged[code] = _normalize_market_index_metrics(combined_row)
 
     ordered_codes = [code for code in MARKET_INDEX_ORDER if code in merged]
     extra_codes = sorted(code for code in merged.keys() if code not in ordered_codes)
@@ -2278,7 +2351,7 @@ async def get_heatmap_data(
 
 
 @router.get("/indices", response_model=MarketIndicesResponse)
-@cached(ttl=60, key_prefix="market_indices")
+@cached(ttl=20, key_prefix="market_indices")
 async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
@@ -2290,15 +2363,22 @@ async def get_market_indices(
         logger.warning(f"Market indices DB fallback failed: {db_error}")
 
     try:
-        indices = await asyncio.wait_for(
-            VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
-            timeout=30,
-        )
-        provider_rows = [
-            item.model_dump(mode="json", by_alias=False) if hasattr(item, "model_dump") else item
-            for item in indices
-        ]
-        merged = _merge_market_index_rows(db_rows, provider_rows)
+        yahoo_rows = await _fetch_yahoo_market_indices()
+        merged = _merge_market_index_rows(db_rows, yahoo_rows)
+        if len(merged) < min(limit, len(MARKET_INDEX_ORDER)):
+            indices = await asyncio.wait_for(
+                VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
+                timeout=30,
+            )
+            provider_rows = [
+                item.model_dump(mode="json", by_alias=False) if hasattr(item, "model_dump") else item
+                for item in indices
+            ]
+            merged = _merge_market_index_rows(db_rows, [*yahoo_rows, *provider_rows])
+            source = "yahoo_finance+vnstock_fallback"
+        else:
+            source = "yahoo_finance+db_fallback"
+
         if merged:
             rows = merged[:limit]
             return MarketIndicesResponse(
@@ -2310,8 +2390,10 @@ async def get_market_indices(
                         for row in rows
                     ]
                 ),
+                source=source,
             )
-        rows = provider_rows[:limit]
+
+        rows = db_rows[:limit]
         return MarketIndicesResponse(
             count=len(rows),
             data=rows,
@@ -2321,6 +2403,7 @@ async def get_market_indices(
                     for row in rows
                 ]
             ),
+            source="db_fallback",
         )
     except Exception as e:
         logger.warning(f"Market indices fetch failed: {e}")
@@ -2335,9 +2418,10 @@ async def get_market_indices(
                         for row in rows
                     ]
                 ),
+                source="db_fallback",
                 error=str(e),
             )
-        return MarketIndicesResponse(count=0, data=[], error=str(e))
+        return MarketIndicesResponse(count=0, data=[], source="unavailable", error=str(e))
 
 
 @router.get("/breadth", response_model=MarketBreadthResponse)

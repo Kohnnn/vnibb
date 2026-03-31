@@ -13,7 +13,7 @@ interface AppTemplate {
     description: string;
     icon: React.ReactNode;
     category: 'market' | 'analysis' | 'research' | 'global';
-    widgets: { type: WidgetType; config?: Record<string, unknown> }[];
+    widgets: { type: WidgetType; config?: Record<string, unknown>; layout?: { x: number; y: number; w: number; h: number } }[];
     color: string;
 }
 
@@ -26,11 +26,13 @@ const APP_TEMPLATES: AppTemplate[] = [
         category: 'global',
         color: '#8B5CF6',
         widgets: [
-            { type: 'tradingview_chart', config: { symbol: 'SP:SPX' } },
-            { type: 'world_indices' },
-            { type: 'forex_rates' },
-            { type: 'commodities' },
-            { type: 'market_news' },
+            { type: 'tradingview_ticker_tape', layout: { x: 0, y: 0, w: 24, h: 4 } },
+            { type: 'tradingview_chart', config: { symbol: 'SP:SPX' }, layout: { x: 0, y: 4, w: 14, h: 8 } },
+            { type: 'world_indices', layout: { x: 14, y: 4, w: 10, h: 5 } },
+            { type: 'forex_rates', layout: { x: 14, y: 9, w: 5, h: 5 } },
+            { type: 'commodities', layout: { x: 19, y: 9, w: 5, h: 5 } },
+            { type: 'market_news', layout: { x: 0, y: 12, w: 12, h: 6 } },
+            { type: 'market_overview', layout: { x: 12, y: 14, w: 12, h: 4 } },
         ],
     },
     {
@@ -131,11 +133,11 @@ const APP_TEMPLATES: AppTemplate[] = [
         category: 'research',
         color: '#F97316',
         widgets: [
-            { type: 'earnings_season_monitor' },
-            { type: 'events_calendar' },
-            { type: 'income_statement' },
-            { type: 'cash_flow' },
-            { type: 'financial_ratios' },
+            { type: 'earnings_season_monitor', layout: { x: 0, y: 0, w: 14, h: 8 } },
+            { type: 'events_calendar', layout: { x: 14, y: 0, w: 10, h: 8 } },
+            { type: 'financial_ratios', layout: { x: 0, y: 8, w: 8, h: 6 } },
+            { type: 'income_statement', layout: { x: 8, y: 8, w: 8, h: 6 } },
+            { type: 'cash_flow', layout: { x: 16, y: 8, w: 8, h: 6 } },
         ],
     },
 ];
@@ -163,6 +165,7 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
         // Create a new dashboard with the template name
         const dashboard = createDashboard({
             name: template.name,
+            folderId: template.category === 'global' ? 'folder-initial' : undefined,
         });
 
         // Add widgets to the first tab
@@ -175,7 +178,7 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
                     type: widget.type,
                     tabId,
                     config: widget.config || {},
-                    layout: { x: col * 6, y: row * 4, w: 6, h: 4 }
+                    layout: widget.layout || { x: col * 6, y: row * 4, w: 6, h: 4 }
                 });
             });
         }

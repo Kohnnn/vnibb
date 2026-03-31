@@ -1535,6 +1535,7 @@ async def test_market_indices_smoke_returns_data(client, monkeypatch):
         "vnibb.api.v1.market.VnstockMarketOverviewFetcher.fetch",
         fake_market_overview_fetch,
     )
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
 
     response = await client.get("/api/v1/market/indices?limit=1")
     assert response.status_code == 200
@@ -1542,6 +1543,32 @@ async def test_market_indices_smoke_returns_data(client, monkeypatch):
     assert payload["count"] == 1
     assert payload["data"][0]["index_name"] == "VNINDEX"
     assert payload["updated_at"].startswith("2026-03-14T15:05:00")
+
+
+@pytest.mark.asyncio
+async def test_market_indices_use_yahoo_fast_path_when_available(client, monkeypatch):
+    async def fake_yahoo_fetch():
+        return [
+            {
+                "index_name": "VNINDEX",
+                "current_value": 1345.2,
+                "change": 8.4,
+                "change_pct": 0.63,
+                "high": 1349.1,
+                "low": 1338.0,
+                "volume": 1_200_000,
+                "time": "2026-03-21T08:15:00",
+                "source": "yahoo_finance",
+            }
+        ]
+
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_market_indices", fake_yahoo_fetch)
+
+    response = await client.get("/api/v1/market/indices?limit=1")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "yahoo_finance+db_fallback"
+    assert payload["data"][0]["current_value"] == pytest.approx(1345.2)
 
 
 @pytest.mark.asyncio
@@ -1612,6 +1639,7 @@ async def test_market_indices_prefer_db_rows_over_scaled_provider_payload(
         "vnibb.api.v1.market.VnstockMarketOverviewFetcher.fetch",
         fake_market_overview_fetch,
     )
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
 
     response = await client.get("/api/v1/market/indices?limit=2")
     assert response.status_code == 200
@@ -1666,6 +1694,7 @@ async def test_market_indices_recompute_zero_change_pct_from_db_history(
         "vnibb.api.v1.market.VnstockMarketOverviewFetcher.fetch",
         fake_market_overview_fetch,
     )
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
 
     response = await client.get("/api/v1/market/indices?limit=1")
     assert response.status_code == 200
@@ -2323,6 +2352,53 @@ async def test_financial_ratios_endpoint_filters_specific_quarter_periods(client
     payload = response.json()
     periods = [item["period"] for item in payload["data"]]
     assert periods == ["2023-Q1", "2024-Q1"]
+
+
+@pytest.mark.asyncio
+async def test_financial_ratios_endpoint_builds_ttm_row_from_latest_quarter(client, monkeypatch):
+    async def fake_ratio_fetch(_params):
+        return [
+            FinancialRatioData(symbol="VCI", period="2024-Q3", pe=8.5, pb=1.2),
+            FinancialRatioData(symbol="VCI", period="2024-Q4", pe=9.1, pb=1.4),
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockFinancialRatiosFetcher.fetch",
+        fake_ratio_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VCI/ratios?period=TTM")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["data"]) == 1
+    assert payload["data"][0]["period"] == "TTM"
+    assert payload["data"][0]["pe"] == pytest.approx(9.1)
+    assert payload["data"][0]["pb"] == pytest.approx(1.4)
+
+
+@pytest.mark.asyncio
+async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_db, monkeypatch):
+    test_db.add_all(
+        [
+            IncomeStatement(id=900, symbol="VNM", period="2024-Q1", period_type="quarter", fiscal_year=2024, fiscal_quarter=1, revenue=100.0, net_income=20.0),
+            IncomeStatement(id=901, symbol="VNM", period="2024-Q2", period_type="quarter", fiscal_year=2024, fiscal_quarter=2, revenue=120.0, net_income=24.0),
+            IncomeStatement(id=902, symbol="VNM", period="2024-Q3", period_type="quarter", fiscal_year=2024, fiscal_quarter=3, revenue=140.0, net_income=28.0),
+            IncomeStatement(id=903, symbol="VNM", period="2024-Q4", period_type="quarter", fiscal_year=2024, fiscal_quarter=4, revenue=160.0, net_income=32.0),
+        ]
+    )
+    await test_db.commit()
+
+    async def fake_get_financials_with_ttm(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", fake_get_financials_with_ttm)
+
+    response = await client.get("/api/v1/equity/VNM/income-statement?period=TTM&limit=1")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"][0]["period"] == "TTM"
+    assert payload["data"][0]["revenue"] == pytest.approx(520.0)
+    assert payload["data"][0]["net_income"] == pytest.approx(104.0)
 
 
 @pytest.mark.asyncio

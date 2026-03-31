@@ -122,10 +122,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   const resolveTradingViewDestination = () => {
     let dashboard =
-      (activeDashboard && activeDashboard.isEditable !== false ? activeDashboard : null) ??
       state.dashboards.find(
         (item) => item.name === GLOBAL_MARKETS_DASHBOARD_NAME && item.isEditable !== false,
       ) ??
+      (activeDashboard && activeDashboard.isEditable !== false ? activeDashboard : null) ??
       state.dashboards.find((item) => item.isEditable !== false) ??
       null;
 
@@ -133,6 +133,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       dashboard = createDashboard({
         name: GLOBAL_MARKETS_DASHBOARD_NAME,
         description: 'Charts and macro context for crypto, indices, and global assets.',
+        folderId: 'folder-initial',
       });
     }
 
@@ -150,7 +151,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       }
     }
 
-    const existingWidget = tab.widgets.find((item) => item.type === 'tradingview_chart') ?? null;
+    const existingWidget = tab.widgets.find((item) => {
+      if (item.type === 'tradingview_chart') return true;
+      if (item.type !== 'price_chart') return false;
+      const configuredSymbol = typeof item.config?.symbol === 'string' ? item.config.symbol : '';
+      return configuredSymbol.includes(':');
+    }) ?? null;
 
     setActiveDashboard(dashboard.id);
     setActiveTab(tab.id);
@@ -256,6 +262,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       const destination = resolveTradingViewDestination();
       if (destination.existingWidgetId) {
         updateWidget(destination.dashboardId, destination.tabId, destination.existingWidgetId, {
+          type: 'tradingview_chart',
           config: { ...destination.existingConfig, symbol: 'NASDAQ:AAPL' },
         });
       } else {
@@ -367,6 +374,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     const destination = resolveTradingViewDestination();
     if (destination.existingWidgetId) {
       updateWidget(destination.dashboardId, destination.tabId, destination.existingWidgetId, {
+        type: 'tradingview_chart',
         config: { ...destination.existingConfig, symbol: item.tv_symbol || item.symbol },
       });
     } else {

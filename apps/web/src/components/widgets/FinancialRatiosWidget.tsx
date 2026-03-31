@@ -81,7 +81,7 @@ const QUARTER_PERIOD_LIMIT = 28;
 const NULL_LIKE_RATIO_KEYS = new Set(['pe', 'pb', 'ps', 'peg_ratio', 'ev_sales', 'ev_ebitda']);
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
-const VALID_RATIO_PERIOD_RE = /^20\d{2}(?:-Q[1-4])?$/
+const VALID_RATIO_PERIOD_RE = /^(?:20\d{2}(?:-Q[1-4])?|TTM)$/
 
 function normalizeRatioPeriod(period: string | null | undefined): string | null {
     const cleaned = String(period ?? '').trim().toUpperCase()

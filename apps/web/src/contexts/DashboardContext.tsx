@@ -38,7 +38,7 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 13;
+const CURRENT_MIGRATION_VERSION = 14;
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
@@ -51,6 +51,8 @@ const MAIN_DASHBOARD_ID = 'default-fundamental';
 const MAIN_DASHBOARD_NAME = 'Fundamental';
 const TECHNICAL_DASHBOARD_ID = 'default-technical';
 const QUANT_DASHBOARD_ID = 'default-quant';
+const GLOBAL_MARKETS_DASHBOARD_ID = 'default-global-markets';
+const GLOBAL_MARKETS_DASHBOARD_NAME = 'Global Markets';
 const SYSTEM_DASHBOARD_IDS = new Set([MAIN_DASHBOARD_ID, TECHNICAL_DASHBOARD_ID, QUANT_DASHBOARD_ID]);
 
 // ============================================================================
@@ -232,6 +234,51 @@ const TECHNICAL_TEMPLATE: TemplateWidget[] = [
         config: {},
         layout: { x: 0, y: 30, w: 24, h: 6, minW: 12, minH: 4 }
     }
+];
+
+const GLOBAL_MARKETS_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'tradingview_ticker_tape',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 24, h: 4, minW: 12, minH: 3 }
+    },
+    {
+        type: 'tradingview_chart',
+        syncGroupId: 1,
+        config: { symbol: 'SP:SPX' },
+        layout: { x: 0, y: 4, w: 14, h: 8, minW: 10, minH: 6 }
+    },
+    {
+        type: 'world_indices',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 14, y: 4, w: 10, h: 5, minW: 8, minH: 4 }
+    },
+    {
+        type: 'forex_rates',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 14, y: 9, w: 5, h: 5, minW: 4, minH: 4 }
+    },
+    {
+        type: 'commodities',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 19, y: 9, w: 5, h: 5, minW: 4, minH: 4 }
+    },
+    {
+        type: 'market_news',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 12, w: 12, h: 6, minW: 8, minH: 5 }
+    },
+    {
+        type: 'market_overview',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 12, w: 12, h: 6, minW: 8, minH: 5 }
+    },
 ];
 
 // Comparison Analysis Tab: Multi-ticker comparison toolkit
@@ -840,14 +887,19 @@ const migrateLegacyChartWidgets = (dashboards: Dashboard[]): Dashboard[] => {
             ...tab,
             widgets: tab.widgets.map((widget) => {
                 const widgetType = widget.type as string;
-                if (widgetType !== 'tradingview_chart') {
-                    return widget;
+                const configuredSymbol = typeof widget.config?.symbol === 'string' ? widget.config.symbol : '';
+                const isGlobalContext =
+                    dashboard.name.trim().toLowerCase() === GLOBAL_MARKETS_DASHBOARD_NAME.toLowerCase() ||
+                    tab.name.trim().toLowerCase() === GLOBAL_MARKETS_DASHBOARD_NAME.toLowerCase();
+
+                if (widgetType === 'price_chart' && (configuredSymbol.includes(':') || isGlobalContext)) {
+                    return {
+                        ...widget,
+                        type: 'tradingview_chart',
+                    };
                 }
 
-                return {
-                    ...widget,
-                    type: 'price_chart',
-                };
+                return widget;
             }),
         })),
     }));
@@ -1279,6 +1331,33 @@ const createQuantSystemDashboard = (): Dashboard => {
     );
 };
 
+const createGlobalMarketsDashboard = (): Dashboard => {
+    const timestamp = new Date().toISOString();
+    const tabSpec: SystemDashboardTabSpec = {
+        idSuffix: 'global-markets',
+        name: GLOBAL_MARKETS_DASHBOARD_NAME,
+        template: GLOBAL_MARKETS_TEMPLATE,
+    };
+
+    return {
+        id: GLOBAL_MARKETS_DASHBOARD_ID,
+        name: GLOBAL_MARKETS_DASHBOARD_NAME,
+        description: 'Editable TradingView-first workspace for international indices, FX, commodities, and crypto.',
+        folderId: INITIAL_FOLDER_ID,
+        order: 3,
+        isDefault: false,
+        isEditable: true,
+        isDeletable: false,
+        showGroupLabels: true,
+        tabs: [createSystemDashboardTab(GLOBAL_MARKETS_DASHBOARD_ID, tabSpec, 0)],
+        syncGroups: [
+            { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: DEFAULT_TICKER },
+        ],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+    };
+};
+
 const ensureInitialFolderPresent = (folders: DashboardFolder[]): DashboardFolder[] => {
     const validFolders = Array.isArray(folders) ? folders.filter(Boolean) : [];
     const existingInitial = validFolders.find(
@@ -1324,6 +1403,11 @@ const ensureMainDashboardPresent = (dashboards: Dashboard[]): Dashboard[] => {
     );
     const existingTechnical = permissionsMigrated.find((dashboard) => dashboard.id === TECHNICAL_DASHBOARD_ID || dashboard.name === 'Technical');
     const existingQuant = permissionsMigrated.find((dashboard) => dashboard.id === QUANT_DASHBOARD_ID || dashboard.name === 'Quant');
+    const existingGlobalMarkets = permissionsMigrated.find(
+        (dashboard) =>
+            dashboard.id === GLOBAL_MARKETS_DASHBOARD_ID ||
+            dashboard.name === GLOBAL_MARKETS_DASHBOARD_NAME
+    );
 
     const buildSystemDashboard = (existing: Dashboard | undefined, fallback: Dashboard, order: number): Dashboard => ({
         ...(existing || fallback),
@@ -1349,17 +1433,44 @@ const ensureMainDashboardPresent = (dashboards: Dashboard[]): Dashboard[] => {
         buildSystemDashboard(existingQuant, fallbackQuant, 2),
     ];
 
+    const fallbackGlobalMarkets = createGlobalMarketsDashboard();
+    const globalMarketsDashboard: Dashboard = {
+        ...(existingGlobalMarkets || fallbackGlobalMarkets),
+        id: fallbackGlobalMarkets.id,
+        name: fallbackGlobalMarkets.name,
+        description: fallbackGlobalMarkets.description,
+        folderId: INITIAL_FOLDER_ID,
+        order: systemDashboards.length,
+        isDefault: false,
+        isEditable: true,
+        isDeletable: false,
+        tabs: Array.isArray(existingGlobalMarkets?.tabs) && existingGlobalMarkets.tabs.length > 0
+            ? existingGlobalMarkets.tabs
+            : fallbackGlobalMarkets.tabs,
+        syncGroups: Array.isArray(existingGlobalMarkets?.syncGroups) && existingGlobalMarkets.syncGroups.length > 0
+            ? existingGlobalMarkets.syncGroups
+            : fallbackGlobalMarkets.syncGroups,
+        createdAt: existingGlobalMarkets?.createdAt || fallbackGlobalMarkets.createdAt,
+        updatedAt: new Date().toISOString(),
+    };
+
     const nonSystemDashboards = permissionsMigrated
-        .filter((dashboard) => !SYSTEM_DASHBOARD_IDS.has(dashboard.id) && dashboard.name !== LEGACY_MAIN_DASHBOARD_NAME)
+        .filter(
+            (dashboard) =>
+                !SYSTEM_DASHBOARD_IDS.has(dashboard.id) &&
+                dashboard.name !== LEGACY_MAIN_DASHBOARD_NAME &&
+                dashboard.id !== GLOBAL_MARKETS_DASHBOARD_ID &&
+                dashboard.name !== GLOBAL_MARKETS_DASHBOARD_NAME
+        )
         .sort((a, b) => a.order - b.order)
         .map((dashboard, index) => ({
             ...dashboard,
-            order: index + systemDashboards.length,
+            order: index + systemDashboards.length + 1,
             isEditable: dashboard.isEditable ?? true,
             isDeletable: dashboard.isDeletable ?? true,
         }));
 
-    return [...systemDashboards, ...nonSystemDashboards];
+    return [...systemDashboards, globalMarketsDashboard, ...nonSystemDashboards];
 };
 
 const canEditDashboard = (dashboard?: Dashboard | null): boolean => {

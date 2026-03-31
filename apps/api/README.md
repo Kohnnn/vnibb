@@ -34,7 +34,7 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
 
 - **Framework:** FastAPI 0.110
 - **Language:** Python 3.12
-- **Database:** PostgreSQL (Supabase)
+- **Database:** Appwrite (primary) / PostgreSQL (fallback)
 - **ORM:** SQLAlchemy 2.0 (async)
 - **Cache:** Redis (Upstash)
 - **Data:** vnstock 3.5.0+
@@ -60,7 +60,7 @@ vnibb/
 
 ### Prerequisites
 - Python 3.12+
-- PostgreSQL or Supabase account
+- PostgreSQL or Appwrite account
 
 ### Installation
 
