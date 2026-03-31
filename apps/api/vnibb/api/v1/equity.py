@@ -85,7 +85,7 @@ from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-VALID_RATIO_PERIOD_RE = re.compile(r"^(?:\d{4}|Q[1-4]-\d{4}|\d{4}-Q[1-4])$")
+VALID_RATIO_PERIOD_RE = re.compile(r"^(?:\d{4}|Q[1-4]-\d{4}|\d{4}-Q[1-4]|TTM)$")
 
 _REFRESH_LOCK = asyncio.Lock()
 _REFRESH_IN_FLIGHT: set[str] = set()
@@ -277,12 +277,12 @@ async def _load_financial_statement_fallback(
     )
     if quarter_filter is not None:
         stmt = stmt.where(model.fiscal_quarter == quarter_filter)
-    stmt = stmt.limit(limit)
+    stmt = stmt.limit(max(limit, 4) if period_upper == "TTM" else limit)
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
 
-    return [
+    fallback_rows = [
         FinancialStatementData(
             symbol=row.symbol,
             period=row.period,
@@ -354,6 +354,87 @@ async def _load_financial_statement_fallback(
         )
         for row in rows
     ]
+
+    if period_upper == "TTM":
+        return _build_ttm_financial_statement_rows(fallback_rows, statement_type=statement_type)
+
+    return fallback_rows
+
+
+def _build_ttm_financial_statement_rows(
+    rows: list[FinancialStatementData],
+    *,
+    statement_type: str,
+) -> list[FinancialStatementData]:
+    quarter_rows = [
+        row for row in _sort_financial_statement_rows(rows) if "Q" in str(row.period or "").upper()
+    ]
+    if not quarter_rows:
+        return []
+
+    latest = quarter_rows[-1]
+    if statement_type in {"balance", "balance_sheet"}:
+        payload = latest.model_dump(mode="json")
+        payload["period"] = "TTM"
+        return [FinancialStatementData.model_validate(payload)]
+
+    source_rows = quarter_rows[-4:]
+    if len(source_rows) < 4:
+        return []
+
+    def sum_metric(field_name: str) -> float | None:
+        values = []
+        for row in source_rows:
+            value = getattr(row, field_name, None)
+            if isinstance(value, (int, float)):
+                values.append(float(value))
+        return sum(values) if values else None
+
+    payload = latest.model_dump(mode="json")
+    payload["period"] = "TTM"
+
+    for field_name in [
+        "revenue",
+        "cost_of_revenue",
+        "gross_profit",
+        "operating_income",
+        "pre_tax_profit",
+        "profit_before_tax",
+        "tax_expense",
+        "interest_expense",
+        "depreciation",
+        "selling_general_admin",
+        "research_development",
+        "other_income",
+        "net_income",
+        "ebitda",
+        "operating_cash_flow",
+        "investing_cash_flow",
+        "financing_cash_flow",
+        "free_cash_flow",
+        "net_change_in_cash",
+        "net_cash_flow",
+        "capex",
+        "capital_expenditure",
+        "dividends_paid",
+        "stock_repurchased",
+        "debt_repayment",
+    ]:
+        payload[field_name] = sum_metric(field_name)
+
+    payload["raw_data"] = latest.raw_data
+    return [FinancialStatementData.model_validate(payload)]
+
+
+def _build_ratio_ttm_rows(rows: List[FinancialRatioData]) -> List[FinancialRatioData]:
+    ordered_rows = sorted(rows, key=lambda item: _ratio_period_sort_key(item.period))
+    latest = ordered_rows[-1] if ordered_rows else None
+    if latest is None:
+        return []
+
+    payload = latest.model_dump(mode="json")
+    payload["period"] = "TTM"
+    return [FinancialRatioData.model_validate(payload)]
 
 
 def _financial_statement_identity(item: FinancialStatementData) -> tuple[str, int, int]:
@@ -1669,7 +1750,7 @@ def _filter_ratio_rows_for_period(
 
     if period_upper == "TTM":
         ttm_rows = [row for row in rows if "TTM" in str(row.period or "").upper()]
-        return ttm_rows if ttm_rows else rows
+        return ttm_rows if ttm_rows else _build_ratio_ttm_rows(rows)
 
     return rows
 

@@ -19,7 +19,8 @@ export function WidgetPreview({ type }: WidgetPreviewProps) {
     const normalizedType = normalizeWidgetType(type);
     const previews: Record<string, React.ReactNode> = {
         price_chart: <ChartPreview />,
-        tradingview_chart: <ChartPreview />,
+        tradingview_chart: <TradingViewPreview />,
+        tradingview_ticker_tape: <TickerTapePreview />,
         valuation_multiples_chart: <ChartPreview />,
         screener: <TablePreview rows={4} />,
         market_overview: <IndexCardsPreview />,
@@ -30,9 +31,9 @@ export function WidgetPreview({ type }: WidgetPreviewProps) {
         earnings_season_monitor: <TablePreview rows={5} />,
         balance_sheet: <TablePreview rows={5} />,
         income_statement: <TablePreview rows={5} />,
-        income_sankey: <ChartPreview />,
+        income_sankey: <SankeyPreview />,
         cash_flow: <TablePreview rows={5} />,
-        cashflow_waterfall: <ChartPreview />,
+        cashflow_waterfall: <WaterfallPreview />,
         portfolio_tracker: <PortfolioPreview />,
         top_movers: <TopMoversPreview />,
         sector_performance: <SectorPreview />,
@@ -98,6 +99,92 @@ function normalizeWidgetType(type: string) {
 }
 
 // Mini chart preview with bars
+function TradingViewPreview() {
+    return (
+        <div
+            className="h-full rounded-lg p-2"
+            style={{
+                background:
+                    'radial-gradient(circle at top left, rgba(59,130,246,0.22), transparent 55%), linear-gradient(135deg, rgba(15,23,42,0.95), rgba(30,41,59,0.72))',
+            }}
+        >
+            <div className="flex h-full flex-col justify-between rounded-md border border-white/10 bg-black/20 p-2">
+                <div className="flex items-center justify-between text-[7px] font-bold uppercase tracking-[0.18em] text-sky-200/80">
+                    <span>TradingView</span>
+                    <span>TV</span>
+                </div>
+                <div className="flex items-end gap-1">
+                    {[26, 38, 32, 49, 44, 63, 59, 74].map((height, index) => (
+                        <div
+                            key={index}
+                            className="flex-1 rounded-t"
+                            style={{
+                                height: `${height}%`,
+                                background: 'linear-gradient(to top, rgba(56,189,248,0.85), rgba(99,102,241,0.25))',
+                            }}
+                        />
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function TickerTapePreview() {
+    const items = ['VCI', 'VNM', 'SPX', 'BTC'];
+    return (
+        <div className="h-full flex items-center gap-1 overflow-hidden px-1.5 py-2">
+            {items.map((item, index) => (
+                <div key={item} className="flex min-w-[42px] flex-col rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-1.5 py-1">
+                    <span className="text-[7px] font-bold text-[var(--text-primary)]">{item}</span>
+                    <span className={`text-[7px] font-semibold ${index % 2 === 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {index % 2 === 0 ? '+0.8%' : '-0.4%'}
+                    </span>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function SankeyPreview() {
+    return (
+        <div className="h-full px-2 py-1.5">
+            <svg viewBox="0 0 100 48" className="h-full w-full">
+                <rect x="4" y="10" width="10" height="28" rx="3" fill="rgba(59,130,246,0.75)" />
+                <rect x="44" y="6" width="10" height="16" rx="3" fill="rgba(249,115,22,0.8)" />
+                <rect x="44" y="26" width="10" height="12" rx="3" fill="rgba(16,185,129,0.8)" />
+                <rect x="84" y="18" width="10" height="14" rx="3" fill="rgba(20,184,166,0.8)" />
+                <path d="M14 18 C26 18, 30 14, 44 14" fill="none" stroke="rgba(125,211,252,0.8)" strokeWidth="6" strokeLinecap="round" />
+                <path d="M14 30 C26 30, 30 32, 44 32" fill="none" stroke="rgba(134,239,172,0.75)" strokeWidth="8" strokeLinecap="round" />
+                <path d="M54 30 C68 30, 72 25, 84 25" fill="none" stroke="rgba(94,234,212,0.75)" strokeWidth="7" strokeLinecap="round" />
+            </svg>
+        </div>
+    );
+}
+
+function WaterfallPreview() {
+    const bars = [18, -10, 0, -8, 12, 0];
+    return (
+        <div className="h-full px-2 py-1.5">
+            <div className="flex h-full items-end gap-1">
+                {bars.map((value, index) => {
+                    const isTotal = index === 2 || index === bars.length - 1;
+                    const height = 10 + Math.abs(value) * 2;
+                    return (
+                        <div key={index} className="flex flex-1 flex-col items-center justify-end gap-1">
+                            <div
+                                className={`w-full rounded-t ${isTotal ? 'bg-blue-500/80' : value >= 0 ? 'bg-emerald-500/75' : 'bg-rose-500/75'}`}
+                                style={{ height }}
+                            />
+                            <div className="h-1 w-5 rounded bg-[var(--bg-tertiary)]" />
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
 function ChartPreview() {
     const bars = [40, 55, 45, 60, 50, 70, 65, 80, 75, 90, 85, 95];
     return (

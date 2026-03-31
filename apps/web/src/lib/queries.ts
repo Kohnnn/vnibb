@@ -387,8 +387,8 @@ export function useMarketOverview(enabled = true) {
         queryKey: queryKeys.marketOverview(),
         queryFn: ({ signal }) => api.getMarketOverview(signal),
         enabled,
-        staleTime: 30 * 1000,
-        refetchInterval: enabled ? 30 * 1000 : false,
+        staleTime: 20 * 1000,
+        refetchInterval: enabled ? 20 * 1000 : false,
         refetchIntervalInBackground: false,
     });
 }

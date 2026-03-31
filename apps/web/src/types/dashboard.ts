@@ -27,6 +27,7 @@ export type WidgetType =
     | 'valuation_multiples'
     | 'price_chart'
     | 'tradingview_chart'
+    | 'tradingview_ticker_tape'
     | 'valuation_multiples_chart'
     | 'valuation_band'
 
@@ -278,6 +279,7 @@ export interface WidgetDefinition {
     defaultConfig: WidgetConfig;
     defaultLayout: { w: number; h: number; minW: number; minH: number };
     recommended?: boolean;
+    searchKeywords?: string[];
 }
 
 export type WidgetCategory =

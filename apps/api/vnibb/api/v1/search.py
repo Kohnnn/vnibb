@@ -52,6 +52,15 @@ GLOBAL_ASSET_RESULTS: list[SearchTickerResult] = [
         symbol="DXY", name="US Dollar Index", type="index", exchange="INDEX", tv_symbol="TVC:DXY"
     ),
     SearchTickerResult(
+        symbol="USDVND", name="US Dollar / Vietnamese Dong", type="index", exchange="FOREX", tv_symbol="FX:USDVND"
+    ),
+    SearchTickerResult(
+        symbol="EURUSD", name="Euro / US Dollar", type="index", exchange="FOREX", tv_symbol="FX:EURUSD"
+    ),
+    SearchTickerResult(
+        symbol="USDJPY", name="US Dollar / Japanese Yen", type="index", exchange="FOREX", tv_symbol="FX:USDJPY"
+    ),
+    SearchTickerResult(
         symbol="AAPL",
         name="Apple Inc.",
         type="us_stock",

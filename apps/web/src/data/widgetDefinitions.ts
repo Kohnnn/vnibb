@@ -127,7 +127,18 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'global_markets',
         defaultConfig: {},
         defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
-        recommended: true
+        recommended: true,
+        searchKeywords: ['tv', 'trading view', 'global', 'macro', 'crypto', 'forex', 'indices']
+    },
+    {
+        type: 'tradingview_ticker_tape',
+        name: 'TradingView Ticker Tape',
+        description: 'VN-first ticker tape with global macro, FX, commodity, and crypto symbols',
+        category: 'global_markets',
+        defaultConfig: {},
+        defaultLayout: { w: 12, h: 4, minW: 8, minH: 3 },
+        recommended: true,
+        searchKeywords: ['tv', 'trading view', 'ticker tape', 'tape', 'macro', 'global', 'crypto', 'forex']
     },
     {
         type: 'valuation_multiples_chart',
@@ -162,7 +173,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'calendar',
         defaultConfig: {},
         defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
-        recommended: true
+        recommended: true,
+        searchKeywords: ['earnings', 'quarterly', 'release', 'results season', 'monitor']
     },
     {
         type: 'events_calendar',
@@ -375,7 +387,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Sankey-style flow from revenue through cost, operating income, tax, and net income',
         category: 'core_data',
         defaultConfig: {},
-        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 }
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
+        searchKeywords: ['sankey', 'flow', 'bridge', 'income flow']
     },
     {
         type: 'cash_flow',
@@ -392,7 +405,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Waterfall bridge from operating, investing, and financing cash flow to net cash change',
         category: 'core_data',
         defaultConfig: {},
-        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 }
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
+        searchKeywords: ['waterfall', 'cash bridge', 'cash flow bridge', 'flow']
     },
 
     // Market Data
@@ -444,7 +458,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Global market indices (S&P 500, Nikkei, DAX, etc.)',
         category: 'global_markets',
         defaultConfig: {},
-        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
+        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 },
+        searchKeywords: ['global', 'indices', 'macro', 'international']
     },
     {
         type: 'sector_performance',
@@ -746,7 +761,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'VND currency exchange rates',
         category: 'global_markets',
         defaultConfig: {},
-        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
+        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 },
+        searchKeywords: ['fx', 'forex', 'currency', 'usd vnd', 'global']
     },
     {
         type: 'commodities',
@@ -754,7 +770,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Gold, oil, and commodity prices',
         category: 'global_markets',
         defaultConfig: {},
-        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
+        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 },
+        searchKeywords: ['commodities', 'gold', 'oil', 'macro', 'global']
     },
     {
         type: 'similar_stocks',

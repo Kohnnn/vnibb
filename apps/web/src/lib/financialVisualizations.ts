@@ -83,12 +83,19 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
   const costOfRevenue = asPositive(latest.cost_of_revenue);
   const reportedGrossProfit = asPositive(latest.gross_profit);
   const grossProfit = reportedGrossProfit || Math.max(revenue - costOfRevenue, 0);
+  const sellingGeneralAdmin = asPositive(latest.selling_general_admin);
+  const researchDevelopment = asPositive(latest.research_development);
+  const depreciation = asPositive(latest.depreciation);
   const explicitOpex = firstFinite(
     asPositive(latest.operating_expense),
-    asPositive(latest.selling_general_admin) + asPositive(latest.research_development) + asPositive(latest.depreciation),
+    sellingGeneralAdmin + researchDevelopment + depreciation,
   ) ?? 0;
   const operatingIncome = asPositive(latest.operating_income);
   const operatingExpenses = explicitOpex || Math.max(grossProfit - operatingIncome, 0);
+  const otherOperatingExpenses = Math.max(
+    operatingExpenses - sellingGeneralAdmin - researchDevelopment - depreciation,
+    0,
+  );
   const interestExpense = asPositive(latest.interest_expense);
   const otherIncome = asPositive(latest.other_income);
   const reportedPreTaxProfit = asPositive(latest.pre_tax_profit ?? latest.profit_before_tax);
@@ -122,11 +129,35 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
       changePct: calculatePercentChange(latest.gross_profit ?? null, previous?.gross_profit ?? null, { clamp: 'yoy_change' }),
     },
     {
-      id: 'operating_expenses',
-      label: 'Operating Expenses',
-      value: operatingExpenses,
+      id: 'selling_general_admin',
+      label: 'SG&A',
+      value: sellingGeneralAdmin,
       stage: 2,
       tone: '#f97316',
+      changePct: calculatePercentChange(latest.selling_general_admin ?? null, previous?.selling_general_admin ?? null, { clamp: 'yoy_change' }),
+    },
+    {
+      id: 'research_development',
+      label: 'R&D',
+      value: researchDevelopment,
+      stage: 2,
+      tone: '#fb923c',
+      changePct: calculatePercentChange(latest.research_development ?? null, previous?.research_development ?? null, { clamp: 'yoy_change' }),
+    },
+    {
+      id: 'depreciation',
+      label: 'Depreciation',
+      value: depreciation,
+      stage: 2,
+      tone: '#fdba74',
+      changePct: calculatePercentChange(latest.depreciation ?? null, previous?.depreciation ?? null, { clamp: 'yoy_change' }),
+    },
+    {
+      id: 'other_operating_expenses',
+      label: 'Other OpEx',
+      value: otherOperatingExpenses,
+      stage: 2,
+      tone: '#f59e0b',
       changePct: null,
     },
     {
@@ -182,7 +213,10 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
   const links: FinancialFlowLink[] = [
     { source: 'revenue', target: 'cost_of_revenue', value: costOfRevenue, tone: '#fca5a5' },
     { source: 'revenue', target: 'gross_profit', value: grossProfit, tone: '#93c5fd' },
-    { source: 'gross_profit', target: 'operating_expenses', value: operatingExpenses, tone: '#fdba74' },
+    { source: 'gross_profit', target: 'selling_general_admin', value: sellingGeneralAdmin, tone: '#fdba74' },
+    { source: 'gross_profit', target: 'research_development', value: researchDevelopment, tone: '#fb923c' },
+    { source: 'gross_profit', target: 'depreciation', value: depreciation, tone: '#fdba74' },
+    { source: 'gross_profit', target: 'other_operating_expenses', value: otherOperatingExpenses, tone: '#fcd34d' },
     { source: 'gross_profit', target: 'operating_income', value: operatingIncome, tone: '#86efac' },
     { source: 'operating_income', target: 'interest_expense', value: interestExpense, tone: '#fda4af' },
     { source: 'operating_income', target: 'pre_tax_profit', value: Math.max(preTaxProfit - otherIncome, 0), tone: '#5eead4' },
@@ -220,8 +254,25 @@ export function buildCashFlowWaterfallModel(rows: CashFlowData[]): CashFlowWater
   const capex = firstFinite(latest.capex, latest.capital_expenditure, null);
   const dividends = firstFinite(latest.dividends_paid, null);
   const debtRepayment = firstFinite(latest.debt_repayment, null);
+  const stockRepurchased = firstFinite(latest.stock_repurchased, null);
   const freeCashFlow = firstFinite(latest.free_cash_flow, capex !== null ? operating + capex : null);
   const netChange = firstFinite(latest.net_change_in_cash, latest.net_cash_flow, operating + investing + financing) ?? 0;
+  const otherInvesting = capex !== null ? investing - capex : investing;
+  const financingAdjustments = [dividends, debtRepayment, stockRepurchased].reduce<number>(
+    (total, value) => total + (value ?? 0),
+    0,
+  );
+  const otherFinancing = financing - financingAdjustments;
+  const previousOtherInvesting =
+    (firstFinite(previous?.investing_cash_flow, 0) ?? 0) -
+    (firstFinite(previous?.capex, previous?.capital_expenditure, null) ?? 0);
+  const previousFinancingAdjustments = [
+    previous?.dividends_paid,
+    previous?.debt_repayment,
+    previous?.stock_repurchased,
+  ].reduce<number>((total, value) => total + (value ?? 0), 0);
+  const hasMeaningfulValue = (value: number | null | undefined) =>
+    typeof value === 'number' && Number.isFinite(value) && Math.abs(value) > 0.000001;
 
   let running = 0;
   const steps: WaterfallStep[] = [
@@ -260,6 +311,18 @@ export function buildCashFlowWaterfallModel(rows: CashFlowData[]): CashFlowWater
     });
     running = freeCashFlow;
   }
+  if (hasMeaningfulValue(otherInvesting)) {
+    steps.push({
+      id: 'other_investing_cash_flow',
+      label: 'Other Investing',
+      value: otherInvesting,
+      start: running,
+      end: running + otherInvesting,
+      tone: otherInvesting >= 0 ? 'positive' : 'negative',
+      changePct: calculatePercentChange(otherInvesting, previousOtherInvesting, { clamp: 'yoy_change' }),
+    });
+    running += otherInvesting;
+  }
   if (dividends !== null) {
     steps.push({
       id: 'dividends_paid',
@@ -284,26 +347,34 @@ export function buildCashFlowWaterfallModel(rows: CashFlowData[]): CashFlowWater
     });
     running += debtRepayment;
   }
-  steps.push({
-    id: 'investing_cash_flow',
-    label: 'Investing CF',
-    value: investing,
-    start: running,
-    end: running + investing,
-    tone: investing >= 0 ? 'positive' : 'negative',
-    changePct: calculatePercentChange(latest.investing_cash_flow ?? null, previous?.investing_cash_flow ?? null, { clamp: 'yoy_change' }),
-  });
-  running += investing;
-  steps.push({
-    id: 'financing_cash_flow',
-    label: 'Financing CF',
-    value: financing,
-    start: running,
-    end: running + financing,
-    tone: financing >= 0 ? 'positive' : 'negative',
-      changePct: calculatePercentChange(latest.financing_cash_flow ?? null, previous?.financing_cash_flow ?? null, { clamp: 'yoy_change' }),
+  if (stockRepurchased !== null) {
+    steps.push({
+      id: 'stock_repurchased',
+      label: 'Buybacks',
+      value: stockRepurchased,
+      start: running,
+      end: running + stockRepurchased,
+      tone: stockRepurchased >= 0 ? 'positive' : 'negative',
+      changePct: calculatePercentChange(stockRepurchased, previous?.stock_repurchased ?? null, { clamp: 'yoy_change' }),
     });
-  running += financing;
+    running += stockRepurchased;
+  }
+  if (hasMeaningfulValue(otherFinancing)) {
+    steps.push({
+      id: 'other_financing_cash_flow',
+      label: 'Other Financing',
+      value: otherFinancing,
+      start: running,
+      end: running + otherFinancing,
+      tone: otherFinancing >= 0 ? 'positive' : 'negative',
+      changePct: calculatePercentChange(
+        otherFinancing,
+        (previous?.financing_cash_flow ?? 0) - previousFinancingAdjustments,
+        { clamp: 'yoy_change' },
+      ),
+    });
+    running += otherFinancing;
+  }
   steps.push({
     id: 'net_change_in_cash',
     label: 'Net Change',

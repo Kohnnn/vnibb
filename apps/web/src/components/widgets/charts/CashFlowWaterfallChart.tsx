@@ -16,7 +16,8 @@ const CHART_LEFT = 70;
 const CHART_RIGHT = 860;
 const CHART_TOP = 46;
 const CHART_BOTTOM = 310;
-const BAR_WIDTH = 96;
+const BAR_MAX_WIDTH = 96;
+const BAR_MIN_WIDTH = 52;
 
 function formatDelta(changePct: number | null | undefined): string {
   if (changePct === null || changePct === undefined) return '';
@@ -31,19 +32,25 @@ export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfall
     const extentMax = maxValue === minValue ? maxValue + 1 : maxValue;
     const extentMin = maxValue === minValue ? minValue - 1 : minValue;
     const range = extentMax - extentMin;
-    const xGap = steps.length > 1 ? (CHART_RIGHT - CHART_LEFT - BAR_WIDTH) / (steps.length - 1) : 0;
+    const availableWidth = CHART_RIGHT - CHART_LEFT;
+    const barWidth = steps.length
+      ? Math.max(BAR_MIN_WIDTH, Math.min(BAR_MAX_WIDTH, availableWidth / Math.max(steps.length, 1) - 18))
+      : BAR_MAX_WIDTH;
+    const totalBarsWidth = barWidth * steps.length;
+    const xGap = steps.length > 1 ? Math.max((availableWidth - totalBarsWidth) / (steps.length - 1), 10) : 0;
 
     const scaleY = (value: number) => CHART_BOTTOM - ((value - extentMin) / range) * (CHART_BOTTOM - CHART_TOP);
 
     return {
       zeroY: scaleY(0),
       bars: steps.map((step, index) => {
-        const x = CHART_LEFT + index * xGap;
+        const x = CHART_LEFT + index * (barWidth + xGap);
         const topY = scaleY(Math.max(step.start, step.end));
         const bottomY = scaleY(Math.min(step.start, step.end));
         return {
           ...step,
           x,
+          width: barWidth,
           topY,
           bottomY,
           zeroY: scaleY(0),
@@ -89,7 +96,7 @@ export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfall
               <g key={bar.id}>
                 {index > 0 && bar.tone !== 'total' ? (
                   <line
-                    x1={laidOut.bars[index - 1].x + BAR_WIDTH}
+                    x1={laidOut.bars[index - 1].x + laidOut.bars[index - 1].width}
                     y1={laidOut.bars[index - 1].connectorY}
                     x2={bar.x}
                     y2={laidOut.bars[index - 1].connectorY}
@@ -101,22 +108,22 @@ export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfall
                 <rect
                   x={bar.x}
                   y={bar.topY}
-                  width={BAR_WIDTH}
+                  width={bar.width}
                   height={Math.max(bar.bottomY - bar.topY, 2)}
                   rx={8}
                   fill={fill}
                   opacity={0.92}
                 />
 
-                <text x={bar.x + BAR_WIDTH / 2} y={bar.topY - 8} textAnchor="middle" fill="var(--text-primary)" fontSize="12" fontWeight="600">
+                <text x={bar.x + bar.width / 2} y={bar.topY - 8} textAnchor="middle" fill="var(--text-primary)" fontSize="12" fontWeight="600">
                   {formatValue(bar.value)}
                 </text>
                 {delta ? (
-                  <text x={bar.x + BAR_WIDTH / 2} y={bar.topY - 22} textAnchor="middle" fill="var(--text-secondary)" fontSize="11">
+                  <text x={bar.x + bar.width / 2} y={bar.topY - 22} textAnchor="middle" fill="var(--text-secondary)" fontSize="11">
                     {delta}
                   </text>
                 ) : null}
-                <text x={bar.x + BAR_WIDTH / 2} y={CHART_BOTTOM + 22} textAnchor="middle" fill="var(--text-muted)" fontSize="12" fontWeight="600">
+                <text x={bar.x + bar.width / 2} y={CHART_BOTTOM + 22} textAnchor="middle" fill="var(--text-muted)" fontSize="12" fontWeight="600">
                   {bar.label}
                 </text>
               </g>

@@ -93,7 +93,7 @@ function DashboardContent() {
     } | null>(null);
 
     const starterTemplates = useMemo(() => {
-        const preferredIds = ['getting-started', 'fundamental-analyst', 'day-trader'];
+        const preferredIds = ['getting-started', 'fundamental-analyst', 'global-markets', 'earnings-season'];
         return preferredIds
             .map((id) => DASHBOARD_TEMPLATES.find((template) => template.id === id))
             .filter((template): template is DashboardTemplate => Boolean(template));
@@ -375,6 +375,8 @@ function DashboardContent() {
 
     const quickAddOptions: Array<{ type: WidgetType; label: string }> = [
         { type: 'price_chart', label: 'Price Chart' },
+        { type: 'tradingview_chart', label: 'TradingView Chart' },
+        { type: 'tradingview_ticker_tape', label: 'Ticker Tape' },
         { type: 'key_metrics', label: 'Key Metrics' },
         { type: 'screener', label: 'Screener' },
     ];

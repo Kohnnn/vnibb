@@ -7,11 +7,20 @@ export function CommandPaletteWrapper() {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      if (target.isContentEditable) return true;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    };
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        if (event.defaultPrevented || event.isComposing || event.repeat) return;
+        if (!open && isEditableTarget(event.target)) return;
         event.preventDefault();
         event.stopPropagation();
-        setOpen(true);
+        setOpen((current) => !current);
       }
     };
 
@@ -23,7 +32,7 @@ export function CommandPaletteWrapper() {
       document.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('vnibb:open-command-palette', handleOpen);
     };
-  }, []);
+  }, [open]);
 
   return (
     <CommandPalette open={open} onOpenChange={setOpen} />

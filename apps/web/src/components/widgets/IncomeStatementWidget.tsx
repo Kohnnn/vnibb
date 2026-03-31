@@ -203,7 +203,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                 parentId: 'group:profitability',
                 indent: 12,
                 values: Object.fromEntries(
-                    orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => [
+                    recentItems.map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
                         rowValue(entry, metricKey),
                     ])
@@ -239,7 +239,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                 parentId: 'group:per-share',
                 indent: 12,
                 values: Object.fromEntries(
-                    orderedItems.slice(-TABLE_YEAR_LIMIT).map((entry, index) => [
+                    recentItems.map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
                         entry.eps,
                     ])

@@ -400,10 +400,12 @@ export interface MarketIndexData {
   high?: number;
   low?: number;
   time?: string | null;
+  source?: string | null;
 }
 
 export interface MarketOverviewResponse {
   count: number;
   data: MarketIndexData[];
   updated_at?: string | null;
+  source?: string | null;
 }

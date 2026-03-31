@@ -53,7 +53,7 @@ dependencies = [
     # Database
     "sqlalchemy>=2.0.0",
     "alembic>=1.13.0",
-    "asyncpg>=0.29.0",  # PostgreSQL async driver (Supabase)
+    "asyncpg>=0.29.0",  # PostgreSQL async driver (works with Supabase and standalone Postgres)
     "psycopg2-binary>=2.9.0",  # PostgreSQL sync driver
     "python-jose[cryptography]>=3.3.0",  # JWT handling
     

@@ -82,15 +82,19 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
     });
 
     const filteredCategories = useMemo(() => {
+        const normalizedQuery = searchQuery.trim().toLowerCase();
+        const matchesWidget = (widget: typeof widgetDefinitions[number]) => {
+            if (!normalizedQuery) return true;
+            return (
+                widget.name.toLowerCase().includes(normalizedQuery) ||
+                widget.description.toLowerCase().includes(normalizedQuery) ||
+                (widget.searchKeywords || []).some((keyword) => keyword.toLowerCase().includes(normalizedQuery))
+            );
+        };
+
         return widgetCategories.map(cat => ({
             ...cat,
-            widgets: widgetDefinitions.filter(w =>
-                w.category === cat.id && (
-                    searchQuery === '' ||
-                    w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                    w.description.toLowerCase().includes(searchQuery.toLowerCase())
-                )
-            )
+            widgets: widgetDefinitions.filter((widget) => widget.category === cat.id && matchesWidget(widget))
         })).filter(cat => cat.widgets.length > 0);
     }, [searchQuery]);
 
@@ -335,11 +339,17 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                         <div className="text-[10px] text-[var(--text-muted)] line-clamp-2 leading-tight font-medium">
                                                             {widget.description}
                                                         </div>
-                                                        {widget.recommended && (
-                                                            <div className="mt-2 inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-300">
-                                                                Recommended
+                                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                            {widget.recommended && (
+                                                                <div className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-300">
+                                                                    Recommended
+                                                                </div>
+                                                            )}
+                                                            <div className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                                                                <Maximize2 size={10} className="text-blue-400/60" />
+                                                                {widget.defaultLayout.w}x{widget.defaultLayout.h}
                                                             </div>
-                                                        )}
+                                                        </div>
 
                                                         {/* Enhanced Preview Thumbnail */}
                                                         <div className="mt-3 h-20 bg-[var(--bg-primary)] rounded-xl border border-[var(--border-subtle)] relative overflow-hidden group-hover:border-blue-500/30 transition-all">

@@ -74,7 +74,10 @@ export function buildTickerPaletteSections(
     id: `${item.type}:${item.symbol}`,
     type: item.type,
     label: item.symbol,
-    description: item.name,
+    description:
+      item.type === 'vn_stock'
+        ? item.name
+        : `${item.name} • Opens TradingView in Global Markets`,
     symbol: item.symbol,
     exchange: item.exchange,
     tvSymbol: item.tv_symbol,
@@ -100,12 +103,12 @@ export function buildTickerPaletteSections(
 
   const sections: CommandPaletteSection[] = [];
   if (filteredRecents.length) sections.push({ key: 'recent', label: 'Recent', items: filteredRecents });
-  if (byType('vn_stock').length) sections.push({ key: 'stocks', label: 'Stocks', items: byType('vn_stock') });
+  if (byType('vn_stock').length) sections.push({ key: 'stocks', label: 'VN Stocks', items: byType('vn_stock') });
   if (byType('crypto').length) sections.push({ key: 'crypto', label: 'Crypto', items: byType('crypto') });
   if (byType('index').length || byType('us_stock').length) {
     sections.push({
       key: 'global',
-      label: 'Global',
+      label: 'Global & Macro',
       items: [...byType('index'), ...byType('us_stock')],
     });
   }

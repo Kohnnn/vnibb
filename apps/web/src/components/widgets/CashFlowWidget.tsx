@@ -50,6 +50,10 @@ const labels: Record<string, string> = {
     depreciation: 'Depreciation',
     taxes_paid: 'Taxes Paid',
     interest_paid: 'Interest Paid',
+    change_in_receivables: 'Receivables Change',
+    change_in_inventory: 'Inventory Change',
+    change_in_payables: 'Payables Change',
+    fx_effect: 'FX Effect',
     proceeds_from_borrowings: 'Borrowings Received',
     proceeds_from_share_issuance: 'Share Issuance',
     proceeds_from_asset_sales: 'Asset Sale Proceeds',
@@ -73,10 +77,15 @@ const RAW_CASHFLOW_ALIASES: Record<string, string[]> = {
     depreciation: ['depreciation', 'depreciation_and_amortisation', 'khau_hao_tscd'],
     taxes_paid: ['taxes_paid', 'income_tax_paid', 'cash_paid_for_taxes', 'chi_nop_thue_thu_nhap_doanh_nghiep'],
     interest_paid: ['interest_paid', 'interest_expense_paid', 'cash_paid_for_interest', 'lai_vay_da_tra'],
+    change_in_receivables: ['change_in_receivables', 'increase_decrease_in_receivables', 'tang_giam_cac_khoan_phai_thu'],
+    change_in_inventory: ['change_in_inventory', 'increase_decrease_in_inventories', 'tang_giam_hang_ton_kho'],
+    change_in_payables: ['change_in_payables', 'increase_decrease_in_payables', 'tang_giam_cac_khoan_phai_tra'],
+    fx_effect: ['effect_of_exchange_rate_changes', 'fx_effect', 'chenh_lech_ty_gia'],
     proceeds_from_borrowings: ['proceeds_from_borrowings', 'cash_received_from_borrowings', 'tien_thu_tu_di_vay'],
     proceeds_from_share_issuance: ['proceeds_from_issue_of_shares', 'cash_received_from_shares_issue', 'phat_hanh_co_phieu'],
     proceeds_from_asset_sales: ['proceeds_from_disposal_of_fixed_assets', 'cash_received_from_disposal_of_fixed_assets', 'thu_tu_thanh_ly_tai_san'],
     acquisition_spend: ['payments_for_acquisitions', 'acquisition_spend', 'chi_mua_cong_ty_con'],
+    stock_repurchased: ['stock_repurchased', 'repurchase_of_shares', 'purchase_of_treasury_shares', 'co_phieu_quy'],
 };
 
 function toNumeric(value: unknown): number | null {
@@ -165,6 +174,10 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             getRawMetric(item, 'depreciation'),
             getRawMetric(item, 'taxes_paid'),
             getRawMetric(item, 'interest_paid'),
+            getRawMetric(item, 'change_in_receivables'),
+            getRawMetric(item, 'change_in_inventory'),
+            getRawMetric(item, 'change_in_payables'),
+            getRawMetric(item, 'fx_effect'),
             getRawMetric(item, 'proceeds_from_borrowings'),
             getRawMetric(item, 'proceeds_from_share_issuance'),
             getRawMetric(item, 'proceeds_from_asset_sales'),
@@ -205,8 +218,14 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
         const valueFor = (entry: (typeof items)[number], metricKey: string): number | null | undefined => {
             if (metricKey === 'net_change_in_cash') return entry.net_change_in_cash ?? entry.net_cash_flow
             if (metricKey === 'capex') return entry.capex ?? entry.capital_expenditure
+
+            const normalizedValue = (entry as unknown as Record<string, number | null | undefined>)[metricKey]
+            if (typeof normalizedValue === 'number' && Number.isFinite(normalizedValue)) {
+                return normalizedValue
+            }
+
             if (metricKey in RAW_CASHFLOW_ALIASES) return getRawMetric(entry as CashFlowData, metricKey)
-            return (entry as unknown as Record<string, number | null | undefined>)[metricKey]
+            return normalizedValue
         }
         const recentItems = orderedItems.slice(-visiblePeriodLimit)
         const hasMetricData = (metricKey: string) =>
@@ -235,23 +254,30 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                 : null;
 
         return [
-            { id: 'group:cash-flows', label: 'Cash flows', values: {}, isGroup: true },
-            createRow('group:cash-flows', 'operating_cash_flow'),
-            createRow('group:cash-flows', 'depreciation'),
-            createRow('group:cash-flows', 'taxes_paid'),
-            createRow('group:cash-flows', 'interest_paid'),
-            createRow('group:cash-flows', 'investing_cash_flow'),
-            createRow('group:cash-flows', 'proceeds_from_asset_sales'),
-            createRow('group:cash-flows', 'acquisition_spend'),
-            createRow('group:cash-flows', 'financing_cash_flow'),
-            createRow('group:cash-flows', 'proceeds_from_borrowings'),
-            createRow('group:cash-flows', 'proceeds_from_share_issuance'),
+            { id: 'group:operations', label: 'Operating details', values: {}, isGroup: true },
+            createRow('group:operations', 'operating_cash_flow'),
+            createRow('group:operations', 'depreciation'),
+            createRow('group:operations', 'taxes_paid'),
+            createRow('group:operations', 'interest_paid'),
+            createRow('group:operations', 'change_in_receivables'),
+            createRow('group:operations', 'change_in_inventory'),
+            createRow('group:operations', 'change_in_payables'),
+            createRow('group:operations', 'fx_effect'),
+            { id: 'group:investing', label: 'Investing details', values: {}, isGroup: true },
+            createRow('group:investing', 'investing_cash_flow'),
+            createRow('group:investing', 'capex'),
+            createRow('group:investing', 'proceeds_from_asset_sales'),
+            createRow('group:investing', 'acquisition_spend'),
+            { id: 'group:financing', label: 'Financing details', values: {}, isGroup: true },
+            createRow('group:financing', 'financing_cash_flow'),
+            createRow('group:financing', 'proceeds_from_borrowings'),
+            createRow('group:financing', 'proceeds_from_share_issuance'),
+            createRow('group:financing', 'dividends_paid'),
+            createRow('group:financing', 'debt_repayment'),
+            createRow('group:financing', 'stock_repurchased'),
             { id: 'group:summary', label: 'Summary', values: {}, isGroup: true },
             createRow('group:summary', 'free_cash_flow'),
             createRow('group:summary', 'net_change_in_cash'),
-            createRow('group:summary', 'capex'),
-            createRow('group:summary', 'dividends_paid'),
-            createRow('group:summary', 'debt_repayment'),
         ].filter(Boolean) as DenseTableRow[];
     }, [orderedItems, tableColumns, visiblePeriodLimit]);
 
