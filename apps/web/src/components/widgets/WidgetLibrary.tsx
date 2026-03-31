@@ -5,7 +5,7 @@ import { useDashboard } from '@/contexts/DashboardContext';
 import { widgetCategories, widgetDefinitions } from '@/data/widgetDefinitions';
 import {
     Search, X, ChevronRight,
-    Box, Star, BarChart3, DollarSign, TrendingUp,
+    Box, Star, BarChart3, DollarSign, TrendingUp, Globe,
     Newspaper, PieChart, Info, Layers,
     Plus, Clock, Maximize2, Sigma
 } from 'lucide-react';
@@ -24,6 +24,7 @@ const CATEGORY_ICONS: Record<string, any> = {
     'core_data': BarChart3,
     'financials': DollarSign,
     'charting': TrendingUp,
+    'global_markets': Globe,
     'quant': Sigma,
     'calendar': Newspaper,
     'screener': Search,
@@ -334,6 +335,11 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                         <div className="text-[10px] text-[var(--text-muted)] line-clamp-2 leading-tight font-medium">
                                                             {widget.description}
                                                         </div>
+                                                        {widget.recommended && (
+                                                            <div className="mt-2 inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-300">
+                                                                Recommended
+                                                            </div>
+                                                        )}
 
                                                         {/* Enhanced Preview Thumbnail */}
                                                         <div className="mt-3 h-20 bg-[var(--bg-primary)] rounded-xl border border-[var(--border-subtle)] relative overflow-hidden group-hover:border-blue-500/30 transition-all">

@@ -27,6 +27,7 @@ export function WidgetPreview({ type }: WidgetPreviewProps) {
         news_feed: <NewsPreview />,
         ticker_info: <TickerInfoPreview />,
         key_metrics: <MetricsPreview />,
+        earnings_season_monitor: <TablePreview rows={5} />,
         balance_sheet: <TablePreview rows={5} />,
         income_statement: <TablePreview rows={5} />,
         income_sankey: <ChartPreview />,

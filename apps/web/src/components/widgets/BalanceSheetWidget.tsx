@@ -159,10 +159,10 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
-        const valueFor = (entry: (typeof items)[number], metricKey: string) => {
+        const valueFor = (entry: (typeof items)[number], metricKey: string): number | null | undefined => {
             if (metricKey === 'total_equity') return entry.total_equity ?? entry.equity
             if (metricKey === 'accounts_receivable') return entry.accounts_receivable ?? entry.receivables
-            return entry[metricKey as keyof typeof entry]
+            return (entry as unknown as Record<string, number | null | undefined>)[metricKey]
         }
         const recentItems = orderedItems.slice(-visiblePeriodLimit)
         const hasMetricData = (metricKey: string) =>
@@ -371,7 +371,7 @@ function BalanceSheetWidgetComponent({ id, symbol, isEditing, onRemove }: Balanc
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={`${period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period}`}
+                        note={period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : 'Quarterly'}
                         sourceLabel="Balance sheet"
                         align="right"
                     />

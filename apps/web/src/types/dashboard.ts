@@ -36,6 +36,7 @@ export type WidgetType =
     | 'company_profile'
     | 'financials'
     | 'earnings_history'
+    | 'earnings_season_monitor'
     | 'dividend_payment'
     | 'stock_splits'
     | 'company_filings'
@@ -276,11 +277,13 @@ export interface WidgetDefinition {
     category: WidgetCategory;
     defaultConfig: WidgetConfig;
     defaultLayout: { w: number; h: number; minW: number; minH: number };
+    recommended?: boolean;
 }
 
 export type WidgetCategory =
     | 'core_data'
     | 'charting'
+    | 'global_markets'
     | 'calendar'
     | 'ownership'
     | 'estimates'

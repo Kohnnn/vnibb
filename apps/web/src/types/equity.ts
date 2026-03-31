@@ -309,6 +309,8 @@ export interface SubsidiariesResponse {
 export interface BalanceSheetData {
   symbol: string;
   period?: string;
+  updated_at?: string;
+  raw_data?: Record<string, unknown>;
   total_assets?: number;
   current_assets?: number;
   fixed_assets?: number;
@@ -339,6 +341,8 @@ export interface BalanceSheetResponse {
 export interface IncomeStatementData {
   symbol: string;
   period?: string;
+  updated_at?: string;
+  raw_data?: Record<string, unknown>;
   revenue?: number;
   cost_of_revenue?: number;
   gross_profit?: number;
@@ -366,6 +370,8 @@ export interface IncomeStatementResponse {
 export interface CashFlowData {
   symbol: string;
   period?: string;
+  updated_at?: string;
+  raw_data?: Record<string, unknown>;
   operating_cash_flow?: number;
   investing_cash_flow?: number;
   financing_cash_flow?: number;

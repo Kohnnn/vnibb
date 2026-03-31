@@ -65,6 +65,27 @@ GLOBAL_ASSET_RESULTS: list[SearchTickerResult] = [
         exchange="NASDAQ",
         tv_symbol="NASDAQ:NVDA",
     ),
+    SearchTickerResult(
+        symbol="QQQ",
+        name="Invesco QQQ Trust",
+        type="us_stock",
+        exchange="NASDAQ",
+        tv_symbol="NASDAQ:QQQ",
+    ),
+    SearchTickerResult(
+        symbol="GOLD",
+        name="Spot Gold",
+        type="index",
+        exchange="COMMODITY",
+        tv_symbol="TVC:GOLD",
+    ),
+    SearchTickerResult(
+        symbol="USOIL",
+        name="WTI Crude Oil",
+        type="index",
+        exchange="COMMODITY",
+        tv_symbol="TVC:USOIL",
+    ),
 ]
 
 
@@ -124,14 +145,23 @@ async def search_tickers(
         if not query or _rank_text(query, item.symbol, item.name) < 99
     ]
 
-    combined = [*vn_results, *external_results]
-    combined.sort(
+    vn_results.sort(
         key=lambda item: (
             _rank_text(query, item.symbol, item.name),
-            item.type != "vn_stock",
             item.symbol,
         )
     )
+    external_results.sort(
+        key=lambda item: (
+            _rank_text(query, item.symbol, item.name),
+            item.symbol,
+        )
+    )
+
+    if query and len(query) <= 2:
+        combined = [*vn_results[:5], *external_results[:4], *vn_results[5:]]
+    else:
+        combined = [*vn_results, *external_results]
 
     unique_results: list[SearchTickerResult] = []
     seen_symbols: set[str] = set()

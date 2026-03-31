@@ -3,7 +3,7 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Layout, TrendingUp, BarChart3, LineChart, Globe, Briefcase, Search } from 'lucide-react';
+import { X, Layout, TrendingUp, BarChart3, LineChart, Globe, Briefcase, Search, Bitcoin } from 'lucide-react';
 import { useDashboard } from '@/contexts/DashboardContext';
 import type { WidgetType } from '@/types/dashboard';
 
@@ -12,12 +12,27 @@ interface AppTemplate {
     name: string;
     description: string;
     icon: React.ReactNode;
-    category: 'market' | 'analysis' | 'research';
+    category: 'market' | 'analysis' | 'research' | 'global';
     widgets: { type: WidgetType; config?: Record<string, unknown> }[];
     color: string;
 }
 
 const APP_TEMPLATES: AppTemplate[] = [
+    {
+        id: 'global-macro-tradingview',
+        name: 'Global Markets',
+        description: 'TradingView-first macro workspace for crypto, global indices, forex, and commodities.',
+        icon: <Bitcoin size={24} />,
+        category: 'global',
+        color: '#8B5CF6',
+        widgets: [
+            { type: 'tradingview_chart', config: { symbol: 'SP:SPX' } },
+            { type: 'world_indices' },
+            { type: 'forex_rates' },
+            { type: 'commodities' },
+            { type: 'market_news' },
+        ],
+    },
     {
         id: 'vietnam-overview',
         name: 'Vietnam Market Overview',
@@ -108,6 +123,21 @@ const APP_TEMPLATES: AppTemplate[] = [
             { type: 'company_filings' },
         ],
     },
+    {
+        id: 'earnings-season-monitor',
+        name: 'Earnings Season',
+        description: 'Monitor fresh quarterly releases, earnings quality, and follow-up statement work.',
+        icon: <BarChart3 size={24} />,
+        category: 'research',
+        color: '#F97316',
+        widgets: [
+            { type: 'earnings_season_monitor' },
+            { type: 'events_calendar' },
+            { type: 'income_statement' },
+            { type: 'cash_flow' },
+            { type: 'financial_ratios' },
+        ],
+    },
 ];
 
 interface AppsLibraryProps {
@@ -117,7 +147,7 @@ interface AppsLibraryProps {
 
 export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedCategory, setSelectedCategory] = useState<'all' | 'market' | 'analysis' | 'research'>('all');
+    const [selectedCategory, setSelectedCategory] = useState<'all' | 'market' | 'analysis' | 'research' | 'global'>('all');
     const { createDashboard, addWidget, setActiveDashboard, activeDashboard } = useDashboard();
 
     if (!isOpen) return null;
@@ -206,7 +236,7 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
                                 />
                             </div>
                             <div className="flex gap-1">
-                                {(['all', 'market', 'analysis', 'research'] as const).map(cat => (
+                                {(['all', 'market', 'analysis', 'research', 'global'] as const).map(cat => (
                                     <button
                                         key={cat}
                                         onClick={() => setSelectedCategory(cat)}

@@ -221,6 +221,31 @@ class MarketBreadthResponse(BaseModel):
     error: Optional[str] = None
 
 
+class EarningsSeasonItem(BaseModel):
+    symbol: str
+    name: str
+    exchange: Optional[str] = None
+    period: str
+    updated_at: Optional[str] = None
+    revenue: Optional[float] = None
+    net_income: Optional[float] = None
+    eps: Optional[float] = None
+    gross_margin: Optional[float] = None
+    revenue_yoy: Optional[float] = None
+    earnings_yoy: Optional[float] = None
+    gross_margin_delta: Optional[float] = None
+    score: Optional[float] = None
+    signal: str
+
+
+class EarningsSeasonResponse(BaseModel):
+    count: int
+    season: Optional[str] = None
+    data: List[EarningsSeasonItem]
+    updated_at: Optional[str] = None
+    error: Optional[str] = None
+
+
 class WorldIndicesResponse(BaseModel):
     count: int
     data: List[dict[str, Any]]
@@ -768,6 +793,63 @@ def _latest_timestamp(values: List[Any]) -> Optional[str]:
     if not parsed_values:
         return None
     return max(parsed_values).isoformat()
+
+
+def _quarter_label(year: Any, quarter: Any) -> Optional[str]:
+    if year is None or quarter is None:
+        return None
+    try:
+        return f"Q{int(quarter)} {int(year)}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _growth_rate(current: Optional[float], previous: Optional[float]) -> Optional[float]:
+    if current is None or previous in (None, 0):
+        return None
+    if abs(previous) < 0.001:
+        return None
+    return round(((current - previous) / abs(previous)) * 100, 2)
+
+
+def _margin_rate(numerator: Optional[float], denominator: Optional[float]) -> Optional[float]:
+    if numerator is None or denominator in (None, 0):
+        return None
+    if abs(denominator) < 0.001:
+        return None
+    return round((numerator / denominator) * 100, 2)
+
+
+def _earnings_signal(
+    revenue_yoy: Optional[float],
+    earnings_yoy: Optional[float],
+    margin_delta: Optional[float],
+) -> tuple[str, float]:
+    score = 50.0
+    if revenue_yoy is not None:
+        score += max(min(revenue_yoy, 60), -40) * 0.25
+    if earnings_yoy is not None:
+        score += max(min(earnings_yoy, 80), -50) * 0.35
+    if margin_delta is not None:
+        score += max(min(margin_delta, 15), -15) * 1.0
+
+    score = round(max(min(score, 99), 1), 1)
+    if score >= 72:
+        return "High Conviction", score
+    if score >= 58:
+        return "Watch", score
+    if score >= 45:
+        return "Mixed", score
+    return "Weak", score
+
+
+def _earnings_period_sort_key(period: str | None) -> int:
+    text = str(period or "").upper()
+    year_match = re.search(r"(20\d{2})", text)
+    quarter_match = re.search(r"Q([1-4])", text)
+    year = int(year_match.group(1)) if year_match else 0
+    quarter = int(quarter_match.group(1)) if quarter_match else 0
+    return year * 10 + quarter
 
 
 def _normalize_mover_type(value: Optional[str]) -> str:
@@ -2196,7 +2278,7 @@ async def get_heatmap_data(
 
 
 @router.get("/indices", response_model=MarketIndicesResponse)
-@cached(ttl=180, key_prefix="market_indices")
+@cached(ttl=60, key_prefix="market_indices")
 async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
@@ -2283,6 +2365,172 @@ async def get_market_breadth() -> MarketBreadthResponse:
     except Exception as exc:
         logger.warning("Market breadth fetch failed: %s", exc)
         return MarketBreadthResponse(count=0, data=[], error=str(exc))
+
+
+@router.get("/earnings-season", response_model=EarningsSeasonResponse)
+@cached(ttl=600, key_prefix="earnings_season")
+async def get_earnings_season(
+    limit: int = Query(default=25, ge=5, le=100),
+    exchange: Optional[str] = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> EarningsSeasonResponse:
+    exchange_filter = _normalize_text(exchange)
+    normalized_exchange = exchange_filter.upper() if exchange_filter else None
+
+    latest_quarter_rows = (
+        select(
+            IncomeStatement.symbol.label("symbol"),
+            IncomeStatement.period.label("period"),
+            IncomeStatement.fiscal_year.label("fiscal_year"),
+            IncomeStatement.fiscal_quarter.label("fiscal_quarter"),
+            IncomeStatement.revenue.label("revenue"),
+            IncomeStatement.gross_profit.label("gross_profit"),
+            IncomeStatement.net_income.label("net_income"),
+            IncomeStatement.eps.label("eps"),
+            IncomeStatement.updated_at.label("updated_at"),
+            func.row_number()
+            .over(
+                partition_by=IncomeStatement.symbol,
+                order_by=(
+                    IncomeStatement.fiscal_year.desc(),
+                    IncomeStatement.fiscal_quarter.desc(),
+                    IncomeStatement.updated_at.desc(),
+                ),
+            )
+            .label("rn"),
+        )
+        .where(IncomeStatement.period_type == "quarter")
+        .subquery()
+    )
+
+    current_stmt = (
+        select(
+            latest_quarter_rows,
+            Stock.company_name.label("company_name"),
+            Stock.short_name.label("short_name"),
+            Stock.exchange.label("exchange"),
+        )
+        .join(Stock, Stock.symbol == latest_quarter_rows.c.symbol)
+        .where(latest_quarter_rows.c.rn == 1)
+    )
+    if normalized_exchange in {"HOSE", "HNX", "UPCOM"}:
+        current_stmt = current_stmt.where(Stock.exchange == normalized_exchange)
+
+    current_stmt = current_stmt.order_by(
+        latest_quarter_rows.c.fiscal_year.desc(),
+        latest_quarter_rows.c.fiscal_quarter.desc(),
+        latest_quarter_rows.c.updated_at.desc(),
+    ).limit(limit * 3)
+
+    current_rows = (await db.execute(current_stmt)).mappings().all()
+    if not current_rows:
+        return EarningsSeasonResponse(count=0, data=[])
+
+    symbols = [str(row["symbol"]).upper() for row in current_rows if row.get("symbol")]
+    previous_years = {int(row["fiscal_year"]) - 1 for row in current_rows if row.get("fiscal_year")}
+    previous_quarters = {
+        int(row["fiscal_quarter"]) for row in current_rows if row.get("fiscal_quarter")
+    }
+
+    previous_rows_stmt = (
+        select(
+            IncomeStatement.symbol,
+            IncomeStatement.fiscal_year,
+            IncomeStatement.fiscal_quarter,
+            IncomeStatement.revenue,
+            IncomeStatement.gross_profit,
+            IncomeStatement.net_income,
+            IncomeStatement.eps,
+        )
+        .where(IncomeStatement.period_type == "quarter")
+        .where(IncomeStatement.symbol.in_(symbols))
+        .where(IncomeStatement.fiscal_year.in_(previous_years))
+        .where(IncomeStatement.fiscal_quarter.in_(previous_quarters))
+    )
+    previous_rows = (await db.execute(previous_rows_stmt)).mappings().all()
+    previous_map = {
+        (
+            str(row["symbol"]).upper(),
+            int(row["fiscal_year"]),
+            int(row["fiscal_quarter"]),
+        ): row
+        for row in previous_rows
+        if row.get("symbol") and row.get("fiscal_year") and row.get("fiscal_quarter")
+    }
+
+    season_label = _quarter_label(
+        current_rows[0].get("fiscal_year"), current_rows[0].get("fiscal_quarter")
+    )
+    payload: list[EarningsSeasonItem] = []
+
+    for row in current_rows:
+        symbol = str(row["symbol"]).upper()
+        fiscal_year = int(row["fiscal_year"])
+        fiscal_quarter = int(row["fiscal_quarter"])
+        previous = previous_map.get((symbol, fiscal_year - 1, fiscal_quarter))
+
+        revenue = _to_float(row.get("revenue"))
+        gross_profit = _to_float(row.get("gross_profit"))
+        net_income = _to_float(row.get("net_income"))
+        eps = _to_float(row.get("eps"))
+        previous_revenue = _to_float(previous.get("revenue") if previous else None)
+        previous_gross_profit = _to_float(previous.get("gross_profit") if previous else None)
+        previous_net_income = _to_float(previous.get("net_income") if previous else None)
+
+        gross_margin = _margin_rate(gross_profit, revenue)
+        previous_margin = _margin_rate(previous_gross_profit, previous_revenue)
+        margin_delta = (
+            None
+            if gross_margin is None or previous_margin is None
+            else round(gross_margin - previous_margin, 2)
+        )
+        revenue_yoy = _growth_rate(revenue, previous_revenue)
+        earnings_yoy = _growth_rate(net_income, previous_net_income)
+        signal, score = _earnings_signal(revenue_yoy, earnings_yoy, margin_delta)
+
+        payload.append(
+            EarningsSeasonItem(
+                symbol=symbol,
+                name=_normalize_text(row.get("short_name"))
+                or _normalize_text(row.get("company_name"))
+                or symbol,
+                exchange=_normalize_text(row.get("exchange")),
+                period=_quarter_label(fiscal_year, fiscal_quarter)
+                or _normalize_text(row.get("period"))
+                or "-",
+                updated_at=_serialize_datetime_like(row.get("updated_at")),
+                revenue=revenue,
+                net_income=net_income,
+                eps=eps,
+                gross_margin=gross_margin,
+                revenue_yoy=revenue_yoy,
+                earnings_yoy=earnings_yoy,
+                gross_margin_delta=margin_delta,
+                score=score,
+                signal=signal,
+            )
+        )
+
+    payload.sort(
+        key=lambda item: (
+            _earnings_period_sort_key(item.period),
+            item.score or 0,
+            item.updated_at or "",
+        ),
+        reverse=True,
+    )
+
+    trimmed_payload = payload[:limit]
+    updated_at = _latest_timestamp([item.updated_at for item in trimmed_payload])
+    if trimmed_payload and season_label is None:
+        season_label = trimmed_payload[0].period
+
+    return EarningsSeasonResponse(
+        count=len(trimmed_payload),
+        season=season_label,
+        data=trimmed_payload,
+        updated_at=updated_at,
+    )
 
 
 @router.get("/industry-bubble", response_model=IndustryBubbleResponse)
