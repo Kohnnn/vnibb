@@ -161,10 +161,10 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
-        const rowValue = (entry: (typeof items)[number], metricKey: string) => {
+        const rowValue = (entry: (typeof items)[number], metricKey: string): number | null | undefined => {
             if (metricKey === 'pre_tax_profit') return entry.pre_tax_profit ?? entry.profit_before_tax;
-            return entry[metricKey as keyof typeof entry];
-        }
+            return (entry as unknown as Record<string, number | null | undefined>)[metricKey];
+        };
         const recentItems = orderedItems.slice(-visiblePeriodLimit)
         const hasAnyMetricData = (metricKey: string) =>
             recentItems.some((entry) => {
@@ -429,7 +429,7 @@ function IncomeStatementWidgetComponent({ id, symbol, isEditing, onRemove }: Inc
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={`${period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period}`}
+                        note={period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : 'Quarterly'}
                         sourceLabel="Income statement"
                         align="right"
                     />

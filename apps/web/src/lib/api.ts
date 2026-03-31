@@ -1918,8 +1918,42 @@ export interface MarketBreadthResponse {
     error?: string | null;
 }
 
+export interface EarningsSeasonItem {
+    symbol: string;
+    name: string;
+    exchange?: string | null;
+    period: string;
+    updated_at?: string | null;
+    revenue?: number | null;
+    net_income?: number | null;
+    eps?: number | null;
+    gross_margin?: number | null;
+    revenue_yoy?: number | null;
+    earnings_yoy?: number | null;
+    gross_margin_delta?: number | null;
+    score?: number | null;
+    signal: string;
+}
+
+export interface EarningsSeasonResponse {
+    count: number;
+    season?: string | null;
+    data: EarningsSeasonItem[];
+    updated_at?: string | null;
+    error?: string | null;
+}
+
 export async function getMarketBreadth(): Promise<MarketBreadthResponse> {
     return fetchAPI<MarketBreadthResponse>('/market/breadth');
+}
+
+export async function getEarningsSeason(options?: {
+    limit?: number;
+    exchange?: string;
+}): Promise<EarningsSeasonResponse> {
+    return fetchAPI<EarningsSeasonResponse>('/market/earnings-season', {
+        params: { limit: options?.limit, exchange: options?.exchange },
+    });
 }
 
 export async function getMarketHeatmap(options?: {

@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useState } from 'react';
-import { X, Layout, TrendingUp, Search, Newspaper, ChevronRight } from 'lucide-react';
+import { X, Layout, TrendingUp, Search, Newspaper, ChevronRight, Globe2 } from 'lucide-react';
 import { DASHBOARD_TEMPLATES, DashboardTemplate } from '@/types/dashboard-templates';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,6 +17,7 @@ const CATEGORY_ICONS: Record<string, any> = {
   analysis: Search,
   research: Layout,
   overview: Newspaper,
+  global: Globe2,
 };
 
 const CATEGORY_PREVIEW_STYLES: Record<string, string> = {
@@ -24,6 +25,7 @@ const CATEGORY_PREVIEW_STYLES: Record<string, string> = {
   analysis: 'from-sky-500/15 via-blue-500/5 to-cyan-500/10',
   research: 'from-amber-500/15 via-orange-500/5 to-yellow-500/10',
   overview: 'from-blue-500/15 via-indigo-500/5 to-cyan-500/10',
+  global: 'from-violet-500/15 via-fuchsia-500/5 to-cyan-500/10',
 };
 
 function formatWidgetType(type: string) {

@@ -32,6 +32,7 @@ import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } f
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { buildCashFlowWaterfallModel } from '@/lib/financialVisualizations';
 import { CashFlowWaterfallChart } from '@/components/widgets/charts/CashFlowWaterfallChart';
+import type { CashFlowData } from '@/types/equity';
 
 interface CashFlowWidgetProps {
     id: string;
@@ -46,6 +47,13 @@ const labels: Record<string, string> = {
     operating_cash_flow: 'Operating CF',
     investing_cash_flow: 'Investing CF',
     financing_cash_flow: 'Financing CF',
+    depreciation: 'Depreciation',
+    taxes_paid: 'Taxes Paid',
+    interest_paid: 'Interest Paid',
+    proceeds_from_borrowings: 'Borrowings Received',
+    proceeds_from_share_issuance: 'Share Issuance',
+    proceeds_from_asset_sales: 'Asset Sale Proceeds',
+    acquisition_spend: 'Acquisition Spend',
     net_cash_flow: 'Net Cash Flow',
     net_change_in_cash: 'Net Change in Cash',
     free_cash_flow: 'Free Cash Flow',
@@ -60,6 +68,45 @@ const TABLE_YEAR_LIMIT = 10;
 const QUARTER_PERIOD_LIMIT = 28;
 const QUARTER_CHART_POINTS = 16;
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
+
+const RAW_CASHFLOW_ALIASES: Record<string, string[]> = {
+    depreciation: ['depreciation', 'depreciation_and_amortisation', 'khau_hao_tscd'],
+    taxes_paid: ['taxes_paid', 'income_tax_paid', 'cash_paid_for_taxes', 'chi_nop_thue_thu_nhap_doanh_nghiep'],
+    interest_paid: ['interest_paid', 'interest_expense_paid', 'cash_paid_for_interest', 'lai_vay_da_tra'],
+    proceeds_from_borrowings: ['proceeds_from_borrowings', 'cash_received_from_borrowings', 'tien_thu_tu_di_vay'],
+    proceeds_from_share_issuance: ['proceeds_from_issue_of_shares', 'cash_received_from_shares_issue', 'phat_hanh_co_phieu'],
+    proceeds_from_asset_sales: ['proceeds_from_disposal_of_fixed_assets', 'cash_received_from_disposal_of_fixed_assets', 'thu_tu_thanh_ly_tai_san'],
+    acquisition_spend: ['payments_for_acquisitions', 'acquisition_spend', 'chi_mua_cong_ty_con'],
+};
+
+function toNumeric(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+        const parsed = Number(value.toString().replace(/,/g, '').trim());
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+}
+
+function getRawMetric(entry: CashFlowData, metricKey: string): number | null {
+    const rawData = entry.raw_data;
+    if (!rawData || typeof rawData !== 'object') return null;
+
+    for (const alias of RAW_CASHFLOW_ALIASES[metricKey] || []) {
+        const direct = toNumeric((rawData as Record<string, unknown>)[alias]);
+        if (direct !== null) return direct;
+
+        const loweredAlias = alias.toLowerCase();
+        for (const [rawKey, rawValue] of Object.entries(rawData)) {
+            if (rawKey.toLowerCase() === loweredAlias) {
+                const numeric = toNumeric(rawValue);
+                if (numeric !== null) return numeric;
+            }
+        }
+    }
+
+    return null;
+}
 
 function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWidgetProps) {
     const { period, setPeriod } = usePeriodState({
@@ -115,6 +162,13 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
             item.operating_cash_flow,
             item.investing_cash_flow,
             item.financing_cash_flow,
+            getRawMetric(item, 'depreciation'),
+            getRawMetric(item, 'taxes_paid'),
+            getRawMetric(item, 'interest_paid'),
+            getRawMetric(item, 'proceeds_from_borrowings'),
+            getRawMetric(item, 'proceeds_from_share_issuance'),
+            getRawMetric(item, 'proceeds_from_asset_sales'),
+            getRawMetric(item, 'acquisition_spend'),
             item.free_cash_flow,
             item.net_change_in_cash,
             item.net_cash_flow,
@@ -148,10 +202,11 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
-        const valueFor = (entry: (typeof items)[number], metricKey: string) => {
+        const valueFor = (entry: (typeof items)[number], metricKey: string): number | null | undefined => {
             if (metricKey === 'net_change_in_cash') return entry.net_change_in_cash ?? entry.net_cash_flow
             if (metricKey === 'capex') return entry.capex ?? entry.capital_expenditure
-            return entry[metricKey as keyof typeof entry]
+            if (metricKey in RAW_CASHFLOW_ALIASES) return getRawMetric(entry as CashFlowData, metricKey)
+            return (entry as unknown as Record<string, number | null | undefined>)[metricKey]
         }
         const recentItems = orderedItems.slice(-visiblePeriodLimit)
         const hasMetricData = (metricKey: string) =>
@@ -182,8 +237,15 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
         return [
             { id: 'group:cash-flows', label: 'Cash flows', values: {}, isGroup: true },
             createRow('group:cash-flows', 'operating_cash_flow'),
+            createRow('group:cash-flows', 'depreciation'),
+            createRow('group:cash-flows', 'taxes_paid'),
+            createRow('group:cash-flows', 'interest_paid'),
             createRow('group:cash-flows', 'investing_cash_flow'),
+            createRow('group:cash-flows', 'proceeds_from_asset_sales'),
+            createRow('group:cash-flows', 'acquisition_spend'),
             createRow('group:cash-flows', 'financing_cash_flow'),
+            createRow('group:cash-flows', 'proceeds_from_borrowings'),
+            createRow('group:cash-flows', 'proceeds_from_share_issuance'),
             { id: 'group:summary', label: 'Summary', values: {}, isGroup: true },
             createRow('group:summary', 'free_cash_flow'),
             createRow('group:summary', 'net_change_in_cash'),
@@ -357,7 +419,7 @@ function CashFlowWidgetComponent({ id, symbol, isEditing, onRemove }: CashFlowWi
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period}
+                        note={period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : 'Quarterly'}
                         sourceLabel="Cash flow"
                         align="right"
                     />

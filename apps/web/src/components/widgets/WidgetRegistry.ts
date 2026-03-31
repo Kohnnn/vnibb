@@ -7,6 +7,7 @@ import { TickerProfileWidget } from './TickerProfileWidget';
 import { KeyMetricsWidget } from './KeyMetricsWidget';
 import { ShareStatisticsWidget } from './ShareStatisticsWidget';
 import { EarningsHistoryWidget } from './EarningsHistoryWidget';
+import { EarningsSeasonMonitorWidget } from './EarningsSeasonMonitorWidget';
 import { DividendPaymentWidget } from './DividendPaymentWidget';
 import { ValuationWidget } from './ValuationWidget';
 import { ValuationMultiplesChartWidget } from './ValuationMultiplesChartWidget';
@@ -234,6 +235,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     screener: ScreenerWidget as ComponentType<WidgetProps>,
     company_profile: TickerProfileWidget as ComponentType<WidgetProps>,
     earnings_history: EarningsHistoryWidget as ComponentType<WidgetProps>,
+    earnings_season_monitor: EarningsSeasonMonitorWidget as ComponentType<WidgetProps>,
     dividend_payment: DividendPaymentWidget as ComponentType<WidgetProps>,
     valuation_multiples: ValuationWidget as ComponentType<WidgetProps>,
     valuation_multiples_chart: ValuationMultiplesChartWidget as ComponentType<WidgetProps>,
@@ -372,6 +374,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     company_profile: { w: 5, h: 6, minW: 4, minH: 5 },
     financials: { w: 5, h: 7, minW: 4, minH: 5 },
     earnings_history: { w: 7, h: 7, minW: 5, minH: 5 },
+    earnings_season_monitor: { w: 10, h: 8, minW: 8, minH: 6 },
     dividend_payment: { w: 7, h: 7, minW: 5, minH: 5 },
     stock_splits: { w: 7, h: 5, minW: 4, minH: 4 },
     company_filings: { w: 7, h: 7, minW: 5, minH: 5 },
@@ -485,6 +488,7 @@ export const widgetNames: Record<WidgetType, string> = {
     company_profile: 'Company Profile',
     financials: 'Financials',
     earnings_history: 'Earnings History',
+    earnings_season_monitor: 'Earnings Season Monitor',
     dividend_payment: 'Dividend Payment',
     stock_splits: 'Stock Splits',
     company_filings: 'Company Filings',
@@ -595,6 +599,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     company_profile: 'Full company background',
     financials: 'Consolidated financial reports',
     earnings_history: 'Historical earnings surprises',
+    earnings_season_monitor: 'Latest quarterly releases with quick revenue, earnings, and margin cross-checks',
     dividend_payment: 'Dividend history and yields',
     stock_splits: 'History of corporate splits',
     company_filings: 'Direct SEC/HOSE documents',

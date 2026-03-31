@@ -19,6 +19,12 @@ export const widgetCategories: WidgetCategoryInfo[] = [
         icon: 'TrendingUp'
     },
     {
+        id: 'global_markets',
+        name: 'Global Markets',
+        description: 'TradingView, world indices, forex, and macro context outside VN fundamentals',
+        icon: 'Globe'
+    },
+    {
         id: 'quant',
         name: 'Quant',
         description: 'Institutional-style quantitative and market microstructure tools',
@@ -111,15 +117,17 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Interactive price chart with candlestick/line options',
         category: 'charting',
         defaultConfig: { timeframe: '1Y', chartType: 'candle' },
-        defaultLayout: { w: 8, h: 6, minW: 6, minH: 4 }
+        defaultLayout: { w: 8, h: 6, minW: 6, minH: 4 },
+        recommended: true
     },
     {
         type: 'tradingview_chart',
         name: 'TradingView Chart',
         description: 'TradingView advanced chart for crypto, global indices, and external symbols',
-        category: 'charting',
+        category: 'global_markets',
         defaultConfig: {},
-        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 }
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
+        recommended: true
     },
     {
         type: 'valuation_multiples_chart',
@@ -146,6 +154,15 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'calendar',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 5, minW: 4, minH: 3 }
+    },
+    {
+        type: 'earnings_season_monitor',
+        name: 'Earnings Season Monitor',
+        description: 'Track the latest quarterly releases, YoY changes, and high-priority follow-up names',
+        category: 'calendar',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
+        recommended: true
     },
     {
         type: 'events_calendar',
@@ -249,7 +266,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Historical P/E, P/B, ROE, ROA, margins and more',
         category: 'core_data',
         defaultConfig: {},
-        defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 }
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 },
+        recommended: true
     },
     {
         type: 'bank_metrics',
@@ -339,7 +357,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Assets, liabilities, and equity breakdown',
         category: 'core_data',
         defaultConfig: {},
-        defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 }
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 },
+        recommended: true
     },
     {
         type: 'income_statement',
@@ -347,7 +366,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Revenue, expenses, and profit analysis',
         category: 'core_data',
         defaultConfig: {},
-        defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 }
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 },
+        recommended: true
     },
     {
         type: 'income_sankey',
@@ -363,7 +383,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Operating, investing, and financing cash flows',
         category: 'core_data',
         defaultConfig: {},
-        defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 }
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 4 },
+        recommended: true
     },
     {
         type: 'cashflow_waterfall',
@@ -421,7 +442,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         type: 'world_indices',
         name: 'World Indices',
         description: 'Global market indices (S&P 500, Nikkei, DAX, etc.)',
-        category: 'core_data',
+        category: 'global_markets',
         defaultConfig: {},
         defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
     },
@@ -723,7 +744,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         type: 'forex_rates',
         name: 'Forex Rates',
         description: 'VND currency exchange rates',
-        category: 'core_data',
+        category: 'global_markets',
         defaultConfig: {},
         defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
     },
@@ -731,7 +752,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         type: 'commodities',
         name: 'Commodities',
         description: 'Gold, oil, and commodity prices',
-        category: 'core_data',
+        category: 'global_markets',
         defaultConfig: {},
         defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
     },

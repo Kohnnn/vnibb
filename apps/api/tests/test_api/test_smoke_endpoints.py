@@ -2238,6 +2238,72 @@ async def test_market_breadth_endpoint_returns_dma_and_52_week_stats(client, mon
 
 
 @pytest.mark.asyncio
+async def test_market_earnings_season_endpoint_ranks_latest_quarter_releases(client, test_db):
+    test_db.add_all(
+        [
+            Stock(symbol="VCI", exchange="HOSE", company_name="Vietcap", short_name="Vietcap"),
+            Stock(symbol="VNM", exchange="HOSE", company_name="Vinamilk", short_name="Vinamilk"),
+            IncomeStatement(
+                id=600,
+                symbol="VCI",
+                period="2024-Q4",
+                period_type="quarter",
+                fiscal_year=2024,
+                fiscal_quarter=4,
+                revenue=1000.0,
+                gross_profit=320.0,
+                net_income=120.0,
+            ),
+            IncomeStatement(
+                id=601,
+                symbol="VCI",
+                period="2025-Q4",
+                period_type="quarter",
+                fiscal_year=2025,
+                fiscal_quarter=4,
+                revenue=1200.0,
+                gross_profit=420.0,
+                net_income=180.0,
+            ),
+            IncomeStatement(
+                id=602,
+                symbol="VNM",
+                period="2024-Q4",
+                period_type="quarter",
+                fiscal_year=2024,
+                fiscal_quarter=4,
+                revenue=900.0,
+                gross_profit=360.0,
+                net_income=150.0,
+            ),
+            IncomeStatement(
+                id=603,
+                symbol="VNM",
+                period="2025-Q4",
+                period_type="quarter",
+                fiscal_year=2025,
+                fiscal_quarter=4,
+                revenue=930.0,
+                gross_profit=350.0,
+                net_income=140.0,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/earnings-season?limit=5&exchange=HOSE")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["season"] == "Q4 2025"
+    assert payload["count"] == 2
+    assert payload["data"][0]["symbol"] == "VCI"
+    assert payload["data"][0]["revenue_yoy"] == pytest.approx(20.0)
+    assert payload["data"][0]["earnings_yoy"] == pytest.approx(50.0)
+    assert payload["data"][0]["signal"] in {"High Conviction", "Watch"}
+
+
+@pytest.mark.asyncio
 async def test_financial_ratios_endpoint_filters_specific_quarter_periods(client, monkeypatch):
     async def fake_ratio_fetch(_params):
         return [

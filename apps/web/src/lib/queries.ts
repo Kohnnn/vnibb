@@ -51,6 +51,7 @@ export const queryKeys = {
     cashFlow: (symbol: string, period: string) => ['cashFlow', symbol, period] as const,
     marketOverview: () => ['marketOverview'] as const,
     marketBreadth: () => ['marketBreadth'] as const,
+    earningsSeason: (exchange?: string, limit?: number) => ['earningsSeason', exchange, limit] as const,
     industryBubble: (params?: Record<string, unknown>) => ['industryBubble', params] as const,
     worldIndices: () => ['worldIndices'] as const,
     forexRates: () => ['forexRates'] as const,
@@ -386,7 +387,9 @@ export function useMarketOverview(enabled = true) {
         queryKey: queryKeys.marketOverview(),
         queryFn: ({ signal }) => api.getMarketOverview(signal),
         enabled,
-        staleTime: 60 * 1000, // 1 minute
+        staleTime: 30 * 1000,
+        refetchInterval: enabled ? 30 * 1000 : false,
+        refetchIntervalInBackground: false,
     });
 }
 
@@ -396,6 +399,16 @@ export function useMarketBreadth(enabled = true) {
         queryFn: () => api.getMarketBreadth(),
         enabled,
         staleTime: 60 * 1000,
+        retry: 2,
+    });
+}
+
+export function useEarningsSeason(options?: { exchange?: string; limit?: number; enabled?: boolean }) {
+    return useQuery({
+        queryKey: queryKeys.earningsSeason(options?.exchange, options?.limit),
+        queryFn: () => api.getEarningsSeason({ exchange: options?.exchange, limit: options?.limit }),
+        enabled: options?.enabled !== false,
+        staleTime: 5 * 60 * 1000,
         retry: 2,
     });
 }

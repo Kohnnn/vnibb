@@ -33,9 +33,9 @@ interface LaidOutLink extends FinancialFlowLink {
   targetY: number;
 }
 
-const STAGE_X = [90, 320, 550, 780];
+const STAGE_X = [72, 280, 490, 700, 910];
 const NODE_WIDTH = 18;
-const SVG_WIDTH = 920;
+const SVG_WIDTH = 1120;
 const SVG_HEIGHT = 420;
 const INNER_TOP = 36;
 const INNER_HEIGHT = 300;
@@ -112,10 +112,11 @@ export function IncomeSankeyChart({ model, formatValue }: IncomeSankeyChartProps
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
         <SummaryCard label="Revenue" value={formatValue(model.metrics.revenue)} tone="text-blue-300" />
         <SummaryCard label="Gross Profit" value={formatValue(model.metrics.grossProfit)} tone="text-cyan-300" />
         <SummaryCard label="Operating Income" value={formatValue(model.metrics.operatingIncome)} tone="text-emerald-300" />
+        <SummaryCard label="Pre-tax Profit" value={formatValue(model.metrics.preTaxProfit)} tone="text-teal-300" />
         <SummaryCard label="Net Income" value={formatValue(model.metrics.netIncome)} tone="text-emerald-200" />
       </div>
 
@@ -124,7 +125,7 @@ export function IncomeSankeyChart({ model, formatValue }: IncomeSankeyChartProps
           {laidOut.links.map((link, index) => (
             <path
               key={`${link.source}-${link.target}-${index}`}
-              d={`M ${link.sourceX} ${link.sourceY} C ${link.sourceX + 90} ${link.sourceY}, ${link.targetX - 90} ${link.targetY}, ${link.targetX} ${link.targetY}`}
+              d={`M ${link.sourceX} ${link.sourceY} C ${link.sourceX + 70} ${link.sourceY}, ${link.targetX - 70} ${link.targetY}, ${link.targetX} ${link.targetY}`}
               fill="none"
               stroke={link.tone}
               strokeOpacity="0.55"

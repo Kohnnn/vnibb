@@ -5,7 +5,7 @@ export interface DashboardTemplate {
   name: string;
   description: string;
   thumbnail?: string;
-  category: 'trading' | 'analysis' | 'research' | 'overview';
+  category: 'trading' | 'analysis' | 'research' | 'overview' | 'global';
   widgets: Array<{
     type: WidgetType;
     layout: { x: number; y: number; w: number; h: number };
@@ -14,6 +14,33 @@ export interface DashboardTemplate {
 }
 
 export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
+  {
+    id: 'global-markets',
+    name: 'Global Markets',
+    description: 'TradingView-first workspace for crypto, global indices, forex, and macro market context.',
+    category: 'global',
+    widgets: [
+      { type: 'tradingview_chart', layout: { x: 0, y: 0, w: 14, h: 8 }, config: { symbol: 'SP:SPX' } },
+      { type: 'world_indices', layout: { x: 14, y: 0, w: 10, h: 5 } },
+      { type: 'forex_rates', layout: { x: 14, y: 5, w: 5, h: 5 } },
+      { type: 'commodities', layout: { x: 19, y: 5, w: 5, h: 5 } },
+      { type: 'market_news', layout: { x: 0, y: 8, w: 12, h: 6 } },
+      { type: 'market_overview', layout: { x: 12, y: 10, w: 12, h: 4 } },
+    ],
+  },
+  {
+    id: 'earnings-season',
+    name: 'Earnings Season',
+    description: 'Monitor fresh quarterly releases and jump quickly into statement and ratio follow-up work.',
+    category: 'research',
+    widgets: [
+      { type: 'earnings_season_monitor', layout: { x: 0, y: 0, w: 14, h: 8 } },
+      { type: 'events_calendar', layout: { x: 14, y: 0, w: 10, h: 8 } },
+      { type: 'financial_ratios', layout: { x: 0, y: 8, w: 8, h: 6 } },
+      { type: 'income_statement', layout: { x: 8, y: 8, w: 8, h: 6 } },
+      { type: 'cash_flow', layout: { x: 16, y: 8, w: 8, h: 6 } },
+    ],
+  },
   {
     id: 'getting-started',
     name: 'Getting Started',
