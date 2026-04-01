@@ -17,6 +17,7 @@
 </div>
 
 ---
+# For human
 
 ## Product Introduction
 
@@ -203,14 +204,14 @@ Notes:
 - this path is closer to production deployment than local contributor setup
 - local source-first development is still the recommended default
 
-### AI Quick Start
+
+# For AI
 
 If you want another coding agent to take over quickly, send it the repo link plus this instruction block.
 
+## Prompt
 ```text
 You are working on VNIBB, a Vietnam-first financial analytics monorepo.
-
-Repo: <PASTE_REPO_LINK>
 
 Start here:
 1. Read `AGENTS.md`
