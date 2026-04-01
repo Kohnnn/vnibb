@@ -254,7 +254,9 @@ export function WidgetWrapper({
     const displaySymbol = (widgetGroup !== 'global')
         ? effectiveSymbol
         : (symbol || effectiveSymbol);
-    const usesExternalTradingViewSymbol = widgetType === 'tradingview_chart' && displaySymbol.includes(':');
+    const usesExternalTradingViewSymbol =
+        (widgetType === 'tradingview_chart' || widgetType === 'tradingview_technical_analysis') &&
+        displaySymbol.includes(':');
 
     const { data: profileData } = useProfile(displaySymbol || '', Boolean(displaySymbol) && !usesExternalTradingViewSymbol);
     const rawExchangeBadge = usesExternalTradingViewSymbol

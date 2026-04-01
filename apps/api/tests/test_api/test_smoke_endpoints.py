@@ -731,7 +731,7 @@ async def test_ratios_smoke_returns_data(client, monkeypatch):
     payload = response.json()
     assert payload.get("error") is None, payload
     assert payload["meta"]["count"] == 1
-    assert payload["data"][0]["period"] == "2024-Q1"
+    assert payload["data"][0]["period"] == "Q1-2024"
     assert payload["data"][0]["pe"] == 15.2
 
 
@@ -2346,12 +2346,16 @@ async def test_financial_ratios_endpoint_filters_specific_quarter_periods(client
         "vnibb.api.v1.equity.VnstockFinancialRatiosFetcher.fetch",
         fake_ratio_fetch,
     )
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity._load_ratio_statement_support",
+        lambda **_kwargs: asyncio.sleep(0, result={"income": [], "balance": [], "cashflow": []}),
+    )
 
     response = await client.get("/api/v1/equity/VCI/ratios?period=Q1")
     assert response.status_code == 200
     payload = response.json()
     periods = [item["period"] for item in payload["data"]]
-    assert periods == ["2023-Q1", "2024-Q1"]
+    assert periods == ["Q1-2023", "Q1-2024"]
 
 
 @pytest.mark.asyncio
@@ -2366,6 +2370,10 @@ async def test_financial_ratios_endpoint_builds_ttm_row_from_latest_quarter(clie
         "vnibb.api.v1.equity.VnstockFinancialRatiosFetcher.fetch",
         fake_ratio_fetch,
     )
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity._load_ratio_statement_support",
+        lambda **_kwargs: asyncio.sleep(0, result={"income": [], "balance": [], "cashflow": []}),
+    )
 
     response = await client.get("/api/v1/equity/VCI/ratios?period=TTM")
     assert response.status_code == 200
@@ -2374,6 +2382,74 @@ async def test_financial_ratios_endpoint_builds_ttm_row_from_latest_quarter(clie
     assert payload["data"][0]["period"] == "TTM"
     assert payload["data"][0]["pe"] == pytest.approx(9.1)
     assert payload["data"][0]["pb"] == pytest.approx(1.4)
+
+
+@pytest.mark.asyncio
+async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_support(client, monkeypatch):
+    async def fake_ratio_fetch(_params):
+        return []
+
+    async def fake_get_financials_with_ttm(*, symbol, statement_type, period, limit):
+        assert symbol == "VCI"
+        assert period == "quarter"
+        _ = limit
+        if statement_type == "income":
+            return [
+                FinancialStatementData(
+                    symbol="VCI",
+                    period="Q1-2020",
+                    statement_type="income",
+                    revenue=100.0,
+                    operating_income=30.0,
+                    net_income=20.0,
+                )
+            ]
+        if statement_type == "balance":
+            return [
+                FinancialStatementData(
+                    symbol="VCI",
+                    period="Q1-2020",
+                    statement_type="balance",
+                    total_assets=120.0,
+                    current_assets=60.0,
+                    total_liabilities=60.0,
+                    current_liabilities=24.0,
+                    total_equity=60.0,
+                    cash_and_equivalents=15.0,
+                )
+            ]
+        return [
+            FinancialStatementData(
+                symbol="VCI",
+                period="Q1-2020",
+                statement_type="cashflow",
+                operating_cash_flow=18.0,
+                free_cash_flow=10.0,
+            )
+        ]
+
+    async def fake_statement_fallback(**_kwargs):
+        return []
+
+    async def fake_cross_fill_income_statement_rows(**kwargs):
+        return kwargs["rows"]
+
+    async def fake_resolve_profile_market_cap(**_kwargs):
+        return None
+
+    monkeypatch.setattr("vnibb.api.v1.equity.VnstockFinancialRatiosFetcher.fetch", fake_ratio_fetch)
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", fake_get_financials_with_ttm)
+    monkeypatch.setattr("vnibb.api.v1.equity._load_financial_statement_fallback", fake_statement_fallback)
+    monkeypatch.setattr("vnibb.api.v1.equity._cross_fill_income_statement_rows", fake_cross_fill_income_statement_rows)
+    monkeypatch.setattr("vnibb.api.v1.equity._resolve_profile_market_cap", fake_resolve_profile_market_cap)
+
+    response = await client.get("/api/v1/equity/VCI/ratios?period=quarter")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["count"] >= 1
+    support_row = next(item for item in payload["data"] if "2020" in item["period"])
+    assert support_row["operating_margin"] == pytest.approx(30.0)
+    assert support_row["current_ratio"] == pytest.approx(2.5)
 
 
 @pytest.mark.asyncio

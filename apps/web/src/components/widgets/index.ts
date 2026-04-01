@@ -32,6 +32,7 @@ export {
 export { TickerInfoWidget } from './TickerInfoWidget';
 export { PriceChartWidget } from './PriceChartWidget';
 export { TradingViewTickerTapeWidget } from './TradingViewTickerTapeWidget';
+export { TradingViewTechnicalAnalysisWidget } from './TradingViewTechnicalAnalysisWidget';
 export { KeyMetricsWidget } from './KeyMetricsWidget';
 export { ScreenerWidget } from './ScreenerWidget';
 export { TickerProfileWidget } from './TickerProfileWidget';

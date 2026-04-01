@@ -21,6 +21,7 @@ export function WidgetPreview({ type }: WidgetPreviewProps) {
         price_chart: <ChartPreview />,
         tradingview_chart: <TradingViewPreview />,
         tradingview_ticker_tape: <TickerTapePreview />,
+        tradingview_technical_analysis: <TechnicalGaugePreview />,
         valuation_multiples_chart: <ChartPreview />,
         screener: <TablePreview rows={4} />,
         market_overview: <IndexCardsPreview />,
@@ -142,6 +143,29 @@ function TickerTapePreview() {
                     </span>
                 </div>
             ))}
+        </div>
+    );
+}
+
+function TechnicalGaugePreview() {
+    return (
+        <div className="flex h-full flex-col justify-between gap-2 px-2 py-2">
+            <div className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-1 text-center text-[8px] font-black uppercase tracking-[0.16em] text-emerald-300">
+                Strong Buy
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+                {['Osc', 'MA', 'Mom'].map((label, index) => (
+                    <div key={label} className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-2 text-center">
+                        <div className="text-[7px] uppercase text-[var(--text-muted)]">{label}</div>
+                        <div className={`mt-1 text-[9px] font-bold ${index === 1 ? 'text-emerald-300' : 'text-blue-300'}`}>
+                            {index === 1 ? 'Buy' : 'Neutral'}
+                        </div>
+                    </div>
+                ))}
+            </div>
+            <div className="h-1.5 rounded-full bg-[var(--bg-tertiary)]">
+                <div className="h-full w-3/4 rounded-full bg-gradient-to-r from-amber-400 via-sky-400 to-emerald-400" />
+            </div>
         </div>
     );
 }

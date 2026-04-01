@@ -9,6 +9,8 @@ import logging
 import re
 from typing import Any, List, Optional
 
+import inspect
+
 from pydantic import BaseModel, Field, field_validator
 
 from vnibb.providers.base import BaseFetcher
@@ -204,23 +206,92 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
             try:
                 from vnstock import Vnstock
 
-                stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
-                finance = stock.finance
-                df = finance.ratio(period=query.get("period", "year"))
+                candidate_sources: list[str] = []
+                for source in ["VCI", settings.vnstock_source, "KBS"]:
+                    if source and source not in candidate_sources:
+                        candidate_sources.append(source)
 
-                if df is None or df.empty:
-                    return []
+                def _fetch_rows_for_source(source: str) -> List[dict[str, Any]]:
+                    stock = Vnstock().stock(symbol=query["symbol"], source=source)
+                    finance = stock.finance
+                    method = finance.ratio
+                    kwargs = {"period": query.get("period", "year")}
+                    try:
+                        supports_lang = "lang" in inspect.signature(method).parameters
+                    except (TypeError, ValueError):
+                        supports_lang = False
+                    if supports_lang:
+                        kwargs["lang"] = "en"
+                    df = method(**kwargs)
 
-                if "period" not in df.columns:
-                    index_name = df.index.name or "index"
-                    df = df.reset_index()
+                    if df is None or df.empty:
+                        return []
+
                     if "period" not in df.columns:
-                        if index_name in df.columns:
-                            df = df.rename(columns={index_name: "period"})
-                        elif "index" in df.columns:
-                            df = df.rename(columns={"index": "period"})
+                        index_name = df.index.name or "index"
+                        df = df.reset_index()
+                        if "period" not in df.columns:
+                            if index_name in df.columns:
+                                df = df.rename(columns={index_name: "period"})
+                            elif "index" in df.columns:
+                                df = df.rename(columns={"index": "period"})
 
-                return df.to_dict("records")
+                    rows = df.to_dict("records")
+                    for row in rows:
+                        if isinstance(row, dict) and "_source" not in row:
+                            row["_source"] = source
+                    return rows
+
+                def _score_ratio_payload(rows: List[dict[str, Any]]) -> int:
+                    if not rows:
+                        return 0
+                    numeric_cells = 0
+                    for row in rows[: min(len(rows), 16)]:
+                        if not isinstance(row, dict):
+                            continue
+                        for key, value in row.items():
+                            if key in {"symbol", "period", "_source"}:
+                                continue
+                            if _as_float(value) is not None:
+                                numeric_cells += 1
+                    return len(rows) * 100 + numeric_cells
+
+                best_rows: List[dict[str, Any]] = []
+                best_score = -1
+                best_source: str | None = None
+                last_error: Exception | None = None
+
+                for source in candidate_sources:
+                    try:
+                        rows = _fetch_rows_for_source(source)
+                    except Exception as source_error:
+                        last_error = source_error
+                        logger.debug(
+                            "vnstock ratios fetch failed for %s source=%s: %s",
+                            query["symbol"],
+                            source,
+                            source_error,
+                        )
+                        continue
+
+                    score = _score_ratio_payload(rows)
+                    if score > best_score:
+                        best_score = score
+                        best_rows = rows
+                        best_source = source
+
+                if best_rows:
+                    if best_source and best_source != settings.vnstock_source:
+                        logger.info(
+                            "Using alternate vnstock ratio source for %s: %s",
+                            query["symbol"],
+                            best_source,
+                        )
+                    return best_rows
+
+                if last_error is not None:
+                    raise last_error
+                return []
             except Exception as e:
                 logger.error(f"vnstock ratios fetch error: {e}")
                 raise ProviderError(

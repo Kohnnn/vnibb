@@ -1755,6 +1755,52 @@ def _filter_ratio_rows_for_period(
     return rows
 
 
+def _ratio_metric_count(item: FinancialRatioData) -> int:
+    return sum(
+        1
+        for value in item.model_dump(mode="json", exclude={"symbol", "period"}).values()
+        if value is not None
+    )
+
+
+def _merge_ratio_rows(
+    preferred: FinancialRatioData,
+    fallback: FinancialRatioData,
+) -> FinancialRatioData:
+    payload = fallback.model_dump(mode="json")
+    for key, value in preferred.model_dump(mode="json").items():
+        if value is not None:
+            payload[key] = value
+    return FinancialRatioData.model_validate(payload)
+
+
+def _merge_ratio_row_collections(
+    preferred_rows: List[FinancialRatioData],
+    fallback_rows: List[FinancialRatioData],
+) -> List[FinancialRatioData]:
+    merged: dict[str, FinancialRatioData] = {}
+
+    for row in fallback_rows:
+        period_value = _normalize_ratio_period(row.period) or str(row.period or "").strip()
+        if not period_value:
+            continue
+        merged[period_value] = row.model_copy(update={"period": period_value})
+
+    for row in preferred_rows:
+        period_value = _normalize_ratio_period(row.period) or str(row.period or "").strip()
+        if not period_value:
+            continue
+        normalized_row = row.model_copy(update={"period": period_value})
+        existing = merged.get(period_value)
+        merged[period_value] = (
+            _merge_ratio_rows(normalized_row, existing)
+            if existing is not None
+            else normalized_row
+        )
+
+    return sorted(merged.values(), key=lambda item: _ratio_period_sort_key(item.period))
+
+
 def _derive_dividend_yield_from_dps(dps: Any, latest_price: Any) -> Optional[float]:
     dps_value = _coerce_optional_float(dps)
     price_vnd = _price_to_vnd_units(latest_price, dps_hint=dps_value)
@@ -2437,11 +2483,90 @@ async def _enrich_ratio_ev_sales_from_income(
     return rows
 
 
+def _build_placeholder_ratio_rows_from_support(
+    symbol: str,
+    *support_groups: List[FinancialStatementData],
+) -> List[FinancialRatioData]:
+    periods = {
+        _normalize_ratio_period(statement_row.period)
+        for support_group in support_groups
+        for statement_row in support_group
+    }
+    return [
+        FinancialRatioData(symbol=symbol, period=period_value)
+        for period_value in sorted(filter(None, periods), key=_ratio_period_sort_key)
+    ]
+
+
+async def _load_ratio_statement_support(
+    *,
+    db: AsyncSession,
+    symbol: str,
+    period: str,
+    limit: int,
+) -> dict[str, List[FinancialStatementData]]:
+    support: dict[str, List[FinancialStatementData]] = {
+        StatementType.INCOME.value: [],
+        StatementType.BALANCE.value: [],
+        StatementType.CASHFLOW.value: [],
+    }
+
+    for statement_type in (
+        StatementType.INCOME.value,
+        StatementType.BALANCE.value,
+        StatementType.CASHFLOW.value,
+    ):
+        provider_rows: List[FinancialStatementData] = []
+        try:
+            provider_rows = await get_financials_with_ttm(
+                symbol=symbol,
+                statement_type=statement_type,
+                period=period,
+                limit=limit,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Ratio support statement fetch failed for %s (%s/%s): %s",
+                symbol,
+                statement_type,
+                period,
+                exc,
+            )
+
+        fallback_rows = await _load_financial_statement_fallback(
+            db=db,
+            symbol=symbol,
+            statement_type=statement_type,
+            period=period,
+            limit=limit,
+        )
+        merged_rows = (
+            _merge_financial_statement_rows(provider_rows, fallback_rows)
+            if provider_rows
+            else fallback_rows
+        )
+        merged_rows = _enrich_financial_statement_rows(merged_rows)
+        if statement_type == StatementType.INCOME.value:
+            merged_rows = await _cross_fill_income_statement_rows(
+                db=db,
+                symbol=symbol,
+                period=period,
+                limit=limit,
+                rows=merged_rows,
+            )
+        support[statement_type] = merged_rows
+
+    return support
+
+
 async def _enrich_missing_ratio_metrics(
     symbol: str,
     period: str,
     rows: List[FinancialRatioData],
     db: AsyncSession,
+    income_support_rows: List[FinancialStatementData] | None = None,
+    balance_support_rows: List[FinancialStatementData] | None = None,
+    cashflow_support_rows: List[FinancialStatementData] | None = None,
 ) -> List[FinancialRatioData]:
     if not rows:
         return rows
@@ -2520,10 +2645,23 @@ async def _enrich_missing_ratio_metrics(
             return f"{normalized_year}-Q{normalized_quarter}"
         return str(normalized_year)
 
+    def _support_period(statement_row: FinancialStatementData) -> str | None:
+        year, quarter = _extract_year_quarter(statement_row.period or "")
+        return _serialize_ratio_period(year, quarter)
+
     derived_periods = {
         _serialize_ratio_period(year, quarter)
         for year, quarter, *_rest in [*income_rows, *balance_rows, *cashflow_rows]
     }
+    derived_periods.update(
+        filter(None, (_support_period(statement_row) for statement_row in income_support_rows or []))
+    )
+    derived_periods.update(
+        filter(None, (_support_period(statement_row) for statement_row in balance_support_rows or []))
+    )
+    derived_periods.update(
+        filter(None, (_support_period(statement_row) for statement_row in cashflow_support_rows or []))
+    )
 
     missing_periods = [
         period_value
@@ -2537,8 +2675,17 @@ async def _enrich_missing_ratio_metrics(
         )
         existing_periods.update(period_value.upper() for period_value in missing_periods)
 
+    def _merge_metric_maps(
+        base: dict[str, float | None],
+        supplement: dict[str, float | None],
+    ) -> dict[str, float | None]:
+        merged_metrics = dict(base)
+        for metric_key, metric_value in supplement.items():
+            if merged_metrics.get(metric_key) is None and metric_value is not None:
+                merged_metrics[metric_key] = metric_value
+        return merged_metrics
+
     income_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
-    prev_income_lookup: dict[tuple[int, int], tuple[float | None, float | None, float | None]] = {}
     for (
         year,
         quarter,
@@ -2577,31 +2724,40 @@ async def _enrich_missing_ratio_metrics(
             ),
         }
 
-    for (
-        year,
-        quarter,
-        revenue,
-        _operating_income,
-        net_income,
-        _cost_of_revenue,
-        eps,
-        _interest,
-        _ebitda,
-        _income_tax,
-        _raw_data,
-    ) in income_rows:
-        if year is None:
+    for statement_row in income_support_rows or []:
+        year, quarter = _extract_year_quarter(statement_row.period or "")
+        serialized_period = _serialize_ratio_period(year, quarter)
+        if serialized_period is None or year is None:
             continue
-        y = int(year)
-        q = int(quarter or 0)
-        prev_income_lookup[(y, q)] = (
-            _coerce_optional_float(revenue),
-            _coerce_optional_float(net_income),
-            _coerce_optional_float(eps),
+        key = (int(year), int(quarter or 0))
+        support_metrics = {
+            "revenue": _coerce_optional_float(statement_row.revenue),
+            "operating_income": _coerce_optional_float(statement_row.operating_income),
+            "net_income": _coerce_optional_float(statement_row.net_income),
+            "cost_of_revenue": _coerce_optional_float(statement_row.cost_of_revenue),
+            "eps": _coerce_optional_float(statement_row.eps),
+            "interest_expense": _coerce_optional_float(statement_row.interest_expense),
+            "ebitda": _coerce_optional_float(statement_row.ebitda),
+            "tax_expense": _coerce_optional_float(statement_row.tax_expense),
+            "net_interest_income": _pick_optional_float(
+                _lookup_financial_metric(statement_row.raw_data or {}, "net_interest_income")
+            ),
+            "provision_for_credit_losses": _pick_optional_float(
+                _lookup_financial_metric(
+                    statement_row.raw_data or {},
+                    "provision_for_credit_losses",
+                    "credit_loss_provision",
+                )
+            ),
+        }
+        income_lookup[key] = (
+            _merge_metric_maps(income_lookup[key], support_metrics)
+            if key in income_lookup
+            else support_metrics
         )
 
     prev_income_values: dict[tuple[int, int], tuple[float | None, float | None, float | None]] = {}
-    for key in list(prev_income_lookup.keys()):
+    for key in list(income_lookup.keys()):
         year, quarter = key
         prev_key = (year - 1, quarter if normalized_period == "quarter" else 0)
         prev = income_lookup.get(prev_key)
@@ -2721,6 +2877,54 @@ async def _enrich_missing_ratio_metrics(
             "long_term_debt": _coerce_optional_float(long_term_debt),
         }
 
+    for statement_row in balance_support_rows or []:
+        year, quarter = _extract_year_quarter(statement_row.period or "")
+        serialized_period = _serialize_ratio_period(year, quarter)
+        if serialized_period is None or year is None:
+            continue
+        key = (int(year), int(quarter or 0))
+        support_metrics = {
+            "total_assets": _coerce_optional_float(statement_row.total_assets),
+            "current_assets": _coerce_optional_float(statement_row.current_assets),
+            "cash_and_equivalents": _pick_optional_float(
+                _coerce_optional_float(statement_row.cash_and_equivalents),
+                _coerce_optional_float(statement_row.cash),
+            ),
+            "total_liabilities": _coerce_optional_float(statement_row.total_liabilities),
+            "current_liabilities": _coerce_optional_float(statement_row.current_liabilities),
+            "total_equity": _pick_optional_float(
+                _coerce_optional_float(statement_row.total_equity),
+                _coerce_optional_float(statement_row.equity),
+            ),
+            "book_value_per_share": _coerce_optional_float(statement_row.raw_data.get("book_value_per_share")) if isinstance(statement_row.raw_data, dict) else None,
+            "inventory": _coerce_optional_float(statement_row.inventory),
+            "accounts_receivable": _coerce_optional_float(statement_row.accounts_receivable),
+            "customer_deposits": _coerce_optional_float(statement_row.customer_deposits),
+            "current_account_deposits": _pick_optional_float(
+                _lookup_financial_metric(statement_row.raw_data or {}, "current_account_deposits", "current_accounts", "demand_deposits", "non_term_deposits", "casa")
+            ),
+            "gross_loans": _pick_optional_float(
+                _lookup_financial_metric(statement_row.raw_data or {}, "gross_loans", "loans_and_advances_to_customers"),
+                _coerce_optional_float(statement_row.accounts_receivable),
+            ),
+            "loan_loss_reserve": _pick_optional_float(
+                _lookup_financial_metric(statement_row.raw_data or {}, "loan_loss_reserve", "provision_for_loan_losses")
+            ),
+            "placements_with_banks": _pick_optional_float(
+                _lookup_financial_metric(statement_row.raw_data or {}, "placements_with_banks", "placements_at_other_credit_institutions")
+            ),
+            "investment_securities_total": _pick_optional_float(
+                _lookup_financial_metric(statement_row.raw_data or {}, "investment_securities_total", "investment_securities")
+            ),
+            "short_term_debt": _coerce_optional_float(statement_row.short_term_debt),
+            "long_term_debt": _coerce_optional_float(statement_row.long_term_debt),
+        }
+        balance_lookup[key] = (
+            _merge_metric_maps(balance_lookup[key], support_metrics)
+            if key in balance_lookup
+            else support_metrics
+        )
+
     prev_balance_values: dict[tuple[int, int], dict[str, float | None]] = {}
     for key in list(balance_lookup.keys()):
         year, quarter = key
@@ -2748,6 +2952,29 @@ async def _enrich_missing_ratio_metrics(
             "debt_repayment": _coerce_optional_float(debt_repayment),
             "depreciation": _coerce_optional_float(depreciation),
         }
+
+    for statement_row in cashflow_support_rows or []:
+        year, quarter = _extract_year_quarter(statement_row.period or "")
+        serialized_period = _serialize_ratio_period(year, quarter)
+        if serialized_period is None or year is None:
+            continue
+        key = (int(year), int(quarter or 0))
+        support_metrics = {
+            "operating_cash_flow": _coerce_optional_float(statement_row.operating_cash_flow),
+            "free_cash_flow": _coerce_optional_float(statement_row.free_cash_flow),
+            "capital_expenditure": _pick_optional_float(
+                _coerce_optional_float(statement_row.capital_expenditure),
+                _coerce_optional_float(statement_row.capex),
+            ),
+            "dividends_paid": _coerce_optional_float(statement_row.dividends_paid),
+            "debt_repayment": _coerce_optional_float(statement_row.debt_repayment),
+            "depreciation": _coerce_optional_float(statement_row.depreciation),
+        }
+        cashflow_lookup[key] = (
+            _merge_metric_maps(cashflow_lookup[key], support_metrics)
+            if key in cashflow_lookup
+            else support_metrics
+        )
 
     latest_price_stmt = (
         select(ScreenerSnapshot.price)
@@ -4838,7 +5065,7 @@ async def get_rating(symbol: str):
 
 @router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
-@cached(ttl=86400, key_prefix="ratios_v2")
+@cached(ttl=86400, key_prefix="ratios_v3")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
@@ -4858,6 +5085,23 @@ async def get_financial_ratios(
         "symbol": symbol_upper,
         "last_data_date": _serialize_meta_datetime(latest_price_time),
     }
+    db_ratio_rows: List[FinancialRatioData] = []
+    provider_ratio_rows: List[FinancialRatioData] = []
+    provider_error: Exception | None = None
+    support_rows = {
+        StatementType.INCOME.value: [],
+        StatementType.BALANCE.value: [],
+        StatementType.CASHFLOW.value: [],
+    }
+
+    if normalized_period == "quarter":
+        support_rows = await _load_ratio_statement_support(
+            db=db,
+            symbol=symbol_upper,
+            period=normalized_period,
+            limit=24,
+        )
+
     try:
         stmt = (
             select(FinancialRatio)
@@ -4870,44 +5114,36 @@ async def get_financial_ratios(
         result = await db.execute(stmt)
         rows = result.scalars().all()
         if rows:
-            data = [_to_ratio_data(row) for row in rows]
-            data = await _enrich_ratio_ev_sales_from_income(
-                symbol=symbol_upper,
-                period=normalized_period,
-                rows=data,
-                db=db,
-            )
-            data = await _enrich_missing_ratio_metrics(
-                symbol=symbol_upper,
-                period=normalized_period,
-                rows=data,
-                db=db,
-            )
-            data = [item for item in data if VALID_RATIO_PERIOD_RE.match(str(item.period or ""))]
-            data = _dedupe_ratio_rows(data)
-            data = _filter_ratio_rows_for_period(data, period)
-            usable_data = [item for item in data if _ratio_has_metric_value(item)]
-            if usable_data:
-                return StandardResponse(
-                    data=usable_data,
-                    meta=MetaData(
-                        count=len(usable_data),
-                        data_points=len(usable_data),
-                        **meta_kwargs,
-                    ),
-                )
-
-            logger.warning(
-                "Ratio DB rows for %s are empty placeholders; falling back to provider",
-                symbol_upper,
-            )
+            db_ratio_rows = [_to_ratio_data(row) for row in rows]
     except Exception as db_error:
         logger.warning(f"Ratio DB lookup failed for {symbol_upper}: {db_error}")
 
-    try:
-        data = await VnstockFinancialRatiosFetcher.fetch(
-            FinancialRatiosQueryParams(symbol=symbol_upper, period=normalized_period)
+    should_fetch_provider = (
+        not db_ratio_rows
+        or normalized_period == "quarter"
+        or str(period or "").strip().upper() == "TTM"
+    )
+    if should_fetch_provider:
+        try:
+            provider_ratio_rows = await VnstockFinancialRatiosFetcher.fetch(
+                FinancialRatiosQueryParams(symbol=symbol_upper, period=normalized_period)
+            )
+        except Exception as exc:
+            provider_error = exc
+            logger.warning("Provider ratio fetch failed for %s: %s", symbol_upper, exc)
+
+    data = _merge_ratio_row_collections(provider_ratio_rows, db_ratio_rows)
+    if not data:
+        data = db_ratio_rows or provider_ratio_rows
+    if not data:
+        data = _build_placeholder_ratio_rows_from_support(
+            symbol_upper,
+            support_rows.get(StatementType.INCOME.value, []),
+            support_rows.get(StatementType.BALANCE.value, []),
+            support_rows.get(StatementType.CASHFLOW.value, []),
         )
+
+    if data:
         data = await _enrich_ratio_ev_sales_from_income(
             symbol=symbol_upper,
             period=normalized_period,
@@ -4919,33 +5155,31 @@ async def get_financial_ratios(
             period=normalized_period,
             rows=data,
             db=db,
+            income_support_rows=support_rows.get(StatementType.INCOME.value),
+            balance_support_rows=support_rows.get(StatementType.BALANCE.value),
+            cashflow_support_rows=support_rows.get(StatementType.CASHFLOW.value),
         )
         data = [item for item in data if VALID_RATIO_PERIOD_RE.match(str(item.period or ""))]
         data = _dedupe_ratio_rows(data)
         data = _filter_ratio_rows_for_period(data, period)
         usable_data = [item for item in data if _ratio_has_metric_value(item)]
         payload = usable_data if usable_data else data
-        if not payload:
-            await _schedule_critical_reinforcement(
-                symbol=symbol_upper,
-                endpoint="equity.ratios",
-                domains=["ratios"],
+        if payload:
+            return StandardResponse(
+                data=payload,
+                meta=MetaData(
+                    count=len(payload),
+                    data_points=len(payload),
+                    **meta_kwargs,
+                ),
             )
-        return StandardResponse(
-            data=payload,
-            meta=MetaData(
-                count=len(payload),
-                data_points=len(payload),
-                **meta_kwargs,
-            ),
-        )
-    except Exception as e:
-        await _schedule_critical_reinforcement(
-            symbol=symbol_upper,
-            endpoint="equity.ratios",
-            domains=["ratios"],
-        )
-        return StandardResponse(data=[], error=str(e))
+
+    await _schedule_critical_reinforcement(
+        symbol=symbol_upper,
+        endpoint="equity.ratios",
+        domains=["ratios"],
+    )
+    return StandardResponse(data=[], error=str(provider_error) if provider_error else None)
 
 
 @router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])

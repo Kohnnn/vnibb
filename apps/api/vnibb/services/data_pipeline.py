@@ -3100,6 +3100,101 @@ class DataPipeline:
                 row = annual.get(year)
             return row
 
+        def _format_ratio_period(period_value: Any, fiscal_year: Any, fiscal_quarter: Any) -> str | None:
+            year_match = re.search(r"(20\d{2})", str(period_value or "").upper())
+            year = int(year_match.group(1)) if year_match else None
+            if fiscal_year is not None:
+                try:
+                    year = int(fiscal_year)
+                except (TypeError, ValueError):
+                    pass
+            quarter = None
+            quarter_match = re.search(r"Q([1-4])", str(period_value or "").upper())
+            if quarter_match:
+                quarter = int(quarter_match.group(1))
+            elif fiscal_quarter is not None:
+                try:
+                    parsed_quarter = int(fiscal_quarter)
+                    if 1 <= parsed_quarter <= 4:
+                        quarter = parsed_quarter
+                except (TypeError, ValueError):
+                    pass
+            if year is None:
+                return None
+            if normalized_period == "quarter":
+                return f"{year}-Q{quarter}" if quarter else None
+            return str(year)
+
+        async def _seed_ratio_period_rows(session: AsyncSession, symbol_value: str) -> int:
+            period_entries: set[tuple[str, int, int | None]] = set()
+            for model in (IncomeStatement, BalanceSheet, CashFlow):
+                source_rows = (
+                    await session.execute(
+                        select(model.period, model.fiscal_year, model.fiscal_quarter)
+                        .where(model.symbol == symbol_value, model.period_type == normalized_period)
+                    )
+                ).all()
+                for period_value, fiscal_year, fiscal_quarter in source_rows:
+                    normalized_ratio_period = _format_ratio_period(
+                        period_value,
+                        fiscal_year,
+                        fiscal_quarter,
+                    )
+                    if not normalized_ratio_period:
+                        continue
+                    period_entries.add(
+                        (
+                            normalized_ratio_period,
+                            int(fiscal_year) if fiscal_year is not None else 0,
+                            int(fiscal_quarter) if fiscal_quarter not in (None, 0) else None,
+                        )
+                    )
+
+            if not period_entries:
+                return 0
+
+            existing_periods = {
+                str(period_text).upper()
+                for period_text in (
+                    await session.execute(
+                        select(FinancialRatio.period).where(
+                            FinancialRatio.symbol == symbol_value,
+                            FinancialRatio.period_type == normalized_period,
+                        )
+                    )
+                ).scalars().all()
+            }
+            created_count = 0
+            for period_text, fiscal_year, fiscal_quarter in sorted(
+                period_entries,
+                key=lambda item: (item[1], item[2] or 0),
+            ):
+                if period_text.upper() in existing_periods:
+                    continue
+                values = {
+                    "symbol": symbol_value,
+                    "period": period_text,
+                    "period_type": normalized_period,
+                    "fiscal_year": fiscal_year,
+                    "fiscal_quarter": fiscal_quarter,
+                    "raw_data": {
+                        "_seeded_from": "statement_periods",
+                        "_synthetic": True,
+                    },
+                    "source": "derived",
+                    "updated_at": datetime.utcnow(),
+                }
+                stmt = get_upsert_stmt(
+                    FinancialRatio,
+                    ["symbol", "period", "period_type"],
+                    values,
+                )
+                await session.execute(stmt)
+                created_count += 1
+                existing_periods.add(period_text.upper())
+
+            return created_count
+
         async def _enrich_ratio_rows(session: AsyncSession, symbol_value: str) -> int:
             ratio_rows = (
                 (
@@ -3614,13 +3709,15 @@ class DataPipeline:
             try:
                 params = FinancialRatiosQueryParams(symbol=symbol, period=normalized_period)
                 ratio_items = await VnstockFinancialRatiosFetcher.fetch(params)
-                if not ratio_items:
-                    if progress is not None:
-                        progress["error_count"] = progress.get("error_count", 0) + 1
-                        progress["stage_stats"]["financial_ratios"]["errors"] += 1
-                    continue
 
                 async with async_session_maker() as session:
+                    seeded_rows = await _seed_ratio_period_rows(session, symbol)
+                    if not ratio_items and seeded_rows == 0:
+                        if progress is not None:
+                            progress["error_count"] = progress.get("error_count", 0) + 1
+                            progress["stage_stats"]["financial_ratios"]["errors"] += 1
+                        continue
+
                     for ratio in ratio_items:
                         period_str = str(ratio.period or "").strip()
                         period_upper = period_str.upper()
@@ -3742,11 +3839,12 @@ class DataPipeline:
                     await session.flush()
                     enriched_rows = await _enrich_ratio_rows(session, symbol)
                     await session.commit()
-                    if enriched_rows:
+                    if enriched_rows or seeded_rows:
                         logger.info(
-                            "Enriched %d computed ratio rows for %s",
+                            "Enriched %d computed ratio rows for %s (%d synthetic periods)",
                             enriched_rows,
                             symbol,
+                            seeded_rows,
                         )
 
                 total += 1
