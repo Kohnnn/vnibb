@@ -451,6 +451,7 @@ function DashboardContent() {
         { type: 'price_chart', label: 'Price Chart' },
         { type: 'tradingview_chart', label: 'TradingView Chart' },
         { type: 'tradingview_ticker_tape', label: 'Ticker Tape' },
+        { type: 'tradingview_technical_analysis', label: 'TV Technicals' },
         { type: 'key_metrics', label: 'Key Metrics' },
         { type: 'screener', label: 'Screener' },
     ];
@@ -594,7 +595,7 @@ function DashboardContent() {
                                         const WidgetComponent = widgetRegistry[widgetType];
                                         const widgetTitle = getWidgetDefinition(widgetType)?.name ?? widgetType.replace(/_/g, ' ');
                                         const widgetSymbol =
-                                            widgetType === 'tradingview_chart' && typeof widget.config?.symbol === 'string'
+                                            (widgetType === 'tradingview_chart' || widgetType === 'tradingview_technical_analysis') && typeof widget.config?.symbol === 'string'
                                                 ? widget.config.symbol
                                                 : globalSymbol;
                                         const parameters = getWidgetParameters(widget, (key, value) =>

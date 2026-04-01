@@ -136,9 +136,19 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Global macro ticker tape with FX, commodity, and crypto symbols plus VND cross context',
         category: 'global_markets',
         defaultConfig: {},
-        defaultLayout: { w: 12, h: 4, minW: 8, minH: 3 },
+        defaultLayout: { w: 24, h: 4, minW: 12, minH: 3 },
         recommended: true,
         searchKeywords: ['tv', 'trading view', 'ticker tape', 'tape', 'macro', 'global', 'crypto', 'forex']
+    },
+    {
+        type: 'tradingview_technical_analysis',
+        name: 'TradingView Technicals',
+        description: 'TradingView technical analysis gauge for global ETFs, FX, commodities, and crypto',
+        category: 'global_markets',
+        defaultConfig: {},
+        defaultLayout: { w: 9, h: 10, minW: 8, minH: 8 },
+        recommended: true,
+        searchKeywords: ['tv', 'trading view', 'technical', 'gauge', 'macro', 'global']
     },
     {
         type: 'valuation_multiples_chart',
@@ -458,7 +468,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Global market indices (S&P 500, Nikkei, DAX, etc.)',
         category: 'global_markets',
         defaultConfig: {},
-        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 },
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
         searchKeywords: ['global', 'indices', 'macro', 'international']
     },
     {
@@ -761,7 +771,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'VND currency exchange rates',
         category: 'global_markets',
         defaultConfig: {},
-        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 },
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 6 },
         searchKeywords: ['fx', 'forex', 'currency', 'usd vnd', 'global']
     },
     {
@@ -770,7 +780,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         description: 'Gold, oil, and commodity prices',
         category: 'global_markets',
         defaultConfig: {},
-        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 },
+        defaultLayout: { w: 8, h: 7, minW: 6, minH: 6 },
         searchKeywords: ['commodities', 'gold', 'oil', 'macro', 'global']
     },
     {

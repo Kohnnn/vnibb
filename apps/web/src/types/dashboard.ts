@@ -28,6 +28,7 @@ export type WidgetType =
     | 'price_chart'
     | 'tradingview_chart'
     | 'tradingview_ticker_tape'
+    | 'tradingview_technical_analysis'
     | 'valuation_multiples_chart'
     | 'valuation_band'
 
