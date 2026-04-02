@@ -34,7 +34,7 @@ const DEFAULT_MIN_W = 3;
 const DEFAULT_MIN_H = 2;
 
 // Breakpoints matching Tailwind defaults
-const BREAKPOINTS = { lg: 1024, md: 768, sm: 640, xs: 0 };
+const BREAKPOINTS = { lg: 960, md: 768, sm: 640, xs: 0 };
 const COLS = { lg: 24, md: 12, sm: 6, xs: 2 };
 const GRID_GAP = { lg: 6, md: 6, sm: 8, xs: 6 } as const;
 
@@ -150,9 +150,23 @@ export function DashboardGrid({
 
     const handleLayoutChange = useCallback(
         (currentLayout: Layout, allLayouts: Partial<Record<string, Layout>>) => {
-            // Only update with the desktop layout to maintain consistency
-            if (currentBreakpoint === 'lg' && onLayoutChange && allLayouts.lg) {
+            if (!onLayoutChange) return;
+
+            if (currentBreakpoint === 'lg' && allLayouts.lg) {
                 onLayoutChange(allLayouts.lg as unknown as LayoutItem[]);
+                return;
+            }
+
+            if (currentBreakpoint === 'md') {
+                onLayoutChange(
+                    currentLayout.map((item) => ({
+                        ...item,
+                        x: item.x * 2,
+                        w: Math.min(item.w * 2, COLS.lg),
+                        minW: item.minW ? Math.min(item.minW * 2, COLS.lg) : undefined,
+                        maxW: item.maxW ? Math.min(item.maxW * 2, COLS.lg) : undefined,
+                    })) as unknown as LayoutItem[]
+                );
             }
         },
         [currentBreakpoint, onLayoutChange]
@@ -165,7 +179,7 @@ export function DashboardGrid({
     const gridSpacing = GRID_GAP[currentBreakpoint as keyof typeof GRID_GAP] ?? GRID_GAP.lg;
     const gridMargin: [number, number] = [gridSpacing, gridSpacing];
 
-    const canEdit = isEditing && currentBreakpoint === 'lg';
+    const canEdit = isEditing && (currentBreakpoint === 'lg' || currentBreakpoint === 'md');
     const draggableHandle = canEdit ? '.widget-drag-handle' : undefined;
 
     useEffect(() => {
@@ -220,6 +234,7 @@ export function DashboardGrid({
         draggableHandle,
         isDraggable: canEdit,
         isResizable: canEdit,
+        resizeHandles: canEdit ? ['se', 'e', 's'] : undefined,
         isDroppable: false,
         compactType: 'vertical' as const,
         preventCollision: false,

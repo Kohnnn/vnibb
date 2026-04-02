@@ -1,4 +1,5 @@
 const ADMIN_LAYOUT_KEY_STORAGE = 'vnibb_admin_layout_key'
+const ADMIN_LAYOUT_CONTROLS_VISIBLE_STORAGE = 'vnibb_admin_layout_controls_visible'
 const ADMIN_LAYOUT_EVENT = 'vnibb:admin-layout-key-updated'
 
 export function readAdminLayoutKey(): string {
@@ -19,6 +20,21 @@ export function writeAdminLayoutKey(value: string): void {
 
 export function clearAdminLayoutKey(): void {
   writeAdminLayoutKey('')
+}
+
+export function readAdminLayoutControlsVisible(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.localStorage.getItem(ADMIN_LAYOUT_CONTROLS_VISIBLE_STORAGE) === '1'
+}
+
+export function writeAdminLayoutControlsVisible(value: boolean): void {
+  if (typeof window === 'undefined') return
+  if (value) {
+    window.localStorage.setItem(ADMIN_LAYOUT_CONTROLS_VISIBLE_STORAGE, '1')
+  } else {
+    window.localStorage.removeItem(ADMIN_LAYOUT_CONTROLS_VISIBLE_STORAGE)
+  }
+  window.dispatchEvent(new Event(ADMIN_LAYOUT_EVENT))
 }
 
 export function subscribeAdminLayoutKey(callback: () => void): () => void {
