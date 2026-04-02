@@ -259,7 +259,10 @@ function DashboardContent() {
     const isAdminManagedSystemDashboard = Boolean(
         activeDashboard && ADMIN_MANAGED_SYSTEM_IDS.has(activeDashboard.id),
     );
-    const showAdminSystemLayoutControls = isAdminManagedSystemDashboard && adminLayoutControlsVisible;
+    const showAdminSystemLayoutControls =
+        isAdminManagedSystemDashboard &&
+        adminLayoutControlsVisible &&
+        adminLayoutKey.trim().length > 0;
 
     const serializeSystemDashboardForPublish = useCallback((dashboard: typeof activeDashboard) => {
         if (!dashboard) return null;

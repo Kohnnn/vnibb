@@ -121,10 +121,13 @@ ALEMBIC_STRICT=1  # Recommended for Oracle cutover so failed migrations do not b
 CORS_ORIGINS=["https://vnibb.vercel.app"]
 CORS_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$|^https://[a-z0-9-]+\\.vercel\\.app$
 ENVIRONMENT=production
-GEMINI_API_KEY=your_gemini_api_key
+OPENROUTER_API_KEY=your_openrouter_api_key
+LLM_PROVIDER=openrouter
+LLM_MODEL=openai/gpt-4o-mini
 ENABLE_AI_SENTIMENT_ANALYSIS=0  # keep market news sentiment paused for stability-first deploys
-# Alternative accepted key name:
-# GOOGLE_API_KEY=your_gemini_api_key
+# Optional OpenRouter attribution headers:
+# OPENROUTER_SITE_URL=https://your-app.example.com
+# OPENROUTER_APP_NAME=VNIBB
 
 # Appwrite primary runtime datastore
 # APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
@@ -136,7 +139,7 @@ ENABLE_AI_SENTIMENT_ANALYSIS=0  # keep market news sentiment paused for stabilit
 # APPWRITE_SECRET=your-appwrite-server-api-key
 ```
 
-If neither `GEMINI_API_KEY` nor `GOOGLE_API_KEY` is set, news sentiment falls back to rule-based scoring.
+If `OPENROUTER_API_KEY` is not set, the copilot falls back to a configuration warning until you add the key or use a browser-local OpenRouter key in Settings.
 
 Set `ENABLE_AI_SENTIMENT_ANALYSIS=0` to pause news sentiment processing entirely; crawled articles will be marked neutral so the news feed still works without AI load.
 

@@ -60,7 +60,6 @@ export const env = {
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   appwriteEndpoint: process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT,
   appwriteProjectId: process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID,
-  geminiApiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY,
   analyticsId: process.env.NEXT_PUBLIC_ANALYTICS_ID,
   isDev: process.env.NEXT_PUBLIC_ENV === 'development' || process.env.NODE_ENV === 'development',
   isProd: isProdEnv,

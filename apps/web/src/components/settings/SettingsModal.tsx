@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw, Shield } from 'lucide-react';
+import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw, Shield, Sparkles } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
@@ -30,13 +30,19 @@ import {
   writeAdminLayoutControlsVisible,
   writeAdminLayoutKey,
 } from '@/lib/adminLayoutAccess';
+import {
+  clearStoredAISettings,
+  readStoredAISettings,
+  writeStoredAISettings,
+  type AIProviderMode,
+} from '@/lib/aiSettings';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type SettingTab = 'general' | 'data' | 'notifications' | 'appearance' | 'admin';
+type SettingTab = 'general' | 'ai' | 'data' | 'notifications' | 'appearance' | 'admin';
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingTab>('general');
@@ -44,9 +50,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [defaultTab, setDefaultTab] = useState<DefaultTabPreference>('overview');
   const [defaultTickerError, setDefaultTickerError] = useState<string | null>(null);
   const [preferenceStatus, setPreferenceStatus] = useState<string | null>(null);
+  const [aiSettingsError, setAiSettingsError] = useState<string | null>(null);
   const [isTickerMenuOpen, setIsTickerMenuOpen] = useState(false);
   const [adminLayoutKeyInput, setAdminLayoutKeyInput] = useState('');
   const [showGlobalLayoutControls, setShowGlobalLayoutControls] = useState(false);
+  const [aiMode, setAiMode] = useState<AIProviderMode>('app_default');
+  const [aiModelInput, setAiModelInput] = useState('openai/gpt-4o-mini');
+  const [aiApiKeyInput, setAiApiKeyInput] = useState('');
+  const [aiWebSearch, setAiWebSearch] = useState(false);
+  const [aiPreferAppwriteData, setAiPreferAppwriteData] = useState(true);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const { resolvedTheme } = useTheme();
   const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
@@ -63,9 +75,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setDefaultTab(preferences.defaultTab);
       setDefaultTickerError(null);
       setPreferenceStatus(null);
+      setAiSettingsError(null);
       setIsTickerMenuOpen(false);
       setAdminLayoutKeyInput(readAdminLayoutKey());
       setShowGlobalLayoutControls(readAdminLayoutControlsVisible());
+      const aiSettings = readStoredAISettings();
+      setAiMode(aiSettings.mode);
+      setAiModelInput(aiSettings.model);
+      setAiApiKeyInput(aiSettings.apiKey);
+      setAiWebSearch(aiSettings.webSearch);
+      setAiPreferAppwriteData(aiSettings.preferAppwriteData);
     }
   }, [globalSymbol, isOpen]);
 
@@ -123,8 +142,42 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setPreferenceStatus(`Saved locally: ${nextPreferences.defaultTicker} opens on ${tabLabel}.`);
   };
 
+  const applyAISettings = () => {
+    const normalizedModel = aiModelInput.trim();
+    if (!normalizedModel) {
+      setAiSettingsError('Enter a model slug, for example openai/gpt-4o-mini.');
+      return;
+    }
+
+    if (aiMode === 'browser_key' && !aiApiKeyInput.trim()) {
+      setAiSettingsError('Enter an OpenRouter API key or switch back to App default mode.');
+      return;
+    }
+
+    const nextSettings = writeStoredAISettings({
+      mode: aiMode,
+      model: normalizedModel,
+      apiKey: aiApiKeyInput,
+      webSearch: aiWebSearch,
+      preferAppwriteData: aiPreferAppwriteData,
+    });
+
+    setAiSettingsError(null);
+    setAiMode(nextSettings.mode);
+    setAiModelInput(nextSettings.model);
+    setAiApiKeyInput(nextSettings.apiKey);
+    setAiWebSearch(nextSettings.webSearch);
+    setAiPreferAppwriteData(nextSettings.preferAppwriteData);
+    setPreferenceStatus(
+      nextSettings.mode === 'browser_key'
+        ? `AI settings saved locally: OpenRouter browser key + ${nextSettings.model}.`
+        : `AI settings saved locally: App default key + ${nextSettings.model}.`,
+    );
+  };
+
   const tabs = [
     { id: 'general' as const, label: 'General', icon: SettingsIcon },
+    { id: 'ai' as const, label: 'AI', icon: Sparkles },
     { id: 'data' as const, label: 'Data Sources', icon: Database },
     { id: 'notifications' as const, label: 'Notifications', icon: Bell },
     { id: 'appearance' as const, label: 'Appearance', icon: Palette },
@@ -321,6 +374,167 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
               </div>
             )}
+            {activeTab === 'ai' && (
+              <div className="space-y-6">
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h4 className="text-sm font-bold text-[var(--text-primary)]">OpenRouter Copilot</h4>
+                      <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                        VNIBB now uses an Appwrite-first AI flow. Market data from your runtime Appwrite database is preferred over internet sources.
+                      </p>
+                    </div>
+                    <div className="rounded-full border border-blue-500/30 bg-blue-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-300">
+                      Browser-local only
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]">Provider Mode</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAiMode('app_default')
+                        if (aiSettingsError) setAiSettingsError(null)
+                      }}
+                      className={cn(
+                        'rounded-lg border px-3 py-3 text-left transition-all',
+                        aiMode === 'app_default'
+                          ? 'border-blue-500 bg-blue-600/15 text-blue-300'
+                          : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
+                      )}
+                    >
+                      <div className="text-xs font-bold uppercase tracking-wider">App Default</div>
+                      <div className="mt-1 text-[11px] text-[var(--text-muted)]">Use the OpenRouter key configured on your Oracle backend.</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAiMode('browser_key')
+                        if (aiSettingsError) setAiSettingsError(null)
+                      }}
+                      className={cn(
+                        'rounded-lg border px-3 py-3 text-left transition-all',
+                        aiMode === 'browser_key'
+                          ? 'border-blue-500 bg-blue-600/15 text-blue-300'
+                          : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
+                      )}
+                    >
+                      <div className="text-xs font-bold uppercase tracking-wider">Browser Key</div>
+                      <div className="mt-1 text-[11px] text-[var(--text-muted)]">Store your personal OpenRouter key only in this browser instance.</div>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="settings-ai-model"
+                    className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]"
+                  >
+                    Model Slug
+                  </label>
+                  <input
+                    id="settings-ai-model"
+                    type="text"
+                    value={aiModelInput}
+                    onChange={(event) => {
+                      setAiModelInput(event.target.value)
+                      if (aiSettingsError) setAiSettingsError(null)
+                    }}
+                    placeholder="openai/gpt-4o-mini"
+                    className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                  />
+                  <p className="mt-2 text-[10px] text-[var(--text-muted)]">
+                    Any OpenRouter model slug is allowed. Start with `openai/gpt-4o-mini` for a low-cost default.
+                  </p>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="settings-ai-api-key"
+                    className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]"
+                  >
+                    OpenRouter API Key
+                  </label>
+                  <input
+                    id="settings-ai-api-key"
+                    type="password"
+                    value={aiApiKeyInput}
+                    onChange={(event) => {
+                      setAiApiKeyInput(event.target.value)
+                      if (aiSettingsError) setAiSettingsError(null)
+                    }}
+                    placeholder="Optional unless Browser Key mode is enabled"
+                    className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                  />
+                  <p className="mt-2 text-[10px] text-[var(--text-muted)]">
+                    This key stays in your browser local storage. VNIBB does not persist it server-side.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={aiPreferAppwriteData}
+                      onChange={(event) => setAiPreferAppwriteData(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded"
+                    />
+                    <span>
+                      <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Prefer Appwrite data</span>
+                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use runtime Appwrite market data first and only fall back when that data is missing.</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={aiWebSearch}
+                      onChange={(event) => setAiWebSearch(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded"
+                    />
+                    <span>
+                      <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Allow web search</span>
+                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Keep this off unless you want the model to supplement Appwrite data with external web context.</span>
+                    </span>
+                  </label>
+                </div>
+
+                {aiSettingsError && (
+                  <p className="text-[11px] text-amber-300">{aiSettingsError}</p>
+                )}
+                {preferenceStatus && (
+                  <p className="text-[11px] text-emerald-300">{preferenceStatus}</p>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={applyAISettings}
+                    className="rounded-lg border border-blue-500/40 bg-blue-600/15 px-4 py-2 text-sm font-semibold text-blue-300 transition-colors hover:bg-blue-600/25"
+                  >
+                    Save AI Settings
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextSettings = clearStoredAISettings()
+                      setAiMode(nextSettings.mode)
+                      setAiModelInput(nextSettings.model)
+                      setAiApiKeyInput(nextSettings.apiKey)
+                      setAiWebSearch(nextSettings.webSearch)
+                      setAiPreferAppwriteData(nextSettings.preferAppwriteData)
+                      setAiSettingsError(null)
+                      setPreferenceStatus('AI settings reset to defaults for this browser.')
+                    }}
+                    className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  >
+                    Reset AI Settings
+                  </button>
+                </div>
+              </div>
+            )}
             {activeTab === 'data' && (
               <div className="space-y-6">
                 <div>
@@ -435,7 +649,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         type="button"
                         onClick={() => {
                           writeAdminLayoutKey(adminLayoutKeyInput)
-                          setPreferenceStatus(adminLayoutKeyInput.trim() ? 'Admin layout key saved locally.' : 'Admin layout key cleared.')
+                          const hasKey = adminLayoutKeyInput.trim().length > 0
+                          if (!hasKey) {
+                            writeAdminLayoutControlsVisible(false)
+                            setShowGlobalLayoutControls(false)
+                          }
+                          setPreferenceStatus(hasKey ? 'Admin layout key saved locally.' : 'Admin layout key cleared.')
                         }}
                         className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
                       >
@@ -445,7 +664,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         type="button"
                         onClick={() => {
                           clearAdminLayoutKey()
+                          writeAdminLayoutControlsVisible(false)
                           setAdminLayoutKeyInput('')
+                          setShowGlobalLayoutControls(false)
                           setPreferenceStatus('Admin layout key removed from this browser.')
                         }}
                         className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
@@ -453,22 +674,32 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         Clear Key
                       </button>
                     </div>
-                    <div className="mt-4 flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3">
-                      <div className="pr-4">
-                        <div className="text-sm font-semibold text-[var(--text-primary)]">Show global layout controls</div>
-                        <div className="mt-1 text-xs text-[var(--text-muted)]">
-                          Toggle the floating admin controls for Initial dashboards. Keep this off when you are not actively editing layouts.
-                        </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${adminLayoutKeyInput.trim() ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
+                        Admin key: {adminLayoutKeyInput.trim() ? 'active' : 'inactive'}
                       </div>
-                      <Switch
-                        checked={showGlobalLayoutControls}
-                        onCheckedChange={(checked) => {
-                          setShowGlobalLayoutControls(checked)
-                          writeAdminLayoutControlsVisible(checked)
-                          setPreferenceStatus(checked ? 'Global layout controls enabled.' : 'Global layout controls hidden.')
-                        }}
-                      />
+                      <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${showGlobalLayoutControls ? 'border-blue-500/30 bg-blue-500/10 text-blue-300' : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
+                        Layout controls: {showGlobalLayoutControls ? 'visible' : 'hidden'}
+                      </div>
                     </div>
+                    {adminLayoutKeyInput.trim() ? (
+                      <div className="mt-4 flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3">
+                        <div className="pr-4">
+                          <div className="text-sm font-semibold text-[var(--text-primary)]">Show global layout controls</div>
+                          <div className="mt-1 text-xs text-[var(--text-muted)]">
+                            Toggle the floating admin controls for Initial dashboards. Keep this off when you are not actively editing layouts.
+                          </div>
+                        </div>
+                        <Switch
+                          checked={showGlobalLayoutControls}
+                          onCheckedChange={(checked) => {
+                            setShowGlobalLayoutControls(checked)
+                            writeAdminLayoutControlsVisible(checked)
+                            setPreferenceStatus(checked ? 'Global layout controls enabled.' : 'Global layout controls hidden.')
+                          }}
+                        />
+                      </div>
+                    ) : null}
                     <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-3 text-xs text-amber-100/80">
                       This is an initial admin-only flow. Later tenant roles can replace the raw key with a proper server-issued admin session.
                     </div>

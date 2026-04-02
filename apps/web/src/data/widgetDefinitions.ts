@@ -898,7 +898,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'ai_analysis',
         name: 'AI Analysis',
-        description: 'Deep fundamental and technical analysis using Gemini AI',
+        description: 'Deep fundamental and technical analysis using your configured OpenRouter model',
         category: 'analysis',
         defaultConfig: {},
         defaultLayout: { w: 8, h: 10, minW: 4, minH: 6 }

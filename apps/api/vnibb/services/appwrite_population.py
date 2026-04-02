@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import lru_cache
 import hashlib
 import json
 import logging
@@ -97,6 +98,15 @@ def _load_schema_map() -> dict[str, Any]:
     return json.loads(_schema_map_path().read_text(encoding="utf-8"))
 
 
+@lru_cache(maxsize=1)
+def _collection_config_by_id() -> dict[str, dict[str, Any]]:
+    return {
+        str(item.get("collectionId")): item
+        for item in _load_schema_map().get("collections", [])
+        if item.get("collectionId")
+    }
+
+
 def _load_state() -> dict[str, Any]:
     path = _state_path()
     if not path.exists():
@@ -148,11 +158,90 @@ def _build_document_data(
     row: dict[str, Any],
     precision_columns: set[str],
     coerce_all_to_string: bool,
+    query_attributes: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         key: _normalize_value(value, key, precision_columns, coerce_all_to_string)
         for key, value in row.items()
     }
+    for spec in query_attributes or []:
+        attr_key = spec.get("key")
+        if not attr_key:
+            continue
+        source_key = spec.get("source") or attr_key
+        payload[attr_key] = _normalize_query_value(row.get(source_key), spec)
+    return payload
+
+
+def _normalize_query_value(value: Any, spec: dict[str, Any]) -> Any:
+    if value is None:
+        return None
+
+    kind = str(spec.get("type") or "string").strip().lower()
+    normalize_mode = str(spec.get("normalize") or "").strip().lower()
+
+    if kind == "datetime":
+        if hasattr(value, "isoformat") and not isinstance(value, str):
+            iso = value.isoformat()
+        else:
+            raw = str(value).strip()
+            if not raw:
+                return None
+            if len(raw) == 10 and raw[4] == "-" and raw[7] == "-":
+                iso = f"{raw}T00:00:00"
+            else:
+                iso = raw.replace(" ", "T", 1)
+
+        if len(iso) == 10 and iso[4] == "-" and iso[7] == "-":
+            iso = f"{iso}T00:00:00"
+        if "T" in iso and not iso.endswith("Z") and "+" not in iso:
+            iso = f"{iso}Z"
+        return iso
+
+    if kind == "integer":
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+    if kind == "float":
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed
+
+    if kind == "boolean":
+        if isinstance(value, bool):
+            return value
+        raw = str(value).strip().lower()
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+        if raw in {"0", "false", "no", "off"}:
+            return False
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+    if normalize_mode == "upper":
+        text = text.upper()
+    elif normalize_mode == "lower":
+        text = text.lower()
+    size = spec.get("size")
+    try:
+        size_value = int(size) if size is not None else 0
+    except (TypeError, ValueError):
+        size_value = 0
+    if size_value > 0:
+        text = text[:size_value]
+    return text
+
+
+def _query_attributes_for_collection(collection_id: str) -> list[dict[str, Any]]:
+    config = _collection_config_by_id().get(collection_id) or {}
+    query_attributes = config.get("queryAttributes") or []
+    return [item for item in query_attributes if isinstance(item, dict)]
 
 
 def _deterministic_document_id(
@@ -241,6 +330,7 @@ async def upsert_appwrite_documents(
 
     normalized_keys = list(document_id_columns or ["id"])
     normalized_precision = set(precision_columns or set())
+    query_attributes = _query_attributes_for_collection(collection_id)
     effective_permissions = permissions
     effective_concurrency = max(1, concurrency)
     effective_batch_size = max(1, batch_size)
@@ -263,7 +353,12 @@ async def upsert_appwrite_documents(
                         row,
                         normalized_keys,
                     )
-                    document_data = _build_document_data(row, normalized_precision, True)
+                    document_data = _build_document_data(
+                        row,
+                        normalized_precision,
+                        True,
+                        query_attributes,
+                    )
                     return await _upsert_document(
                         client,
                         database_id,
@@ -350,6 +445,11 @@ async def _populate_via_http(
                 batch_size = min(batch_size, 300)
             document_id_columns = list(collection_config.get("documentIdColumns") or ["id"])
             precision_columns = set(collection_config.get("precisionColumns") or [])
+            query_attributes = [
+                item
+                for item in (collection_config.get("queryAttributes") or [])
+                if isinstance(item, dict)
+            ]
 
             table_state = state.setdefault("tables", {}).setdefault(table_name, {})
             last_cursor = None if full_refresh else table_state.get("lastCursor")
@@ -382,7 +482,10 @@ async def _populate_via_http(
                             collection_id, row, document_id_columns
                         )
                         document_data = _build_document_data(
-                            row, precision_columns, coerce_all_to_string
+                            row,
+                            precision_columns,
+                            coerce_all_to_string,
+                            query_attributes,
                         )
                         permissions = _build_permissions(collection_config, row)
                         return await _upsert_document(

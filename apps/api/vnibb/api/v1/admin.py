@@ -20,7 +20,6 @@ from vnibb.services.system_layout_template_service import (
     SYSTEM_DASHBOARD_KEYS,
     SystemLayoutTemplateBundleResponse,
     SystemLayoutTemplateListResponse,
-    SystemLayoutTemplateUpsertRequest,
     system_layout_template_service,
 )
 
@@ -124,16 +123,25 @@ async def get_admin_system_layout_bundle(dashboard_key: str) -> SystemLayoutTemp
 )
 async def save_admin_system_layout(
     dashboard_key: str,
-    data: SystemLayoutTemplateUpsertRequest,
+    data: Dict[str, Any] = Body(...),
     x_admin_actor: Optional[str] = Header(default=None, alias="X-Admin-Actor"),
 ) -> SystemLayoutTemplateBundleResponse:
+    dashboard_payload = data.get("dashboard")
+    if not isinstance(dashboard_payload, dict):
+        raise HTTPException(status_code=400, detail="dashboard payload must be an object")
+
+    notes_value = data.get("notes")
+    if notes_value is not None and not isinstance(notes_value, str):
+        notes_value = str(notes_value)
+
+    publish_value = bool(data.get("publish", False))
     updated_by = (x_admin_actor or "admin").strip() or "admin"
     return await system_layout_template_service.save_dashboard_template(
         dashboard_key=dashboard_key,
-        dashboard=data.dashboard,
-        notes=data.notes,
+        dashboard=dashboard_payload,
+        notes=notes_value,
         updated_by=updated_by,
-        publish=data.publish,
+        publish=publish_value,
     )
 
 

@@ -18,6 +18,8 @@ Runtime model:
 - `run_mcp_from_env.mjs`: starts Appwrite MCP server using vars loaded from `apps/api/.env`.
 - `ensure_appwrite_collections.mjs`: creates missing Appwrite collections from schema map.
 - `ensure_appwrite_attributes_textsafe.mjs`: creates longtext attributes from source table columns.
+- `ensure_appwrite_query_attributes.mjs`: creates typed query overlay attributes from schema map.
+- `ensure_appwrite_indexes.mjs`: creates Appwrite indexes from schema map.
 - `reset_appwrite_collections.mjs`: deletes + recreates selected collections.
 - `verify_appwrite_counts.mjs`: compares Supabase row counts vs Appwrite document counts.
 - `run_backfill_loop.mjs`: repeatedly runs chunked backfills for one table until caught up or chunk limit is reached.
@@ -59,6 +61,12 @@ MIGRATION_BASELINE_SAMPLE_SIZE=500
 APPWRITE_POPULATE_MAX_ROWS=1000
 APPWRITE_POPULATE_FORCE_HTTP=1
 ```
+
+Schema map notes:
+
+- Raw source columns are still mirrored as text-safe attributes.
+- Query-safe overlay attributes are defined in `queryAttributes` with suffixes like `_q`, `_i`, `_f`, `_dt`.
+- Indexes should target overlay attributes, not longtext source fields.
 
 Alias support is included if your env file uses these names:
 
@@ -154,6 +162,18 @@ Create text-safe attributes (all longtext) for selected tables:
 MIGRATION_TABLES=stocks,income_statements node ./scripts/appwrite/ensure_appwrite_attributes_textsafe.mjs
 ```
 
+Create query overlay attributes for selected tables:
+
+```bash
+MIGRATION_TABLES=stocks,stock_prices,income_statements node ./scripts/appwrite/ensure_appwrite_query_attributes.mjs
+```
+
+Create indexes for selected tables:
+
+```bash
+MIGRATION_TABLES=stocks,stock_prices,income_statements node ./scripts/appwrite/ensure_appwrite_indexes.mjs
+```
+
 Reset selected collections (staging only):
 
 ```bash
@@ -231,6 +251,7 @@ node ./scripts/appwrite/run_backfill_loop.mjs
 - The script uses deterministic document IDs to support retries/resume.
 - On duplicate IDs, it updates existing documents.
 - Monetary and ratio fields can be coerced to strings using `precisionColumns` in schema map.
+- Use query overlay attributes and indexes for Appwrite-side filtering (`symbol_q`, `time_dt`, `fiscal_year_i`, etc.).
 - Use `MIGRATION_COERCE_ALL_TO_STRING=true` with text-safe longtext attributes to avoid precision drift.
 - Start with immutable data collections before user-owned mutable collections.
 - Always generate `supabase_baseline.json` before first live migration batch.

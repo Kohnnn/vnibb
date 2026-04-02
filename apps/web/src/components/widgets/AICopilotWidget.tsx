@@ -6,9 +6,10 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Sparkles, Loader2, X, Download, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { API_BASE_URL } from '@/lib/api';
+import { consumeCopilotStream, openCopilotChatStream } from '@/lib/api';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { readStoredAISettings } from '@/lib/aiSettings';
 
 interface WidgetContext {
     widgetType: string;
@@ -105,62 +106,35 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                 .slice(-10) // Last 10 messages for context
                 .map(m => ({ role: m.role, content: m.content }));
 
-            const response = await fetch(`${API_BASE_URL}/copilot/chat/stream`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
+            const response = await openCopilotChatStream(
+                {
                     message: userMessage,
                     context: context || null,
                     history: historyForRequest,
-                }),
-                signal: abortControllerRef.current.signal,
-            });
+                    settings: readStoredAISettings(),
+                },
+                abortControllerRef.current.signal,
+            );
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const reader = response.body?.getReader();
-            const decoder = new TextDecoder();
             let fullContent = '';
 
-            if (reader) {
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-
-                    const chunk = decoder.decode(value, { stream: true });
-                    const lines = chunk.split('\n');
-
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
-                                if (data.chunk) {
-                                    fullContent += data.chunk;
-                                    setMessages(prev => prev.map(m =>
-                                        m.id === assistantMsgId
-                                            ? { ...m, content: fullContent }
-                                            : m
-                                    ));
-                                }
-                                if (data.done) {
-                                    setMessages(prev => prev.map(m =>
-                                        m.id === assistantMsgId
-                                            ? { ...m, isStreaming: false }
-                                            : m
-                                    ));
-                                }
-                                if (data.error) {
-                                    throw new Error(data.error);
-                                }
-                            } catch (e) {
-                                // Ignore JSON parse errors for incomplete chunks
-                            }
-                        }
-                    }
-                }
-            }
+            await consumeCopilotStream(response, {
+                onChunk: (chunk) => {
+                    fullContent += chunk;
+                    setMessages(prev => prev.map(m =>
+                        m.id === assistantMsgId
+                            ? { ...m, content: fullContent }
+                            : m
+                    ));
+                },
+                onDone: () => {
+                    setMessages(prev => prev.map(m =>
+                        m.id === assistantMsgId
+                            ? { ...m, isStreaming: false }
+                            : m
+                    ));
+                },
+            });
         } catch (error: any) {
             if (error.name === 'AbortError') {
                 setMessages(prev => prev.map(m =>

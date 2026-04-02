@@ -9,6 +9,7 @@ import {
 } from './appwrite';
 import { env } from './env';
 import { isSupabaseConfigured, supabase } from './supabase';
+import type { AISettings } from './aiSettings';
 
 const LOCALHOST_OR_LOOPBACK_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i
 
@@ -1766,7 +1767,9 @@ export async function getRelativeRotation(
 export interface WidgetContext {
     widgetType: string;
     symbol: string;
+    activeTab?: string | null;
     dataSnapshot?: Record<string, unknown>;
+    widgetPayload?: Record<string, unknown> | null;
 }
 
 export interface CopilotQuery {
@@ -1787,11 +1790,144 @@ export interface PromptTemplate {
     template: string;
 }
 
+export interface CopilotHistoryMessage {
+    role: 'user' | 'assistant';
+    content: string;
+}
+
+export interface CopilotStreamRequest {
+    message: string;
+    context?: WidgetContext | null;
+    history: CopilotHistoryMessage[];
+    settings?: AISettings;
+}
+
+export interface CopilotStreamEvent {
+    chunk?: string;
+    done?: boolean;
+    error?: string;
+}
+
 export async function askCopilot(query: CopilotQuery): Promise<CopilotResponse> {
     return fetchAPI<CopilotResponse>('/copilot/ask', {
         method: 'POST',
         body: JSON.stringify(query),
     });
+}
+
+export async function openCopilotChatStream(
+    request: CopilotStreamRequest,
+    signal?: AbortSignal,
+): Promise<Response> {
+    const isBrowser = typeof window !== 'undefined';
+    if (isBrowser && window.location.protocol === 'https:' && API_BASE_URL.startsWith('http://')) {
+        throw new APIError(
+            'Mixed content blocked. API URL must use HTTPS for secure pages.',
+            0,
+            'MixedContent'
+        );
+    }
+    if (isBrowser && !navigator.onLine) {
+        throw new APIError('You are offline. Please check your internet connection.', 0, 'Offline');
+    }
+
+    const headers = new Headers({
+        'Content-Type': 'application/json',
+    });
+
+    const token = await getAuthorizationToken();
+    if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+    }
+
+    return fetch(`${API_BASE_URL}/copilot/chat/stream`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(request),
+        signal,
+    });
+}
+
+export async function consumeCopilotStream(
+    response: Response,
+    handlers: {
+        onChunk?: (chunk: string) => void;
+        onDone?: () => void;
+    } = {},
+): Promise<void> {
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new APIError(errorText || `API Error: ${response.status}`, response.status, response.statusText);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+        throw new APIError('No response body', response.status, response.statusText);
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+            break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+
+        for (const eventBlock of events) {
+            const dataLine = eventBlock
+                .split('\n')
+                .find((line) => line.startsWith('data: '));
+
+            if (!dataLine) {
+                continue;
+            }
+
+            let event: CopilotStreamEvent;
+            try {
+                event = JSON.parse(dataLine.slice(6)) as CopilotStreamEvent;
+            } catch {
+                continue;
+            }
+
+            if (event.error) {
+                throw new APIError(event.error, response.status, response.statusText);
+            }
+
+            if (event.chunk) {
+                handlers.onChunk?.(event.chunk);
+            }
+
+            if (event.done) {
+                handlers.onDone?.();
+            }
+        }
+    }
+
+    if (buffer.trim().startsWith('data: ')) {
+        const trailing = buffer.trim().slice(6);
+        let event: CopilotStreamEvent;
+        try {
+            event = JSON.parse(trailing) as CopilotStreamEvent;
+        } catch {
+            // Ignore incomplete trailing chunks.
+            return;
+        }
+
+        if (event.error) {
+            throw new APIError(event.error, response.status, response.statusText);
+        }
+        if (event.chunk) {
+            handlers.onChunk?.(event.chunk);
+        }
+        if (event.done) {
+            handlers.onDone?.();
+        }
+    }
 }
 
 

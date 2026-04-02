@@ -77,7 +77,7 @@ Total registered widgets: **59**.
 | Comparison Analysis | `comparison_analysis` | core_data | `GET /comparison`, `GET /comparison/performance` |
 | News Flow | `news_flow` | core_data | `GET /news/*`, `GET /equity/{symbol}/news` |
 | News + Corporate Actions | `news_corporate_actions` | core_data | `GET /equity/{symbol}/news`, `GET /equity/{symbol}/events`, insider feeds |
-| AI Analysis | `ai_analysis` | analysis | `POST /copilot/ask`, `GET /copilot/suggestions`, Gemini-backed analysis service |
+| AI Analysis | `ai_analysis` | analysis | `POST /copilot/chat/stream`, `GET /copilot/suggestions`, OpenRouter-backed Appwrite-first analysis |
 | Sector Top Movers | `sector_top_movers` | core_data | `GET /trading/sector-top-movers`, `GET /sectors/{sector}/stocks` |
 
 ## Notes
