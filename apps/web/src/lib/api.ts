@@ -164,8 +164,21 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
                 detail: response.statusText || 'Unknown error'
             }));
 
+            const normalizedDetail = Array.isArray(errorData.detail)
+                ? errorData.detail
+                    .map((item: any) => {
+                        const location = Array.isArray(item?.loc) ? item.loc.join('.') : null
+                        return location ? `${location}: ${item?.msg || 'invalid'}` : item?.msg || 'invalid'
+                    })
+                    .join('; ')
+                : typeof errorData.detail === 'string'
+                    ? errorData.detail
+                    : errorData.detail
+                        ? JSON.stringify(errorData.detail)
+                        : null;
+
             // Generate user-friendly error message based on status
-            let errorMessage = errorData.detail || `API Error: ${response.status}`;
+            let errorMessage = normalizedDetail || `API Error: ${response.status}`;
 
             // Add specific messages for common status codes
             if (response.status === 429) {

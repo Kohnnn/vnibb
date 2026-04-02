@@ -13,17 +13,22 @@
 
 ## 📋 Overview
 
-Python package providing unified interface to Vietnamese stock market data sources, powered by vnstock.
+Shared provider package for VNIBB's Python data integrations.
+
+Right now this package is only a thin placeholder around vnstock credentials/dependency wiring. The production-grade vnstock integration still lives in `vnibb/apps/api`, where the fallback, caching, and normalization logic is implemented.
+
+Upstream alignment:
+- Official `vnstocks.com` docs currently document stable releases through `v3.4.2`.
+- VNIBB currently pins the newer GitHub-main/runtime line via `vnstock>=3.5.0` in `pyproject.toml`.
+- That means KBS-first behavior is assumed and `TCBS` should be treated as removed.
 
 ---
 
 ## 🚀 Features
 
-- **vnstock Integration** - Golden Sponsor API support
-- **Async/Await** - High-performance async operations
-- **Type Safety** - Full Pydantic models
-- **Caching** - Built-in cache layer
-- **Retry Logic** - Automatic retry on failures
+- **Shared dependency anchor** - Keeps the repo's standalone providers package aligned to the vnstock runtime line used by VNIBB.
+- **Credential placeholder** - Exposes a minimal `VnstockProvider` wrapper for future extraction work.
+- **Roadmap package** - Intended home for reusable providers as logic is carved out of `apps/api`.
 
 ---
 
@@ -40,21 +45,16 @@ pip install vnibb-providers
 ```python
 from vnibb_providers import VnstockProvider
 
-# Initialize
-provider = VnstockProvider(api_key="your-key")
+# Current implementation is intentionally thin.
+provider = VnstockProvider(api_key="vnstock_xxx")
 
-# Get stock data
-stock = await provider.get_stock("VNM")
-
-# Get financials
-financials = await provider.get_financials("VNM", period="annual")
-
-# Screen stocks
-results = await provider.screen_stocks(
-    exchange="HOSE",
-    filters={"pe": "<15"}
-)
+print(provider.api_key)
 ```
+
+If you need the actual market-data integration today, use one of these instead:
+- `vnibb/apps/api` for the full VNIBB backend integration
+- `https://github.com/thinh-vu/vnstock` for the upstream Python library
+- `https://github.com/mrgoonie/vnstock-agent` for MCP/CLI workflows
 
 ---
 
@@ -62,7 +62,8 @@ results = await provider.screen_stocks(
 
 | Provider | Data Source | Status |
 |----------|-------------|--------|
-| `VnstockProvider` | vnstock v3.5.0+ | ✅ Active |
+| `VnstockProvider` | Minimal wrapper stub | ✅ Present |
+| Shared extracted provider API | VNIBB backend parity | 🔄 Planned |
 | `CafeProvider` | cafef.vn | 🔄 Planned |
 | `VNDirectProvider` | vndirect.com.vn | 🔄 Planned |
 

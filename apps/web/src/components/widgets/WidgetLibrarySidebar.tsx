@@ -31,7 +31,7 @@ const CATEGORY_ICONS: Record<string, any> = {
 
 export function WidgetLibrarySidebar({ isOpen, onClose }: WidgetLibrarySidebarProps) {
     const { activeDashboard, activeTab, addWidget } = useDashboard();
-    const dashboardEditable = (activeDashboard?.isEditable ?? true) !== false;
+    const dashboardEditable = activeDashboard?.adminUnlocked === true || (activeDashboard?.isEditable ?? true) !== false;
     const [searchQuery, setSearchQuery] = useState('');
     const [activeCategory, setActiveCategory] = useState<string | null>(null);
 

@@ -1,12 +1,19 @@
-# VnStock Library - Comprehensive API Documentation
+# vnstock Library - VNIBB Reference Notes
 
-> **Official Documentation**: [vnstocks.com/docs](https://vnstocks.com/docs)
-> **GitHub**: [github.com/thinh-vu/vnstock](https://github.com/thinh-vu/vnstock)
-> **Version**: 3.5.0+ (KBS default data source, TCBS removed)
+> **Official documentation (stable/public)**: [vnstocks.com/docs](https://vnstocks.com/docs)
+> **Official version history**: [vnstocks.com/docs/tai-lieu/lich-su-phien-ban](https://vnstocks.com/docs/tai-lieu/lich-su-phien-ban)
+> **Upstream repo**: [github.com/thinh-vu/vnstock](https://github.com/thinh-vu/vnstock)
+> **MCP/CLI companion**: [github.com/mrgoonie/vnstock-agent](https://github.com/mrgoonie/vnstock-agent)
+> **VNIBB runtime target**: `vnstock>=3.5.0,<3.6` in `apps/api/pyproject.toml`
 
-Please check context7 mcp for detail documentation about vnstock library.
+This document is a VNIBB-facing reference, not the canonical upstream manual. It is audited against the public docs site, the official version history, the upstream GitHub README/CHANGELOG, and the `vnstock-agent` README.
 
-This document provides a complete reference for all vnstock library functions and how to use them effectively without violating rate limits.
+When those sources disagree, use this order of precedence:
+- `vnstocks.com/docs` and the official version-history page for stable public behavior
+- GitHub `main` for newer runtime changes that may not be mirrored on the docs site yet
+- VNIBB config and `pyproject.toml` for local integration assumptions
+
+Context7 is still useful for deeper API lookup, but it should be treated as a supporting source rather than the primary source of truth.
 
 ---
 
@@ -31,8 +38,10 @@ This document provides a complete reference for all vnstock library functions an
 
 ```bash
 pip install -U vnstock
-# OR for specific vnstock3 version:
+# Legacy package alias kept only for old 3.1.0-era installs:
 # pip install vnstock3
+# GitHub main / unreleased runtime line used by VNIBB:
+# pip install git+https://github.com/thinh-vu/vnstock.git
 ```
 
 ### Basic Import Pattern
@@ -66,24 +75,29 @@ best_proxy = proxy_manager.get_best_proxy()
 
 ## Data Sources
 
-VnStock supports multiple data sources:
+vnstock source behavior differs slightly across the audited sources:
 
-| Source | Description | Recommended For |
-|--------|-------------|-----------------|
-| **KBS** | KBS Securities (v3.5.0+ default) | All operations (default) |
-| **VCI** | VNDirect data | Price history, financial statements, company overview |
-| **DNSE** | DNSE data source | Price/intraday alternatives and redundancy |
+| Source | Upstream status | Recommended use in VNIBB |
+|--------|-----------------|---------------------------|
+| **KBS** | Public docs/README use it as the default from `3.4.0` onward | Primary/default source |
+| **VCI** | Still supported | Fallback and parity with `vnstock-agent` default config |
+| **DNSE** | Still supported | Quote/intraday redundancy |
+| **TCBS** | Removed from GitHub `main` changelog on `2026-03-05` | Do not configure |
 
-> **v3.5.0 Note**: KBS is the default source. `TCBS` was removed upstream, so source selection should be limited to `KBS`, `VCI`, and `DNSE`. The `Vnstock` class remains available but specific classes (`Listing`, `Company`, `Finance`) are preferred.
+Notes:
+- The official docs site currently documents stable releases through `v3.4.2` (`2026-02-01`).
+- GitHub `main` includes later March 2026 changes, including TCBS removal, that VNIBB follows locally.
+- `mrgoonie/vnstock-agent` defaults `VNSTOCK_SOURCE=VCI`; set `KBS` explicitly if you want parity with VNIBB.
+- The `Vnstock` class remains available, but specific classes (`Listing`, `Company`, `Finance`, `Trading`) are preferred in VNIBB.
 
 ```python
-# KBS source (v3.5.0+ default)
+# KBS source (VNIBB default / official docs first choice)
 stock = Vnstock().stock(symbol='VCI', source='KBS')
 
-# VCI source (legacy, still works)
+# VCI source (explicit fallback / matches vnstock-agent default)
 stock = Vnstock().stock(symbol='VCI', source='VCI')
 
-# Using specific classes (recommended in v3.5.0+)
+# Using specific classes (preferred in VNIBB)
 from vnstock import Listing, Company, Finance
 listing = Listing(source='KBS')  # or just Listing() for default
 ```
@@ -97,7 +111,7 @@ Get lists of all stocks, indices, and securities.
 ### List All Symbols
 ```python
 from vnstock import Listing
-listing = Listing()  # Uses KBS by default in v3.5.0+
+listing = Listing()  # Uses the current default source; VNIBB sets KBS explicitly for clarity
 
 # Get all stock symbols with company names
 df = listing.all_symbols()
@@ -239,7 +253,10 @@ df = quote.intraday(page_size=10000)
 
 ### Price Board (Multiple Symbols)
 ```python
-df = quote.price_board(symbols_list=['VCB', 'ACB', 'TCB', 'BID'])
+from vnstock import Trading
+
+trading = Trading(source='KBS')
+df = trading.price_board(symbols_list=['VCB', 'ACB', 'TCB', 'BID'])
 # Returns: bid/ask data for multiple symbols simultaneously
 ```
 
@@ -295,9 +312,14 @@ df = finance.ratio(
 
 ## Stock Screener API
 
-### Status in vnstock 3.5.0+
+### Current upstream status
 
-`Screener().stock()` in the OSS path is no longer a reliable source for the historical 84-column dataset after TCBS removal.
+The audited sources disagree slightly on screener messaging:
+- The public docs/README still describe screener historically and mark it as temporarily unavailable.
+- The GitHub `CHANGELOG.md` entry dated `2026-03-05` removes the TCBS-backed OSS screener path.
+- `vnstock-agent` does not expose a screener tool or CLI command.
+
+For VNIBB planning, treat the built-in OSS screener path as unavailable.
 
 Recommended paths in VNIBB:
 
@@ -312,7 +334,7 @@ Recommended paths in VNIBB:
 ### Runtime guidance
 
 - Keep `VNSTOCK_SOURCE` on `KBS` (recommended), `VCI`, or `DNSE`.
-- Do not configure `TCBS`; it is removed upstream in vnstock 3.5.0+.
+- Do not configure `TCBS`; it is removed in the newer upstream runtime line used by VNIBB.
 - For migration/backfill workloads, run the Appwrite migration orchestrator after source sync completion.
 
 ---
@@ -325,7 +347,7 @@ Real-time price board data with bid/ask information.
 ```python
 from vnstock import Trading
 
-trading = Trading(symbol='VN30F1M')  # Any symbol to initialize
+trading = Trading(source='KBS')
 df = trading.price_board(symbols_list=['VCB', 'ACB', 'TCB', 'BID'])
 ```
 
@@ -344,59 +366,62 @@ df = trading.price_board(symbols_list=['VCB', 'ACB', 'TCB', 'BID'])
 - `bid_1_price`, `bid_1_volume`, `bid_2_price`, `bid_2_volume`, `bid_3_price`, `bid_3_volume`
 - `ask_1_price`, `ask_1_volume`, `ask_2_price`, `ask_2_volume`, `ask_3_price`, `ask_3_volume`
 
-435: ---
-436: 
-437: ## Fund API
-438: 
-439: Access open-end fund data (fmarket.vn source).
-440: 
-441: ### Initialize Fund Module
-442: ```python
-443: from vnstock import Fund
-444: fund = Fund()
-445: ```
-446: 
-447: ### List All Open-End Funds
-448: ```python
-449: df = fund.listing()
-450: # Returns dataframe of all available funds
-451: ```
-452: 
-453: ### Filter Funds by Symbol
-454: ```python
-455: df = fund.filter('DC')
-456: # Returns funds containing 'DC' in symbol
-457: ```
-458: 
-459: ### Top Holdings
-460: ```python
-461: df = fund.details.top_holding('SSISCA')
-462: # Returns top assets held by the fund
-463: ```
-464: 
-465: ### NAV Report
-466: ```python
-467: df = fund.details.nav_report('SSISCA')
-468: # Returns Net Asset Value history
-469: ```
-470: 
-471: ---
+---
+
+## Fund API
+
+Access open-end fund data (fmarket.vn source).
+
+### Initialize Fund Module
+```python
+from vnstock.explorer.fmarket.fund import Fund
+
+fund = Fund()
+```
+
+### List All Open-End Funds
+```python
+df = fund.listing()
+# Returns dataframe of all available funds
+```
+
+### Filter Funds by Symbol
+```python
+df = fund.filter('DC')
+# Returns funds containing 'DC' in symbol
+```
+
+### Top Holdings
+```python
+df = fund.details.top_holding('SSISCA')
+# Returns top assets held by the fund
+```
+
+### NAV Report
+```python
+df = fund.details.nav_report('SSISCA')
+# Returns Net Asset Value history
+```
+
+---
 
 ## Rate Limit Guidelines
 
-> ⚠️ **CRITICAL**: VnStock APIs have implicit rate limits. Exceeding them will result in IP blocking or temporary bans.
+> ⚠️ **CRITICAL**: vnstock rate limits are tier-dependent. Exceeding them can still lead to throttling, degraded responses, or temporary bans.
 
-### Recommended Rate Limits
+### Upstream Tier Guidance
 
-| Operation | Max Calls/Min | Recommended Delay |
-|-----------|--------------|-------------------|
-| Listing API | 10 | 6 seconds |
-| Company Overview | 20 | 3 seconds |
-| Price History | 30 | 2 seconds |
-| Financial Statements | 15 | 4 seconds |
-| Premium screener backfill | 2 | 30 seconds |
-| Trading Board | 20 | 3 seconds |
-| Intraday Data | 10 | 6 seconds |
+| Tier / Context | Guidance from audited sources |
+|----------------|-------------------------------|
+| Guest | ~20 requests/minute, no registration |
+| Community | ~60 requests/minute, free registration |
+| Sponsor | 3-5x the free tier according to the upstream README |
+| VNIBB backend | Local env defaults reserve `500/min` main budget plus `50/min` reinforcement budget for premium/server-side workloads |
+
+Notes:
+- The `500/min` and `50/min` figures come from VNIBB's own env defaults, not from the public upstream docs.
+- If you run ad-hoc scripts or use `vnstock-agent` locally, assume the lower public-tier limits unless you have sponsor access and a configured `VNSTOCK_API_KEY`.
+- Batch endpoints such as `Trading.price_board()` and cached backend screener snapshots are preferred over many per-symbol calls.
 
 ### Rate Limiting Implementation
 
@@ -575,4 +600,4 @@ except Exception as e:
 
 ---
 
-*Documentation generated from vnstocks.com/docs - Last updated: 2026-03-14 - Updated for v3.5.0+*
+*Audited on 2026-04-02 against `vnstocks.com/docs`, the official version-history page, `thinh-vu/vnstock` README/CHANGELOG, and `mrgoonie/vnstock-agent` README.*

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw, Shield } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -22,7 +23,13 @@ import {
   writeStoredUserPreferences,
 } from '@/lib/userPreferences';
 import { formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
-import { clearAdminLayoutKey, readAdminLayoutKey, writeAdminLayoutKey } from '@/lib/adminLayoutAccess';
+import {
+  clearAdminLayoutKey,
+  readAdminLayoutControlsVisible,
+  readAdminLayoutKey,
+  writeAdminLayoutControlsVisible,
+  writeAdminLayoutKey,
+} from '@/lib/adminLayoutAccess';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -39,6 +46,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [preferenceStatus, setPreferenceStatus] = useState<string | null>(null);
   const [isTickerMenuOpen, setIsTickerMenuOpen] = useState(false);
   const [adminLayoutKeyInput, setAdminLayoutKeyInput] = useState('');
+  const [showGlobalLayoutControls, setShowGlobalLayoutControls] = useState(false);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const { resolvedTheme } = useTheme();
   const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
@@ -57,6 +65,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setPreferenceStatus(null);
       setIsTickerMenuOpen(false);
       setAdminLayoutKeyInput(readAdminLayoutKey());
+      setShowGlobalLayoutControls(readAdminLayoutControlsVisible());
     }
   }, [globalSymbol, isOpen]);
 
@@ -443,6 +452,22 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       >
                         Clear Key
                       </button>
+                    </div>
+                    <div className="mt-4 flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3">
+                      <div className="pr-4">
+                        <div className="text-sm font-semibold text-[var(--text-primary)]">Show global layout controls</div>
+                        <div className="mt-1 text-xs text-[var(--text-muted)]">
+                          Toggle the floating admin controls for Initial dashboards. Keep this off when you are not actively editing layouts.
+                        </div>
+                      </div>
+                      <Switch
+                        checked={showGlobalLayoutControls}
+                        onCheckedChange={(checked) => {
+                          setShowGlobalLayoutControls(checked)
+                          writeAdminLayoutControlsVisible(checked)
+                          setPreferenceStatus(checked ? 'Global layout controls enabled.' : 'Global layout controls hidden.')
+                        }}
+                      />
                     </div>
                     <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-3 text-xs text-amber-100/80">
                       This is an initial admin-only flow. Later tenant roles can replace the raw key with a proper server-issued admin session.

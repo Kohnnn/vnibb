@@ -37,7 +37,16 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
 - **Database:** Appwrite (primary) / PostgreSQL (fallback)
 - **ORM:** SQLAlchemy 2.0 (async)
 - **Cache:** Redis (Upstash)
-- **Data:** vnstock 3.5.0+
+- **Data:** vnstock post-3.4.2 / 3.5.x runtime line (KBS-first, TCBS removed)
+
+---
+
+## VNStock Alignment
+
+- Public upstream docs and version history at `vnstocks.com` currently document stable releases through `v3.4.2`.
+- Upstream GitHub `main` includes newer March 2026 changes, including TCBS removal and KBS-first runtime behavior.
+- VNIBB currently pins `vnstock>=3.5.0,<3.6` in `apps/api/pyproject.toml`, so this backend assumes the post-TCBS source set: `KBS` (default), `VCI`, and `DNSE`.
+- `mrgoonie/vnstock-agent` is the MCP/CLI companion project. Its README defaults `VNSTOCK_SOURCE=VCI`, so set `KBS` explicitly when you want parity with VNIBB.
 
 ---
 
@@ -137,8 +146,9 @@ Premium package strategy:
 - Default `Dockerfile` keeps runtime installer disabled (`VNSTOCK_RUNTIME_INSTALL=0`) to avoid cold-start CPU spikes.
 - Use `Dockerfile.premium` for prebuilt premium layers when `VNSTOCK_API_KEY` is available at build time.
 
-VNStock 3.5.0+ compatibility notes:
-- `TCBS` source is removed upstream and should not be configured.
+VNStock alignment notes:
+- Stable public docs currently point to `v3.4.2`, while GitHub `main` carries newer runtime changes used by VNIBB.
+- `TCBS` is removed in the newer upstream runtime line and should not be configured here.
 - Use `VNSTOCK_SOURCE=KBS` (recommended), `VCI`, or `DNSE`.
 - OSS screener coverage changed upstream; keep premium modules installed (`vnstock_data`, `vnstock_ta`, `vnstock_pipeline`, `vnstock_news`, `vnii`) for full legacy screener parity.
 
@@ -162,6 +172,7 @@ Workspace docs:
 - `../../docs/API_REFERENCE.md`
 - `../../docs/v47_production_health.md`
 - `../../CHANGELOG.md`
+- `docs/vnstock_api_documentation.md`
 
 ---
 
@@ -216,6 +227,7 @@ MIT License - see [LICENSE](LICENSE)
 - [vnibb-web](https://github.com/Kohnnn/vnibb-web) - Frontend app
 - [vnibb-providers](https://github.com/Kohnnn/vnibb-providers) - Data providers
 - [vnibb](https://github.com/Kohnnn/vnibb) - Main hub
+- [mrgoonie/vnstock-agent](https://github.com/mrgoonie/vnstock-agent) - MCP/CLI wrapper around vnstock
 
 ---
 

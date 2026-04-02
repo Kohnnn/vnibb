@@ -78,7 +78,7 @@ Notes:
 - `WARRANT_SYMBOLS` is optional. If empty, warrant sync is skipped.
 - `DERIVATIVES_SYMBOLS` is optional; defaults to vnstock list.
 - Intraday/orderbook/block-trade sync is skipped outside configured market hours.
-- All vnstock calls use `VNSTOCK_SOURCE` (KBS).
+- All vnstock calls use `VNSTOCK_SOURCE` (`KBS` by default in VNIBB; valid sources are `KBS`, `VCI`, `DNSE`).
 - Intraday raw storage is disabled by default; only daily order flow is persisted.
 
 ## Redis Budget Controls
