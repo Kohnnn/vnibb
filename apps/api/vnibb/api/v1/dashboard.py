@@ -21,6 +21,10 @@ from vnibb.providers.vnstock.market_overview import (
 )
 from vnibb.providers.vnstock.top_movers import TopMoverData
 from vnibb.services.dashboard_service import dashboard_service
+from vnibb.services.system_layout_template_service import (
+    SystemLayoutTemplateListResponse,
+    system_layout_template_service,
+)
 
 router = APIRouter()
 
@@ -293,6 +297,17 @@ async def get_most_active(
         data=data,
         timestamp=datetime.now().isoformat(),
     )
+
+
+@router.get(
+    "/system-layouts/published",
+    response_model=SystemLayoutTemplateListResponse,
+    summary="List Published System Layouts",
+    description="Return published global layouts for Initial system dashboards.",
+)
+async def list_published_system_layouts() -> SystemLayoutTemplateListResponse:
+    records = await system_layout_template_service.list_published_templates()
+    return SystemLayoutTemplateListResponse(count=len(records), data=records)
 
 
 @router.get(

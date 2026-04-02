@@ -224,7 +224,14 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
 
 import type { EquityHistoricalResponse, EquityProfileResponse, CompanyNewsResponse, CompanyEventsResponse, AnalystEstimatesResponse, ShareholdersResponse, OfficersResponse, IntradayResponse, FinancialRatiosResponse, RatioHistoryResponse, ForeignTradingResponse, TransactionFlowResponse, CorrelationMatrixResponse, SubsidiariesResponse, BalanceSheetResponse, IncomeStatementResponse, CashFlowResponse, MarketOverviewResponse } from '@/types/equity';
 import type { ScreenerResponse } from '@/types/screener';
-import type { Dashboard, DashboardCreate, DashboardUpdate, WidgetCreate } from '@/types/dashboard';
+import type {
+    Dashboard,
+    DashboardCreate,
+    DashboardUpdate,
+    SystemDashboardTemplateBundleResponse,
+    SystemDashboardTemplateListResponse,
+    WidgetCreate,
+} from '@/types/dashboard';
 import type {
     FibonacciRetracementResponse,
     FullTechnicalAnalysis,
@@ -698,6 +705,31 @@ export async function removeWidget(dashboardId: number, widgetId: number): Promi
     return fetchAPI(`/dashboard/${dashboardId}/widgets/${widgetId}`, {
         method: 'DELETE',
         auth: 'required',
+    });
+}
+
+export async function getPublishedSystemDashboardTemplates(): Promise<SystemDashboardTemplateListResponse> {
+    return fetchAPI<SystemDashboardTemplateListResponse>('/dashboard/system-layouts/published');
+}
+
+export async function getAdminSystemDashboardTemplateBundle(
+    dashboardKey: string,
+    adminKey: string,
+): Promise<SystemDashboardTemplateBundleResponse> {
+    return fetchAPI<SystemDashboardTemplateBundleResponse>(`/admin/system-layouts/${dashboardKey}`, {
+        headers: { 'X-Admin-Key': adminKey },
+    });
+}
+
+export async function saveAdminSystemDashboardTemplate(
+    dashboardKey: string,
+    payload: { dashboard: Dashboard; notes?: string; publish?: boolean },
+    adminKey: string,
+): Promise<SystemDashboardTemplateBundleResponse> {
+    return fetchAPI<SystemDashboardTemplateBundleResponse>(`/admin/system-layouts/${dashboardKey}`, {
+        method: 'PUT',
+        headers: { 'X-Admin-Key': adminKey },
+        body: JSON.stringify(payload),
     });
 }
 

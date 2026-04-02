@@ -42,6 +42,8 @@ import { useUnit } from '@/contexts/UnitContext';
 import { autoFitGridItems, findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
+import { readAdminLayoutKey, subscribeAdminLayoutKey } from '@/lib/adminLayoutAccess';
+import { saveAdminSystemDashboardTemplate } from '@/lib/api';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import {
     DASHBOARD_WALKTHROUGH_RESTART_EVENT,
@@ -50,7 +52,7 @@ import {
 } from '@/lib/userPreferences';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
 import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '@/types/dashboard-templates';
-import { Grid3X3, PlusCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, Grid3X3, PlusCircle, RefreshCw, Shield } from 'lucide-react';
 
 export default function DashboardPage() {
     return (
@@ -62,8 +64,17 @@ export default function DashboardPage() {
 
 const RIGHT_SIDEBAR_WIDTH = 350;
 const MAIN_FUNDAMENTAL_DASHBOARD_ID = 'default-fundamental';
+const TECHNICAL_DASHBOARD_ID = 'default-technical';
+const QUANT_DASHBOARD_ID = 'default-quant';
+const GLOBAL_MARKETS_DASHBOARD_ID = 'default-global-markets';
 const FUNDAMENTALS_TAB_NAME = 'Fundamentals';
 const FUNDAMENTALS_PERIOD_SYNC_GROUP = 'fundamental-core';
+const ADMIN_MANAGED_SYSTEM_IDS = new Set([
+    MAIN_FUNDAMENTAL_DASHBOARD_ID,
+    TECHNICAL_DASHBOARD_ID,
+    QUANT_DASHBOARD_ID,
+    GLOBAL_MARKETS_DASHBOARD_ID,
+]);
 
 function DashboardContent() {
     const {
@@ -79,7 +90,8 @@ function DashboardContent() {
         updateTabLayout,
         updateWidget,
         resetTabLayout,
-        addWidget
+        addWidget,
+        setDashboardAdminUnlocked,
     } = useDashboard();
 
     const { setGlobalSymbol: setContextGlobalSymbol } = useWidgetGroups();
@@ -97,6 +109,9 @@ function DashboardContent() {
     const [sidebarWidth, setSidebarWidth] = useState(208);
     const [mounted, setMounted] = useState(false);
     const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
+    const [adminLayoutKey, setAdminLayoutKey] = useState('');
+    const [adminLayoutStatus, setAdminLayoutStatus] = useState<string | null>(null);
+    const [isPublishingSystemLayout, setIsPublishingSystemLayout] = useState(false);
     const [widgetSettingsState, setWidgetSettingsState] = useState<{
         widgetId: string;
         tabId: string;
@@ -129,6 +144,21 @@ function DashboardContent() {
         window.addEventListener('resize', updateSidebarWidth);
         return () => window.removeEventListener('resize', updateSidebarWidth);
     }, [updateSidebarWidth]);
+
+    useEffect(() => {
+        if (!mounted) return;
+        const syncAdminKey = () => {
+            setAdminLayoutKey(readAdminLayoutKey());
+        };
+        syncAdminKey();
+        return subscribeAdminLayoutKey(syncAdminKey);
+    }, [mounted]);
+
+    useEffect(() => {
+        if (!adminLayoutStatus) return;
+        const timeoutId = window.setTimeout(() => setAdminLayoutStatus(null), 2600);
+        return () => window.clearTimeout(timeoutId);
+    }, [adminLayoutStatus]);
 
     const openWalkthrough = useCallback(() => {
         if (!mounted || sidebarWidth === 0) {
@@ -212,6 +242,59 @@ function DashboardContent() {
         validPeriods: ['FY', 'Q', 'TTM'],
         sharedKey: sharedFundamentalPeriodKey,
     });
+    const isAdminManagedSystemDashboard = Boolean(
+        activeDashboard && ADMIN_MANAGED_SYSTEM_IDS.has(activeDashboard.id),
+    );
+
+    const serializeSystemDashboardForPublish = useCallback((dashboard: typeof activeDashboard) => {
+        if (!dashboard) return null;
+        return {
+            ...dashboard,
+            adminUnlocked: false,
+            isEditable: false,
+            isDeletable: false,
+            updatedAt: new Date().toISOString(),
+        };
+    }, []);
+
+    const handleToggleAdminLayoutMode = useCallback(() => {
+        if (!activeDashboard || !isAdminManagedSystemDashboard) return;
+        const nextUnlocked = activeDashboard.adminUnlocked !== true;
+        setDashboardAdminUnlocked(activeDashboard.id, nextUnlocked);
+        setIsEditing(nextUnlocked);
+        setAdminLayoutStatus(nextUnlocked ? 'Admin layout mode enabled.' : 'Admin layout mode disabled.');
+    }, [activeDashboard, isAdminManagedSystemDashboard, setDashboardAdminUnlocked]);
+
+    const handlePersistSystemLayout = useCallback(async (publish: boolean) => {
+        if (!activeDashboard || !isAdminManagedSystemDashboard || !adminLayoutKey) {
+            setAdminLayoutStatus('Save an admin layout key in Settings before publishing global layouts.');
+            return;
+        }
+        const payloadDashboard = serializeSystemDashboardForPublish(activeDashboard);
+        if (!payloadDashboard) return;
+
+        try {
+            setIsPublishingSystemLayout(true);
+            await saveAdminSystemDashboardTemplate(
+                activeDashboard.id,
+                {
+                    dashboard: payloadDashboard,
+                    publish,
+                },
+                adminLayoutKey,
+            );
+            setDashboardAdminUnlocked(activeDashboard.id, false);
+            setIsEditing(false);
+            setAdminLayoutStatus(publish ? 'Published globally.' : 'Draft saved to Appwrite.');
+        } catch (error) {
+            console.error('Failed to persist system layout template:', error);
+            setAdminLayoutStatus(
+                error instanceof Error ? error.message : 'Failed to persist system layout.',
+            );
+        } finally {
+            setIsPublishingSystemLayout(false);
+        }
+    }, [activeDashboard, adminLayoutKey, isAdminManagedSystemDashboard, serializeSystemDashboardForPublish, setDashboardAdminUnlocked]);
 
     useEffect(() => {
         if (!mounted) return;
@@ -305,18 +388,20 @@ function DashboardContent() {
         applySelectedSymbol(symbol);
     }, [applySelectedSymbol]);
 
+    const canEditCurrentDashboard = (activeDashboard?.adminUnlocked === true) || activeDashboard?.isEditable !== false;
+
     const handleEditToggle = useCallback(() => {
-        if (activeDashboard?.isEditable === false) {
+        if (!canEditCurrentDashboard) {
             return;
         }
         setIsEditing((prev) => !prev);
-    }, [activeDashboard?.isEditable]);
+    }, [canEditCurrentDashboard]);
 
     useEffect(() => {
-        if (activeDashboard?.isEditable === false && isEditing) {
+        if (!canEditCurrentDashboard && isEditing) {
             setIsEditing(false);
         }
-    }, [activeDashboard?.id, activeDashboard?.isEditable, isEditing]);
+    }, [activeDashboard?.id, canEditCurrentDashboard, isEditing]);
 
     useEffect(() => {
         if (!mounted || typeof window === 'undefined') return;
@@ -544,16 +629,16 @@ function DashboardContent() {
                     currentSymbol={globalSymbol}
                     onSymbolChange={handleSymbolChange}
                     isEditing={isEditing}
-                    onEditToggle={activeDashboard?.isEditable === false ? undefined : handleEditToggle}
+                    onEditToggle={canEditCurrentDashboard ? handleEditToggle : undefined}
                     onAIClick={() => {
                         setCopilotWidgetContext(undefined);
                         setCopilotWidgetData(undefined);
                         setShowAICopilot(!showAICopilot);
                     }}
-                    onResetLayout={activeDashboard?.isEditable === false ? undefined : handleResetLayout}
-                    onAutoFitLayout={activeDashboard?.isEditable === false ? undefined : handleAutoFitLayout}
-                    onCollapseAll={activeDashboard?.isEditable === false ? undefined : handleCollapseAll}
-                    onExpandAll={activeDashboard?.isEditable === false ? undefined : handleExpandAll}
+                    onResetLayout={canEditCurrentDashboard ? handleResetLayout : undefined}
+                    onAutoFitLayout={canEditCurrentDashboard ? handleAutoFitLayout : undefined}
+                    onCollapseAll={canEditCurrentDashboard ? handleCollapseAll : undefined}
+                    onExpandAll={canEditCurrentDashboard ? handleExpandAll : undefined}
                     unitDisplay={unitConfig.display}
                     onUnitDisplayChange={setUnit}
                 />
@@ -563,6 +648,53 @@ function DashboardContent() {
                 <div className="flex-1 overflow-hidden bg-[var(--bg-primary)] p-3 sm:p-4">
                     {activeDashboard && activeTab ? (
                         <div className="h-full w-full overflow-y-auto scrollbar-hide">
+                            {isAdminManagedSystemDashboard ? (
+                                <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.18),rgba(30,41,59,0.92))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.18)]">
+                                    <div className="flex min-w-0 items-start gap-2">
+                                        <Shield className="mt-0.5 h-4 w-4 text-amber-300" />
+                                        <div>
+                                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
+                                                Global System Layout
+                                            </div>
+                                            <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                                                Admin-only draft/publish flow for the Initial workspace. Save your admin key in Settings to unlock editing.
+                                            </div>
+                                            {adminLayoutStatus ? (
+                                                <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-amber-200/85">
+                                                    <AlertCircle className="h-3.5 w-3.5" />
+                                                    <span>{adminLayoutStatus}</span>
+                                                </div>
+                                            ) : null}
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={handleToggleAdminLayoutMode}
+                                            disabled={!adminLayoutKey || isPublishingSystemLayout}
+                                            className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {activeDashboard.adminUnlocked ? 'Disable Admin Layout Mode' : 'Enable Admin Layout Mode'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => void handlePersistSystemLayout(false)}
+                                            disabled={!adminLayoutKey || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
+                                            className="rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            Save Draft
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => void handlePersistSystemLayout(true)}
+                                            disabled={!adminLayoutKey || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
+                                            className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            {isPublishingSystemLayout ? 'Publishing...' : 'Publish Global'}
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : null}
                             {isSystemFundamentalsTab ? (
                                 <div className="mb-3 flex flex-col gap-2 rounded-2xl border border-blue-500/20 bg-[linear-gradient(135deg,rgba(30,41,59,0.92),rgba(15,23,42,0.92))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.22)]">
                                     <div className="flex flex-wrap items-center justify-between gap-2">

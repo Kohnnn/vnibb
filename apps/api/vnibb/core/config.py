@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     appwrite_api_key: Optional[str] = None
     appwrite_database_id: Optional[str] = None
     appwrite_bucket_id: Optional[str] = None
+    appwrite_system_templates_collection_id: Optional[str] = "system_dashboard_templates"
     appwrite_name: Optional[str] = None  # Alias for APPWRITE_PROJECT_ID
     appwrite_secret: Optional[str] = None  # Alias for APPWRITE_API_KEY
 

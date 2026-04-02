@@ -69,12 +69,37 @@ Edit `deployment/env.oracle` and set:
 - `APPWRITE_ENDPOINT`
 - `APPWRITE_PROJECT_ID`
 - `APPWRITE_API_KEY`
-- `APPWRITE_DATABASE_ID`
+- `APPWRITE_DATABASE_ID` (reuse the existing VNIBB Appwrite database)
+- `APPWRITE_SYSTEM_TEMPLATES_COLLECTION_ID=system_dashboard_templates`
 - `REDIS_URL` if Redis remains enabled
 - `SENTRY_DSN`
 - `ADMIN_API_KEY`
 - `LOG_FORMAT=json`
 - `CORS_ORIGINS`
+
+### Create the Appwrite collection
+
+For the exact click-by-click setup, see `docs/appwrite_system_layouts_manual_setup.md`.
+
+Before expecting admin draft/publish to work, create collection `system_dashboard_templates` in the existing VNIBB Appwrite database with these attributes:
+
+- `dashboard_key` string
+- `status` string
+- `version` integer
+- `dashboard_json` string
+- `notes` string
+- `updated_by` string
+- `updated_at` string
+- `published_at` string
+
+Recommended indexes:
+
+- `dashboard_key + status`
+- `dashboard_key + version`
+
+### Admin-first workflow result
+
+After deploy, admins can save the platform admin key in the web UI and manage locked Initial layouts without SSH access or code edits.
 
 ### Start the stack
 

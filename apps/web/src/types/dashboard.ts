@@ -213,6 +213,7 @@ export interface Dashboard {
     isDefault: boolean;
     isEditable?: boolean;
     isDeletable?: boolean;
+    adminUnlocked?: boolean;
     showGroupLabels: boolean; // Controls visibility of sync badges on widgets
     tabs: DashboardTab[];
     syncGroups: WidgetSyncGroup[];
@@ -248,6 +249,28 @@ export interface DashboardUpdate {
     folderId?: string;
     isDefault?: boolean;
     layout_config?: Record<string, any>;
+}
+
+export interface SystemDashboardTemplateRecord {
+    dashboard_key: string;
+    status: 'draft' | 'published';
+    version: number;
+    dashboard: Dashboard;
+    notes?: string | null;
+    updated_by?: string | null;
+    updated_at: string;
+    published_at?: string | null;
+}
+
+export interface SystemDashboardTemplateListResponse {
+    count: number;
+    data: SystemDashboardTemplateRecord[];
+}
+
+export interface SystemDashboardTemplateBundleResponse {
+    dashboard_key: string;
+    draft: SystemDashboardTemplateRecord | null;
+    published: SystemDashboardTemplateRecord | null;
 }
 
 export interface TabCreate {

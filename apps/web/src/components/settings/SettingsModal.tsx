@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw } from 'lucide-react';
+import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw, Shield } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -22,13 +22,14 @@ import {
   writeStoredUserPreferences,
 } from '@/lib/userPreferences';
 import { formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
+import { clearAdminLayoutKey, readAdminLayoutKey, writeAdminLayoutKey } from '@/lib/adminLayoutAccess';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type SettingTab = 'general' | 'data' | 'notifications' | 'appearance';
+type SettingTab = 'general' | 'data' | 'notifications' | 'appearance' | 'admin';
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingTab>('general');
@@ -37,6 +38,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [defaultTickerError, setDefaultTickerError] = useState<string | null>(null);
   const [preferenceStatus, setPreferenceStatus] = useState<string | null>(null);
   const [isTickerMenuOpen, setIsTickerMenuOpen] = useState(false);
+  const [adminLayoutKeyInput, setAdminLayoutKeyInput] = useState('');
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const { resolvedTheme } = useTheme();
   const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
@@ -54,6 +56,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setDefaultTickerError(null);
       setPreferenceStatus(null);
       setIsTickerMenuOpen(false);
+      setAdminLayoutKeyInput(readAdminLayoutKey());
     }
   }, [globalSymbol, isOpen]);
 
@@ -116,6 +119,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     { id: 'data' as const, label: 'Data Sources', icon: Database },
     { id: 'notifications' as const, label: 'Notifications', icon: Bell },
     { id: 'appearance' as const, label: 'Appearance', icon: Palette },
+    { id: 'admin' as const, label: 'Admin', icon: Shield },
   ];
 
   const unitOptions: Array<{ value: UnitDisplay; label: string }> = [
@@ -396,6 +400,52 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                     <div className="mt-3 inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[11px] font-semibold text-blue-300">
                       Active theme: {resolvedTheme}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {activeTab === 'admin' && (
+              <div className="space-y-6">
+                <div>
+                  <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Global Layout Admin Key</h4>
+                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
+                    <div className="text-sm font-bold text-[var(--text-primary)]">Admin-first Initial layout publishing</div>
+                    <div className="mt-1 text-xs text-[var(--text-muted)]">
+                      Store your admin hash key locally on this machine to unlock draft and publish controls for the Initial system dashboards.
+                    </div>
+                    <input
+                      type="password"
+                      value={adminLayoutKeyInput}
+                      onChange={(event) => setAdminLayoutKeyInput(event.target.value)}
+                      placeholder="Enter admin layout key"
+                      className="mt-4 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                    />
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          writeAdminLayoutKey(adminLayoutKeyInput)
+                          setPreferenceStatus(adminLayoutKeyInput.trim() ? 'Admin layout key saved locally.' : 'Admin layout key cleared.')
+                        }}
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                      >
+                        Save Key
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clearAdminLayoutKey()
+                          setAdminLayoutKeyInput('')
+                          setPreferenceStatus('Admin layout key removed from this browser.')
+                        }}
+                        className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      >
+                        Clear Key
+                      </button>
+                    </div>
+                    <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-3 text-xs text-amber-100/80">
+                      This is an initial admin-only flow. Later tenant roles can replace the raw key with a proper server-issued admin session.
                     </div>
                   </div>
                 </div>
