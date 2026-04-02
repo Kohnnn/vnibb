@@ -28,6 +28,7 @@ import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
 import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync } from '@/lib/useDashboardSync';
 import { autoFitGridItems, compactGridItems, findNextAvailableLayout, getWidgetDefaultLayout, preserveTemplateGridItems } from '@/lib/dashboardLayout';
+import { getPublishedSystemDashboardTemplates } from '@/lib/api';
 
 // ============================================================================
 // Storage Keys
@@ -54,6 +55,12 @@ const QUANT_DASHBOARD_ID = 'default-quant';
 const GLOBAL_MARKETS_DASHBOARD_ID = 'default-global-markets';
 const GLOBAL_MARKETS_DASHBOARD_NAME = 'Global Markets';
 const SYSTEM_DASHBOARD_IDS = new Set([MAIN_DASHBOARD_ID, TECHNICAL_DASHBOARD_ID, QUANT_DASHBOARD_ID]);
+const GLOBAL_SYSTEM_TEMPLATE_IDS = new Set([
+    MAIN_DASHBOARD_ID,
+    TECHNICAL_DASHBOARD_ID,
+    QUANT_DASHBOARD_ID,
+    GLOBAL_MARKETS_DASHBOARD_ID,
+]);
 
 // ============================================================================
 // Default Data & Templates
@@ -1412,7 +1419,7 @@ const createGlobalMarketsDashboard = (): Dashboard => {
         folderId: INITIAL_FOLDER_ID,
         order: 3,
         isDefault: false,
-        isEditable: true,
+        isEditable: false,
         isDeletable: false,
         showGroupLabels: true,
         tabs: [createSystemDashboardTab(GLOBAL_MARKETS_DASHBOARD_ID, tabSpec, 0)],
@@ -1560,7 +1567,7 @@ const ensureMainDashboardPresent = (dashboards: Dashboard[]): Dashboard[] => {
         folderId: INITIAL_FOLDER_ID,
         order: systemDashboards.length,
         isDefault: false,
-        isEditable: true,
+        isEditable: false,
         isDeletable: false,
         tabs: Array.isArray(existingGlobalMarkets?.tabs) && existingGlobalMarkets.tabs.length > 0 && !shouldRefreshGlobalMarketsLayout(existingGlobalMarkets)
             ? existingGlobalMarkets.tabs
@@ -1592,7 +1599,7 @@ const ensureMainDashboardPresent = (dashboards: Dashboard[]): Dashboard[] => {
 };
 
 const canEditDashboard = (dashboard?: Dashboard | null): boolean => {
-    return (dashboard?.isEditable ?? true) !== false;
+    return dashboard?.adminUnlocked === true || (dashboard?.isEditable ?? true) !== false;
 };
 
 const canDeleteDashboard = (dashboard?: Dashboard | null): boolean => {
@@ -1603,8 +1610,37 @@ const canDeleteDashboard = (dashboard?: Dashboard | null): boolean => {
 // Actions
 // ============================================================================
 
+const applyPublishedSystemTemplates = (
+    dashboards: Dashboard[],
+    templates: Dashboard[],
+): Dashboard[] => {
+    const templateMap = new Map(templates.map((dashboard) => [dashboard.id, dashboard]));
+
+    return dashboards.map((dashboard) => {
+        const template = templateMap.get(dashboard.id);
+        if (!template) {
+            return dashboard;
+        }
+
+        return {
+            ...dashboard,
+            name: template.name,
+            description: template.description,
+            folderId: template.folderId ?? dashboard.folderId,
+            order: template.order,
+            isDefault: template.isDefault,
+            showGroupLabels: template.showGroupLabels,
+            tabs: template.tabs,
+            syncGroups: dashboard.syncGroups.length > 0 ? dashboard.syncGroups : template.syncGroups,
+            updatedAt: template.updatedAt || new Date().toISOString(),
+        };
+    });
+};
+
 type DashboardAction =
     | { type: 'SET_STATE'; payload: DashboardState }
+    | { type: 'APPLY_SYSTEM_TEMPLATES'; payload: Dashboard[] }
+    | { type: 'SET_DASHBOARD_ADMIN_UNLOCKED'; payload: { dashboardId: string; unlocked: boolean } }
     | { type: 'SET_ACTIVE_DASHBOARD'; payload: string }
     | { type: 'SET_ACTIVE_TAB'; payload: string }
     | { type: 'ADD_DASHBOARD'; payload: Dashboard }
@@ -1661,6 +1697,34 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
                 dashboards,
                 activeDashboardId,
                 activeTabId,
+            };
+        }
+
+        case 'APPLY_SYSTEM_TEMPLATES': {
+            const dashboards = applyPublishedSystemTemplates(state.dashboards, action.payload);
+            const activeDashboard = dashboards.find((dashboard) => dashboard.id === state.activeDashboardId) || dashboards[0] || null;
+            const activeTabId = activeDashboard?.tabs.some((tab) => tab.id === state.activeTabId)
+                ? state.activeTabId
+                : activeDashboard?.tabs[0]?.id || null;
+
+            return {
+                ...state,
+                dashboards,
+                activeTabId,
+            };
+        }
+
+        case 'SET_DASHBOARD_ADMIN_UNLOCKED': {
+            if (!GLOBAL_SYSTEM_TEMPLATE_IDS.has(action.payload.dashboardId)) {
+                return state;
+            }
+            return {
+                ...state,
+                dashboards: state.dashboards.map((dashboard) =>
+                    dashboard.id === action.payload.dashboardId
+                        ? { ...dashboard, adminUnlocked: action.payload.unlocked }
+                        : dashboard
+                ),
             };
         }
 
@@ -2152,6 +2216,7 @@ interface DashboardContextValue {
     // Sync group actions
     updateSyncGroupSymbol: (dashboardId: string, groupId: number, symbol: string) => void;
     createSyncGroup: (dashboardId: string, symbol: string) => WidgetSyncGroup;
+    setDashboardAdminUnlocked: (dashboardId: string, unlocked: boolean) => void;
     // Move & Reorder actions
     moveDashboard: (dashboardId: string, targetFolderId: string | undefined) => void;
     reorderDashboards: (dashboardIds: string[], folderId: string | undefined) => void;
@@ -2188,6 +2253,26 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     // Load from localStorage on mount
     useEffect(() => {
         if (typeof window === 'undefined') return;
+
+        let cancelled = false;
+
+        const loadPublishedTemplates = async () => {
+            if (typeof fetch !== 'function') {
+                return;
+            }
+            try {
+                const response = await getPublishedSystemDashboardTemplates();
+                if (cancelled || !response.data?.length) {
+                    return;
+                }
+                dispatch({
+                    type: 'APPLY_SYSTEM_TEMPLATES',
+                    payload: response.data.map((record) => ({ ...record.dashboard, adminUnlocked: false })),
+                });
+            } catch (error) {
+                console.warn('Failed to load published system dashboard templates:', error);
+            }
+        };
 
         try {
             const storedStorageVersion = localStorage.getItem(STORAGE_VERSION_KEY);
@@ -2318,6 +2403,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 type: 'SET_STATE',
                 payload: { dashboards, folders, activeDashboardId, activeTabId },
             });
+            void loadPublishedTemplates();
         } catch (error) {
             console.error('Failed to load dashboards from storage:', error);
             const defaultDashboard = createMainSystemDashboard();
@@ -2330,7 +2416,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     activeTabId: getPreferredActiveTabId(defaultDashboard),
                 },
             });
+            void loadPublishedTemplates();
         }
+
+        return () => {
+            cancelled = true;
+        };
     }, [getPreferredActiveTabId]);
 
     // Save to localStorage on state change
@@ -2339,7 +2430,13 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         if (state.dashboards.length === 0) return;
 
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state.dashboards));
+            localStorage.setItem(
+                STORAGE_KEY,
+                JSON.stringify(state.dashboards.map((dashboard) => {
+                    const { adminUnlocked: _omitAdminUnlocked, ...persistedDashboard } = dashboard;
+                    return persistedDashboard;
+                }))
+            );
             localStorage.setItem(FOLDERS_KEY, JSON.stringify(state.folders));
         } catch (error) {
             console.error('Failed to save dashboards to storage:', error);
@@ -2614,6 +2711,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         return group;
     }, [state.dashboards]);
 
+    const setDashboardAdminUnlocked = useCallback((dashboardId: string, unlocked: boolean) => {
+        dispatch({ type: 'SET_DASHBOARD_ADMIN_UNLOCKED', payload: { dashboardId, unlocked } });
+    }, []);
+
     // ========================================================================
     // Move & Reorder Actions
     // ========================================================================
@@ -2662,6 +2763,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         resetTabLayout,
         updateSyncGroupSymbol,
         createSyncGroup,
+        setDashboardAdminUnlocked,
         moveDashboard,
         reorderDashboards,
         activeDashboard,

@@ -16,6 +16,13 @@ from vnibb.core.config import settings
 from vnibb.core.appwrite_client import check_appwrite_connectivity, appwrite_runtime_summary
 from vnibb.core.middleware.logging import get_recent_error_events
 from vnibb.models.sync_status import SyncStatus
+from vnibb.services.system_layout_template_service import (
+    SYSTEM_DASHBOARD_KEYS,
+    SystemLayoutTemplateBundleResponse,
+    SystemLayoutTemplateListResponse,
+    SystemLayoutTemplateUpsertRequest,
+    system_layout_template_service,
+)
 
 router = APIRouter(tags=["Admin"])
 logger = logging.getLogger(__name__)
@@ -87,6 +94,47 @@ async def get_provider_status() -> Dict[str, Any]:
         "appwrite": appwrite_health,
         "appwrite_runtime": appwrite_runtime_summary(),
     }
+
+
+@router.get("/system-layouts", response_model=SystemLayoutTemplateListResponse, dependencies=[Depends(require_admin_access)])
+async def list_admin_system_layouts() -> SystemLayoutTemplateListResponse:
+    records = []
+    for dashboard_key in SYSTEM_DASHBOARD_KEYS:
+        bundle = await system_layout_template_service.get_template_bundle(dashboard_key)
+        if bundle.draft is not None:
+            records.append(bundle.draft)
+        if bundle.published is not None:
+            records.append(bundle.published)
+    return SystemLayoutTemplateListResponse(count=len(records), data=records)
+
+
+@router.get(
+    "/system-layouts/{dashboard_key}",
+    response_model=SystemLayoutTemplateBundleResponse,
+    dependencies=[Depends(require_admin_access)],
+)
+async def get_admin_system_layout_bundle(dashboard_key: str) -> SystemLayoutTemplateBundleResponse:
+    return await system_layout_template_service.get_template_bundle(dashboard_key)
+
+
+@router.put(
+    "/system-layouts/{dashboard_key}",
+    response_model=SystemLayoutTemplateBundleResponse,
+    dependencies=[Depends(require_admin_access)],
+)
+async def save_admin_system_layout(
+    dashboard_key: str,
+    data: SystemLayoutTemplateUpsertRequest,
+    x_admin_actor: Optional[str] = Header(default=None, alias="X-Admin-Actor"),
+) -> SystemLayoutTemplateBundleResponse:
+    updated_by = (x_admin_actor or "admin").strip() or "admin"
+    return await system_layout_template_service.save_dashboard_template(
+        dashboard_key=dashboard_key,
+        dashboard=data.dashboard,
+        notes=data.notes,
+        updated_by=updated_by,
+        publish=data.publish,
+    )
 
 
 def _quote_identifier(table_name: str) -> str:

@@ -119,7 +119,7 @@ export function TabBar(_props: TabBarProps) {
     }
 
     const sortedTabs = [...activeDashboard.tabs].sort((a, b) => a.order - b.order);
-    const dashboardEditable = (activeDashboard.isEditable ?? true) !== false;
+    const dashboardEditable = activeDashboard.adminUnlocked === true || (activeDashboard.isEditable ?? true) !== false;
     const reachedTabLimit = sortedTabs.length >= MAX_TABS;
 
     // Swipe gesture handlers for mobile tab navigation
