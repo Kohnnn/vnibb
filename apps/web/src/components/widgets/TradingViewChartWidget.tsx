@@ -91,7 +91,6 @@ export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChar
       details: false,
       hotlist: false,
       calendar: false,
-      studies: ['Volume@tv-basicstudies'],
       support_host: 'https://www.tradingview.com',
     });
 
