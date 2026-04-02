@@ -8,12 +8,15 @@ Provides:
 """
 
 import json
+from typing import Any, Literal
+
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+
+from vnibb.services.ai_context_service import ai_context_service
+from vnibb.services.copilot_service import PROMPT_TEMPLATES, copilot_service
 from vnibb.services.llm_service import llm_service
-from vnibb.services.copilot_service import copilot_service, PROMPT_TEMPLATES
 
 router = APIRouter()
 
@@ -31,33 +34,43 @@ class WidgetContext(BaseModel):
 
     widgetType: str = "General"
     symbol: str = ""
-    activeTab: Optional[str] = None
-    dataSnapshot: Optional[Dict[str, Any]] = None
-    widgetPayload: Optional[Dict[str, Any]] = None
+    activeTab: str | None = None
+    dataSnapshot: dict[str, Any] | None = None
+    widgetPayload: dict[str, Any] | None = None
+
+
+class CopilotRequestSettings(BaseModel):
+    mode: Literal["app_default", "browser_key"] = "app_default"
+    provider: Literal["openrouter"] = "openrouter"
+    model: str | None = None
+    apiKey: str | None = None
+    webSearch: bool = False
+    preferAppwriteData: bool = True
 
 
 class ChatStreamRequest(BaseModel):
     """Request for streaming chat."""
 
     message: str
-    context: Optional[WidgetContext] = None
-    history: List[Message] = []
+    context: WidgetContext | None = None
+    history: list[Message] = []
+    settings: CopilotRequestSettings | None = None
 
 
 class ChatRequest(BaseModel):
     """Legacy chat request with full history."""
 
-    messages: List[Message]
-    context: Optional[Dict[str, Any]] = None
+    messages: list[Message]
+    context: dict[str, Any] | None = None
 
 
 class AskRequest(BaseModel):
     query: str
-    context: Optional[Dict[str, Any]] = None
+    context: dict[str, Any] | None = None
 
 
 class CopilotSuggestionResponse(BaseModel):
-    suggestions: List[str]
+    suggestions: list[str]
 
 
 class PromptTemplate(BaseModel):
@@ -67,7 +80,7 @@ class PromptTemplate(BaseModel):
 
 
 class PromptsResponse(BaseModel):
-    prompts: List[PromptTemplate]
+    prompts: list[PromptTemplate]
 
 
 # ============ Endpoints ============
@@ -84,7 +97,10 @@ async def chat_stream(request: ChatStreamRequest):
 
     async def generate():
         try:
-            # Build context prompt if widget context provided
+            request_settings = (
+                request.settings.model_dump(exclude_none=True) if request.settings else {}
+            )
+
             context_dict = {}
             if request.context:
                 context_dict = {
@@ -95,15 +111,24 @@ async def chat_stream(request: ChatStreamRequest):
                 }
                 if request.context.widgetPayload:
                     context_dict["widget_payload"] = request.context.widgetPayload
-                context_prompt = await copilot_service.build_context_prompt(context_dict)
-                context_dict["context_prompt"] = context_prompt
 
             # Convert history to dict format
             messages = [{"role": m.role, "content": m.content} for m in request.history]
             messages.append({"role": "user", "content": request.message})
 
+            runtime_context = await ai_context_service.build_runtime_context(
+                message=request.message,
+                history=messages,
+                client_context=context_dict,
+                prefer_appwrite_data=bool(request_settings.get("preferAppwriteData", True)),
+            )
+
             # Stream from LLM
-            async for chunk in llm_service.generate_response_stream(messages, context_dict):
+            async for chunk in llm_service.generate_response_stream(
+                messages,
+                runtime_context,
+                request_settings=request_settings,
+            ):
                 if chunk:
                     yield f"data: {json.dumps({'chunk': chunk})}\n\n"
 

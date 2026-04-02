@@ -7,8 +7,9 @@ import { Sparkles, RefreshCw, BrainCircuit, AlertTriangle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
-import { API_BASE_URL } from '@/lib/api';
+import { consumeCopilotStream, openCopilotChatStream } from '@/lib/api';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { readStoredAISettings } from '@/lib/aiSettings';
 
 interface AIAnalysisWidgetProps {
   id: string;
@@ -37,52 +38,28 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
       const context = {
         widgetType: 'AI Analysis',
         symbol,
-        data: {
+        dataSnapshot: {
           profile: profile?.data || null,
           quote: quote || null,
           ratios: ratios?.data || null,
         }
       };
 
-      const response = await fetch(`${API_BASE_URL}/copilot/chat/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Perform a deep fundamental and technical analysis for ${symbol}. Provide a summary, pros, cons, and a final rating (Bullish/Neutral/Bearish).`,
-          context,
-          history: []
-        }),
+      const response = await openCopilotChatStream({
+        message: `Perform a deep fundamental and technical analysis for ${symbol}. Provide a summary, pros, cons, and a final rating (Bullish/Neutral/Bearish).`,
+        context,
+        history: [],
+        settings: readStoredAISettings(),
       });
 
-      if (!response.ok) throw new Error('Failed to start analysis');
-      if (!response.body) throw new Error('No response body');
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
       let fullContent = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.chunk) {
-                fullContent += data.chunk;
-                setAnalysis(fullContent);
-              }
-              if (data.error) throw new Error(data.error);
-            } catch (e) {
-              // Ignore partial JSON errors
-            }
-          }
-        }
-      }
+      await consumeCopilotStream(response, {
+        onChunk: (chunk) => {
+          fullContent += chunk;
+          setAnalysis(fullContent);
+        },
+      });
     } catch (err: any) {
       console.error('AI Analysis Error:', err);
       setError(err.message || 'Analysis failed');
@@ -106,7 +83,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         <div className="flex items-center justify-between p-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)]">
           <div className="flex items-center gap-2">
             <BrainCircuit size={16} className="text-cyan-400" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Gemini Intelligence</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Appwrite-First AI</span>
           </div>
           <div className="flex items-center gap-2">
             <WidgetMeta note="AI analysis" isFetching={isLoading} align="right" />

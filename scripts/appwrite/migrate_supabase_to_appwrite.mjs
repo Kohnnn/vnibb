@@ -166,11 +166,84 @@ function normalizeValue(value, key, precisionColumns, coerceAllToString) {
   return value
 }
 
-function buildDocumentData(row, precisionColumns, coerceAllToString) {
+function normalizeQueryValue(value, spec) {
+  if (value === null || value === undefined) return null
+
+  const type = String(spec.type || 'string').toLowerCase()
+  const normalizeMode = String(spec.normalize || '').toLowerCase()
+
+  if (type === 'datetime') {
+    if (value instanceof Date) {
+      return value.toISOString()
+    }
+
+    const raw = String(value).trim()
+    if (!raw) return null
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return `${raw}T00:00:00Z`
+    }
+
+    const candidate = raw.includes('T') ? raw : raw.replace(' ', 'T')
+    const parsed = new Date(candidate)
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+  }
+
+  if (type === 'integer') {
+    const parsed = Number.parseInt(String(value), 10)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  if (type === 'float') {
+    const parsed = Number.parseFloat(String(value))
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  if (type === 'boolean') {
+    if (typeof value === 'boolean') return value
+    const raw = String(value).trim().toLowerCase()
+    if (['1', 'true', 'yes', 'on'].includes(raw)) return true
+    if (['0', 'false', 'no', 'off'].includes(raw)) return false
+    return null
+  }
+
+  let text = String(value).trim()
+  if (!text) return null
+
+  if (normalizeMode === 'upper') {
+    text = text.toUpperCase()
+  } else if (normalizeMode === 'lower') {
+    text = text.toLowerCase()
+  }
+
+  const size = Number.parseInt(String(spec.size ?? 0), 10)
+  if (Number.isFinite(size) && size > 0) {
+    text = text.slice(0, size)
+  }
+
+  return text
+}
+
+function buildQueryOverlay(row, queryAttributes) {
+  const output = {}
+
+  for (const spec of queryAttributes || []) {
+    const key = spec?.key
+    if (!key) continue
+
+    const sourceKey = spec.source || key
+    output[key] = normalizeQueryValue(row[sourceKey], spec)
+  }
+
+  return output
+}
+
+function buildDocumentData(row, precisionColumns, coerceAllToString, queryAttributes = []) {
   const output = {}
   for (const [key, value] of Object.entries(row)) {
     output[key] = normalizeValue(value, key, precisionColumns, coerceAllToString)
   }
+  Object.assign(output, buildQueryOverlay(row, queryAttributes))
   return output
 }
 
@@ -457,6 +530,9 @@ async function main() {
     const batchSize = collectionConfig.batchSize || defaultBatchSize
     const documentIdColumns = collectionConfig.documentIdColumns || ['id']
     const precisionColumns = new Set(collectionConfig.precisionColumns || [])
+    const queryAttributes = Array.isArray(collectionConfig.queryAttributes)
+      ? collectionConfig.queryAttributes
+      : []
 
     if (!tableName || !collectionId) {
       throw new Error('Each collection config needs table and collectionId')
@@ -493,7 +569,12 @@ async function main() {
       stats.read += rows.length
 
       await runWithConcurrency(rows, concurrency, async row => {
-        const documentData = buildDocumentData(row, precisionColumns, coerceAllToString)
+        const documentData = buildDocumentData(
+          row,
+          precisionColumns,
+          coerceAllToString,
+          queryAttributes
+        )
         const documentId = deterministicDocumentId(collectionId, row, documentIdColumns)
         const permissions = buildPermissions(collectionConfig, row)
 

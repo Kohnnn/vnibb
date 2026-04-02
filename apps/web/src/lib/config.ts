@@ -21,7 +21,7 @@ export const config = {
   appwriteProjectId: env.appwriteProjectId || '',
   
   // Feature flags
-  enableAiAnalysis: env.geminiApiKey ? true : false,
+  enableAiAnalysis: true,
   enableRealtime: env.enableRealtime,
   isDev: env.isDev,
   isProd: env.isProd,

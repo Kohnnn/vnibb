@@ -4,78 +4,456 @@
     {
       "table": "stocks",
       "collectionId": "stocks",
+      "collectionName": "Stocks",
       "cursorColumn": "id",
       "documentIdColumns": ["symbol"],
       "permissionsMode": "publicRead",
       "batchSize": 500,
-      "precisionColumns": []
+      "precisionColumns": [],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "exchange_q", "source": "exchange", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "industry_q", "source": "industry", "type": "string", "size": 128 },
+        { "key": "sector_q", "source": "sector", "type": "string", "size": 64 }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_exchange_q", "type": "key", "attributes": ["exchange_q"], "orders": ["asc"] },
+        { "key": "idx_industry_q", "type": "key", "attributes": ["industry_q"], "orders": ["asc"] }
+      ]
     },
     {
       "table": "stock_prices",
       "collectionId": "stock_prices",
+      "collectionName": "Stock Prices",
       "cursorColumn": "id",
       "documentIdColumns": ["symbol", "time", "interval"],
       "permissionsMode": "publicRead",
       "batchSize": 1000,
-      "precisionColumns": ["open", "high", "low", "close", "adj_close", "value"]
+      "precisionColumns": ["open", "high", "low", "close", "adj_close", "value"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "time_dt", "source": "time", "type": "datetime" },
+        { "key": "interval_q", "source": "interval", "type": "string", "size": 8, "normalize": "upper" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_time_dt", "type": "key", "attributes": ["time_dt"], "orders": ["asc"] },
+        { "key": "idx_sym_time_int", "type": "key", "attributes": ["symbol_q", "time_dt", "interval_q"], "orders": ["asc", "asc", "asc"] }
+      ]
     },
     {
       "table": "stock_indices",
       "collectionId": "stock_indices",
+      "collectionName": "Stock Indices",
       "cursorColumn": "id",
       "documentIdColumns": ["index_code", "time"],
       "permissionsMode": "publicRead",
       "batchSize": 500,
-      "precisionColumns": ["open", "high", "low", "close", "value", "change", "change_pct"]
+      "precisionColumns": ["open", "high", "low", "close", "value", "change", "change_pct"],
+      "queryAttributes": [
+        { "key": "index_code_q", "source": "index_code", "type": "string", "size": 20, "normalize": "upper" },
+        { "key": "time_dt", "source": "time", "type": "datetime" }
+      ],
+      "indexes": [
+        { "key": "idx_index_code_q", "type": "key", "attributes": ["index_code_q"], "orders": ["asc"] },
+        { "key": "idx_index_time", "type": "key", "attributes": ["index_code_q", "time_dt"], "orders": ["asc", "asc"] }
+      ]
     },
     {
       "table": "intraday_trades",
       "collectionId": "intraday_trades",
+      "collectionName": "Intraday Trades",
       "cursorColumn": "id",
       "documentIdColumns": ["id"],
       "permissionsMode": "publicRead",
       "batchSize": 1000,
-      "precisionColumns": ["price", "accumulated_val"]
+      "precisionColumns": ["price", "accumulated_val"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "trade_time_dt", "source": "trade_time", "type": "datetime" },
+        { "key": "match_type_q", "source": "match_type", "type": "string", "size": 16, "normalize": "upper" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_trade_time", "type": "key", "attributes": ["trade_time_dt"], "orders": ["asc"] },
+        { "key": "idx_sym_trade_tm", "type": "key", "attributes": ["symbol_q", "trade_time_dt"], "orders": ["asc", "asc"] }
+      ]
     },
     {
       "table": "income_statements",
       "collectionId": "income_statements",
+      "collectionName": "Income Statements",
       "cursorColumn": "id",
       "documentIdColumns": ["id"],
       "permissionsMode": "publicRead",
       "batchSize": 500,
-      "precisionColumns": ["revenue", "net_income", "eps", "ebitda"]
+      "precisionColumns": ["revenue", "net_income", "eps", "ebitda"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "period_q", "source": "period", "type": "string", "size": 24, "normalize": "upper" },
+        { "key": "period_type_q", "source": "period_type", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "fiscal_year_i", "source": "fiscal_year", "type": "integer" },
+        { "key": "fiscal_quarter_i", "source": "fiscal_quarter", "type": "integer" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_period", "type": "key", "attributes": ["symbol_q", "period_type_q", "fiscal_year_i", "fiscal_quarter_i"], "orders": ["asc", "asc", "desc", "desc"] }
+      ]
     },
     {
       "table": "balance_sheets",
       "collectionId": "balance_sheets",
+      "collectionName": "Balance Sheets",
       "cursorColumn": "id",
       "documentIdColumns": ["id"],
       "permissionsMode": "publicRead",
       "batchSize": 500,
-      "precisionColumns": ["total_assets", "total_liabilities", "total_equity", "book_value_per_share"]
+      "precisionColumns": ["total_assets", "total_liabilities", "total_equity", "book_value_per_share"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "period_q", "source": "period", "type": "string", "size": 24, "normalize": "upper" },
+        { "key": "period_type_q", "source": "period_type", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "fiscal_year_i", "source": "fiscal_year", "type": "integer" },
+        { "key": "fiscal_quarter_i", "source": "fiscal_quarter", "type": "integer" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_period", "type": "key", "attributes": ["symbol_q", "period_type_q", "fiscal_year_i", "fiscal_quarter_i"], "orders": ["asc", "asc", "desc", "desc"] }
+      ]
     },
     {
       "table": "cash_flows",
       "collectionId": "cash_flows",
+      "collectionName": "Cash Flows",
       "cursorColumn": "id",
       "documentIdColumns": ["id"],
       "permissionsMode": "publicRead",
       "batchSize": 500,
-      "precisionColumns": ["operating_cash_flow", "free_cash_flow", "net_change_in_cash"]
+      "precisionColumns": ["operating_cash_flow", "free_cash_flow", "net_change_in_cash"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "period_q", "source": "period", "type": "string", "size": 24, "normalize": "upper" },
+        { "key": "period_type_q", "source": "period_type", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "fiscal_year_i", "source": "fiscal_year", "type": "integer" },
+        { "key": "fiscal_quarter_i", "source": "fiscal_quarter", "type": "integer" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_period", "type": "key", "attributes": ["symbol_q", "period_type_q", "fiscal_year_i", "fiscal_quarter_i"], "orders": ["asc", "asc", "desc", "desc"] }
+      ]
     },
     {
       "table": "financial_ratios",
       "collectionId": "financial_ratios",
+      "collectionName": "Financial Ratios",
       "cursorColumn": "id",
       "documentIdColumns": ["id"],
       "permissionsMode": "publicRead",
       "batchSize": 500,
-      "precisionColumns": ["pe_ratio", "pb_ratio", "ps_ratio", "roe", "roa", "eps"]
+      "precisionColumns": ["pe_ratio", "pb_ratio", "ps_ratio", "roe", "roa", "eps"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "period_q", "source": "period", "type": "string", "size": 24, "normalize": "upper" },
+        { "key": "period_type_q", "source": "period_type", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "fiscal_year_i", "source": "fiscal_year", "type": "integer" },
+        { "key": "fiscal_quarter_i", "source": "fiscal_quarter", "type": "integer" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_period", "type": "key", "attributes": ["symbol_q", "period_type_q", "fiscal_year_i", "fiscal_quarter_i"], "orders": ["asc", "asc", "desc", "desc"] }
+      ]
+    },
+    {
+      "table": "companies",
+      "collectionId": "companies",
+      "collectionName": "Companies",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["outstanding_shares", "listed_shares"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "exchange_q", "source": "exchange", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "industry_q", "source": "industry", "type": "string", "size": 128 },
+        { "key": "sector_q", "source": "sector", "type": "string", "size": 64 }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_exchange_q", "type": "key", "attributes": ["exchange_q"], "orders": ["asc"] },
+        { "key": "idx_industry_q", "type": "key", "attributes": ["industry_q"], "orders": ["asc"] }
+      ]
+    },
+    {
+      "table": "shareholders",
+      "collectionId": "shareholders",
+      "collectionName": "Shareholders",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "name", "as_of_date"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["shares_held", "ownership_pct"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "shareholder_type_q", "source": "shareholder_type", "type": "string", "size": 32, "normalize": "lower" },
+        { "key": "as_of_date_dt", "source": "as_of_date", "type": "datetime" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_as_of", "type": "key", "attributes": ["symbol_q", "as_of_date_dt"], "orders": ["asc", "desc"] }
+      ]
+    },
+    {
+      "table": "officers",
+      "collectionId": "officers",
+      "collectionName": "Officers",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "name", "title"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["shares_held", "ownership_pct"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "position_type_q", "source": "position_type", "type": "string", "size": 32, "normalize": "lower" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] }
+      ]
+    },
+    {
+      "table": "subsidiaries",
+      "collectionId": "subsidiaries",
+      "collectionName": "Subsidiaries",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "subsidiary_name"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["ownership_pct", "charter_capital"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "relationship_type_q", "source": "relationship_type", "type": "string", "size": 32, "normalize": "lower" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] }
+      ]
+    },
+    {
+      "table": "dividends",
+      "collectionId": "dividends",
+      "collectionName": "Dividends",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "exercise_date", "cash_year"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["dividend_rate", "dividend_value"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "exercise_date_dt", "source": "exercise_date", "type": "datetime" },
+        { "key": "cash_year_i", "source": "cash_year", "type": "integer" },
+        { "key": "issue_method_q", "source": "issue_method", "type": "string", "size": 32, "normalize": "lower" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_ex_date", "type": "key", "attributes": ["symbol_q", "exercise_date_dt"], "orders": ["asc", "desc"] }
+      ]
+    },
+    {
+      "table": "company_events",
+      "collectionId": "company_events",
+      "collectionName": "Company Events",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "event_type", "event_date"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["value"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "event_type_q", "source": "event_type", "type": "string", "size": 32, "normalize": "lower" },
+        { "key": "event_date_dt", "source": "event_date", "type": "datetime" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_evt_date", "type": "key", "attributes": ["symbol_q", "event_type_q", "event_date_dt"], "orders": ["asc", "asc", "desc"] }
+      ]
+    },
+    {
+      "table": "company_news",
+      "collectionId": "company_news",
+      "collectionName": "Company News",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "title", "published_date"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["rsi", "rs", "price", "price_change", "price_change_ratio"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "source_q", "source": "source", "type": "string", "size": 32, "normalize": "lower" },
+        { "key": "published_date_dt", "source": "published_date", "type": "datetime" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_pub_date", "type": "key", "attributes": ["symbol_q", "published_date_dt"], "orders": ["asc", "desc"] },
+        { "key": "idx_source_q", "type": "key", "attributes": ["source_q"], "orders": ["asc"] }
+      ]
+    },
+    {
+      "table": "insider_deals",
+      "collectionId": "insider_deals",
+      "collectionName": "Insider Deals",
+      "cursorColumn": "id",
+      "documentIdColumns": ["id"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["deal_quantity", "deal_price", "deal_value", "deal_ratio"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "announce_date_dt", "source": "announce_date", "type": "datetime" },
+        { "key": "deal_action_q", "source": "deal_action", "type": "string", "size": 16, "normalize": "upper" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_announce_dt", "type": "key", "attributes": ["announce_date_dt"], "orders": ["desc"] }
+      ]
+    },
+    {
+      "table": "foreign_trading",
+      "collectionId": "foreign_trading",
+      "collectionName": "Foreign Trading",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "trade_date"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["buy_value", "sell_value", "net_value", "room_available", "room_pct"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "trade_date_dt", "source": "trade_date", "type": "datetime" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_trade_dt", "type": "key", "attributes": ["symbol_q", "trade_date_dt"], "orders": ["asc", "desc"] }
+      ]
+    },
+    {
+      "table": "order_flow_daily",
+      "collectionId": "order_flow_daily",
+      "collectionName": "Order Flow Daily",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "trade_date"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["buy_value", "sell_value", "net_value"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "trade_date_dt", "source": "trade_date", "type": "datetime" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_trade_dt", "type": "key", "attributes": ["symbol_q", "trade_date_dt"], "orders": ["asc", "desc"] }
+      ]
+    },
+    {
+      "table": "orderbook_snapshots",
+      "collectionId": "orderbook_snapshots",
+      "collectionName": "Orderbook Snapshots",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "snapshot_time"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["bid1_price", "bid2_price", "bid3_price", "ask1_price", "ask2_price", "ask3_price"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "snapshot_time_dt", "source": "snapshot_time", "type": "datetime" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_snapshot_dt", "type": "key", "attributes": ["snapshot_time_dt"], "orders": ["desc"] },
+        { "key": "idx_sym_snap_dt", "type": "key", "attributes": ["symbol_q", "snapshot_time_dt"], "orders": ["asc", "desc"] }
+      ]
+    },
+    {
+      "table": "derivative_prices",
+      "collectionId": "derivative_prices",
+      "collectionName": "Derivative Prices",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "trade_date", "interval"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["open", "high", "low", "close"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 20, "normalize": "upper" },
+        { "key": "trade_date_dt", "source": "trade_date", "type": "datetime" },
+        { "key": "interval_q", "source": "interval", "type": "string", "size": 8, "normalize": "upper" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_sym_trade_iv", "type": "key", "attributes": ["symbol_q", "trade_date_dt", "interval_q"], "orders": ["asc", "desc", "asc"] }
+      ]
+    },
+    {
+      "table": "screener_snapshots",
+      "collectionId": "screener_snapshots",
+      "collectionName": "Screener Snapshots",
+      "cursorColumn": "id",
+      "documentIdColumns": ["symbol", "snapshot_date"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["price", "volume", "market_cap", "pe", "pb", "ps", "ev_ebitda", "roe", "roa", "roic", "gross_margin", "net_margin", "operating_margin", "revenue_growth", "earnings_growth", "dividend_yield", "debt_to_equity", "current_ratio", "quick_ratio", "eps", "bvps", "foreign_ownership", "rs_rating"],
+      "queryAttributes": [
+        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "snapshot_date_dt", "source": "snapshot_date", "type": "datetime" },
+        { "key": "exchange_q", "source": "exchange", "type": "string", "size": 16, "normalize": "upper" },
+        { "key": "industry_q", "source": "industry", "type": "string", "size": 128 },
+        { "key": "market_cap_f", "source": "market_cap", "type": "float" }
+      ],
+      "indexes": [
+        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
+        { "key": "idx_snapshot_dt", "type": "key", "attributes": ["snapshot_date_dt"], "orders": ["desc"] },
+        { "key": "idx_snap_ind_q", "type": "key", "attributes": ["snapshot_date_dt", "industry_q"], "orders": ["desc", "asc"] },
+        { "key": "idx_snap_mcap_f", "type": "key", "attributes": ["snapshot_date_dt", "market_cap_f"], "orders": ["desc", "desc"] }
+      ]
+    },
+    {
+      "table": "market_sectors",
+      "collectionId": "market_sectors",
+      "collectionName": "Market Sectors",
+      "cursorColumn": "id",
+      "documentIdColumns": ["sector_code"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": [],
+      "queryAttributes": [
+        { "key": "sector_code_q", "source": "sector_code", "type": "string", "size": 32, "normalize": "upper" },
+        { "key": "parent_code_q", "source": "parent_code", "type": "string", "size": 32, "normalize": "upper" },
+        { "key": "level_i", "source": "level", "type": "integer" }
+      ],
+      "indexes": [
+        { "key": "idx_sector_code", "type": "key", "attributes": ["sector_code_q"], "orders": ["asc"] },
+        { "key": "idx_parent_code", "type": "key", "attributes": ["parent_code_q"], "orders": ["asc"] }
+      ]
+    },
+    {
+      "table": "sector_performance",
+      "collectionId": "sector_performance",
+      "collectionName": "Sector Performance",
+      "cursorColumn": "id",
+      "documentIdColumns": ["sector_code", "trade_date"],
+      "permissionsMode": "publicRead",
+      "batchSize": 500,
+      "precisionColumns": ["change_pct", "avg_change_pct", "total_value", "total_market_cap", "top_gainer_change", "top_loser_change"],
+      "queryAttributes": [
+        { "key": "sector_code_q", "source": "sector_code", "type": "string", "size": 32, "normalize": "upper" },
+        { "key": "trade_date_dt", "source": "trade_date", "type": "datetime" }
+      ],
+      "indexes": [
+        { "key": "idx_sector_code", "type": "key", "attributes": ["sector_code_q"], "orders": ["asc"] },
+        { "key": "idx_sector_date", "type": "key", "attributes": ["sector_code_q", "trade_date_dt"], "orders": ["asc", "desc"] }
+      ]
     },
     {
       "table": "user_dashboards",
       "collectionId": "user_dashboards",
+      "collectionName": "User Dashboards",
       "cursorColumn": "id",
       "documentIdColumns": ["id"],
       "permissionsMode": "ownerReadWrite",
@@ -86,6 +464,7 @@
     {
       "table": "dashboard_widgets",
       "collectionId": "dashboard_widgets",
+      "collectionName": "Dashboard Widgets",
       "cursorColumn": "id",
       "documentIdColumns": ["id"],
       "permissionsMode": "collectionDefault",

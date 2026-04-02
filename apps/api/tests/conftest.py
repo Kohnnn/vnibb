@@ -3,6 +3,7 @@ FastAPI Testing Fixtures.
 Provides async engine, session and test client for API integration tests.
 Uses SQLite in-memory for testing.
 """
+
 import os
 import asyncio
 from typing import AsyncGenerator
@@ -31,6 +32,7 @@ os.environ["REDIS_HOST"] = ""
 os.environ["REDIS_PORT"] = "0"
 os.environ["SENTRY_DSN"] = ""
 os.environ["VNSTOCK_API_KEY"] = "mock_key"
+os.environ["OPENROUTER_API_KEY"] = "mock_openrouter_key"
 os.environ["GEMINI_API_KEY"] = "mock_key"
 os.environ["OPENAI_API_KEY"] = "mock_key"
 
@@ -41,6 +43,7 @@ from vnibb.models import *  # Ensure all models are loaded for metadata
 # Use SQLite in-memory for fast testing
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Create an instance of the default event loop for each test case."""
@@ -48,6 +51,7 @@ def event_loop():
     loop = policy.new_event_loop()
     yield loop
     loop.close()
+
 
 @pytest.fixture(scope="session")
 async def test_engine():
@@ -61,6 +65,7 @@ async def test_engine():
     yield engine
     await engine.dispose()
 
+
 @pytest.fixture(autouse=True)
 async def setup_tables(test_engine):
     """Create tables for each test and drop them after."""
@@ -70,30 +75,29 @@ async def setup_tables(test_engine):
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
+
 @pytest.fixture
 async def test_db(test_engine) -> AsyncGenerator[AsyncSession, None]:
     """Create a new database session for a test."""
-    async_session = async_sessionmaker(
-        test_engine, class_=AsyncSession, expire_on_commit=False
-    )
-    
+    async_session = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
     async with async_session() as session:
         yield session
         # No rollback needed since tables are dropped
 
+
 @pytest.fixture
 async def client(test_db) -> AsyncGenerator[AsyncClient, None]:
     """FastAPI test client with dependency overrides."""
-    
+
     # Override get_db to use our test session
     async def override_get_db():
         yield test_db
-    
+
     app.dependency_overrides[get_db] = override_get_db
-    
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
-    
+
     # Clean up overrides
     app.dependency_overrides.clear()
-

@@ -170,10 +170,14 @@ class Settings(BaseSettings):
     # ==========================================================================
     # LLM Configuration (AI Copilot)
     # ==========================================================================
+    openrouter_api_key: Optional[str] = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_site_url: Optional[str] = None
+    openrouter_app_name: str = "VNIBB"
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
-    llm_provider: str = "gemini"  # openai, gemini, anthropic, ollama
-    llm_model: str = "gemini-2.0-flash"  # gpt-4o-mini, gemini-2.0-flash, claude-3-haiku
+    llm_provider: str = "openrouter"  # openrouter, openai, gemini, anthropic, ollama
+    llm_model: str = "openai/gpt-4o-mini"
     llm_timeout: int = 30
     llm_max_tokens: int = 1024
     enable_ai_sentiment_analysis: bool = False  # Keep news sentiment paused until runtime is stable

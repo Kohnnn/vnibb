@@ -19,7 +19,13 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProfile, useStockQuote, useFinancialRatios } from '@/lib/queries';
-import { API_BASE_URL } from '@/lib/api';
+import { consumeCopilotStream, openCopilotChatStream } from '@/lib/api';
+import {
+    AI_SETTINGS_UPDATED_EVENT,
+    readStoredAISettings,
+    writeStoredAISettings,
+    type AISettings,
+} from '@/lib/aiSettings';
 
 interface Message {
     id: string;
@@ -132,11 +138,7 @@ export function AICopilot({
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [showReasoning, setShowReasoning] = useState<Record<string, boolean>>({});
-
-    // Settings toggles
-    const [globalData, setGlobalData] = useState(true);
-    const [generativeUI, setGenerativeUI] = useState(true);
-    const [webSearch, setWebSearch] = useState(false);
+    const [aiSettings, setAISettings] = useState<AISettings>(() => readStoredAISettings());
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -189,6 +191,17 @@ export function AICopilot({
         }
     }, [isOpen]);
 
+    useEffect(() => {
+        const syncSettings = () => setAISettings(readStoredAISettings());
+
+        window.addEventListener(AI_SETTINGS_UPDATED_EVENT, syncSettings);
+        window.addEventListener('storage', syncSettings);
+        return () => {
+            window.removeEventListener(AI_SETTINGS_UPDATED_EVENT, syncSettings);
+            window.removeEventListener('storage', syncSettings);
+        };
+    }, []);
+
     const handleSend = async (prompt?: string) => {
         const messageText = prompt || input.trim();
         if (!messageText) return;
@@ -232,62 +245,25 @@ export function AICopilot({
             const history = messages.slice(-20).map(m => ({ role: m.role, content: m.content }));
 
             // Use new SSE streaming endpoint
-            const response = await fetch(`${API_BASE_URL}/copilot/chat/stream`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    message: messageText,
-                    context: requestContext,
-                    history: history
-                }),
+            const response = await openCopilotChatStream({
+                message: messageText,
+                context: requestContext,
+                history,
+                settings: aiSettings,
             });
 
-            if (!response.ok) {
-                throw new Error(`API Error: ${response.statusText}`);
-            }
-
-            if (!response.body) {
-                throw new Error('No response body');
-            }
-
-            // SSE stream handler
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
             let fullContent = '';
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\n');
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const data = JSON.parse(line.slice(6));
-                            if (data.chunk) {
-                                fullContent += data.chunk;
-                                setMessages((prev) => prev.map((msg) =>
-                                    msg.id === assistantMsgId
-                                        ? { ...msg, content: fullContent }
-                                        : msg
-                                ));
-                            }
-                            if (data.done) {
-                                // Streaming complete
-                            }
-                            if (data.error) {
-                                throw new Error(data.error);
-                            }
-                        } catch (e) {
-                            // Ignore JSON parse errors for incomplete chunks
-                        }
-                    }
-                }
-            }
+            await consumeCopilotStream(response, {
+                onChunk: (chunk) => {
+                    fullContent += chunk;
+                    setMessages((prev) => prev.map((msg) =>
+                        msg.id === assistantMsgId
+                            ? { ...msg, content: fullContent }
+                            : msg
+                    ));
+                },
+            });
 
         } catch (error) {
             console.error('Copilot Error:', error);
@@ -340,7 +316,7 @@ export function AICopilot({
                 <span className="text-xs text-blue-400">
                     {widgetContext ? `Context: @${widgetContext} · ` : ''}
                     {activeTabName ? `${activeTabName} · ` : ''}
-                    {currentSymbol}
+                    {currentSymbol} · {aiSettings.mode === 'browser_key' ? 'Browser key' : 'App default'} · {aiSettings.model}
                 </span>
                 {messages.length > 0 && (
                     <button
@@ -434,29 +410,18 @@ export function AICopilot({
                 <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                         type="checkbox"
-                        checked={globalData}
-                        onChange={(e) => setGlobalData(e.target.checked)}
+                        checked={aiSettings.preferAppwriteData}
+                        onChange={(e) => setAISettings(writeStoredAISettings({ preferAppwriteData: e.target.checked }))}
                         className="w-3 h-3 rounded"
                     />
                     <Globe size={12} className="text-[var(--text-muted)]" />
-                    <span className="text-[var(--text-muted)]">Global data</span>
+                    <span className="text-[var(--text-muted)]">Appwrite first</span>
                 </label>
                 <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                         type="checkbox"
-                        checked={generativeUI}
-                        onChange={(e) => setGenerativeUI(e.target.checked)}
-                        className="w-3 h-3 rounded"
-                    />
-                    <Sparkles size={12} className="text-[var(--text-muted)]" />
-                    <span className="text-[var(--text-muted)]">Generative UI</span>
-                    <span className="px-1 py-0.5 text-[10px] bg-blue-600/20 text-blue-400 rounded">BETA</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={webSearch}
-                        onChange={(e) => setWebSearch(e.target.checked)}
+                        checked={aiSettings.webSearch}
+                        onChange={(e) => setAISettings(writeStoredAISettings({ webSearch: e.target.checked }))}
                         className="w-3 h-3 rounded"
                     />
                     <SearchIcon size={12} className="text-[var(--text-muted)]" />
