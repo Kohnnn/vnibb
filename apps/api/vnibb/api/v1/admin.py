@@ -6,8 +6,9 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks, Header, Body
+from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks, Header, Body, Request
 from sqlalchemy import text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -165,6 +166,55 @@ async def get_admin_system_layout_bundle(dashboard_key: str) -> SystemLayoutTemp
     return await system_layout_template_service.get_template_bundle(dashboard_key)
 
 
+def _coerce_admin_system_layout_body(payload: Any) -> Dict[str, Any]:
+    if isinstance(payload, dict):
+        return payload
+
+    if isinstance(payload, (bytes, bytearray)):
+        payload = payload.decode("utf-8", errors="ignore")
+
+    if isinstance(payload, str):
+        stripped = payload.strip()
+        if not stripped:
+            raise HTTPException(status_code=400, detail="request body is empty")
+
+        try:
+            decoded = json.loads(stripped)
+        except Exception:
+            decoded = None
+
+        if isinstance(decoded, dict):
+            return decoded
+        if isinstance(decoded, str):
+            try:
+                nested = json.loads(decoded)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"request body string is not valid JSON: {exc}",
+                ) from exc
+            if isinstance(nested, dict):
+                return nested
+
+        form_values = parse_qs(stripped, keep_blank_values=True)
+        if form_values:
+            flattened = {
+                key: values[-1] if isinstance(values, list) and values else values
+                for key, values in form_values.items()
+            }
+            if isinstance(flattened.get("dashboard"), str):
+                try:
+                    flattened["dashboard"] = json.loads(flattened["dashboard"])
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"dashboard payload string is not valid JSON: {exc}",
+                    ) from exc
+            return flattened
+
+    raise HTTPException(status_code=400, detail="request body must be a JSON object")
+
+
 @router.put(
     "/system-layouts/{dashboard_key}",
     response_model=SystemLayoutTemplateBundleResponse,
@@ -172,19 +222,15 @@ async def get_admin_system_layout_bundle(dashboard_key: str) -> SystemLayoutTemp
 )
 async def save_admin_system_layout(
     dashboard_key: str,
-    data: Any = Body(...),
+    request: Request,
     x_admin_actor: Optional[str] = Header(default=None, alias="X-Admin-Actor"),
 ) -> SystemLayoutTemplateBundleResponse:
-    if isinstance(data, str):
-        try:
-            data = json.loads(data)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400, detail=f"request body string is not valid JSON: {exc}"
-            ) from exc
+    try:
+        raw_body = await request.body()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Unable to read request body: {exc}") from exc
 
-    if not isinstance(data, dict):
-        raise HTTPException(status_code=400, detail="request body must be a JSON object")
+    data = _coerce_admin_system_layout_body(raw_body)
 
     dashboard_payload = data.get("dashboard")
     if isinstance(dashboard_payload, str):
@@ -202,7 +248,12 @@ async def save_admin_system_layout(
     if notes_value is not None and not isinstance(notes_value, str):
         notes_value = str(notes_value)
 
-    publish_value = bool(data.get("publish", False))
+    publish_raw = data.get("publish", False)
+    if isinstance(publish_raw, str):
+        publish_value = publish_raw.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        publish_value = bool(publish_raw)
+
     updated_by = (x_admin_actor or "admin").strip() or "admin"
     return await system_layout_template_service.save_dashboard_template(
         dashboard_key=dashboard_key,
