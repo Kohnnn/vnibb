@@ -328,6 +328,41 @@ async function getAuthorizationToken(): Promise<string | null> {
     return session?.access_token || null;
 }
 
+async function getAuthorizationTokenForCopilot(): Promise<string | null> {
+    try {
+        return await getAuthorizationToken();
+    } catch (error) {
+        if (authProvider === 'appwrite') {
+            console.warn('Copilot proceeding without Appwrite JWT:', error);
+            return null;
+        }
+        throw error;
+    }
+}
+
+function buildCopilotRequestPayload(request: CopilotStreamRequest): CopilotStreamRequest {
+    if (!request.settings) {
+        return request;
+    }
+
+    if (request.settings.mode === 'app_default' && request.settings.provider === 'openrouter') {
+        return {
+            ...request,
+            settings: {
+                mode: 'app_default',
+                provider: 'openrouter',
+                model: '',
+                apiKey: '',
+                baseUrl: '',
+                webSearch: request.settings.webSearch,
+                preferAppwriteData: request.settings.preferAppwriteData,
+            },
+        };
+    }
+
+    return request;
+}
+
 export async function getProfile(symbol: string, signal?: AbortSignal): Promise<EquityProfileResponse> {
     return fetchAPI<EquityProfileResponse>(`/equity/${symbol}/profile`, {
         timeout: 20000,
@@ -1900,6 +1935,12 @@ export interface CopilotFeedbackResponse {
     matched: boolean;
 }
 
+export interface AdminAIRuntimeConfigResponse {
+    provider: string;
+    model: string;
+    updated_at?: string | null;
+}
+
 export interface CopilotOutcomeRequest {
     responseId: string;
     kind: 'artifact' | 'action';
@@ -1948,6 +1989,24 @@ export interface AdminAITelemetryRecord {
 export interface AdminAITelemetryResponse {
     count: number;
     data: AdminAITelemetryRecord[];
+}
+
+export interface AdminProviderStatusResponse {
+    environment: string;
+    providers: {
+        data_backend_requested: string;
+        data_backend: string;
+        cache_backend: string;
+        appwrite_configured: boolean;
+        vnstock_source: string;
+        vnstock_timeout_seconds: number;
+        vnstock_api_key_configured: boolean;
+        openrouter_configured: boolean;
+        ai_runtime_provider?: string | null;
+        ai_runtime_model?: string | null;
+    };
+    appwrite: Record<string, unknown>;
+    appwrite_runtime: Record<string, unknown>;
 }
 
 export interface CopilotStreamEvent {
@@ -2219,6 +2278,36 @@ export async function getAdminAITelemetry(
     });
 }
 
+export async function getAdminAIRuntimeConfig(
+    adminKey: string,
+): Promise<AdminAIRuntimeConfigResponse> {
+    return fetchAPI<AdminAIRuntimeConfigResponse>('/admin/ai-runtime', {
+        headers: { 'X-Admin-Key': adminKey },
+        timeout: 15000,
+    });
+}
+
+export async function getAdminProviderStatus(
+    adminKey: string,
+): Promise<AdminProviderStatusResponse> {
+    return fetchAPI<AdminProviderStatusResponse>('/admin/providers/status', {
+        headers: { 'X-Admin-Key': adminKey },
+        timeout: 15000,
+    });
+}
+
+export async function saveAdminAIRuntimeConfig(
+    adminKey: string,
+    model: string,
+): Promise<AdminAIRuntimeConfigResponse> {
+    return fetchAPI<AdminAIRuntimeConfigResponse>('/admin/ai-runtime', {
+        method: 'PUT',
+        headers: { 'X-Admin-Key': adminKey },
+        body: JSON.stringify({ model }),
+        timeout: 15000,
+    });
+}
+
 export async function openCopilotChatStream(
     request: CopilotStreamRequest,
     signal?: AbortSignal,
@@ -2239,7 +2328,7 @@ export async function openCopilotChatStream(
         'Content-Type': 'application/json',
     });
 
-    const token = await getAuthorizationToken();
+    const token = await getAuthorizationTokenForCopilot();
     if (token) {
         headers.set('Authorization', `Bearer ${token}`);
     }
@@ -2247,7 +2336,7 @@ export async function openCopilotChatStream(
     return fetch(`${API_BASE_URL}/copilot/chat/stream`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(request),
+        body: JSON.stringify(buildCopilotRequestPayload(request)),
         signal,
     });
 }

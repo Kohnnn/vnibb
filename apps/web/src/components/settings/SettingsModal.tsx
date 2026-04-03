@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw, Shield, Sparkles } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AICopilotTelemetryReview } from '@/components/admin/AICopilotTelemetryReview';
@@ -33,7 +33,12 @@ import {
   writeAdminLayoutKey,
   writeAdminLayoutKeyValidated,
 } from '@/lib/adminLayoutAccess';
-import { getAdminSystemDashboardTemplateBundle } from '@/lib/api';
+import {
+  getAdminAIRuntimeConfig,
+  getAdminProviderStatus,
+  getAdminSystemDashboardTemplateBundle,
+  saveAdminAIRuntimeConfig,
+} from '@/lib/api';
 import {
   clearStoredAISettings,
   OPENAI_COMPATIBLE_BASE_URL,
@@ -62,6 +67,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [adminLayoutKeyInput, setAdminLayoutKeyInput] = useState('');
   const [showGlobalLayoutControls, setShowGlobalLayoutControls] = useState(false);
   const [isAdminLayoutKeyValidating, setIsAdminLayoutKeyValidating] = useState(false);
+  const [adminAiModelInput, setAdminAiModelInput] = useState('openai/gpt-4o-mini');
+  const [isAdminAiRuntimeLoading, setIsAdminAiRuntimeLoading] = useState(false);
+  const [isAdminAiRuntimeSaving, setIsAdminAiRuntimeSaving] = useState(false);
+  const [adminOpenRouterConfigured, setAdminOpenRouterConfigured] = useState<boolean | null>(null);
+  const [adminRuntimeProvider, setAdminRuntimeProvider] = useState<string | null>(null);
   const [aiProvider, setAiProvider] = useState<AIProvider>('openrouter');
   const [aiMode, setAiMode] = useState<AIProviderMode>('app_default');
   const [aiModelInput, setAiModelInput] = useState('openai/gpt-4o-mini');
@@ -77,6 +87,24 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { state, activeDashboard, setActiveDashboard, setActiveTab: setDashboardActiveTab } = useDashboard();
 
   const tickerSuggestions = useMemo(() => searchStocks(defaultTickerInput, 6), [defaultTickerInput]);
+
+  const loadAdminAiRuntimeConfig = useCallback(async (adminKey: string) => {
+    const trimmedKey = adminKey.trim()
+    if (!trimmedKey) return
+
+    try {
+      setIsAdminAiRuntimeLoading(true)
+      const config = await getAdminAIRuntimeConfig(trimmedKey)
+      setAdminAiModelInput(config.model || 'openai/gpt-4o-mini')
+      const providerStatus = await getAdminProviderStatus(trimmedKey)
+      setAdminOpenRouterConfigured(Boolean(providerStatus.providers.openrouter_configured))
+      setAdminRuntimeProvider(typeof providerStatus.providers.ai_runtime_provider === 'string' ? providerStatus.providers.ai_runtime_provider : null)
+    } catch (error) {
+      setPreferenceStatus(error instanceof Error ? `AI runtime load failed: ${error.message}` : 'AI runtime load failed.')
+    } finally {
+      setIsAdminAiRuntimeLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (isOpen) {
@@ -97,8 +125,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setAiBaseUrlInput(aiSettings.baseUrl);
       setAiWebSearch(aiSettings.webSearch);
       setAiPreferAppwriteData(aiSettings.preferAppwriteData);
+      if (readAdminLayoutKeyValidated()) {
+        void loadAdminAiRuntimeConfig(readAdminLayoutKey())
+      }
     }
-  }, [globalSymbol, isOpen]);
+  }, [globalSymbol, isOpen, loadAdminAiRuntimeConfig]);
 
   useEffect(() => {
     if (!preferenceStatus) return;
@@ -157,7 +188,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const applyAISettings = () => {
     const normalizedModel = aiModelInput.trim();
     const normalizedBaseUrl = aiBaseUrlInput.trim().replace(/\/$/, '');
-    if (!normalizedModel) {
+    const needsLocalModel = !(aiProvider === 'openrouter' && aiMode === 'app_default')
+    if (needsLocalModel && !normalizedModel) {
       setAiSettingsError('Enter a model slug, for example openai/gpt-4o-mini.');
       return;
     }
@@ -180,7 +212,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const nextSettings = writeStoredAISettings({
       provider: aiProvider,
       mode: aiMode,
-      model: normalizedModel,
+      model: needsLocalModel ? normalizedModel : aiModelInput,
       apiKey: aiApiKeyInput,
       baseUrl: normalizedBaseUrl,
       webSearch: aiWebSearch,
@@ -198,7 +230,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setPreferenceStatus(
       nextSettings.mode === 'browser_key'
         ? `AI settings saved locally: ${nextSettings.provider} browser key + ${nextSettings.model}.`
-        : `AI settings saved locally: app OpenRouter key + ${nextSettings.model}.`,
+        : 'AI settings saved locally: app default provider + admin-managed model.',
     );
   };
 
@@ -516,10 +548,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       if (aiSettingsError) setAiSettingsError(null)
                     }}
                     placeholder="openai/gpt-4o-mini"
-                    className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                    disabled={aiProvider === 'openrouter' && aiMode === 'app_default'}
+                    className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                   />
                   <p className="mt-2 text-[10px] text-[var(--text-muted)]">
-                    {aiProvider === 'openrouter'
+                    {aiProvider === 'openrouter' && aiMode === 'app_default'
+                      ? 'App Default mode uses the admin-managed OpenRouter model from the Admin tab.'
+                      : aiProvider === 'openrouter'
                       ? 'Any OpenRouter model slug is allowed. Start with `openai/gpt-4o-mini` for a low-cost default.'
                       : 'Enter the model ID supported by your OpenAI-compatible provider.'}
                   </p>
@@ -764,6 +799,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           try {
                             setIsAdminLayoutKeyValidating(true)
                             await getAdminSystemDashboardTemplateBundle('default-fundamental', trimmedKey)
+                            await loadAdminAiRuntimeConfig(trimmedKey)
                             writeAdminLayoutKey(trimmedKey)
                             writeAdminLayoutKeyValidated(true)
                             setPreferenceStatus('Admin layout key validated and saved locally.')
@@ -828,6 +864,68 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                   </div>
                 </div>
+
+                {readAdminLayoutKeyValidated() && (
+                  <div>
+                    <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">AI Runtime Defaults</h4>
+                    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
+                      <div className="text-sm font-bold text-[var(--text-primary)]">App default OpenRouter model</div>
+                      <div className="mt-1 text-xs text-[var(--text-muted)]">
+                        This controls the default model used when users select `App Default` in AI settings.
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${adminOpenRouterConfigured ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'}`}>
+                          OpenRouter: {adminOpenRouterConfigured ? 'configured' : 'missing key'}
+                        </div>
+                        <div className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 text-[11px] font-semibold text-[var(--text-secondary)]">
+                          Runtime provider: {adminRuntimeProvider || 'openrouter'}
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        value={adminAiModelInput}
+                        onChange={(event) => setAdminAiModelInput(event.target.value)}
+                        placeholder="openai/gpt-4o-mini"
+                        className="mt-4 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                      />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const trimmedKey = adminLayoutKeyInput.trim()
+                            const trimmedModel = adminAiModelInput.trim()
+                            if (!trimmedKey || !trimmedModel) {
+                              setPreferenceStatus('Provide both an admin key and a model slug before saving AI runtime defaults.')
+                              return
+                            }
+                            try {
+                              setIsAdminAiRuntimeSaving(true)
+                              const saved = await saveAdminAIRuntimeConfig(trimmedKey, trimmedModel)
+                              setAdminAiModelInput(saved.model || trimmedModel)
+                              setPreferenceStatus(`Admin AI model saved: ${saved.model}.`)
+                            } catch (error) {
+                              setPreferenceStatus(error instanceof Error ? `AI runtime save failed: ${error.message}` : 'AI runtime save failed.')
+                            } finally {
+                              setIsAdminAiRuntimeSaving(false)
+                            }
+                          }}
+                          disabled={isAdminAiRuntimeSaving || isAdminAiRuntimeLoading}
+                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isAdminAiRuntimeSaving ? 'Saving…' : 'Save AI Model'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void loadAdminAiRuntimeConfig(adminLayoutKeyInput)}
+                          disabled={isAdminAiRuntimeSaving || isAdminAiRuntimeLoading}
+                          className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isAdminAiRuntimeLoading ? 'Loading…' : 'Reload'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <AICopilotTelemetryReview
                   adminKey={adminLayoutKeyInput}

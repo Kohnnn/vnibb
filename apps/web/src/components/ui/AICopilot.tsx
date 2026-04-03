@@ -76,6 +76,13 @@ interface AICopilotProps {
     activeTabName?: string;
 }
 
+interface ConnectedWidgetSummary {
+    widgetTypeKey?: string;
+    widgetId?: string;
+    widgetGroup?: string;
+    dataSample?: unknown;
+}
+
 type PromptSuggestion = {
     label: string;
     icon: LucideIcon;
@@ -116,6 +123,39 @@ const TAB_PROMPTS: Record<string, PromptSuggestion[]> = {
     ],
 };
 
+const WIDGET_PROMPTS: Record<string, PromptSuggestion[]> = {
+    comparison: [
+        { label: 'Best vs Worst', icon: Bot, prompt: 'From this comparison widget, identify the strongest and weakest name and justify both with evidence' },
+        { label: 'Valuation Gap', icon: Sparkles, prompt: 'Explain the biggest valuation gap shown in this widget and whether it looks justified' },
+        { label: 'Quality Rank', icon: Terminal, prompt: 'Rank the compared names by quality and explain what is driving the ranking' },
+        { label: 'One Pick', icon: SearchIcon, prompt: 'Choose one ticker from this comparison and give the cleanest investment case plus key risks' },
+    ],
+    price_chart: [
+        { label: 'Trend Read', icon: SearchIcon, prompt: 'Read this chart like a market technician: trend, momentum, and what matters most now' },
+        { label: 'Levels', icon: Terminal, prompt: 'Use this chart context to map support, resistance, invalidation, and key breakout levels' },
+        { label: 'Trade Setup', icon: Bot, prompt: 'Draft a risk-managed trade setup from this chart with entry, stop, and target logic' },
+        { label: 'Context', icon: Sparkles, prompt: 'Explain what this price action says about sentiment and positioning' },
+    ],
+    foreign_trading: [
+        { label: 'Flow Signal', icon: Sparkles, prompt: 'Explain what this foreign trading widget is signaling about conviction and accumulation' },
+        { label: 'Persistence', icon: Terminal, prompt: 'Is the foreign flow persistent or noisy? Summarize the key evidence from this widget' },
+        { label: 'Implication', icon: Bot, prompt: 'What does this foreign trading pattern imply for the stock over the next few sessions?' },
+        { label: 'Risks', icon: SearchIcon, prompt: 'What would invalidate the bullish or bearish read from this foreign trading widget?' },
+    ],
+    market_breadth: [
+        { label: 'Breadth Read', icon: Sparkles, prompt: 'Summarize what this market breadth widget says about the real health of the market' },
+        { label: 'Leaders', icon: Bot, prompt: 'Identify sector leaders and laggards from this widget and explain the rotation' },
+        { label: 'Risk-On?', icon: SearchIcon, prompt: 'Does this breadth setup look risk-on, risk-off, or mixed? Explain clearly' },
+        { label: 'Next Step', icon: Terminal, prompt: 'Translate this market breadth setup into a practical next-step watchlist or positioning plan' },
+    ],
+    financials: [
+        { label: 'Explain Widget', icon: Terminal, prompt: 'Explain the key takeaways from this financial widget and what matters most for the thesis' },
+        { label: 'Quality', icon: Sparkles, prompt: 'Assess earnings quality, cash conversion, and balance-sheet strength from this widget context' },
+        { label: 'Weak Points', icon: SearchIcon, prompt: 'Point out the weakest fundamental signals visible in this widget and why they matter' },
+        { label: 'Decision', icon: Bot, prompt: 'Using this widget only as the starting point, tell me whether the fundamentals are investable and why' },
+    ],
+};
+
 function normalizeTabKey(tabName?: string): string {
     if (!tabName) return 'overview';
     const key = tabName.toLowerCase();
@@ -126,8 +166,50 @@ function normalizeTabKey(tabName?: string): string {
     return 'overview';
 }
 
-function getSessionKey(symbol: string): string {
-    return `vnibb:copilot:session:${symbol || 'UNKNOWN'}`;
+function normalizeWidgetKey(widgetName?: string): string | null {
+    if (!widgetName) return null;
+    const key = widgetName.toLowerCase();
+    if (key.includes('comparison')) return 'comparison';
+    if (key.includes('price chart') || key.includes('chart')) return 'price_chart';
+    if (key.includes('foreign')) return 'foreign_trading';
+    if (key.includes('breadth') || key.includes('sector performance')) return 'market_breadth';
+    if (key.includes('financial') || key.includes('income') || key.includes('balance') || key.includes('cash flow') || key.includes('ratio')) return 'financials';
+    return null;
+}
+
+function getWidgetSummary(widgetContext?: string, widgetContextData?: Record<string, unknown>): ConnectedWidgetSummary | null {
+    if (!widgetContext && !widgetContextData) {
+        return null;
+    }
+
+    const context = widgetContextData || {};
+    return {
+        widgetTypeKey: typeof context.widgetTypeKey === 'string' ? context.widgetTypeKey : undefined,
+        widgetId: typeof context.widgetId === 'string' ? context.widgetId : undefined,
+        widgetGroup: typeof context.widgetGroup === 'string' ? context.widgetGroup : undefined,
+        dataSample: context.dataSample,
+    };
+}
+
+function getWidgetDataPreview(widgetSummary: ConnectedWidgetSummary | null): string | null {
+    const dataSample = widgetSummary?.dataSample;
+    if (Array.isArray(dataSample)) {
+        return dataSample.length ? `${dataSample.length} sampled rows attached` : null;
+    }
+    if (dataSample && typeof dataSample === 'object') {
+        const keys = Object.keys(dataSample as Record<string, unknown>).slice(0, 4);
+        return keys.length ? `Sample fields: ${keys.join(', ')}` : null;
+    }
+    if (dataSample !== undefined && dataSample !== null && dataSample !== '') {
+        return 'Scalar widget sample attached';
+    }
+    return null;
+}
+
+function getSessionKey(symbol: string, widgetContext?: string, activeTabName?: string): string {
+    const widgetKey = normalizeWidgetKey(widgetContext) || 'general';
+    const tabKey = normalizeTabKey(activeTabName);
+    return `vnibb:copilot:session:${symbol || 'UNKNOWN'}:${widgetKey}:${tabKey}`;
 }
 
 function toPersistedMessage(message: Message): PersistedMessage {
@@ -186,6 +268,32 @@ function getProviderLabel(provider: AISettings['provider']): string {
     return provider === 'openai_compatible' ? 'OpenAI-compatible' : 'OpenRouter';
 }
 
+function getWidgetAwareIntro(widgetContext?: string, activeTabName?: string, symbol?: string): string {
+    const widgetKey = normalizeWidgetKey(widgetContext);
+    const tabLabel = activeTabName || 'current workspace';
+    if (widgetContext && widgetKey === 'comparison') {
+        return `Connected to @${widgetContext} on ${tabLabel} for ${symbol}. Ask me to rank the names, explain valuation gaps, or pick the strongest thesis.`;
+    }
+    if (widgetContext && widgetKey === 'price_chart') {
+        return `Connected to @${widgetContext} on ${tabLabel} for ${symbol}. Ask me to read the setup, define levels, or turn this chart into a trade plan.`;
+    }
+    if (widgetContext && widgetKey === 'foreign_trading') {
+        return `Connected to @${widgetContext} on ${tabLabel} for ${symbol}. Ask me to decode foreign flow, persistence, and what it means for positioning.`;
+    }
+    if (widgetContext && widgetKey === 'market_breadth') {
+        return `Connected to @${widgetContext} on ${tabLabel}. Ask me to explain sector rotation, breadth health, or what the market is signaling.`;
+    }
+    if (widgetContext) {
+        return `Connected to @${widgetContext} on ${tabLabel} for ${symbol}. Ask me to explain the widget, call out anomalies, or connect it to the broader thesis.`;
+    }
+    return `Ask me anything about ${symbol}`;
+}
+
+function getInputPlaceholder(widgetContext?: string): string {
+    if (!widgetContext) return 'Ask a question...';
+    return `Ask about @${widgetContext}...`;
+}
+
 export function AICopilot({
     isOpen,
     onClose,
@@ -203,6 +311,7 @@ export function AICopilot({
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const contextualStarterKeyRef = useRef<string | null>(null);
 
     // Data fetching for context
     const { data: profile } = useProfile(currentSymbol);
@@ -210,9 +319,19 @@ export function AICopilot({
     const { data: ratios } = useFinancialRatios(currentSymbol);
 
     const activeTabKey = useMemo(() => normalizeTabKey(activeTabName), [activeTabName]);
+    const activeWidgetKey = useMemo(() => normalizeWidgetKey(widgetContext), [widgetContext]);
+    const widgetSummary = useMemo(
+        () => getWidgetSummary(widgetContext, widgetContextData),
+        [widgetContext, widgetContextData]
+    );
+    const widgetDataPreview = useMemo(() => getWidgetDataPreview(widgetSummary), [widgetSummary]);
     const suggestedPrompts = useMemo(
-        () => TAB_PROMPTS[activeTabKey] || DEFAULT_PROMPTS,
-        [activeTabKey]
+        () => WIDGET_PROMPTS[activeWidgetKey || ''] || TAB_PROMPTS[activeTabKey] || DEFAULT_PROMPTS,
+        [activeTabKey, activeWidgetKey]
+    );
+    const sessionKey = useMemo(
+        () => getSessionKey(currentSymbol, widgetContext, activeTabName),
+        [currentSymbol, widgetContext, activeTabName]
     );
 
     // Scroll to bottom when new messages arrive
@@ -223,7 +342,7 @@ export function AICopilot({
     useEffect(() => {
         if (typeof window === 'undefined') return;
         try {
-            const raw = window.sessionStorage.getItem(getSessionKey(currentSymbol));
+            const raw = window.sessionStorage.getItem(sessionKey);
             if (!raw) {
                 setMessages([]);
                 return;
@@ -233,17 +352,17 @@ export function AICopilot({
         } catch {
             setMessages([]);
         }
-    }, [currentSymbol]);
+    }, [sessionKey]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
         try {
             const limited = messages.slice(-40).map(toPersistedMessage);
-            window.sessionStorage.setItem(getSessionKey(currentSymbol), JSON.stringify(limited));
+            window.sessionStorage.setItem(sessionKey, JSON.stringify(limited));
         } catch {
             // ignore persistence failures
         }
-    }, [messages, currentSymbol]);
+    }, [messages, sessionKey]);
 
     // Focus input when opened
     useEffect(() => {
@@ -262,6 +381,26 @@ export function AICopilot({
             window.removeEventListener('storage', syncSettings);
         };
     }, []);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (!widgetContext) {
+            contextualStarterKeyRef.current = null;
+            return;
+        }
+        if (messages.length > 0) return;
+        if (contextualStarterKeyRef.current === sessionKey) return;
+
+        contextualStarterKeyRef.current = sessionKey;
+        setMessages([
+            {
+                id: `${Date.now()}-context`,
+                role: 'assistant',
+                content: getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol),
+                timestamp: new Date(),
+            },
+        ]);
+    }, [activeTabName, currentSymbol, isOpen, messages.length, sessionKey, widgetContext]);
 
     const handleSend = async (prompt?: string) => {
         const messageText = prompt || input.trim();
@@ -292,6 +431,7 @@ export function AICopilot({
             // Construct context for widget
             const requestContext = {
                 widgetType: widgetContext || 'Dashboard',
+                widgetTypeKey: widgetSummary?.widgetTypeKey || null,
                 activeTab: activeTabName || null,
                 symbol: currentSymbol,
                 dataSnapshot: {
@@ -401,7 +541,7 @@ export function AICopilot({
                 <span className="text-xs text-blue-400">
                     {widgetContext ? `Context: @${widgetContext} · ` : ''}
                     {activeTabName ? `${activeTabName} · ` : ''}
-                    {currentSymbol} · {getProviderLabel(aiSettings.provider)} · {aiSettings.mode === 'browser_key' ? 'Browser key' : 'App default'} · {aiSettings.model}
+                    {currentSymbol} · {getProviderLabel(aiSettings.provider)} · {aiSettings.mode === 'browser_key' ? `Browser key · ${aiSettings.model}` : 'App default · admin-managed model'}
                 </span>
                 {messages.length > 0 && (
                     <button
@@ -415,13 +555,36 @@ export function AICopilot({
                 )}
             </div>
 
+            {widgetContext && (
+                <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/60 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                        <div>
+                            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">Connected Widget</div>
+                            <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">@{widgetContext}</div>
+                        </div>
+                        <div className="text-right text-[10px] text-[var(--text-muted)]">
+                            {widgetSummary?.widgetTypeKey ? <div>{widgetSummary.widgetTypeKey}</div> : null}
+                            {widgetSummary?.widgetGroup ? <div>Group: {widgetSummary.widgetGroup}</div> : null}
+                        </div>
+                    </div>
+                    <div className="text-[11px] text-[var(--text-secondary)]">
+                        {getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)}
+                    </div>
+                    {widgetDataPreview && (
+                        <div className="rounded-md border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[10px] text-cyan-100/80">
+                            {widgetDataPreview}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {messages.length === 0 ? (
                     <div className="space-y-4">
                         <div className="text-center text-[var(--text-muted)] py-8">
                             <Bot size={40} className="mx-auto mb-3 text-[var(--text-muted)]/70" />
-                            <p className="text-sm">Ask me anything about {currentSymbol}</p>
+                            <p className="text-sm">{getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)}</p>
                         </div>
 
                         {/* Suggested Prompts */}
@@ -561,7 +724,7 @@ export function AICopilot({
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                        placeholder="Ask a question..."
+                        placeholder={getInputPlaceholder(widgetContext)}
                         className="flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] outline-none"
                     />
                     <button

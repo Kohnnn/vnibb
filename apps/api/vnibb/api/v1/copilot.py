@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from vnibb.services.ai_context_service import ai_context_service
+from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
 from vnibb.services.copilot_service import PROMPT_TEMPLATES, copilot_service
 from vnibb.services.llm_service import llm_service
@@ -34,6 +35,7 @@ class WidgetContext(BaseModel):
     """Context from a widget for AI analysis."""
 
     widgetType: str = "General"
+    widgetTypeKey: str | None = None
     symbol: str = ""
     activeTab: str | None = None
     dataSnapshot: dict[str, Any] | None = None
@@ -128,12 +130,17 @@ async def chat_stream(request: ChatStreamRequest):
             request_settings = (
                 request.settings.model_dump(exclude_none=True) if request.settings else {}
             )
+            if str(request_settings.get("mode") or "app_default") != "browser_key":
+                runtime_config = await ai_runtime_config_service.get_runtime_config()
+                request_settings["provider"] = str(runtime_config.get("provider") or "openrouter")
+                request_settings["model"] = str(runtime_config.get("model") or "").strip()
             yield f"data: {json.dumps({'reasoning': {'eventType': 'INFO', 'message': 'Building Appwrite-first runtime context'}})}\n\n"
 
             context_dict = {}
             if request.context:
                 context_dict = {
                     "widgetType": request.context.widgetType,
+                    "widgetTypeKey": request.context.widgetTypeKey,
                     "symbol": request.context.symbol,
                     "activeTab": request.context.activeTab,
                     "data": request.context.dataSnapshot or {},

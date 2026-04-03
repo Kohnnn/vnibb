@@ -12,6 +12,7 @@ import {
   Settings2,
   LayoutGrid,
   Lock,
+  Sparkles,
   Unlock,
   TrendingDown,
   TrendingUp,
@@ -106,6 +107,7 @@ interface HeaderProps {
   isEditing?: boolean
   onEditToggle?: () => void
   onAIClick?: () => void
+  isAIOpen?: boolean
   onResetLayout?: () => void
   onAutoFitLayout?: () => void
   onCollapseAll?: () => void
@@ -120,6 +122,7 @@ export function Header({
   isEditing = false,
   onEditToggle,
   onAIClick,
+  isAIOpen = false,
   onResetLayout,
   onAutoFitLayout,
   onCollapseAll,
@@ -131,7 +134,7 @@ export function Header({
   const [isSearching, setIsSearching] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const hasActionMenu = Boolean(
-    onResetLayout || onCollapseAll || onExpandAll || onAIClick
+    onResetLayout || onCollapseAll || onExpandAll
   )
   const { resolvedTheme } = useTheme()
   const [marketClock, setMarketClock] = useState(() => Date.now())
@@ -473,6 +476,24 @@ export function Header({
             <span className="hidden md:inline">Ctrl+K</span>
           </button>
 
+          {onAIClick && (
+            <button
+              type="button"
+              onClick={onAIClick}
+              className={cn(
+                'flex items-center gap-1 rounded-md border px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
+                isAIOpen
+                  ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-200'
+                  : 'border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              )}
+              title="Open AI copilot"
+              aria-label={isAIOpen ? 'Close AI copilot' : 'Open AI copilot'}
+            >
+              <Sparkles size={13} />
+              <span className="hidden md:inline">AI Copilot</span>
+            </button>
+          )}
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -561,16 +582,6 @@ export function Header({
                   <DropdownMenuItem onClick={onResetLayout} className="text-xs">
                     Reset layout
                   </DropdownMenuItem>
-                )}
-                {onAIClick && (
-                  <>
-                    {(onAutoFitLayout || onResetLayout || onCollapseAll || onExpandAll || onEditToggle) && (
-                      <DropdownMenuSeparator />
-                    )}
-                    <DropdownMenuItem onClick={onAIClick} className="text-xs">
-                      Open AI assistant
-                    </DropdownMenuItem>
-                  </>
                 )}
                 {(onCollapseAll || onExpandAll) && <DropdownMenuSeparator />}
                 {onCollapseAll && (

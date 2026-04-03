@@ -389,8 +389,12 @@ export function WidgetWrapper({
         return {
             widgetId: id,
             widgetType: title,
+            widgetTypeKey: widgetType,
             symbol: displaySymbol,
             widgetGroup,
+            tabId,
+            dashboardId,
+            widgetConfig: currentWidget?.config || null,
             dataSample,
         };
     };

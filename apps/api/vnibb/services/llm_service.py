@@ -228,6 +228,58 @@ def _response_current_symbol(context: dict[str, Any]) -> str | None:
     return None
 
 
+def _derive_prompt_focus(context: dict[str, Any]) -> dict[str, str]:
+    client_context = context.get("client_context") if isinstance(context, dict) else None
+    widget_type = ""
+    widget_type_key = ""
+    active_tab = ""
+    if isinstance(client_context, dict):
+        widget_type = str(client_context.get("widgetType") or "").strip()
+        widget_type_key = str(client_context.get("widgetTypeKey") or "").strip()
+        active_tab = str(client_context.get("activeTab") or "").strip()
+
+    normalized = f"{widget_type_key} {widget_type} {active_tab}".lower()
+    if any(keyword in normalized for keyword in ("comparison", "peer", "relative")):
+        return {
+            "mode": "comparison",
+            "instructions": "Prefer direct relative judgments. Start with the winner/loser, then explain the spread using valuation, quality, momentum, and risk evidence from context.",
+        }
+    if any(
+        keyword in normalized for keyword in ("technical", "price chart", "chart", "tradingview")
+    ):
+        return {
+            "mode": "technical",
+            "instructions": "Focus on trend, levels, momentum, invalidation, and trade structure. Be concrete about what would confirm or break the setup.",
+        }
+    if any(keyword in normalized for keyword in ("news", "event")):
+        return {
+            "mode": "news_events",
+            "instructions": "Focus on catalysts, event risk, narrative shifts, and which items matter most for the thesis over the next few sessions and quarters.",
+        }
+    if any(
+        keyword in normalized
+        for keyword in ("financial", "income", "balance", "cash flow", "ratio")
+    ):
+        return {
+            "mode": "fundamentals",
+            "instructions": "Focus on earnings quality, growth durability, margins, leverage, and balance-sheet strength. Call out what truly matters for the business quality read.",
+        }
+    if any(keyword in normalized for keyword in ("breadth", "sector", "market")):
+        return {
+            "mode": "market_regime",
+            "instructions": "Focus on breadth, rotation, leadership, and whether the market backdrop is supportive or deteriorating.",
+        }
+    if any(keyword in normalized for keyword in ("foreign", "flow", "order")):
+        return {
+            "mode": "flow",
+            "instructions": "Focus on participation, persistence, and whether capital flow is confirming or contradicting the broader thesis.",
+        }
+    return {
+        "mode": "general",
+        "instructions": "Start with the clearest thesis, then support it with the most decision-useful evidence from the current context.",
+    }
+
+
 def _reasoning_event(
     event_type: str,
     message: str,
@@ -330,13 +382,23 @@ class LlmService:
             bool((request_settings or {}).get("webSearch")) and effective_provider == "openrouter"
         )
         appwrite_first = bool(context.get("prefer_appwrite_data", True))
+        prompt_focus = _derive_prompt_focus(context)
+        widget_type = ""
+        widget_type_key = ""
+        active_tab = ""
+        client_context = context.get("client_context") if isinstance(context, dict) else None
+        if isinstance(client_context, dict):
+            widget_type = str(client_context.get("widgetType") or "").strip()
+            widget_type_key = str(client_context.get("widgetTypeKey") or "").strip()
+            active_tab = str(client_context.get("activeTab") or "").strip()
         context_blob = json.dumps(context, ensure_ascii=True, default=str)
         if len(context_blob) > MAX_CONTEXT_CHARS:
             context_blob = f"{context_blob[:MAX_CONTEXT_CHARS]}..."
 
         system_prompt = (
-            "You are VNIBB Copilot, a financial analysis assistant for Vietnam equities. "
-            "Be concise, factual, and explicit about uncertainty."
+            "You are VNIBB Copilot, a workspace-native financial analysis assistant for Vietnam equities. "
+            "You are not a generic chat bot: you are embedded inside a live dashboard and should use the current widget, active tab, and Appwrite-backed market context as your primary frame of reference. "
+            "Be concise, factual, decision-useful, and explicit about uncertainty."
         )
         developer_prompt = (
             "Security and data rules:\n"
@@ -354,7 +416,10 @@ class LlmService:
             "12. `answer_markdown` must be a Markdown string containing the answer body only. Do not include a Sources heading or source list because the server will append a normalized Sources section.\n"
             "13. `used_source_ids` must be an array of source IDs from source_catalog that you actually relied on for factual claims.\n"
             "14. If you have no validated source IDs, return an empty array for `used_source_ids`.\n"
-            "15. Do not wrap the JSON in Markdown fences or add explanatory text before or after it."
+            "15. Do not wrap the JSON in Markdown fences or add explanatory text before or after it.\n"
+            f"16. Current focus mode: {prompt_focus['mode']}. Widget: {(widget_type_key or widget_type or 'dashboard')}. Active tab: {active_tab or 'unknown'}.\n"
+            f"17. Focus instructions: {prompt_focus['instructions']}\n"
+            "18. Prefer answer structures like: thesis, supporting evidence, risks, and next action. For technical/chart contexts, emphasize levels and invalidation. For comparison contexts, emphasize relative winners/losers. For widget-origin requests, explain the widget before expanding into broader conclusions when helpful."
         )
 
         chat_messages: list[dict[str, str]] = [

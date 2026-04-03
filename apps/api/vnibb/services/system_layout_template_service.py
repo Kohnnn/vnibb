@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
-from datetime import datetime, timezone
+import zlib
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 import httpx
@@ -34,6 +36,7 @@ SYSTEM_LAYOUT_STATUS_ALIASES = {
     "draft": "dr",
     "published": "pub",
 }
+COMPRESSED_DASHBOARD_PREFIX = "gz:"
 
 
 class SystemLayoutTemplateRecord(BaseModel):
@@ -103,7 +106,9 @@ class SystemLayoutTemplateService:
             raise HTTPException(status_code=400, detail="Unsupported system dashboard key")
         normalized_status = status_value.strip().lower()
         if normalized_status not in SYSTEM_LAYOUT_STATUSES:
-            raise HTTPException(status_code=400, detail="Unsupported system dashboard template status")
+            raise HTTPException(
+                status_code=400, detail="Unsupported system dashboard template status"
+            )
         safe_key = SYSTEM_DASHBOARD_KEY_ALIASES.get(
             normalized_dashboard_key,
             DOC_ID_RE.sub("-", normalized_dashboard_key).strip("-")[:20],
@@ -128,26 +133,66 @@ class SystemLayoutTemplateService:
 
     async def _upsert_document(self, document_id: str, data: dict[str, Any]) -> dict[str, Any]:
         self._assert_configured()
-        create_payload = {"documentId": document_id, "data": data}
+        create_payload = {"documentId": document_id, "data": self._clean_document_data(data)}
         timeout = httpx.Timeout(20.0, connect=10.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            create_response = await client.post(self._documents_url(), headers=self._headers(), json=create_payload)
+            create_response = await client.post(
+                self._documents_url(), headers=self._headers(), json=create_payload
+            )
             if create_response.status_code < 300:
                 return create_response.json()
             if create_response.status_code != 409:
-                create_response.raise_for_status()
+                self._raise_appwrite_error(create_response)
 
             update_response = await client.patch(
                 f"{self._documents_url()}/{document_id}",
                 headers=self._headers(),
-                json={"data": data},
+                json={"data": self._clean_document_data(data)},
             )
-            update_response.raise_for_status()
+            if update_response.status_code >= 300:
+                self._raise_appwrite_error(update_response)
             return update_response.json()
+
+    def _clean_document_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in data.items() if value is not None}
+
+    def _serialize_dashboard_json(self, dashboard: dict[str, Any]) -> str:
+        raw_json = json.dumps(dashboard, ensure_ascii=True, separators=(",", ":"))
+        compressed_json = COMPRESSED_DASHBOARD_PREFIX + base64.urlsafe_b64encode(
+            zlib.compress(raw_json.encode("utf-8"), level=9)
+        ).decode("ascii")
+        payload = compressed_json if len(compressed_json) < len(raw_json) else raw_json
+        if len(payload) > 65535:
+            raise HTTPException(
+                status_code=400,
+                detail=f"system layout payload too large for Appwrite dashboard_json field ({len(payload)} chars)",
+            )
+        return payload
+
+    def _deserialize_dashboard_json(self, data: str) -> dict[str, Any]:
+        payload = data or "{}"
+        if payload.startswith(COMPRESSED_DASHBOARD_PREFIX):
+            compressed = payload[len(COMPRESSED_DASHBOARD_PREFIX) :]
+            try:
+                return json.loads(zlib.decompress(base64.urlsafe_b64decode(compressed.encode("ascii"))).decode("utf-8"))
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Failed to decode compressed dashboard template: {exc}") from exc
+        return json.loads(payload)
+
+    def _raise_appwrite_error(self, response: httpx.Response) -> None:
+        message = response.text[:500] or response.reason_phrase or "Appwrite request failed"
+        try:
+            payload = response.json()
+            message = (
+                payload.get("message") or payload.get("detail") or payload.get("error") or message
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=response.status_code, detail=f"Appwrite template save failed: {message}")
 
     def _parse_document(self, payload: dict[str, Any]) -> SystemLayoutTemplateRecord:
         data = payload.get("dashboard_json") or "{}"
-        dashboard = json.loads(data)
+        dashboard = self._deserialize_dashboard_json(data)
         return SystemLayoutTemplateRecord(
             dashboard_key=str(payload.get("dashboard_key") or "").strip(),
             status=str(payload.get("status") or "published").strip().lower(),
@@ -155,7 +200,7 @@ class SystemLayoutTemplateService:
             dashboard=dashboard,
             notes=payload.get("notes"),
             updated_by=payload.get("updated_by"),
-            updated_at=str(payload.get("updated_at") or datetime.now(timezone.utc).isoformat()),
+            updated_at=str(payload.get("updated_at") or datetime.now(UTC).isoformat()),
             published_at=payload.get("published_at"),
         )
 
@@ -168,7 +213,9 @@ class SystemLayoutTemplateService:
             try:
                 payload = await self._get_document(self._document_id(dashboard_key, "published"))
             except Exception as exc:
-                logger.warning("Unable to fetch published system layout for %s: %s", dashboard_key, exc)
+                logger.warning(
+                    "Unable to fetch published system layout for %s: %s", dashboard_key, exc
+                )
                 continue
             if payload is None:
                 continue
@@ -204,8 +251,8 @@ class SystemLayoutTemplateService:
             if payload is not None
         ]
         next_version = (max(current_versions) if current_versions else 0) + 1
-        now = datetime.now(timezone.utc).isoformat()
-        dashboard_json = json.dumps(dashboard, ensure_ascii=True)
+        now = datetime.now(UTC).isoformat()
+        dashboard_json = self._serialize_dashboard_json(dashboard)
 
         draft_data = {
             "dashboard_key": dashboard_key,
@@ -230,7 +277,9 @@ class SystemLayoutTemplateService:
                 "updated_at": now,
                 "published_at": now,
             }
-            await self._upsert_document(self._document_id(dashboard_key, "published"), published_data)
+            await self._upsert_document(
+                self._document_id(dashboard_key, "published"), published_data
+            )
 
         return await self.get_template_bundle(dashboard_key)
 
