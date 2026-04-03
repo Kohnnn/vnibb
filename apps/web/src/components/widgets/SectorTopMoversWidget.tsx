@@ -188,7 +188,7 @@ function SectorColumn({
           isPositive ? 'border-b-green-900/30' : 'border-b-red-900/30'
         )}
       >
-        <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest truncate mb-0.5">
+        <div className="mb-0.5 break-words whitespace-normal text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">
           {sector.sector_vi || sector.sector}
         </div>
         <div

@@ -136,6 +136,8 @@ Copilot notes:
 - The VniAgent prompt library is now expected to be opened from within the copilot sidebar. Global prompt actions route into the sidebar instead of a disconnected standalone modal.
 - App-default copilot mode normalizes unsupported legacy provider values back to `openrouter` so stale runtime config does not break AI requests.
 - Copilot no longer depends on a browser-minted Appwrite JWT for the streaming chat route, which avoids noisy Appwrite `/account/jwts` CORS failures on deployed web origins.
+- Appwrite JWT mint failures are now cooled down client-side before retrying, so broken Appwrite platform/CORS setups do not spam repeated failing JWT requests on every action.
+- The frontend still uses browser-side Appwrite session flows for login and account operations, but copilot streaming no longer depends on that JWT mint path.
 
 ## Request/Response Examples
 

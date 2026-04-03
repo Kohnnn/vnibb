@@ -68,7 +68,7 @@ export function SubsidiariesWidget({ symbol }: SubsidiariesWidgetProps) {
                         >
                             <div className="flex items-start justify-between gap-2">
                                 <div className="flex-1 min-w-0">
-                                    <p className="truncate text-sm font-medium text-[var(--text-primary)]" title={sub.company_name || ''}>
+                                    <p className="break-words whitespace-normal text-sm font-medium text-[var(--text-primary)]" title={sub.company_name || ''}>
                                         {sub.company_name || 'Unnamed'}
                                     </p>
                                     {sub.charter_capital && (

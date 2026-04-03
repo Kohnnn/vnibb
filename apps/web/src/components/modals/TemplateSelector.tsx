@@ -41,12 +41,6 @@ function formatWidgetType(type: string) {
 function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: TemplateSelectorProps) {
   const [selectedCategory, setSelectedCategory] = useState<DashboardTemplateCategory | null>(null);
 
-  if (!open) return null;
-
-  const filteredTemplates = selectedCategory
-    ? DASHBOARD_TEMPLATES.filter(t => t.category === selectedCategory)
-    : DASHBOARD_TEMPLATES;
-
   const categoryCounts = useMemo(() => {
     return Object.fromEntries(
       DASHBOARD_TEMPLATE_CATEGORIES.map((category) => [
@@ -55,6 +49,12 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
       ])
     ) as Record<DashboardTemplateCategory, number>;
   }, []);
+
+  const filteredTemplates = selectedCategory
+    ? DASHBOARD_TEMPLATES.filter(t => t.category === selectedCategory)
+    : DASHBOARD_TEMPLATES;
+
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center animate-in fade-in duration-200">

@@ -22,6 +22,7 @@ MAX_MESSAGE_LENGTH = 2000
 MAX_CONTEXT_CHARS = 16000
 STREAM_CHUNK_SIZE = 600
 SOURCE_SECTION_FALLBACK = "No validated sources cited."
+SUPPORTED_LLM_PROVIDERS = {"openrouter", "openai_compatible"}
 
 
 def _truncate_text(value: str, limit: int = MAX_MESSAGE_LENGTH) -> str:
@@ -298,6 +299,10 @@ class LlmService:
     def __init__(self):
         self.default_openrouter_base_url = settings.openrouter_base_url.rstrip("/")
 
+    def _normalize_provider(self, provider: str | None) -> str:
+        normalized = str(provider or "openrouter").strip().lower()
+        return normalized if normalized in SUPPORTED_LLM_PROVIDERS else "openrouter"
+
     @property
     def is_available(self) -> bool:
         return bool(settings.openrouter_api_key)
@@ -306,10 +311,8 @@ class LlmService:
         self, request_settings: dict[str, Any] | None = None
     ) -> dict[str, str]:
         request_settings = request_settings or {}
-        provider = (
-            str(request_settings.get("provider") or settings.llm_provider or "openrouter")
-            .strip()
-            .lower()
+        provider = self._normalize_provider(
+            request_settings.get("provider") or settings.llm_provider or "openrouter"
         )
         model = str(
             request_settings.get("model") or settings.llm_model or "openai/gpt-4o-mini"

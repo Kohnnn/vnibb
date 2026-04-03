@@ -483,7 +483,7 @@ function ComparisonAnalysisWidgetComponent({
           </div>
         </div>
 
-        <div className="h-[180px] border-b border-[var(--border-color)] px-2 py-1">
+        <div className="flex min-h-[180px] flex-col border-b border-[var(--border-color)] px-2 py-1">
           {performanceTimedOut && performanceQuery.isLoading ? (
             <WidgetError
               title="Loading timed out"

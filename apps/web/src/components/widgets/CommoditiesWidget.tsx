@@ -58,7 +58,7 @@ export function CommoditiesWidget({ onDataChange }: { onDataChange?: (data: unkn
                                 className="flex items-center justify-between p-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40"
                             >
                                 <div className="min-w-0">
-                                    <div className="text-xs font-semibold text-[var(--text-primary)] truncate">
+                                    <div className="break-words whitespace-normal text-xs font-semibold text-[var(--text-primary)]">
                                         {row.name || row.symbol || 'Commodity'}
                                     </div>
                                     <div className="text-[10px] text-[var(--text-muted)]">{row.source}</div>

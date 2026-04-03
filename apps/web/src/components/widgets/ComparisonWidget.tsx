@@ -170,7 +170,7 @@ export function ComparisonWidget({ id, initialSymbols = [DEFAULT_TICKER, 'FPT'],
                     <>
                         {/* Performance Chart Section */}
                         {showChart && symbols.length > 0 && (
-                            <div className="h-[180px] w-full p-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
+                            <div className="flex min-h-[180px] w-full flex-col border-b border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2">
                                 {perfLoading ? (
                                     <div className="h-full flex items-center justify-center opacity-20 animate-pulse">
                                         <LineChart size={24} />

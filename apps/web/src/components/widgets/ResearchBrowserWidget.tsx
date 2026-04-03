@@ -608,8 +608,8 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove }: Research
                         onClick={() => setActiveSavedSiteId(site.id)}
                         className="min-w-0 flex-1 text-left"
                       >
-                        <div className="truncate text-xs font-semibold text-[var(--text-primary)]">{site.title}</div>
-                        <div className="truncate text-[10px] text-[var(--text-muted)]">
+                        <div className="break-words whitespace-normal text-xs font-semibold text-[var(--text-primary)]">{site.title}</div>
+                        <div className="break-all text-[10px] text-[var(--text-muted)]">
                           {site.url.replace(/^https?:\/\//, '')}
                         </div>
                       </button>
@@ -635,7 +635,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove }: Research
             </div>
           </aside>
 
-          <section className="min-h-[320px] bg-[var(--bg-primary)] p-3">
+          <section className="min-h-[220px] bg-[var(--bg-primary)] p-3">
             {!activeUrl ? (
               <WidgetEmpty message="Pick a source to begin research." icon={<Link2 size={18} />} />
             ) : (

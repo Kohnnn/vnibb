@@ -93,7 +93,7 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup }: SectorPerform
                                         key={sector.sectorId}
                                         className={`p-3 rounded-lg border border-[var(--border-default)] ${getHeatmapColor(change)} cursor-pointer hover:opacity-90 transition-opacity flex flex-col justify-between min-h-[60px]`}
                                     >
-                                        <div className="text-[10px] font-bold text-[var(--text-secondary)] uppercase truncate">
+                                        <div className="break-words whitespace-normal text-[10px] font-bold uppercase text-[var(--text-secondary)]">
                                             {name}
                                         </div>
                                         <div className={`text-base font-black ${change >= 0 ? 'text-green-600' : 'text-red-600'}`}>

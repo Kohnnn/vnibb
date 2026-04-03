@@ -133,12 +133,12 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
             </div>
           </div>
 
-          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 mb-2">
+          <div className="mb-2 flex min-h-[220px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Underwater Curve</div>
               <div className="text-[10px] text-[var(--text-secondary)]">Current vs 52W high</div>
             </div>
-            <ChartMountGuard className="h-[150px]" minHeight={120}>
+            <ChartMountGuard className="flex-1 min-h-[160px]" minHeight={160}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={series.slice(-252)}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />

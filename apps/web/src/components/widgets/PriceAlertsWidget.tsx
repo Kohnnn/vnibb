@@ -683,7 +683,7 @@ function AlertItem({ alert, onRemove, onToggle }: AlertItemProps) {
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-[var(--text-primary)]">{alert.symbol}</span>
-                        <span className="text-xs text-[var(--text-secondary)] truncate">
+                        <span className="break-words whitespace-normal text-xs text-[var(--text-secondary)]">
                             {formatCondition(alert.condition)} {formatThreshold(alert)}
                         </span>
                     </div>
@@ -729,7 +729,7 @@ function TriggeredAlertItem({ alert, onRemove }: TriggeredAlertItemProps) {
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-green-400">{alert.symbol}</span>
-                        <span className="text-xs text-[var(--text-secondary)] truncate">
+                        <span className="break-words whitespace-normal text-xs text-[var(--text-secondary)]">
                             {formatCondition(alert.condition)} {formatThreshold(alert)}
                         </span>
                     </div>
