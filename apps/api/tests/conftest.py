@@ -38,6 +38,7 @@ os.environ["OPENAI_API_KEY"] = "mock_key"
 
 from vnibb.api.main import app
 from vnibb.core.database import Base, get_db
+from vnibb.middleware.rate_limit import RateLimitMiddleware
 from vnibb.models import *  # Ensure all models are loaded for metadata
 
 # Use SQLite in-memory for fast testing
@@ -64,6 +65,19 @@ async def test_engine():
     )
     yield engine
     await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def relax_rate_limit_buckets(monkeypatch):
+    original_resolve_bucket = RateLimitMiddleware._resolve_bucket
+
+    def _resolve_bucket(self, path: str):
+        bucket, requests_per_minute = original_resolve_bucket(self, path)
+        if bucket == 'admin':
+            return bucket, 1000
+        return bucket, requests_per_minute
+
+    monkeypatch.setattr(RateLimitMiddleware, '_resolve_bucket', _resolve_bucket)
 
 
 @pytest.fixture(autouse=True)

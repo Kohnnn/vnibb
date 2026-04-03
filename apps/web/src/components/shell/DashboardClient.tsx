@@ -666,6 +666,7 @@ function DashboardContent() {
                     onSymbolChange={handleSymbolChange}
                     isEditing={isEditing}
                     onEditToggle={canEditCurrentDashboard ? handleEditToggle : undefined}
+                    isAIOpen={showAICopilot}
                     onAIClick={() => {
                         setCopilotWidgetContext(undefined);
                         setCopilotWidgetData(undefined);

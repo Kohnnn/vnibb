@@ -17,6 +17,7 @@ from vnibb.core.config import settings
 from vnibb.core.appwrite_client import check_appwrite_connectivity, appwrite_runtime_summary
 from vnibb.core.middleware.logging import get_recent_error_events
 from vnibb.models.sync_status import SyncStatus
+from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
 from vnibb.services.system_layout_template_service import (
     SYSTEM_DASHBOARD_KEYS,
@@ -86,10 +87,24 @@ async def get_ai_telemetry(limit: int = Query(default=25, ge=1, le=200)) -> Dict
     }
 
 
+@router.get("/ai-runtime", dependencies=[Depends(require_admin_access)])
+async def get_ai_runtime_config() -> Dict[str, Any]:
+    return await ai_runtime_config_service.get_runtime_config()
+
+
+@router.put("/ai-runtime", dependencies=[Depends(require_admin_access)])
+async def save_ai_runtime_config(model: str = Body(..., embed=True)) -> Dict[str, Any]:
+    normalized = str(model or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Model is required")
+    return await ai_runtime_config_service.save_runtime_config(model=normalized)
+
+
 @router.get("/providers/status", dependencies=[Depends(require_admin_access)])
 async def get_provider_status() -> Dict[str, Any]:
     """Return runtime provider configuration and migration connectivity status."""
     appwrite_health = await check_appwrite_connectivity(timeout_seconds=2.5)
+    ai_runtime = await ai_runtime_config_service.get_runtime_config()
     return {
         "environment": settings.environment,
         "providers": {
@@ -100,6 +115,9 @@ async def get_provider_status() -> Dict[str, Any]:
             "vnstock_source": settings.vnstock_source,
             "vnstock_timeout_seconds": settings.vnstock_timeout,
             "vnstock_api_key_configured": bool(settings.vnstock_api_key),
+            "openrouter_configured": bool(settings.openrouter_api_key),
+            "ai_runtime_provider": ai_runtime.get("provider"),
+            "ai_runtime_model": ai_runtime.get("model"),
         },
         "appwrite": appwrite_health,
         "appwrite_runtime": appwrite_runtime_summary(),
@@ -157,7 +175,9 @@ async def save_admin_system_layout(
         try:
             dashboard_payload = json.loads(dashboard_payload)
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"dashboard payload string is not valid JSON: {exc}") from exc
+            raise HTTPException(
+                status_code=400, detail=f"dashboard payload string is not valid JSON: {exc}"
+            ) from exc
 
     if not isinstance(dashboard_payload, dict):
         raise HTTPException(status_code=400, detail="dashboard payload must be an object")

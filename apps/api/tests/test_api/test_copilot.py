@@ -166,6 +166,63 @@ async def test_submit_feedback_records_telemetry(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_uses_admin_runtime_model_for_app_default_mode(client, monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_build_runtime_context(*, message, history, client_context, prefer_appwrite_data):
+        return {
+            "market_context": [],
+            "source_catalog": [],
+            "prefer_appwrite_data": prefer_appwrite_data,
+        }
+
+    async def fake_get_runtime_config():
+        return {"provider": "openrouter", "model": "anthropic/claude-3.5-haiku"}
+
+    async def fake_generate_response_stream_events(messages, context, request_settings=None):
+        captured["request_settings"] = request_settings
+        yield {"chunk": "Hello"}
+        yield {"done": True, "usedSourceIds": [], "sources": [], "artifacts": [], "actions": []}
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.ai_context_service.build_runtime_context",
+        fake_build_runtime_context,
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.ai_runtime_config_service.get_runtime_config",
+        fake_get_runtime_config,
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.llm_service.generate_response_stream_events",
+        fake_generate_response_stream_events,
+    )
+
+    response = await client.post(
+        "/api/v1/copilot/chat/stream",
+        json={
+            "message": "Analyze VNM",
+            "history": [],
+            "settings": {
+                "mode": "app_default",
+                "provider": "openrouter",
+                "model": "",
+                "webSearch": False,
+                "preferAppwriteData": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["request_settings"] == {
+        "mode": "app_default",
+        "provider": "openrouter",
+        "model": "anthropic/claude-3.5-haiku",
+        "webSearch": False,
+        "preferAppwriteData": True,
+    }
+
+
+@pytest.mark.asyncio
 async def test_submit_outcome_records_telemetry(client, monkeypatch):
     captured: dict[str, object] = {}
 
@@ -205,6 +262,38 @@ async def test_submit_outcome_records_telemetry(client, monkeypatch):
         "surface": "widget",
         "notes": "Action applied",
     }
+
+
+@pytest.mark.asyncio
+async def test_admin_ai_runtime_endpoints_round_trip(client, monkeypatch):
+    async def fake_get_runtime_config():
+        return {"provider": "openrouter", "model": "openai/gpt-4o-mini", "updated_at": None}
+
+    async def fake_save_runtime_config(*, model: str):
+        return {
+            "provider": "openrouter",
+            "model": model,
+            "updated_at": "2026-04-03T12:00:00+00:00",
+        }
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.admin.ai_runtime_config_service.get_runtime_config",
+        fake_get_runtime_config,
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.admin.ai_runtime_config_service.save_runtime_config",
+        fake_save_runtime_config,
+    )
+
+    get_response = await client.get("/api/v1/admin/ai-runtime")
+    put_response = await client.put(
+        "/api/v1/admin/ai-runtime", json={"model": "google/gemini-2.5-flash"}
+    )
+
+    assert get_response.status_code == 200
+    assert get_response.json()["model"] == "openai/gpt-4o-mini"
+    assert put_response.status_code == 200
+    assert put_response.json()["model"] == "google/gemini-2.5-flash"
 
 
 @pytest.mark.asyncio

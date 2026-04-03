@@ -202,12 +202,16 @@ export function Sidebar({
         return candidate;
     };
 
+    const adminInitialLayoutModeEnabled = state.dashboards.some(
+        (dashboard) => dashboard.folderId === INITIAL_FOLDER_ID && dashboard.adminUnlocked === true,
+    );
+
     const isDashboardEditable = (dashboard: Dashboard | undefined) => {
-        return (dashboard?.isEditable ?? true) !== false;
+        return dashboard?.adminUnlocked === true || (dashboard?.isEditable ?? true) !== false;
     };
 
     const isDashboardDeletable = (dashboard: Dashboard | undefined) => {
-        return (dashboard?.isDeletable ?? true) !== false;
+        return dashboard?.adminUnlocked === true || (dashboard?.isDeletable ?? true) !== false;
     };
 
     const isSystemFolder = (folder: DashboardFolder | undefined) => {
@@ -215,6 +219,9 @@ export function Sidebar({
     };
 
     const handleCreateDashboard = (folderId?: string) => {
+        if (folderId === INITIAL_FOLDER_ID && !adminInitialLayoutModeEnabled) {
+            return;
+        }
         const dashboard = createDashboard({
             name: withUniqueDashboardName(nextDashboardName()),
             folderId,
@@ -320,7 +327,7 @@ export function Sidebar({
 
     const handleMoveToFolder = (targetFolderId: string | undefined) => {
         if (!contextMenu || contextMenu.type !== 'dashboard') return;
-        if (targetFolderId === INITIAL_FOLDER_ID) {
+        if (targetFolderId === INITIAL_FOLDER_ID && !adminInitialLayoutModeEnabled) {
             setContextMenu(null);
             setShowMoveSubmenu(false);
             return;
