@@ -12,6 +12,7 @@ from vnibb.models.app_kv import AppKeyValue
 logger = logging.getLogger(__name__)
 
 AI_PROMPT_LIBRARY_KEY = "ai_prompt_library"
+PROMPT_LIBRARY_HISTORY_LIMIT = 10
 
 DEFAULT_PROMPTS: list[dict[str, Any]] = [
     {
@@ -101,6 +102,7 @@ VALID_PROMPT_CATEGORIES = {"analysis", "comparison", "fundamentals", "technical"
 class AIPromptLibraryService:
     def __init__(self) -> None:
         self._memory_shared_prompts: list[dict[str, Any]] | None = None
+        self._memory_metadata: dict[str, Any] | None = None
 
     def _sanitize_prompt(
         self, prompt: dict[str, Any], *, source: str, is_default: bool
@@ -131,9 +133,12 @@ class AIPromptLibraryService:
             "source": source,
         }
 
-    async def get_shared_prompts(self) -> list[dict[str, Any]]:
-        if self._memory_shared_prompts is not None:
-            return [dict(prompt) for prompt in self._memory_shared_prompts]
+    async def get_library_state(self) -> dict[str, Any]:
+        if self._memory_shared_prompts is not None and self._memory_metadata is not None:
+            return {
+                "prompts": [dict(prompt) for prompt in self._memory_shared_prompts],
+                **self._memory_metadata,
+            }
 
         try:
             async with async_session_maker() as session:
@@ -150,10 +155,31 @@ class AIPromptLibraryService:
                             ]
                             if sanitized is not None
                         ]
+                    self._memory_metadata = {
+                        "version": int(record.value.get("version") or 0),
+                        "updated_at": str(record.value.get("updated_at") or "") or None,
+                        "history": [
+                            {
+                                "version": int(item.get("version") or 0),
+                                "updated_at": str(item.get("updated_at") or "") or None,
+                                "prompt_count": int(item.get("prompt_count") or 0),
+                            }
+                            for item in (record.value.get("history") or [])
+                            if isinstance(item, dict)
+                        ],
+                    }
         except SQLAlchemyError as exc:
             logger.warning("AI prompt library read failed: %s", exc)
 
-        return [dict(prompt) for prompt in (self._memory_shared_prompts or [])]
+        if self._memory_metadata is None:
+            self._memory_metadata = {"version": 0, "updated_at": None, "history": []}
+        return {
+            "prompts": [dict(prompt) for prompt in (self._memory_shared_prompts or [])],
+            **self._memory_metadata,
+        }
+
+    async def get_shared_prompts(self) -> list[dict[str, Any]]:
+        return (await self.get_library_state())["prompts"]
 
     async def get_public_prompts(self) -> list[dict[str, Any]]:
         defaults = [dict(prompt) for prompt in DEFAULT_PROMPTS]
@@ -161,6 +187,7 @@ class AIPromptLibraryService:
         return [*defaults, *shared]
 
     async def save_shared_prompts(self, prompts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        state = await self.get_library_state()
         sanitized_prompts = [
             sanitized
             for prompt in prompts
@@ -168,11 +195,27 @@ class AIPromptLibraryService:
             for sanitized in [self._sanitize_prompt(prompt, source="shared", is_default=False)]
             if sanitized is not None
         ]
+        next_version = int(state.get("version") or 0) + 1
+        history = list(state.get("history") or [])
+        history.append(
+            {
+                "version": next_version,
+                "updated_at": datetime.now(UTC).isoformat(),
+                "prompt_count": len(sanitized_prompts),
+            }
+        )
         payload = {
             "prompts": sanitized_prompts,
             "updated_at": datetime.now(UTC).isoformat(),
+            "version": next_version,
+            "history": history[-PROMPT_LIBRARY_HISTORY_LIMIT:],
         }
         self._memory_shared_prompts = sanitized_prompts
+        self._memory_metadata = {
+            "version": next_version,
+            "updated_at": payload["updated_at"],
+            "history": payload["history"],
+        }
 
         try:
             async with async_session_maker() as session:

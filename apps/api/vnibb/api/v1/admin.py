@@ -18,6 +18,7 @@ from vnibb.core.config import settings
 from vnibb.core.appwrite_client import check_appwrite_connectivity, appwrite_runtime_summary
 from vnibb.core.middleware.logging import get_recent_error_events
 from vnibb.models.sync_status import SyncStatus
+from vnibb.services.ai_model_catalog_service import ai_model_catalog_service
 from vnibb.services.ai_prompt_library_service import ai_prompt_library_service
 from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
@@ -82,7 +83,7 @@ def require_admin_access(
 
 @router.get("/ai-telemetry", dependencies=[Depends(require_admin_access)])
 async def get_ai_telemetry(limit: int = Query(default=25, ge=1, le=200)) -> Dict[str, Any]:
-    records = ai_telemetry_service.get_recent_records(limit=limit)
+    records = await ai_telemetry_service.get_recent_records(limit=limit)
     return {
         "count": len(records),
         "data": records,
@@ -104,8 +105,15 @@ async def save_ai_runtime_config(model: str = Body(..., embed=True)) -> Dict[str
 
 @router.get("/ai-prompts", dependencies=[Depends(require_admin_access)])
 async def get_ai_prompt_library() -> Dict[str, Any]:
-    prompts = await ai_prompt_library_service.get_shared_prompts()
-    return {"count": len(prompts), "data": prompts}
+    state = await ai_prompt_library_service.get_library_state()
+    prompts = state.get("prompts") or []
+    return {
+        "count": len(prompts),
+        "data": prompts,
+        "version": state.get("version") or 0,
+        "updated_at": state.get("updated_at"),
+        "history": state.get("history") or [],
+    }
 
 
 @router.put("/ai-prompts", dependencies=[Depends(require_admin_access)])
@@ -114,7 +122,14 @@ async def save_ai_prompt_library(data: Any = Body(...)) -> Dict[str, Any]:
     if not isinstance(prompts, list):
         raise HTTPException(status_code=400, detail="prompts array is required")
     saved = await ai_prompt_library_service.save_shared_prompts(prompts)
-    return {"count": len(saved), "data": saved}
+    state = await ai_prompt_library_service.get_library_state()
+    return {
+        "count": len(saved),
+        "data": saved,
+        "version": state.get("version") or 0,
+        "updated_at": state.get("updated_at"),
+        "history": state.get("history") or [],
+    }
 
 
 @router.get("/providers/status", dependencies=[Depends(require_admin_access)])
@@ -122,6 +137,7 @@ async def get_provider_status() -> Dict[str, Any]:
     """Return runtime provider configuration and migration connectivity status."""
     appwrite_health = await check_appwrite_connectivity(timeout_seconds=2.5)
     ai_runtime = await ai_runtime_config_service.get_runtime_config()
+    openrouter_status = await ai_model_catalog_service.get_openrouter_status()
     return {
         "environment": settings.environment,
         "providers": {
@@ -132,7 +148,11 @@ async def get_provider_status() -> Dict[str, Any]:
             "vnstock_source": settings.vnstock_source,
             "vnstock_timeout_seconds": settings.vnstock_timeout,
             "vnstock_api_key_configured": bool(settings.vnstock_api_key),
-            "openrouter_configured": bool(settings.openrouter_api_key),
+            "openrouter_configured": openrouter_status.get("configured", False),
+            "openrouter_reachable": openrouter_status.get("reachable", False),
+            "openrouter_catalog_source": openrouter_status.get("catalog_source"),
+            "openrouter_free_model_count": openrouter_status.get("free_model_count"),
+            "openrouter_free_models_url": openrouter_status.get("free_models_url"),
             "ai_runtime_provider": ai_runtime.get("provider"),
             "ai_runtime_model": ai_runtime.get("model"),
         },

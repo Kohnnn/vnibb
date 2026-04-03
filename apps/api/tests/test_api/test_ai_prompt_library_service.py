@@ -25,6 +25,9 @@ async def test_prompt_library_service_merges_defaults_and_shared_prompts():
     assert saved[0]["id"] == "shared-thesis"
     assert any(prompt["id"] == "shared-thesis" for prompt in public_prompts)
     assert any(prompt["id"] == DEFAULT_PROMPTS[0]["id"] for prompt in public_prompts)
+    state = await service.get_library_state()
+    assert state["version"] == 1
+    assert state["history"][0]["prompt_count"] == 1
 
 
 @pytest.mark.asyncio

@@ -1849,6 +1849,11 @@ export interface ModelOption {
     recommended?: boolean;
     tier?: string | null;
     context_length?: number | null;
+    is_free?: boolean;
+    pricing?: {
+        prompt?: string | null;
+        completion?: string | null;
+    } | null;
 }
 
 export interface CopilotHistoryMessage {
@@ -1872,6 +1877,14 @@ export interface CopilotSourceRef {
     symbol?: string;
     asOf?: string;
     priority?: number;
+    widgetTarget?: CopilotWidgetTarget;
+}
+
+export interface CopilotWidgetTarget {
+    widgetType: string;
+    label?: string;
+    symbol?: string;
+    config?: Record<string, unknown>;
 }
 
 export type CopilotArtifactValueKind = 'text' | 'number' | 'percent' | 'currency' | 'large_number';
@@ -1890,6 +1903,7 @@ export interface CopilotTableArtifact {
     columns: CopilotTableArtifactColumn[];
     rows: Array<Record<string, string | number | null>>;
     sourceIds?: string[];
+    widgetTarget?: CopilotWidgetTarget;
 }
 
 export interface CopilotChartArtifactSeries {
@@ -1909,6 +1923,7 @@ export interface CopilotChartArtifact {
     series: CopilotChartArtifactSeries[];
     rows: Array<Record<string, string | number | null>>;
     sourceIds?: string[];
+    widgetTarget?: CopilotWidgetTarget;
 }
 
 export type CopilotArtifact = CopilotTableArtifact | CopilotChartArtifact;
@@ -2008,6 +2023,9 @@ export interface AdminAITelemetryResponse {
 export interface AdminAIPromptLibraryResponse {
     count: number;
     data: PromptTemplate[];
+    version: number;
+    updated_at?: string | null;
+    history?: Array<{ version: number; updated_at?: string | null; prompt_count: number }>;
 }
 
 export interface AdminProviderStatusResponse {
@@ -2021,6 +2039,10 @@ export interface AdminProviderStatusResponse {
         vnstock_timeout_seconds: number;
         vnstock_api_key_configured: boolean;
         openrouter_configured: boolean;
+        openrouter_reachable?: boolean;
+        openrouter_catalog_source?: string | null;
+        openrouter_free_model_count?: number | null;
+        openrouter_free_models_url?: string | null;
         ai_runtime_provider?: string | null;
         ai_runtime_model?: string | null;
     };
@@ -2049,6 +2071,7 @@ interface RawCopilotSourceRef {
     symbol?: string;
     as_of?: string;
     priority?: number;
+    widget_target?: CopilotWidgetTarget;
 }
 
 interface RawCopilotReasoningStep {
@@ -2073,6 +2096,8 @@ interface RawCopilotTableArtifact {
     rows?: Array<Record<string, string | number | null>>;
     sourceIds?: string[];
     source_ids?: string[];
+    widgetTarget?: CopilotWidgetTarget;
+    widget_target?: CopilotWidgetTarget;
 }
 
 interface RawCopilotChartArtifactSeries {
@@ -2096,6 +2121,8 @@ interface RawCopilotChartArtifact {
     rows?: Array<Record<string, string | number | null>>;
     sourceIds?: string[];
     source_ids?: string[];
+    widgetTarget?: CopilotWidgetTarget;
+    widget_target?: CopilotWidgetTarget;
 }
 
 interface RawCopilotActionSuggestion {
@@ -2118,6 +2145,23 @@ interface RawCopilotResponseMeta {
     mode?: string;
     latencyMs?: number;
     latency_ms?: number;
+}
+
+function normalizeWidgetTarget(value: unknown): CopilotWidgetTarget | undefined {
+    if (!value || typeof value !== 'object') {
+        return undefined;
+    }
+    const target = value as Record<string, unknown>;
+    const widgetType = typeof target.widgetType === 'string' ? target.widgetType : undefined;
+    if (!widgetType) {
+        return undefined;
+    }
+    return {
+        widgetType,
+        label: typeof target.label === 'string' ? target.label : undefined,
+        symbol: typeof target.symbol === 'string' ? target.symbol : undefined,
+        config: target.config && typeof target.config === 'object' ? target.config as Record<string, unknown> : undefined,
+    };
 }
 
 function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
@@ -2154,6 +2198,7 @@ function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
             symbol: typeof source.symbol === 'string' ? source.symbol : undefined,
             asOf: typeof source.as_of === 'string' ? source.as_of : undefined,
             priority: typeof source.priority === 'number' ? source.priority : undefined,
+            widgetTarget: normalizeWidgetTarget(source.widget_target),
         })).filter((source) => Boolean(source.id)),
         artifacts: rawArtifacts.map((artifact) => {
             const normalizedType = String((artifact as RawCopilotChartArtifact).type || '').toLowerCase();
@@ -2188,6 +2233,7 @@ function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
                         ? chartArtifact.rows.filter((row) => row && typeof row === 'object')
                         : [],
                     sourceIds: normalizedSourceIds,
+                    widgetTarget: normalizeWidgetTarget(chartArtifact.widgetTarget || chartArtifact.widget_target),
                 } satisfies CopilotChartArtifact;
             }
 
@@ -2212,6 +2258,7 @@ function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
                     ? tableArtifact.rows.filter((row) => row && typeof row === 'object')
                     : [],
                 sourceIds: normalizedSourceIds,
+                widgetTarget: normalizeWidgetTarget(tableArtifact.widgetTarget || tableArtifact.widget_target),
             } satisfies CopilotTableArtifact;
         }).filter((artifact) => {
             if (artifact.type === 'chart') {

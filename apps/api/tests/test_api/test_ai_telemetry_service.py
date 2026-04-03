@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
 from vnibb.services.ai_telemetry_service import AITelemetryService
 
 
-def test_ai_telemetry_service_records_response_and_feedback():
+@pytest.mark.asyncio
+async def test_ai_telemetry_service_records_response_and_feedback():
     service = AITelemetryService(max_records=5)
 
-    response_record = service.record_response(
+    response_record = await service.record_response(
         response_id="resp-1",
         provider="openrouter",
         model="openai/gpt-4o-mini",
@@ -23,7 +26,7 @@ def test_ai_telemetry_service_records_response_and_feedback():
     assert response_record["response_id"] == "resp-1"
     assert response_record["feedback"] is None
 
-    feedback_payload = service.record_feedback(
+    feedback_payload = await service.record_feedback(
         response_id="resp-1",
         vote="up",
         surface="sidebar",
@@ -31,12 +34,12 @@ def test_ai_telemetry_service_records_response_and_feedback():
     )
 
     assert feedback_payload["matched"] is True
-    recent_records = service.get_recent_records(limit=1)
+    recent_records = await service.get_recent_records(limit=1)
     assert recent_records[0]["response_id"] == "resp-1"
     assert recent_records[0]["feedback"]["vote"] == "up"
     assert recent_records[0]["feedback"]["surface"] == "sidebar"
 
-    outcome_payload = service.record_outcome(
+    outcome_payload = await service.record_outcome(
         response_id="resp-1",
         kind="action",
         item_id="add_widget_price_chart",
@@ -46,15 +49,16 @@ def test_ai_telemetry_service_records_response_and_feedback():
     )
 
     assert outcome_payload["matched"] is True
-    recent_records = service.get_recent_records(limit=1)
+    recent_records = await service.get_recent_records(limit=1)
     assert recent_records[0]["outcomes"][0]["item_id"] == "add_widget_price_chart"
     assert recent_records[0]["outcomes"][0]["status"] == "executed"
 
 
-def test_ai_telemetry_service_handles_unmatched_feedback():
+@pytest.mark.asyncio
+async def test_ai_telemetry_service_handles_unmatched_feedback():
     service = AITelemetryService(max_records=2)
 
-    feedback_payload = service.record_feedback(
+    feedback_payload = await service.record_feedback(
         response_id="missing",
         vote="down",
         surface="analysis",
@@ -62,13 +66,14 @@ def test_ai_telemetry_service_handles_unmatched_feedback():
     )
 
     assert feedback_payload["matched"] is False
-    assert service.get_recent_records(limit=5) == []
+    assert await service.get_recent_records(limit=5) == []
 
 
-def test_ai_telemetry_service_handles_unmatched_outcome():
+@pytest.mark.asyncio
+async def test_ai_telemetry_service_handles_unmatched_outcome():
     service = AITelemetryService(max_records=2)
 
-    outcome_payload = service.record_outcome(
+    outcome_payload = await service.record_outcome(
         response_id="missing",
         kind="artifact",
         item_id="comparison_snapshot",
@@ -77,4 +82,4 @@ def test_ai_telemetry_service_handles_unmatched_outcome():
     )
 
     assert outcome_payload["matched"] is False
-    assert service.get_recent_records(limit=5) == []
+    assert await service.get_recent_records(limit=5) == []

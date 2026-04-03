@@ -76,10 +76,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [isAdminAiRuntimeLoading, setIsAdminAiRuntimeLoading] = useState(false);
   const [isAdminAiRuntimeSaving, setIsAdminAiRuntimeSaving] = useState(false);
   const [adminOpenRouterConfigured, setAdminOpenRouterConfigured] = useState<boolean | null>(null);
+  const [adminOpenRouterReachable, setAdminOpenRouterReachable] = useState<boolean | null>(null);
+  const [adminOpenRouterCatalogSource, setAdminOpenRouterCatalogSource] = useState<string | null>(null);
+  const [adminOpenRouterFreeModelsUrl, setAdminOpenRouterFreeModelsUrl] = useState<string | null>(null);
+  const [adminOpenRouterFreeModelCount, setAdminOpenRouterFreeModelCount] = useState<number | null>(null);
   const [adminRuntimeProvider, setAdminRuntimeProvider] = useState<string | null>(null);
   const [sharedPrompts, setSharedPrompts] = useState<PromptTemplate[]>([]);
   const [isAdminPromptLibraryLoading, setIsAdminPromptLibraryLoading] = useState(false);
   const [isAdminPromptLibrarySaving, setIsAdminPromptLibrarySaving] = useState(false);
+  const [sharedPromptVersion, setSharedPromptVersion] = useState(0);
+  const [sharedPromptHistory, setSharedPromptHistory] = useState<Array<{ version: number; updated_at?: string | null; prompt_count: number }>>([]);
   const [newSharedPromptLabel, setNewSharedPromptLabel] = useState('');
   const [newSharedPromptTemplate, setNewSharedPromptTemplate] = useState('');
   const [newSharedPromptCategory, setNewSharedPromptCategory] = useState<NonNullable<PromptTemplate['category']>>('analysis');
@@ -105,6 +111,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     () => openRouterModels.filter((model) => model.recommended).slice(0, 8),
     [openRouterModels]
   )
+  const freeOpenRouterModels = useMemo(
+    () => openRouterModels.filter((model) => model.is_free).slice(0, 8),
+    [openRouterModels]
+  )
 
   const loadOpenRouterModels = useCallback(async () => {
     try {
@@ -126,6 +136,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setIsAdminPromptLibraryLoading(true)
       const response = await getAdminAIPromptLibrary(trimmedKey)
       setSharedPrompts(response.data || [])
+      setSharedPromptVersion(response.version || 0)
+      setSharedPromptHistory(response.history || [])
     } catch (error) {
       setPreferenceStatus(error instanceof Error ? `VniAgent prompt library load failed: ${error.message}` : 'VniAgent prompt library load failed.')
     } finally {
@@ -143,6 +155,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setAdminAiModelInput(config.model || 'openai/gpt-4o-mini')
       const providerStatus = await getAdminProviderStatus(trimmedKey)
       setAdminOpenRouterConfigured(Boolean(providerStatus.providers.openrouter_configured))
+      setAdminOpenRouterReachable(typeof providerStatus.providers.openrouter_reachable === 'boolean' ? providerStatus.providers.openrouter_reachable : null)
+      setAdminOpenRouterCatalogSource(typeof providerStatus.providers.openrouter_catalog_source === 'string' ? providerStatus.providers.openrouter_catalog_source : null)
+      setAdminOpenRouterFreeModelsUrl(typeof providerStatus.providers.openrouter_free_models_url === 'string' ? providerStatus.providers.openrouter_free_models_url : null)
+      setAdminOpenRouterFreeModelCount(typeof providerStatus.providers.openrouter_free_model_count === 'number' ? providerStatus.providers.openrouter_free_model_count : null)
       setAdminRuntimeProvider(typeof providerStatus.providers.ai_runtime_provider === 'string' ? providerStatus.providers.ai_runtime_provider : null)
     } catch (error) {
       setPreferenceStatus(error instanceof Error ? `VniAgent runtime load failed: ${error.message}` : 'VniAgent runtime load failed.')
@@ -315,6 +331,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setIsAdminPromptLibrarySaving(true)
       const response = await saveAdminAIPromptLibrary(trimmedKey, sharedPrompts)
       setSharedPrompts(response.data || [])
+      setSharedPromptVersion(response.version || 0)
+      setSharedPromptHistory(response.history || [])
       setPreferenceStatus(`Shared VniAgent prompt library saved (${response.count} prompts).`)
     } catch (error) {
       setPreferenceStatus(error instanceof Error ? `Shared VniAgent prompt save failed: ${error.message}` : 'Shared VniAgent prompt save failed.')
@@ -650,6 +668,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </p>
                   {aiProvider === 'openrouter' && (
                     <>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                        {adminOpenRouterFreeModelCount ? (
+                          <span>{adminOpenRouterFreeModelCount} free models currently visible in the catalog.</span>
+                        ) : null}
+                        <a
+                          href={adminOpenRouterFreeModelsUrl || 'https://openrouter.ai/collections/free-models'}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-cyan-300 underline underline-offset-2"
+                        >
+                          OpenRouter free models
+                        </a>
+                      </div>
                       <datalist id="vniagent-openrouter-models">
                         {openRouterModels.map((model) => (
                           <option key={model.id} value={model.id}>{model.name}</option>
@@ -666,6 +697,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             title={model.description || model.name}
                           >
                             {model.name}
+                          </button>
+                        ))}
+                        {freeOpenRouterModels.map((model) => (
+                          <button
+                            key={`free-${model.id}`}
+                            type="button"
+                            onClick={() => setAiModelInput(model.id)}
+                            disabled={aiProvider === 'openrouter' && aiMode === 'app_default'}
+                            className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold text-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                            title={model.description || model.name}
+                          >
+                            {model.name} · free
                           </button>
                         ))}
                         {isOpenRouterModelsLoading && (
@@ -993,9 +1036,25 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${adminOpenRouterConfigured ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'}`}>
                           OpenRouter: {adminOpenRouterConfigured ? 'configured' : 'missing key'}
                         </div>
+                        {adminOpenRouterReachable !== null && (
+                          <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${adminOpenRouterReachable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'}`}>
+                            Catalog: {adminOpenRouterReachable ? 'reachable' : (adminOpenRouterCatalogSource || 'fallback')}
+                          </div>
+                        )}
                         <div className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 text-[11px] font-semibold text-[var(--text-secondary)]">
                           Runtime provider: {adminRuntimeProvider || 'openrouter'}
                         </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                        {adminOpenRouterFreeModelCount ? <span>{adminOpenRouterFreeModelCount} free models available.</span> : null}
+                        <a
+                          href={adminOpenRouterFreeModelsUrl || 'https://openrouter.ai/collections/free-models'}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-cyan-300 underline underline-offset-2"
+                        >
+                          OpenRouter free models
+                        </a>
                       </div>
                       <input
                         type="text"
@@ -1066,6 +1125,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <div>
                     <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Shared VniAgent Prompt Library</h4>
                     <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 space-y-4">
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                        <span>Version {sharedPromptVersion}</span>
+                        {sharedPromptHistory[0]?.updated_at ? <span>· Updated {sharedPromptHistory[0].updated_at}</span> : null}
+                      </div>
                       <div className="text-xs text-[var(--text-muted)]">
                         Shared prompts appear in every user&apos;s VniAgent prompt library. Use placeholders like <code>{'{symbol}'}</code>, <code>{'{widget_or_symbol}'}</code>, and <code>{'{tab}'}</code>.
                       </div>
@@ -1133,6 +1196,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           <div className="text-xs text-[var(--text-muted)]">No shared prompts saved yet.</div>
                         )}
                       </div>
+
+                      {sharedPromptHistory.length > 0 && (
+                        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+                          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--text-primary)]">Version History</div>
+                          <div className="mt-2 space-y-1 text-[11px] text-[var(--text-secondary)]">
+                            {sharedPromptHistory.map((entry) => (
+                              <div key={`${entry.version}-${entry.updated_at || 'na'}`} className="flex flex-wrap items-center gap-2">
+                                <span className="font-semibold text-cyan-300">v{entry.version}</span>
+                                <span>{entry.prompt_count} prompts</span>
+                                {entry.updated_at ? <span className="text-[var(--text-muted)]">{entry.updated_at}</span> : null}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex flex-wrap gap-2">
                         <button

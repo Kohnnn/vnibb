@@ -1,4 +1,4 @@
-import type { CopilotArtifact, CopilotSourceRef } from '@/lib/api'
+import type { CopilotArtifact, CopilotSourceRef, CopilotWidgetTarget } from '@/lib/api'
 import type { DashboardState, WidgetType } from '@/types/dashboard'
 
 export interface VniAgentWidgetIntent {
@@ -6,6 +6,18 @@ export interface VniAgentWidgetIntent {
   label: string
   symbol?: string
   config?: Record<string, unknown>
+}
+
+function intentFromWidgetTarget(target?: CopilotWidgetTarget): VniAgentWidgetIntent | null {
+  if (!target?.widgetType) {
+    return null
+  }
+  return {
+    widgetType: target.widgetType as WidgetType,
+    label: target.label || target.widgetType,
+    symbol: target.symbol,
+    config: target.config,
+  }
 }
 
 export interface VniAgentWidgetTarget {
@@ -29,6 +41,11 @@ function extractArtifactSymbols(artifact: CopilotArtifact): string[] {
 }
 
 export function getIntentFromSource(source: CopilotSourceRef): VniAgentWidgetIntent | null {
+  const directIntent = intentFromWidgetTarget(source.widgetTarget)
+  if (directIntent) {
+    return directIntent
+  }
+
   switch (source.kind) {
     case 'company_profile':
       return { widgetType: 'company_profile', label: 'Company Profile', symbol: source.symbol }
@@ -64,6 +81,11 @@ export function getIntentFromSource(source: CopilotSourceRef): VniAgentWidgetInt
 }
 
 export function getIntentFromArtifact(artifact: CopilotArtifact): VniAgentWidgetIntent | null {
+  const directIntent = intentFromWidgetTarget(artifact.widgetTarget)
+  if (directIntent) {
+    return directIntent
+  }
+
   switch (artifact.id) {
     case 'comparison_snapshot':
     case 'comparison_quality_chart':

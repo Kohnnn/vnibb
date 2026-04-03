@@ -133,7 +133,7 @@ async def test_chat_stream_returns_error_event_when_context_build_fails(client, 
 async def test_submit_feedback_records_telemetry(client, monkeypatch):
     captured: dict[str, object] = {}
 
-    def fake_record_feedback(*, response_id, vote, surface, notes=None):
+    async def fake_record_feedback(*, response_id, vote, surface, notes=None):
         captured["response_id"] = response_id
         captured["vote"] = vote
         captured["surface"] = surface
@@ -226,7 +226,7 @@ async def test_chat_stream_uses_admin_runtime_model_for_app_default_mode(client,
 async def test_submit_outcome_records_telemetry(client, monkeypatch):
     captured: dict[str, object] = {}
 
-    def fake_record_outcome(*, response_id, kind, item_id, status, surface, notes=None):
+    async def fake_record_outcome(*, response_id, kind, item_id, status, surface, notes=None):
         captured["response_id"] = response_id
         captured["kind"] = kind
         captured["item_id"] = item_id
@@ -298,9 +298,8 @@ async def test_admin_ai_runtime_endpoints_round_trip(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_admin_ai_telemetry_returns_recent_records(client, monkeypatch):
-    monkeypatch.setattr(
-        "vnibb.api.v1.admin.ai_telemetry_service.get_recent_records",
-        lambda limit=25: [
+    async def fake_get_recent_records(limit=25):
+        return [
             {
                 "response_id": "resp-1",
                 "provider": "openrouter",
@@ -317,7 +316,11 @@ async def test_admin_ai_telemetry_returns_recent_records(client, monkeypatch):
                 "feedback": None,
                 "outcomes": [],
             }
-        ],
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.admin.ai_telemetry_service.get_recent_records",
+        fake_get_recent_records,
     )
 
     response = await client.get("/api/v1/admin/ai-telemetry?limit=10")
@@ -393,12 +396,22 @@ async def test_admin_ai_prompt_library_round_trip(client, monkeypatch):
             }
         ]
 
+    async def fake_get_library_state():
+        return {
+            "prompts": await fake_get_shared_prompts(),
+            "version": 3,
+            "updated_at": "2026-04-03T12:00:00+00:00",
+            "history": [
+                {"version": 3, "updated_at": "2026-04-03T12:00:00+00:00", "prompt_count": 1}
+            ],
+        }
+
     async def fake_save_shared_prompts(prompts):
         return prompts
 
     monkeypatch.setattr(
-        "vnibb.api.v1.admin.ai_prompt_library_service.get_shared_prompts",
-        fake_get_shared_prompts,
+        "vnibb.api.v1.admin.ai_prompt_library_service.get_library_state",
+        fake_get_library_state,
     )
     monkeypatch.setattr(
         "vnibb.api.v1.admin.ai_prompt_library_service.save_shared_prompts",
@@ -422,5 +435,6 @@ async def test_admin_ai_prompt_library_round_trip(client, monkeypatch):
 
     assert get_response.status_code == 200
     assert get_response.json()["count"] == 1
+    assert get_response.json()["version"] == 3
     assert put_response.status_code == 200
     assert put_response.json()["data"][0]["id"] == "shared-tech"
