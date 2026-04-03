@@ -70,6 +70,7 @@ VNIBB now uses:
 - validated `used_source_ids`
 - per-message evidence metadata returned on the SSE `done` event
 - a frontend `CopilotEvidencePanel`
+- widget-linked evidence actions such as `Jump to widget` and `Add widget`
 
 ### 3. Context-aware AI
 
@@ -125,6 +126,7 @@ Browser widget data remains lower-priority than backend data.
 - action confirmation panels in copilot surfaces
 - thumbs up/down feedback bars in copilot surfaces
 - evidence panel in sidebar copilot, widget copilot, and AI analysis widget
+- widget-linked evidence actions and artifact-to-widget promotion
 - reasoning/status display while the answer is being prepared
 
 Current telemetry note:
@@ -165,4 +167,4 @@ The strongest remaining OpenBB-style improvements are:
 2. Review dashboards for AI quality analysis
 3. Document-native context ingestion
 4. More advanced tool orchestration beyond the current allowlisted actions
-5. Richer feedback capture such as notes and per-artifact ratings
+5. Richer feedback capture such as per-artifact ratings and workspace-level review actions

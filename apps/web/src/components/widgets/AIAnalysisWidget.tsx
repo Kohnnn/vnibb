@@ -193,7 +193,13 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
               {Boolean(artifacts.length) && (
                 <CopilotArtifactPanel artifacts={artifacts} responseMeta={responseMeta || undefined} surface="analysis" />
               )}
-              {Boolean(sources.length) && <CopilotEvidencePanel sources={sources} />}
+              {Boolean(sources.length) && (
+                <CopilotEvidencePanel
+                  sources={sources}
+                  responseMeta={responseMeta || undefined}
+                  surface="analysis"
+                />
+              )}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] gap-4 text-center opacity-40">

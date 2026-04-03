@@ -157,8 +157,7 @@ This is the biggest product-level difference between VNIBB today and OpenBB.
 ### Remaining follow-up
 
 - support direct symbol-aware widget seeding for compare widgets
-- add source-linked jump-to-widget and add-widget flows
-- expand the allowlist to chart and table promotion actions
+- expand the allowlist to richer chart and table promotion actions
 
 ### Candidate actions
 
