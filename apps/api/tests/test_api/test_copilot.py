@@ -21,6 +21,9 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
         captured["messages"] = messages
         captured["runtime_context"] = context
         captured["request_settings"] = request_settings
+        yield {
+            "reasoning": {"eventType": "INFO", "message": "Requesting structured model response"}
+        }
         yield {"chunk": "Hello"}
         yield {"chunk": " world"}
         yield {
@@ -62,6 +65,9 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
     )
 
     assert response.status_code == 200
+    assert '"message": "Building Appwrite-first runtime context"' in response.text
+    assert '"message": "Runtime context ready"' in response.text
+    assert '"message": "Requesting structured model response"' in response.text
     assert '"chunk": "Hello"' in response.text
     assert '"chunk": " world"' in response.text
     assert '"usedSourceIds": ["VNM-PRICES"]' in response.text

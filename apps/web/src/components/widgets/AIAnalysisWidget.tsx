@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import {
   consumeCopilotStream,
   openCopilotChatStream,
+  type CopilotReasoningStep,
   type CopilotSourceRef,
 } from '@/lib/api';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -22,9 +23,15 @@ interface AIAnalysisWidgetProps {
   onRemove?: () => void;
 }
 
+function appendReasoningStep(existing: string[], step: CopilotReasoningStep): string[] {
+  const line = `[${step.eventType}] ${step.message}`
+  return existing[existing.length - 1] === line ? existing : [...existing, line]
+}
+
 function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetProps) {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [sources, setSources] = useState<CopilotSourceRef[]>([]);
+  const [reasoningLog, setReasoningLog] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +47,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
     setError(null);
     setAnalysis('');
     setSources([]);
+    setReasoningLog([]);
 
     try {
       const context = {
@@ -65,6 +73,9 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         onChunk: (chunk) => {
           fullContent += chunk;
           setAnalysis(fullContent);
+        },
+        onReasoning: (reasoning) => {
+          setReasoningLog((prev) => appendReasoningStep(prev, reasoning));
         },
         onDone: (event) => {
           setSources(event.sources || []);
@@ -141,6 +152,11 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
             </div>
           ) : analysis ? (
             <div className="space-y-3">
+              {Boolean(reasoningLog.length) && (
+                <div className="rounded border border-cyan-500/20 bg-cyan-500/5 p-3 text-[10px] leading-relaxed text-cyan-100/80 whitespace-pre-wrap">
+                  {reasoningLog.join('\n')}
+                </div>
+              )}
               <div className="prose prose-sm max-w-none text-[var(--text-secondary)] prose-headings:text-[var(--text-primary)] prose-strong:text-[var(--text-primary)] prose-p:leading-relaxed prose-headings:mb-2 prose-headings:mt-4 first:prose-headings:mt-0">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {analysis}
@@ -160,7 +176,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
                 </div>
                 <div>
                     <p className="text-xs font-black uppercase tracking-[0.2em]">Ready to analyze {symbol}</p>
-                    <p className="text-[10px] mt-1">Fundamentals, Valuation & Technical insight</p>
+                    <p className="text-[10px] mt-1">{reasoningLog[reasoningLog.length - 1] || 'Fundamentals, Valuation & Technical insight'}</p>
                 </div>
             </div>
           )}

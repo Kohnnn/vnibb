@@ -39,6 +39,7 @@ The goal is not to be just another screener or charting page. VNIBB is meant to 
 
 - **Vietnam-first modeling**: the app is designed around Vietnamese equities, not retrofitted from a US-market product
 - **OpenBB-inspired workflow**: dense, modular, multi-widget research surfaces instead of shallow page-by-page navigation
+- **OpenBB-inspired AI copilot**: Appwrite-first context, validated source citations, evidence panels, and reasoning/status events influenced by OpenBB copilot patterns
 - **Bank-aware analytics**: banks are treated as a distinct analytical class, not forced into industrial-company ratios
 - **Fallback-first backend**: provider instability, missing values, and schema quirks are handled in the backend instead of leaking directly into the UI
 - **Agent-friendly repo**: phased planning, ops notes, AGENTS guidance, and docs make handoff to other coding agents much easier
@@ -57,6 +58,8 @@ VNIBB is more than one app folder. It is a working system made of cooperating la
 - `AGENTS.md` - repo instructions for coding agents
 
 ## Architecture
+
+For the current copilot design and OpenBB-inspired AI notes, see `docs/ai_copilot.md` and `apps/api/docs/openbb_architecture.md`.
 
 ### System Architecture
 

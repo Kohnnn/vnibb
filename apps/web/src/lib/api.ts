@@ -129,8 +129,18 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
     }, timeout);
     const requestSignal = controller.signal;
     const method = String(fetchOptions.method || 'GET').toUpperCase();
-    const hasBody = fetchOptions.body !== undefined && fetchOptions.body !== null;
     const headers = new Headers(fetchOptions.headers || {});
+    const rawBody = fetchOptions.body;
+    const shouldJsonEncodeBody =
+        rawBody !== undefined &&
+        rawBody !== null &&
+        typeof rawBody === 'object' &&
+        !(rawBody instanceof FormData) &&
+        !(rawBody instanceof URLSearchParams) &&
+        !(rawBody instanceof Blob) &&
+        !(rawBody instanceof ArrayBuffer);
+    const requestBody = shouldJsonEncodeBody ? JSON.stringify(rawBody) : rawBody;
+    const hasBody = requestBody !== undefined && requestBody !== null;
 
     if (auth !== 'none' && !headers.has('Authorization')) {
         const token = await getAuthorizationToken();
@@ -155,6 +165,7 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
             headers,
             signal: requestSignal,
             ...fetchOptions,
+            body: requestBody,
         });
 
         clearTimeout(timeoutId);
@@ -744,7 +755,7 @@ export async function saveAdminSystemDashboardTemplate(
     return fetchAPI<SystemDashboardTemplateBundleResponse>(`/admin/system-layouts/${dashboardKey}`, {
         method: 'PUT',
         headers: { 'X-Admin-Key': adminKey },
-        body: JSON.stringify(payload),
+        body: payload as unknown as BodyInit,
     });
 }
 

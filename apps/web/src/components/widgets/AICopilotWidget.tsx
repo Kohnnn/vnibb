@@ -88,6 +88,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
     const [isLoading, setIsLoading] = useState(false);
     const [context, setContext] = useState<WidgetContext | undefined>(initialContext);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    const [currentStatus, setCurrentStatus] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -155,7 +156,16 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                             : m
                     ));
                 },
+                onReasoning: (reasoning) => {
+                    setCurrentStatus(reasoning.message);
+                    setMessages(prev => prev.map(m =>
+                        m.id === assistantMsgId
+                            ? { ...m, reasoning: appendReasoningStep(m.reasoning, reasoning) }
+                            : m
+                    ));
+                },
                 onDone: (event) => {
+                    setCurrentStatus(null);
                     setMessages(prev => prev.map(m =>
                         m.id === assistantMsgId
                             ? { ...m, isStreaming: false, sources: event.sources || [] }
@@ -165,12 +175,14 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
             });
         } catch (error: any) {
             if (error.name === 'AbortError') {
+                setCurrentStatus(null);
                 setMessages(prev => prev.map(m =>
                     m.id === assistantMsgId
                         ? { ...m, content: m.content + '\n\n*[Cancelled]*', isStreaming: false }
                         : m
                 ));
             } else {
+                setCurrentStatus(null);
                 setMessages(prev => prev.map(m =>
                     m.id === assistantMsgId
                         ? { ...m, content: `❌ Error: ${error.message}\n\nPlease try again.`, isStreaming: false }
@@ -194,6 +206,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
         setMessages(prev => [...prev, userMessage]);
         setInput('');
         setIsLoading(true);
+        setCurrentStatus(null);
 
         await handleStreamResponse(messageText);
         setIsLoading(false);
@@ -249,6 +262,9 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                             {context.symbol}
                         </span>
                     )}
+                    {currentStatus && (
+                        <span className="text-[10px] text-cyan-300">{currentStatus}</span>
+                    )}
                 </div>
                 <div className="flex items-center gap-2">
                     <WidgetMeta note="AI chat" isFetching={isLoading} align="right" />
@@ -295,6 +311,12 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                             {/* Streaming indicator */}
                             {message.isStreaming && (
                                 <span className="inline-block w-2 h-4 bg-cyan-400 animate-pulse ml-1" />
+                            )}
+
+                            {message.reasoning && (
+                                <div className="mt-2 rounded border border-cyan-500/20 bg-cyan-500/5 p-2 text-[10px] leading-relaxed text-cyan-100/80 whitespace-pre-wrap">
+                                    {message.reasoning}
+                                </div>
                             )}
 
                             {/* Copy button */}
