@@ -114,7 +114,7 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
             </div>
           </div>
 
-          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 mb-2">
+          <div className="mb-2 flex min-h-[200px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">BB Width Regime</div>
               <div className="text-[10px] text-[var(--text-secondary)]">Threshold {threshold.toFixed(3)}%</div>
@@ -122,7 +122,7 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
             {widthSeries.length === 0 ? (
               <div className="py-6 text-center text-[11px] text-[var(--text-muted)]">No width series</div>
             ) : (
-              <ChartMountGuard className="h-[130px]" minHeight={120}>
+              <ChartMountGuard className="flex-1 min-h-[145px]" minHeight={145}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={widthSeries}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />

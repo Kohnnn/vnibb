@@ -134,7 +134,7 @@ export function EconomicCalendarWidget({}: EconomicCalendarWidgetProps) {
                                                 <span className="text-sm">{COUNTRY_FLAGS[event.country] || '🌍'}</span>
                                                 <span className="text-xs text-[var(--text-secondary)]">{event.time}</span>
                                             </div>
-                                            <div className="truncate text-sm font-medium text-[var(--text-primary)]">{event.event}</div>
+                                            <div className="break-words whitespace-normal text-sm font-medium text-[var(--text-primary)]">{event.event}</div>
                                             <div className="mt-0.5 flex gap-2 text-[10px] text-[var(--text-secondary)]">
                                                 {event.forecast && <span>F: {event.forecast}</span>}
                                                 {event.previous && <span>P: {event.previous}</span>}

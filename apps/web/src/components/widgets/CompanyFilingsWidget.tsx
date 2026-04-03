@@ -127,7 +127,7 @@ export function CompanyFilingsWidget({ symbol }: CompanyFilingsWidgetProps) {
                                                 {eventType}
                                             </span>
                                         </td>
-                                        <td className="py-2 text-[var(--text-secondary)] text-xs max-w-[200px] truncate" title={eventDesc}>
+                                        <td className="max-w-[260px] py-2 text-xs text-[var(--text-secondary)]" title={eventDesc}>
                                             {eventDesc}
                                         </td>
                                     </tr>

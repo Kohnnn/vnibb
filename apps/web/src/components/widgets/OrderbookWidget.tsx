@@ -97,13 +97,13 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
                   style={{ width: `${((entry.ask_vol || 0) / maxVolume) * 50}%` }}
                 />
 
-                <div className="min-w-0 truncate text-xs text-green-400 font-mono relative z-10">
+                <div className="min-w-0 break-all text-xs text-green-400 font-mono relative z-10">
                   {entry.bid_vol?.toLocaleString() || '--'}
                 </div>
                 <div className="text-center text-xs text-[var(--text-primary)] font-bold relative z-10">
                   {entry.price?.toLocaleString() || '--'}
                 </div>
-                <div className="min-w-0 truncate text-right text-xs text-red-400 font-mono relative z-10">
+                <div className="min-w-0 break-all text-right text-xs text-red-400 font-mono relative z-10">
                   {entry.ask_vol?.toLocaleString() || '--'}
                 </div>
               </div>

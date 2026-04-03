@@ -83,7 +83,7 @@ export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidget
                         >
                             <div>
                                 <div className="text-sm font-medium text-[var(--text-primary)]">{peer.symbol}</div>
-                                <div className="text-[10px] text-[var(--text-muted)] truncate max-w-[140px]">
+                                <div className="max-w-[180px] break-words whitespace-normal text-[10px] text-[var(--text-muted)]">
                                     {peer.name || peer.industry || peer.sector || '-'}
                                 </div>
                             </div>

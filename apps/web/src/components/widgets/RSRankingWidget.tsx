@@ -101,8 +101,8 @@ export function RSRankingWidget({ widgetGroup }: RSRankingWidgetProps) {
                             <div className="flex items-center gap-2 flex-1 min-w-0">
                                 <span className="text-[10px] text-[var(--text-muted)] font-mono w-6 text-right">#{index + 1}</span>
                                 <div className="flex flex-col min-w-0 flex-1">
-                                    <span className="text-xs font-bold text-[var(--text-primary)] truncate">{stock.symbol}</span>
-                                    <span className="text-[9px] text-[var(--text-muted)] truncate">{stock.company_name || stock.industry}</span>
+                                    <span className="break-words whitespace-normal text-xs font-bold text-[var(--text-primary)]">{stock.symbol}</span>
+                                    <span className="break-words whitespace-normal text-[9px] text-[var(--text-muted)]">{stock.company_name || stock.industry}</span>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">

@@ -153,12 +153,12 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
             </div>
           </div>
 
-          <div className={`rounded-md border border-[var(--border-color)] bg-gradient-to-br ${regimeBand(currentRegime)} p-2 mb-2`}>
+          <div className={`mb-2 flex min-h-[220px] flex-col rounded-md border border-[var(--border-color)] bg-gradient-to-br ${regimeBand(currentRegime)} p-2`}>
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">30D Volatility Regime</div>
               <div className="text-[10px] text-[var(--text-secondary)]">Z-score {Number(metric?.current_regime_z_score ?? 0).toFixed(2)}</div>
             </div>
-            <ChartMountGuard className="h-[165px]" minHeight={130}>
+            <ChartMountGuard className="flex-1 min-h-[160px]" minHeight={160}>
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={rows.slice(-252)}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />

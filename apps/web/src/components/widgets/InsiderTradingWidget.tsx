@@ -211,7 +211,7 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <div className="flex items-center gap-1.5 flex-1 min-w-0">
                       <ActionIcon size={12} className={actionColor} />
-                      <span className="truncate text-xs text-[var(--text-primary)]" title={deal.insider_name || 'Unknown'}>
+                      <span className="break-words whitespace-normal text-xs text-[var(--text-primary)]" title={deal.insider_name || 'Unknown'}>
                         {deal.insider_name || 'Unknown'}
                       </span>
                     </div>
@@ -220,7 +220,7 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)]">
-                    <span className="truncate" title={deal.insider_position || ''}>
+                    <span className="break-words whitespace-normal" title={deal.insider_position || ''}>
                       {deal.insider_position || 'N/A'}
                     </span>
                     <span>{formatDate(deal.announce_date)}</span>

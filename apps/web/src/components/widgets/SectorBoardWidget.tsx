@@ -160,7 +160,7 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
 
           <div ref={scrollRef} className="flex h-full overflow-x-auto scrollbar-hide">
             {isLoading && !hasData ? (
-              <div className="mx-auto mt-6 max-h-[200px] w-full max-w-[560px] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70 p-3">
+              <div className="mx-auto mt-6 w-full max-w-[560px] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70 p-3">
                 <WidgetSkeleton lines={8} />
               </div>
             ) : error && !hasData ? (
@@ -173,7 +173,7 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
               sectors.map((sector) => (
                 <div key={sector.name} className="min-w-[190px] border-r border-[var(--border-subtle)] last:border-r-0">
                   <div className="sticky top-0 z-10 border-b border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2">
-                    <div className="truncate text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                    <div className="break-words whitespace-normal text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
                       {sector.name}
                     </div>
                     <div className={cn('text-xs font-semibold', sector.change_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
@@ -196,7 +196,7 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
                           </div>
                         </div>
                         <div className="min-w-[64px] text-right">
-                          <div className={cn('truncate text-xs font-semibold tabular-nums', colorClass(stock.color))}>
+                          <div className={cn('break-words whitespace-normal text-xs font-semibold tabular-nums', colorClass(stock.color))}>
                             {stock.change_pct != null && stock.change_pct > 0 ? '+' : ''}
                             {formatNumber(stock.change_pct ?? null, { decimals: 2 })}%
                           </div>

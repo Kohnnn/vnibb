@@ -167,7 +167,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
             </div>
           </div>
 
-          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 mb-2">
+          <div className="mb-2 flex min-h-[210px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">MACD Panel</div>
               <div className="text-[10px] text-[var(--text-secondary)]">MACD, Signal, Histogram</div>
@@ -175,7 +175,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
             {macdPanelSeries.length === 0 ? (
               <div className="py-6 text-center text-[11px] text-[var(--text-muted)]">No MACD series available</div>
             ) : (
-              <ChartMountGuard className="h-[140px]" minHeight={120}>
+              <ChartMountGuard className="flex-1 min-h-[150px]" minHeight={150}>
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={macdPanelSeries}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />
@@ -221,7 +221,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
             </div>
           </div>
 
-          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 mb-2">
+          <div className="mb-2 flex min-h-[210px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Post-Crossover Forward Returns</div>
               <div className="text-[10px] text-[var(--text-secondary)]">1M and 3M</div>
@@ -229,7 +229,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
             {crossoverBars.length === 0 ? (
               <div className="py-6 text-center text-[11px] text-[var(--text-muted)]">No crossover return series</div>
             ) : (
-              <ChartMountGuard className="h-[140px]" minHeight={120}>
+              <ChartMountGuard className="flex-1 min-h-[150px]" minHeight={150}>
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={crossoverBars}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />

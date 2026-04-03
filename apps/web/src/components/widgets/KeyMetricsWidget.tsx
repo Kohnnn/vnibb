@@ -50,7 +50,7 @@ function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
     return (
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2 transition-colors hover:border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]/80">
             <div className="min-w-0">
-                <div className="truncate text-[11px] font-semibold text-[var(--text-secondary)]">{label}</div>
+                <div className="break-words whitespace-normal text-[11px] font-semibold text-[var(--text-secondary)]">{label}</div>
                 {source && source !== 'Unavailable' && (
                     <div className="mt-0.5 text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
                         {source}

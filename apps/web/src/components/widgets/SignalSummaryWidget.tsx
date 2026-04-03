@@ -186,8 +186,8 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
               {data.signals.indicators.slice(0, 8).map((indicator) => (
                 <div key={indicator.name} className="grid grid-cols-[minmax(0,1fr)_90px] items-center gap-2 text-xs">
                   <div className="min-w-0">
-                    <div className="truncate font-medium text-[var(--text-primary)]">{indicator.name}</div>
-                    <div className="truncate text-[10px] text-[var(--text-muted)]">{String(indicator.value ?? 'No value')}</div>
+                    <div className="break-words whitespace-normal font-medium text-[var(--text-primary)]">{indicator.name}</div>
+                    <div className="break-words whitespace-normal text-[10px] text-[var(--text-muted)]">{String(indicator.value ?? 'No value')}</div>
                   </div>
                   <div className={`justify-self-end rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${signalTone(indicator.signal)}`}>
                     {indicator.signal.replace(/_/g, ' ')}

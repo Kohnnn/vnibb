@@ -99,3 +99,5 @@ For current TradingView-native coverage, use:
 - Legacy saved widget layout caps are stripped during dashboard migration, so old `maxW`/`maxH` values no longer block manual resizing of widgets like Transaction Flow, Major Shareholders, and Officers & Management.
 - Prompt Library is now VniAgent-owned. Global "Prompts" actions open the VniAgent sidebar and then open the contextual prompt library there instead of using a disconnected standalone modal.
 - Dashboard template surfaces should consume `apps/web/src/types/dashboard-templates.ts` as the canonical template dataset. Category presentation is now aligned around `market`, `fundamentals`, `technical`, `quant`, `research`, and `global`.
+- `AppsLibrary` and `TemplateSelector` now read from the same template catalog instead of maintaining separate template inventories.
+- The final resize sweep also reduced fixed inner chart heights and aggressive text truncation across additional quant, comparison, research, and market widgets so manual resize produces meaningfully usable content.

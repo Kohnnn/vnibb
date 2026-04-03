@@ -70,7 +70,7 @@ export function ResearchSourceCard({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="truncate text-sm font-semibold text-[var(--text-primary)]">{source.label}</h3>
+            <h3 className="break-words whitespace-normal text-sm font-semibold text-[var(--text-primary)]">{source.label}</h3>
             <span className="rounded bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
               {CATEGORY_LABELS[source.category]}
             </span>
@@ -80,7 +80,7 @@ export function ResearchSourceCard({
             {source.description || `${source.label} research source for ${symbol || 'selected ticker'}.`}
           </p>
 
-          <p className="mt-2 truncate text-[11px] text-[var(--text-muted)]">{shortHost}</p>
+          <p className="mt-2 break-all text-[11px] text-[var(--text-muted)]">{shortHost}</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">

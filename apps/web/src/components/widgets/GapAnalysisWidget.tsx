@@ -103,12 +103,12 @@ export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
             </div>
           </div>
 
-          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 mb-2">
+          <div className="mb-2 flex min-h-[190px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Monthly Avg Gap</div>
               <div className="text-[10px] text-[var(--text-secondary)]">Positive up / Negative down</div>
             </div>
-            <ChartMountGuard className="h-[120px]" minHeight={110}>
+            <ChartMountGuard className="flex-1 min-h-[140px]" minHeight={140}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthRows}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />
