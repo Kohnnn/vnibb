@@ -163,3 +163,76 @@ async def test_submit_feedback_records_telemetry(client, monkeypatch):
         "surface": "sidebar",
         "notes": "Helpful answer",
     }
+
+
+@pytest.mark.asyncio
+async def test_submit_outcome_records_telemetry(client, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_record_outcome(*, response_id, kind, item_id, status, surface, notes=None):
+        captured["response_id"] = response_id
+        captured["kind"] = kind
+        captured["item_id"] = item_id
+        captured["status"] = status
+        captured["surface"] = surface
+        captured["notes"] = notes
+        return {"matched": True}
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.ai_telemetry_service.record_outcome",
+        fake_record_outcome,
+    )
+
+    response = await client.post(
+        "/api/v1/copilot/outcome",
+        json={
+            "responseId": "resp-123",
+            "kind": "action",
+            "itemId": "add_widget_price_chart",
+            "status": "executed",
+            "surface": "widget",
+            "notes": "Action applied",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"accepted": True, "matched": True}
+    assert captured == {
+        "response_id": "resp-123",
+        "kind": "action",
+        "item_id": "add_widget_price_chart",
+        "status": "executed",
+        "surface": "widget",
+        "notes": "Action applied",
+    }
+
+
+@pytest.mark.asyncio
+async def test_admin_ai_telemetry_returns_recent_records(client, monkeypatch):
+    monkeypatch.setattr(
+        "vnibb.api.v1.admin.ai_telemetry_service.get_recent_records",
+        lambda limit=25: [
+            {
+                "response_id": "resp-1",
+                "provider": "openrouter",
+                "model": "openai/gpt-4o-mini",
+                "mode": "app_default",
+                "latency_ms": 512,
+                "used_source_ids": ["VNM-PRICES"],
+                "artifact_ids": ["comparison_snapshot"],
+                "action_ids": ["add_widget_price_chart"],
+                "reasoning_events": [],
+                "current_symbol": "VNM",
+                "prompt_preview": "Compare VNM and FPT",
+                "created_at": "2026-04-03T12:00:00+00:00",
+                "feedback": None,
+                "outcomes": [],
+            }
+        ],
+    )
+
+    response = await client.get("/api/v1/admin/ai-telemetry?limit=10")
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    assert response.json()["data"][0]["response_id"] == "resp-1"

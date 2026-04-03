@@ -367,12 +367,20 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                         )}
                         {message.role === 'assistant' && Boolean(message.artifacts?.length) && (
                             <div className="mt-2 w-full max-w-[90%]">
-                                <CopilotArtifactPanel artifacts={message.artifacts || []} />
+                                <CopilotArtifactPanel
+                                    artifacts={message.artifacts || []}
+                                    responseMeta={message.responseMeta}
+                                    surface="widget"
+                                />
                             </div>
                         )}
                         {message.role === 'assistant' && Boolean(message.actions?.length) && (
                             <div className="mt-2 w-full max-w-[90%]">
-                                <CopilotActionPanel actions={message.actions || []} />
+                                <CopilotActionPanel
+                                    actions={message.actions || []}
+                                    responseMeta={message.responseMeta}
+                                    surface="widget"
+                                />
                             </div>
                         )}
                     </div>

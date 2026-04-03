@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useWebSocket } from '@/lib/hooks/useWebSocket'
 import { useHistoricalPrices, useMarketOverview, useStockQuote } from '@/lib/queries'
 import { probeBackendReadiness } from '@/lib/backendHealth'
 import type { UnitDisplay } from '@/lib/units'
@@ -138,6 +139,9 @@ export function Header({
 
   const quoteQuery = useStockQuote(currentSymbol, Boolean(currentSymbol))
   const marketOverviewQuery = useMarketOverview(true)
+  const { prices: liveHeaderIndexPrices } = useWebSocket({
+    symbols: HEADER_MARKET_INDICES.map((index) => index.key),
+  })
   const historyQuery = useHistoricalPrices(currentSymbol, {
     interval: '1D',
     enabled: Boolean(currentSymbol),
@@ -184,14 +188,40 @@ export function Header({
 
     return HEADER_MARKET_INDICES.map((index) => {
       const item = marketIndexLookup.get(index.key)
+      const liveItem = liveHeaderIndexPrices.get(index.key)
+      const liveValue =
+        liveItem && Number.isFinite(liveItem.price) && liveItem.price > 0
+          ? liveItem.price
+          : null
+      const baseValue = item?.current_value ?? null
+      const baseChange = item?.change ?? null
+      const liveChangeValue = liveItem?.change ?? null
+      const liveChangePctValue = liveItem?.change_pct ?? null
+      const previousClose =
+        baseValue !== null && baseChange !== null ? baseValue - baseChange : null
+      const hasLiveDelta =
+        liveItem != null
+        && ((liveChangeValue !== null && Math.abs(liveChangeValue) > 1e-9)
+          || (liveChangePctValue !== null && Math.abs(liveChangePctValue) > 1e-9))
+      const derivedLiveChange =
+        liveValue !== null && previousClose !== null ? liveValue - previousClose : null
+      const change = hasLiveDelta
+        ? liveChangeValue
+        : derivedLiveChange ?? item?.change ?? null
+      const changePct = hasLiveDelta
+        ? liveChangePctValue
+        : change !== null && previousClose !== null && previousClose !== 0
+          ? (change / previousClose) * 100
+          : item?.change_pct ?? null
+
       return {
         ...index,
-        value: item?.current_value ?? null,
-        change: item?.change ?? null,
-        changePct: item?.change_pct ?? null,
+        value: liveValue ?? baseValue,
+        change,
+        changePct,
       }
     }).filter((index) => index.value !== null)
-  }, [marketOverviewQuery.data?.data])
+  }, [liveHeaderIndexPrices, marketOverviewQuery.data?.data])
 
   const healthBadge = useMemo(() => {
     if (connectionStatus === 'online') {

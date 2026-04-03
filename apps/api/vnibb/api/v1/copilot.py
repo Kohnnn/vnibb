@@ -97,6 +97,20 @@ class FeedbackResponse(BaseModel):
     matched: bool
 
 
+class OutcomeRequest(BaseModel):
+    responseId: str
+    kind: Literal["artifact", "action"]
+    itemId: str
+    status: Literal["shown", "executed", "failed"]
+    surface: Literal["sidebar", "widget", "analysis"]
+    notes: str | None = None
+
+
+class OutcomeResponse(BaseModel):
+    accepted: bool
+    matched: bool
+
+
 # ============ Endpoints ============
 
 
@@ -198,6 +212,21 @@ async def submit_feedback(request: FeedbackRequest):
         notes=request.notes,
     )
     return FeedbackResponse(accepted=True, matched=bool(payload.get("matched")))
+
+
+@router.post(
+    "/outcome", response_model=OutcomeResponse, summary="Record copilot artifact/action outcome"
+)
+async def submit_outcome(request: OutcomeRequest):
+    payload = ai_telemetry_service.record_outcome(
+        response_id=request.responseId,
+        kind=request.kind,
+        item_id=request.itemId,
+        status=request.status,
+        surface=request.surface,
+        notes=request.notes,
+    )
+    return OutcomeResponse(accepted=True, matched=bool(payload.get("matched")))
 
 
 @router.get("/prompts", response_model=PromptsResponse)

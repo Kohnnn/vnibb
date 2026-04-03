@@ -122,6 +122,12 @@ Browser widget data remains lower-priority than backend data.
 - evidence panel in sidebar copilot, widget copilot, and AI analysis widget
 - reasoning/status display while the answer is being prepared
 
+Current telemetry note:
+
+- recent AI telemetry review is currently process-local and in-memory
+- it is available through the admin review panel for the running API instance
+- it is not yet a durable cross-restart store
+
 ## What We Explicitly Did Not Copy
 
 VNIBB does not currently adopt the full OpenBB Workspace agent stack.

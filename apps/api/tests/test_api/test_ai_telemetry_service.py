@@ -36,6 +36,20 @@ def test_ai_telemetry_service_records_response_and_feedback():
     assert recent_records[0]["feedback"]["vote"] == "up"
     assert recent_records[0]["feedback"]["surface"] == "sidebar"
 
+    outcome_payload = service.record_outcome(
+        response_id="resp-1",
+        kind="action",
+        item_id="add_widget_price_chart",
+        status="executed",
+        surface="sidebar",
+        notes="User accepted the action",
+    )
+
+    assert outcome_payload["matched"] is True
+    recent_records = service.get_recent_records(limit=1)
+    assert recent_records[0]["outcomes"][0]["item_id"] == "add_widget_price_chart"
+    assert recent_records[0]["outcomes"][0]["status"] == "executed"
+
 
 def test_ai_telemetry_service_handles_unmatched_feedback():
     service = AITelemetryService(max_records=2)
@@ -48,4 +62,19 @@ def test_ai_telemetry_service_handles_unmatched_feedback():
     )
 
     assert feedback_payload["matched"] is False
+    assert service.get_recent_records(limit=5) == []
+
+
+def test_ai_telemetry_service_handles_unmatched_outcome():
+    service = AITelemetryService(max_records=2)
+
+    outcome_payload = service.record_outcome(
+        response_id="missing",
+        kind="artifact",
+        item_id="comparison_snapshot",
+        status="shown",
+        surface="analysis",
+    )
+
+    assert outcome_payload["matched"] is False
     assert service.get_recent_records(limit=5) == []

@@ -840,7 +840,11 @@ def _merge_market_index_rows(
         provider_change_pct = _coerce_market_number(existing_row.get("change_pct"))
         db_change_pct = _coerce_market_number(normalized_db_row.get("change_pct"))
 
-        if provider_change_pct in (None, 0.0) and provider_change not in (None, 0.0) and db_change_pct is not None:
+        if (
+            provider_change_pct in (None, 0.0)
+            and provider_change not in (None, 0.0)
+            and db_change_pct is not None
+        ):
             combined_row["change_pct"] = db_change_pct
         for key in ["volume", "high", "low", "time"]:
             if combined_row.get(key) is None and normalized_db_row.get(key) is not None:
@@ -2448,20 +2452,33 @@ async def get_market_indices(
 
     try:
         yahoo_rows = await _fetch_yahoo_market_indices()
-        merged = _merge_market_index_rows(db_rows, yahoo_rows)
-        if len(merged) < min(limit, len(MARKET_INDEX_ORDER)):
+        required_codes = MARKET_INDEX_ORDER[: min(limit, len(MARKET_INDEX_ORDER))]
+        yahoo_codes = {
+            code
+            for code in (
+                _normalize_market_index_code(row.get("index_name") or row.get("index_code"))
+                for row in yahoo_rows
+            )
+            if code
+        }
+
+        provider_rows: list[dict[str, Any]] = []
+        if any(code not in yahoo_codes for code in required_codes):
             indices = await asyncio.wait_for(
                 VnstockMarketOverviewFetcher.fetch(MarketOverviewQueryParams()),
                 timeout=30,
             )
             provider_rows = [
-                item.model_dump(mode="json", by_alias=False) if hasattr(item, "model_dump") else item
+                item.model_dump(mode="json", by_alias=False)
+                if hasattr(item, "model_dump")
+                else item
                 for item in indices
             ]
-            merged = _merge_market_index_rows(db_rows, [*yahoo_rows, *provider_rows])
             source = "yahoo_finance+vnstock_fallback"
         else:
             source = "yahoo_finance+db_fallback"
+
+        merged = _merge_market_index_rows(db_rows, [*yahoo_rows, *provider_rows])
 
         if merged:
             rows = merged[:limit]
@@ -3485,7 +3502,9 @@ async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> World
     try:
         yahoo_rows = await _fetch_yahoo_world_indices(limit)
         if yahoo_rows:
-            return WorldIndicesResponse(count=len(yahoo_rows), data=yahoo_rows, source="yahoo_finance:world_indices")
+            return WorldIndicesResponse(
+                count=len(yahoo_rows), data=yahoo_rows, source="yahoo_finance:world_indices"
+            )
 
         tasks = [_fetch_world_index_point(symbol, name) for symbol, name in symbols[:limit]]
         fetched = await asyncio.gather(*tasks)
@@ -3520,7 +3539,9 @@ async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> World
         )
     except Exception as e:
         logger.warning(f"World indices fetch failed: {e}")
-        return WorldIndicesResponse(count=0, data=[], source="yahoo_finance:world_indices", error=str(e))
+        return WorldIndicesResponse(
+            count=0, data=[], source="yahoo_finance:world_indices", error=str(e)
+        )
 
 
 @router.get("/forex-rates", response_model=ForexRatesResponse)
@@ -3606,7 +3627,9 @@ async def get_commodities(limit: int = Query(default=20, ge=1, le=40)) -> Commod
     try:
         yahoo_rows = await _fetch_yahoo_commodities(limit)
         if yahoo_rows:
-            return CommoditiesResponse(count=len(yahoo_rows), data=yahoo_rows, source="yahoo_finance:commodities")
+            return CommoditiesResponse(
+                count=len(yahoo_rows), data=yahoo_rows, source="yahoo_finance:commodities"
+            )
 
         if btmc_goldprice is None and sjc_gold_price is None:
             return CommoditiesResponse(
@@ -3620,7 +3643,9 @@ async def get_commodities(limit: int = Query(default=20, ge=1, le=40)) -> Commod
         return CommoditiesResponse(count=len(data), data=data, source="vnstock:gold_price")
     except Exception as e:
         logger.warning(f"Commodities fetch failed: {e}")
-        return CommoditiesResponse(count=0, data=[], source="yahoo_finance:commodities", error=str(e))
+        return CommoditiesResponse(
+            count=0, data=[], source="yahoo_finance:commodities", error=str(e)
+        )
 
 
 @router.get("/research/rss-feed", response_model=ResearchRssFeedResponse)
