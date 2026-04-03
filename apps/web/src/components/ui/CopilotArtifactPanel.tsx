@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
+import { ExternalLink, Plus } from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -22,6 +23,15 @@ import {
   type CopilotResponseMeta,
   type CopilotTableArtifact,
 } from '@/lib/api';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { getWidgetDefinition } from '@/data/widgetDefinitions';
+import { useSymbolLink } from '@/contexts/SymbolLinkContext';
+import {
+  findMatchingWidgetTarget,
+  focusDashboardWidget,
+  getIntentFromArtifact,
+} from '@/lib/vniagentWorkspace';
+import type { WidgetCreate } from '@/types/dashboard';
 
 interface CopilotArtifactPanelProps {
   artifacts: CopilotArtifact[];
@@ -157,6 +167,8 @@ function renderChartArtifact(artifact: CopilotChartArtifact) {
 }
 
 export function CopilotArtifactPanel({ artifacts, responseMeta, surface = 'sidebar' }: CopilotArtifactPanelProps) {
+  const { state, activeDashboard, activeTab, addWidget, setActiveDashboard, setActiveTab } = useDashboard();
+  const { globalSymbol, setGlobalSymbol } = useSymbolLink();
   const artifactKey = useMemo(() => artifacts.map((artifact) => artifact.id).join('|'), [artifacts]);
 
   useEffect(() => {
@@ -182,7 +194,111 @@ export function CopilotArtifactPanel({ artifacts, responseMeta, surface = 'sideb
   return (
     <div className="space-y-3">
       {artifacts.map((artifact) => (
-        <div key={artifact.id} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 p-3">
+        <ArtifactCard
+          key={artifact.id}
+          artifact={artifact}
+          responseMeta={responseMeta}
+          surface={surface}
+          state={state}
+          activeDashboardId={activeDashboard?.id || null}
+          activeTabId={activeTab?.id || null}
+          canEditCurrentDashboard={Boolean(activeDashboard && activeTab && ((activeDashboard.adminUnlocked === true) || activeDashboard.isEditable !== false))}
+          addWidget={addWidget}
+          setActiveDashboard={setActiveDashboard}
+          setActiveTab={setActiveTab}
+          globalSymbol={globalSymbol}
+          setGlobalSymbol={setGlobalSymbol}
+        />
+      ))}
+    </div>
+  );
+}
+
+interface ArtifactCardProps {
+  artifact: CopilotArtifact;
+  responseMeta?: CopilotResponseMeta;
+  surface: 'sidebar' | 'widget' | 'analysis';
+  state: Parameters<typeof findMatchingWidgetTarget>[0];
+  activeDashboardId: string | null;
+  activeTabId: string | null;
+  canEditCurrentDashboard: boolean;
+  addWidget: ReturnType<typeof useDashboard>['addWidget'];
+  setActiveDashboard: ReturnType<typeof useDashboard>['setActiveDashboard'];
+  setActiveTab: ReturnType<typeof useDashboard>['setActiveTab'];
+  globalSymbol: string;
+  setGlobalSymbol: ReturnType<typeof useSymbolLink>['setGlobalSymbol'];
+}
+
+function ArtifactCard({
+  artifact,
+  responseMeta,
+  surface,
+  state,
+  activeDashboardId,
+  activeTabId,
+  canEditCurrentDashboard,
+  addWidget,
+  setActiveDashboard,
+  setActiveTab,
+  globalSymbol,
+  setGlobalSymbol,
+}: ArtifactCardProps) {
+  const intent = useMemo(() => getIntentFromArtifact(artifact), [artifact]);
+  const existingTarget = useMemo(
+    () => (intent ? findMatchingWidgetTarget(state, intent) : null),
+    [intent, state],
+  );
+
+  const recordOutcome = async (status: 'executed' | 'failed', notes?: string) => {
+    if (!responseMeta?.responseId) return;
+    try {
+      await submitCopilotOutcome({
+        responseId: responseMeta.responseId,
+        kind: 'artifact',
+        itemId: artifact.id,
+        status,
+        surface,
+        notes,
+      })
+    } catch {
+      // Ignore telemetry failures in UI.
+    }
+  }
+
+  const handleJumpToWidget = async () => {
+    if (!existingTarget) return;
+    if (intent?.symbol && globalSymbol !== intent.symbol) {
+      setGlobalSymbol(intent.symbol)
+    }
+    focusDashboardWidget(existingTarget, setActiveDashboard, setActiveTab)
+    await recordOutcome('executed', 'Jumped to widget from artifact')
+  }
+
+  const handleCreateWidget = async () => {
+    if (!intent || !activeDashboardId || !activeTabId || !canEditCurrentDashboard) {
+      await recordOutcome('failed', 'Dashboard not editable or no active tab')
+      return
+    }
+    const definition = getWidgetDefinition(intent.widgetType)
+    const widgetCreate: WidgetCreate = {
+      type: intent.widgetType,
+      tabId: activeTabId,
+      config: intent.config || {},
+      layout: {
+        x: 0,
+        y: Infinity,
+        w: definition?.defaultLayout.w || 6,
+        h: definition?.defaultLayout.h || 6,
+        minW: definition?.defaultLayout.minW || 3,
+        minH: definition?.defaultLayout.minH || 3,
+      },
+    }
+    addWidget(activeDashboardId, activeTabId, widgetCreate)
+    await recordOutcome('executed', 'Created widget from artifact')
+  }
+
+  return (
+        <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 p-3">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-primary)]">{artifact.title}</div>
@@ -190,17 +306,41 @@ export function CopilotArtifactPanel({ artifacts, responseMeta, surface = 'sideb
                 <div className="mt-1 text-[11px] text-[var(--text-muted)]">{artifact.description}</div>
               )}
             </div>
-            <div className="text-[10px] text-blue-300">
-              {artifact.type === 'chart' ? artifact.chartType : artifact.type}
-              {artifact.sourceIds?.length ? ` · ${artifact.sourceIds.length} source refs` : ''}
+            <div className="flex flex-col items-end gap-2">
+              <div className="text-[10px] text-blue-300">
+                {artifact.type === 'chart' ? artifact.chartType : artifact.type}
+                {artifact.sourceIds?.length ? ` · ${artifact.sourceIds.length} source refs` : ''}
+              </div>
+              {intent && (
+                <div className="flex flex-wrap justify-end gap-2">
+                  {existingTarget && (
+                    <button
+                      type="button"
+                      onClick={() => { void handleJumpToWidget() }}
+                      className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-500/20"
+                    >
+                      <ExternalLink size={11} />
+                      Jump to widget
+                    </button>
+                  )}
+                  {canEditCurrentDashboard && (
+                    <button
+                      type="button"
+                      onClick={() => { void handleCreateWidget() }}
+                      className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-200 hover:bg-blue-500/20"
+                    >
+                      <Plus size={11} />
+                      Create widget
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
           {artifact.type === 'table' ? renderTableArtifact(artifact) : renderChartArtifact(artifact)}
         </div>
-      ))}
-    </div>
-  );
+  )
 }
 
 export default CopilotArtifactPanel

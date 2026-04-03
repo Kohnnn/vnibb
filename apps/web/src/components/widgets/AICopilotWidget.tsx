@@ -348,7 +348,11 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                         </div>
                         {message.role === 'assistant' && Boolean(message.sources?.length) && (
                             <div className="mt-2 w-full max-w-[90%]">
-                                <CopilotEvidencePanel sources={message.sources || []} />
+                                <CopilotEvidencePanel
+                                    sources={message.sources || []}
+                                    responseMeta={message.responseMeta}
+                                    surface="widget"
+                                />
                             </div>
                         )}
                         {message.role === 'assistant' && message.responseMeta && (

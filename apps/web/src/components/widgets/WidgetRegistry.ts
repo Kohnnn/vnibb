@@ -101,6 +101,7 @@ export interface WidgetProps {
     id: string;
     symbol?: string;
     config?: WidgetConfig;
+    initialSymbols?: string[];
     onSymbolClick?: (symbol: string) => void;
     hideHeader?: boolean;
     onRemove?: () => void;

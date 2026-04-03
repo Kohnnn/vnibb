@@ -1,13 +1,25 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, Database } from 'lucide-react';
+import { ChevronDown, ChevronRight, Database, ExternalLink, Plus } from 'lucide-react';
 
 import type { CopilotSourceRef } from '@/lib/api';
+import { submitCopilotOutcome, type CopilotResponseMeta } from '@/lib/api';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { getWidgetDefinition } from '@/data/widgetDefinitions';
+import {
+  findMatchingWidgetTarget,
+  focusDashboardWidget,
+  getIntentFromSource,
+} from '@/lib/vniagentWorkspace';
+import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { cn } from '@/lib/utils';
+import type { WidgetCreate } from '@/types/dashboard';
 
 interface CopilotEvidencePanelProps {
   sources: CopilotSourceRef[];
+  responseMeta?: CopilotResponseMeta;
+  surface?: 'sidebar' | 'widget' | 'analysis';
   className?: string;
 }
 
@@ -25,7 +37,14 @@ function formatSourceMeta(source: CopilotSourceRef): string {
   return parts.join(' · ');
 }
 
-export function CopilotEvidencePanel({ sources, className }: CopilotEvidencePanelProps) {
+export function CopilotEvidencePanel({
+  sources,
+  responseMeta,
+  surface = 'sidebar',
+  className,
+}: CopilotEvidencePanelProps) {
+  const { state, activeDashboard, activeTab, addWidget, setActiveDashboard, setActiveTab } = useDashboard();
+  const { globalSymbol, setGlobalSymbol } = useSymbolLink();
   const orderedSources = useMemo(
     () => [...sources].sort((left, right) => (left.priority ?? 999) - (right.priority ?? 999)),
     [sources],
@@ -48,6 +67,58 @@ export function CopilotEvidencePanel({ sources, className }: CopilotEvidencePane
   }
 
   const selectedSource = orderedSources.find((source) => source.id === selectedSourceId) ?? orderedSources[0];
+  const intent = useMemo(() => getIntentFromSource(selectedSource), [selectedSource]);
+  const existingTarget = useMemo(
+    () => (intent ? findMatchingWidgetTarget(state, intent) : null),
+    [intent, state],
+  );
+  const canAddWidget = Boolean(intent && activeDashboard && activeTab && ((activeDashboard.adminUnlocked === true) || activeDashboard.isEditable !== false));
+
+  const recordOutcome = async (status: 'shown' | 'executed' | 'failed', notes?: string) => {
+    if (!responseMeta?.responseId) return;
+    try {
+      await submitCopilotOutcome({
+        responseId: responseMeta.responseId,
+        kind: 'artifact',
+        itemId: selectedSource.id,
+        status,
+        surface,
+        notes,
+      });
+    } catch {
+      // Ignore telemetry failures in UI.
+    }
+  };
+
+  const handleJumpToWidget = async () => {
+    if (!existingTarget) return;
+    if (intent?.symbol && globalSymbol !== intent.symbol) {
+      setGlobalSymbol(intent.symbol);
+    }
+    focusDashboardWidget(existingTarget, setActiveDashboard, setActiveTab);
+    await recordOutcome('executed', 'Jumped to source-linked widget');
+  };
+
+  const handleAddWidget = async () => {
+    if (!intent || !activeDashboard || !activeTab) return;
+    const definition = getWidgetDefinition(intent.widgetType);
+    const widgetConfig = intent.config || {};
+    const widgetCreate: WidgetCreate = {
+      type: intent.widgetType,
+      tabId: activeTab.id,
+      config: widgetConfig,
+      layout: {
+        x: 0,
+        y: Infinity,
+        w: definition?.defaultLayout.w || 6,
+        h: definition?.defaultLayout.h || 6,
+        minW: definition?.defaultLayout.minW || 3,
+        minH: definition?.defaultLayout.minH || 3,
+      },
+    };
+    addWidget(activeDashboard.id, activeTab.id, widgetCreate)
+    await recordOutcome('executed', `Added ${intent.label} from evidence source`)
+  };
 
   return (
     <div className={cn('rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40', className)}>
@@ -92,6 +163,30 @@ export function CopilotEvidencePanel({ sources, className }: CopilotEvidencePane
             )}
             {selectedSource.kind && (
               <div className="mt-2 text-[11px] text-[var(--text-muted)]">Type: {selectedSource.kind}</div>
+            )}
+            {intent && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {existingTarget && (
+                  <button
+                    type="button"
+                    onClick={() => { void handleJumpToWidget() }}
+                    className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-500/20"
+                  >
+                    <ExternalLink size={11} />
+                    Jump to widget
+                  </button>
+                )}
+                {canAddWidget && (
+                  <button
+                    type="button"
+                    onClick={() => { void handleAddWidget() }}
+                    className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-200 hover:bg-blue-500/20"
+                  >
+                    <Plus size={11} />
+                    Add widget
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

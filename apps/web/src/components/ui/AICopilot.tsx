@@ -689,7 +689,11 @@ export function AICopilot({
                             )}
                             {message.role === 'assistant' && Boolean(message.sources?.length) && (
                                 <div className="mr-4">
-                                    <CopilotEvidencePanel sources={message.sources || []} />
+                                    <CopilotEvidencePanel
+                                        sources={message.sources || []}
+                                        responseMeta={message.responseMeta}
+                                        surface="sidebar"
+                                    />
                                 </div>
                             )}
                         </div>

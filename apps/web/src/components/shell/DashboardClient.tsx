@@ -806,6 +806,9 @@ function DashboardContent() {
                                                 key={widget.id}
                                                 className="h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] rounded"
                                                 data-widget-focus="true"
+                                                data-widget-id={widget.id}
+                                                data-widget-type={widgetType}
+                                                data-widget-symbol={widgetSymbol}
                                                 tabIndex={0}
                                             >
                                                 <WidgetWrapper
@@ -838,6 +841,7 @@ function DashboardContent() {
                                                             id={widget.id}
                                                             symbol={widgetSymbol}
                                                             config={widget.config}
+                                                            initialSymbols={Array.isArray(widget.config?.initialSymbols) ? widget.config.initialSymbols as string[] : undefined}
                                                         />
                                                     ) : (
                                                         <div className="p-4 text-[var(--text-muted)]">Widget not found: {widgetType}</div>
