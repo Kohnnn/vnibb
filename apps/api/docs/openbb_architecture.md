@@ -1,7 +1,13 @@
-# OpenBB V4 Platform Architecture
+# OpenBB Notes For VNIBB
+
+This document started as a rough architecture note about OpenBB v4 patterns. It now serves two purposes:
+
+1. explain the OpenBB architectural ideas that influenced VNIBB
+2. document the OpenBB AI-agent patterns we intentionally reused
 
 ## Core Concepts
-The OpenBB Platform (v4+) uses a hexagonal architecture where **Providers** (Data) and **Extensions** (logic/routes) are pluggable modules around a **Core**.
+
+The OpenBB Platform (v4+) uses a hexagonal architecture where **Providers** (data) and **Extensions** (logic/routes) are pluggable modules around a **Core**.
 
 ### 1. The Router Pattern (`openbb_core.app.router.Router`)
 Each functional area (e.g., `equity`, `crypto`) is an "Extension" that exposes a `Router`.
@@ -39,24 +45,53 @@ class BaseFetcher(ABC, Generic[QueryT, DataT]):
 ```
 
 ### 3. VNIBB Implementation Strategy
-To align with this modularity, VNIBB will structure its backend as follows:
 
-1.  **Core**: `backend/vnibb/core` (Auth, Database, Settings) - maps to `openbb_core`.
-2.  **Providers**: `backend/vnibb/providers/vnstock` - maps to `openbb_providers`.
-    *   This will contain specific `Fetcher` implementations for `vnstock`.
-3.  **App/Routers**: `backend/vnibb/routers` - maps to `openbb_extensions`.
-    *   `router.py` (Main entry point)
-    *   `equity/router.py` (Equity commands)
-    *   `screener/router.py` (Screener commands)
+VNIBB keeps the same broad separation of concerns, but in its actual repo layout:
+
+1. **Core**: `apps/api/vnibb/core`
+2. **Providers**: `apps/api/vnibb/providers`
+3. **Routers / API**: `apps/api/vnibb/api/v1`
+4. **Services**: `apps/api/vnibb/services`
 
 ## Module Loading (Simplified)
-Unlike the full OpenBB Platform which uses `entry_points` in `pyproject.toml` for discovery, VNIBB will explicitly import and mount routers in the main `FastAPI` app to keep complexity manageable while retaining the *structural* modularity.
+
+Unlike the full OpenBB Platform which uses `entry_points` in `pyproject.toml` for discovery, VNIBB explicitly imports and mounts routers in the main `FastAPI` app to keep complexity manageable while retaining the structural modularity.
 
 ```python
-# backend/vnibb/main.py
+# apps/api/vnibb/api/main.py
 from fastapi import FastAPI
-from vnibb.routers.equity import router as equity_router
+from vnibb.api.v1.router import api_router
 
 app = FastAPI()
-app.include_router(equity_router)
+app.include_router(api_router)
 ```
+
+## OpenBB AI Agent Patterns We Reused
+
+The repo `OpenBB-finance/agents-for-openbb` is the most relevant OpenBB reference for VNIBB AI work.
+
+Examples reviewed:
+
+- `31-vanilla-agent-reasoning-steps`
+- `32-vanilla-agent-raw-widget-data-citations`
+- `33-vanilla-agent-charts`
+- `34-vanilla-agent-tables`
+- `39-vanilla-agent-html-artifacts`
+
+Patterns VNIBB now implements:
+
+1. **Reasoning/status SSE events**
+   - VNIBB now emits deterministic backend status steps like context build and citation validation.
+2. **Grounded source attribution**
+   - VNIBB now generates a `source_catalog`, validates `used_source_ids`, and exposes evidence metadata to the UI.
+3. **Context-aware copilot behavior**
+   - VNIBB uses active symbol, active tab, widget snapshots, and Appwrite-first backend context.
+
+Patterns we have not implemented yet:
+
+1. table artifacts
+2. chart artifacts
+3. HTML artifact responses
+4. full tool-orchestration callbacks in the OpenBB style
+
+For the current VNIBB AI implementation details, see `docs/ai_copilot.md`.

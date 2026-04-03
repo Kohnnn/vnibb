@@ -1,5 +1,6 @@
 """Admin API endpoints for database inspection and management."""
 
+import json
 import logging
 import re
 from collections import Counter
@@ -130,6 +131,12 @@ async def save_admin_system_layout(
         data = await request.json()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}") from exc
+
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"request body string is not valid JSON: {exc}") from exc
 
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="request body must be a JSON object")
