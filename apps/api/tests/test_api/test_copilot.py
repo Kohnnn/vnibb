@@ -17,20 +17,25 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
             "market_context": [{"symbol": "VNM", "source": "appwrite"}],
         }
 
-    async def fake_generate_response_stream(messages, context, request_settings=None):
+    async def fake_generate_response_stream_events(messages, context, request_settings=None):
         captured["messages"] = messages
         captured["runtime_context"] = context
         captured["request_settings"] = request_settings
-        yield "Hello"
-        yield " world"
+        yield {"chunk": "Hello"}
+        yield {"chunk": " world"}
+        yield {
+            "done": True,
+            "usedSourceIds": ["VNM-PRICES"],
+            "sources": [{"id": "VNM-PRICES", "label": "Price history snapshot"}],
+        }
 
     monkeypatch.setattr(
         "vnibb.api.v1.copilot.ai_context_service.build_runtime_context",
         fake_build_runtime_context,
     )
     monkeypatch.setattr(
-        "vnibb.api.v1.copilot.llm_service.generate_response_stream",
-        fake_generate_response_stream,
+        "vnibb.api.v1.copilot.llm_service.generate_response_stream_events",
+        fake_generate_response_stream_events,
     )
 
     response = await client.post(
@@ -59,6 +64,7 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
     assert response.status_code == 200
     assert '"chunk": "Hello"' in response.text
     assert '"chunk": " world"' in response.text
+    assert '"usedSourceIds": ["VNM-PRICES"]' in response.text
     assert '"done": true' in response.text.lower()
     assert captured["prefer_appwrite_data"] is True
     assert captured["runtime_context"] == {

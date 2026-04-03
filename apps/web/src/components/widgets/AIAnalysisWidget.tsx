@@ -7,9 +7,14 @@ import { Sparkles, RefreshCw, BrainCircuit, AlertTriangle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
-import { consumeCopilotStream, openCopilotChatStream } from '@/lib/api';
+import {
+  consumeCopilotStream,
+  openCopilotChatStream,
+  type CopilotSourceRef,
+} from '@/lib/api';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { readStoredAISettings } from '@/lib/aiSettings';
+import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
 
 interface AIAnalysisWidgetProps {
   id: string;
@@ -19,6 +24,7 @@ interface AIAnalysisWidgetProps {
 
 function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetProps) {
   const [analysis, setAnalysis] = useState<string | null>(null);
+  const [sources, setSources] = useState<CopilotSourceRef[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,6 +39,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
     setIsLoading(true);
     setError(null);
     setAnalysis('');
+    setSources([]);
 
     try {
       const context = {
@@ -58,6 +65,9 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         onChunk: (chunk) => {
           fullContent += chunk;
           setAnalysis(fullContent);
+        },
+        onDone: (event) => {
+          setSources(event.sources || []);
         },
       });
     } catch (err: any) {
@@ -130,10 +140,13 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
                 </button>
             </div>
           ) : analysis ? (
-            <div className="prose prose-sm max-w-none text-[var(--text-secondary)] prose-headings:text-[var(--text-primary)] prose-strong:text-[var(--text-primary)] prose-p:leading-relaxed prose-headings:mb-2 prose-headings:mt-4 first:prose-headings:mt-0">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {analysis}
-                </ReactMarkdown>
+            <div className="space-y-3">
+              <div className="prose prose-sm max-w-none text-[var(--text-secondary)] prose-headings:text-[var(--text-primary)] prose-strong:text-[var(--text-primary)] prose-p:leading-relaxed prose-headings:mb-2 prose-headings:mt-4 first:prose-headings:mt-0">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {analysis}
+                  </ReactMarkdown>
+              </div>
+              {Boolean(sources.length) && <CopilotEvidencePanel sources={sources} />}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] gap-4 text-center opacity-40">

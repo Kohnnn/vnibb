@@ -19,19 +19,27 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProfile, useStockQuote, useFinancialRatios } from '@/lib/queries';
-import { consumeCopilotStream, openCopilotChatStream } from '@/lib/api';
+import {
+    consumeCopilotStream,
+    openCopilotChatStream,
+    type CopilotReasoningStep,
+    type CopilotSourceRef,
+} from '@/lib/api';
 import {
     AI_SETTINGS_UPDATED_EVENT,
     readStoredAISettings,
     writeStoredAISettings,
     type AISettings,
 } from '@/lib/aiSettings';
+import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
 
 interface Message {
     id: string;
     role: 'user' | 'assistant';
     content: string;
     reasoning?: string;
+    usedSourceIds?: string[];
+    sources?: CopilotSourceRef[];
     timestamp: Date;
 }
 
@@ -40,6 +48,8 @@ interface PersistedMessage {
     role: 'user' | 'assistant';
     content: string;
     reasoning?: string;
+    usedSourceIds?: string[];
+    sources?: CopilotSourceRef[];
     timestamp: string;
 }
 
@@ -112,6 +122,8 @@ function toPersistedMessage(message: Message): PersistedMessage {
         role: message.role,
         content: message.content,
         reasoning: message.reasoning,
+        usedSourceIds: message.usedSourceIds,
+        sources: message.sources,
         timestamp: message.timestamp.toISOString(),
     };
 }
@@ -122,8 +134,30 @@ function fromPersistedMessage(message: PersistedMessage): Message {
         role: message.role,
         content: message.content,
         reasoning: message.reasoning,
+        usedSourceIds: message.usedSourceIds,
+        sources: message.sources,
         timestamp: new Date(message.timestamp),
     };
+}
+
+function appendSourcesForExport(message: Message): string {
+    if (!message.sources?.length) {
+        return message.content;
+    }
+
+    const sourceLines = message.sources.map((source) => {
+        const meta = [source.source, source.asOf ? `as of ${source.asOf}` : null]
+            .filter(Boolean)
+            .join(', ');
+        return `- [${source.id}] ${source.label || source.kind || 'Source'}${meta ? ` (${meta})` : ''}`;
+    });
+
+    return `${message.content}\n\n## Sources\n${sourceLines.join('\n')}`;
+}
+
+function appendReasoningStep(existing: string | undefined, step: CopilotReasoningStep): string {
+    const line = `[${step.eventType}] ${step.message}`;
+    return existing ? `${existing}\n${line}` : line;
 }
 
 function getProviderLabel(provider: AISettings['provider']): string {
@@ -143,6 +177,7 @@ export function AICopilot({
     const [isLoading, setIsLoading] = useState(false);
     const [showReasoning, setShowReasoning] = useState<Record<string, boolean>>({});
     const [aiSettings, setAISettings] = useState<AISettings>(() => readStoredAISettings());
+    const [currentStatus, setCurrentStatus] = useState<string | null>(null);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -267,10 +302,31 @@ export function AICopilot({
                             : msg
                     ));
                 },
+                onReasoning: (reasoning) => {
+                    setCurrentStatus(reasoning.message);
+                    setMessages((prev) => prev.map((msg) =>
+                        msg.id === assistantMsgId
+                            ? { ...msg, reasoning: appendReasoningStep(msg.reasoning, reasoning) }
+                            : msg
+                    ));
+                },
+                onDone: (event) => {
+                    setCurrentStatus(null);
+                    setMessages((prev) => prev.map((msg) =>
+                        msg.id === assistantMsgId
+                            ? {
+                                ...msg,
+                                usedSourceIds: event.usedSourceIds || [],
+                                sources: event.sources || [],
+                            }
+                            : msg
+                    ));
+                },
             });
 
         } catch (error) {
             console.error('Copilot Error:', error);
+            setCurrentStatus(null);
             setMessages((prev) => prev.map((msg) =>
                 msg.id === assistantMsgId
                     ? { ...msg, content: `**Error**: Failed to connect to Copilot service. \n\n${String(error)}` }
@@ -285,7 +341,7 @@ export function AICopilot({
         if (messages.length === 0) return;
 
         const content = messages.map(m =>
-            `### ${m.role.toUpperCase()} (${m.timestamp.toLocaleTimeString()})\n\n${m.content}\n\n---\n`
+            `### ${m.role.toUpperCase()} (${m.timestamp.toLocaleTimeString()})\n\n${appendSourcesForExport(m)}\n\n---\n`
         ).join('\n');
 
         const blob = new Blob([content], { type: 'text/markdown' });
@@ -394,6 +450,11 @@ export function AICopilot({
                                     {message.reasoning}
                                 </div>
                             )}
+                            {message.role === 'assistant' && Boolean(message.sources?.length) && (
+                                <div className="mr-4">
+                                    <CopilotEvidencePanel sources={message.sources || []} />
+                                </div>
+                            )}
                         </div>
                     ))
                 )}
@@ -401,7 +462,7 @@ export function AICopilot({
                 {isLoading && messages[messages.length - 1]?.role === 'user' && (
                     <div className="bg-[var(--bg-secondary)] rounded-lg p-3 mr-4 border border-[var(--border-color)]">
                         <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                            <div className="animate-pulse">Thinking...</div>
+                            <div className="animate-pulse">{currentStatus || 'Thinking...'}</div>
                         </div>
                     </div>
                 )}
