@@ -1,15 +1,15 @@
 {
-  "stage": "ratios_year",
+  "stage": "company_news",
   "next_batch": 0,
   "total_symbols": 200,
   "completed_symbols": 200,
   "failed_symbols": [],
   "stage_stats": {
-    "ratios_year": {
+    "company_news": {
       "success_symbols": 200,
       "failed_symbols": 0,
-      "completed_batches": 20
+      "completed_batches": 8
     }
   },
-  "updated_at": "2026-02-12T17:03:21.550764+00:00"
+  "updated_at": "2026-04-02T16:36:12.933529+00:00"
 }

@@ -32,6 +32,9 @@ import {
 } from '@/lib/adminLayoutAccess';
 import {
   clearStoredAISettings,
+  OPENAI_COMPATIBLE_BASE_URL,
+  OPENROUTER_BASE_URL,
+  type AIProvider,
   readStoredAISettings,
   writeStoredAISettings,
   type AIProviderMode,
@@ -54,9 +57,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [isTickerMenuOpen, setIsTickerMenuOpen] = useState(false);
   const [adminLayoutKeyInput, setAdminLayoutKeyInput] = useState('');
   const [showGlobalLayoutControls, setShowGlobalLayoutControls] = useState(false);
+  const [aiProvider, setAiProvider] = useState<AIProvider>('openrouter');
   const [aiMode, setAiMode] = useState<AIProviderMode>('app_default');
   const [aiModelInput, setAiModelInput] = useState('openai/gpt-4o-mini');
   const [aiApiKeyInput, setAiApiKeyInput] = useState('');
+  const [aiBaseUrlInput, setAiBaseUrlInput] = useState(OPENROUTER_BASE_URL);
   const [aiWebSearch, setAiWebSearch] = useState(false);
   const [aiPreferAppwriteData, setAiPreferAppwriteData] = useState(true);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
@@ -80,9 +85,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setAdminLayoutKeyInput(readAdminLayoutKey());
       setShowGlobalLayoutControls(readAdminLayoutControlsVisible());
       const aiSettings = readStoredAISettings();
+      setAiProvider(aiSettings.provider);
       setAiMode(aiSettings.mode);
       setAiModelInput(aiSettings.model);
       setAiApiKeyInput(aiSettings.apiKey);
+      setAiBaseUrlInput(aiSettings.baseUrl);
       setAiWebSearch(aiSettings.webSearch);
       setAiPreferAppwriteData(aiSettings.preferAppwriteData);
     }
@@ -144,34 +151,49 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const applyAISettings = () => {
     const normalizedModel = aiModelInput.trim();
+    const normalizedBaseUrl = aiBaseUrlInput.trim().replace(/\/$/, '');
     if (!normalizedModel) {
       setAiSettingsError('Enter a model slug, for example openai/gpt-4o-mini.');
       return;
     }
 
-    if (aiMode === 'browser_key' && !aiApiKeyInput.trim()) {
+    if (aiProvider === 'openrouter' && aiMode === 'browser_key' && !aiApiKeyInput.trim()) {
       setAiSettingsError('Enter an OpenRouter API key or switch back to App default mode.');
       return;
     }
 
+    if (aiProvider === 'openai_compatible' && !normalizedBaseUrl) {
+      setAiSettingsError('Enter a base URL for the OpenAI-compatible provider.');
+      return;
+    }
+
+    if (aiProvider === 'openai_compatible' && !aiApiKeyInput.trim()) {
+      setAiSettingsError('Enter a browser-local API key for the OpenAI-compatible provider.');
+      return;
+    }
+
     const nextSettings = writeStoredAISettings({
+      provider: aiProvider,
       mode: aiMode,
       model: normalizedModel,
       apiKey: aiApiKeyInput,
+      baseUrl: normalizedBaseUrl,
       webSearch: aiWebSearch,
       preferAppwriteData: aiPreferAppwriteData,
     });
 
     setAiSettingsError(null);
+    setAiProvider(nextSettings.provider);
     setAiMode(nextSettings.mode);
     setAiModelInput(nextSettings.model);
     setAiApiKeyInput(nextSettings.apiKey);
+    setAiBaseUrlInput(nextSettings.baseUrl);
     setAiWebSearch(nextSettings.webSearch);
     setAiPreferAppwriteData(nextSettings.preferAppwriteData);
     setPreferenceStatus(
       nextSettings.mode === 'browser_key'
-        ? `AI settings saved locally: OpenRouter browser key + ${nextSettings.model}.`
-        : `AI settings saved locally: App default key + ${nextSettings.model}.`,
+        ? `AI settings saved locally: ${nextSettings.provider} browser key + ${nextSettings.model}.`
+        : `AI settings saved locally: app OpenRouter key + ${nextSettings.model}.`,
     );
   };
 
@@ -379,9 +401,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <h4 className="text-sm font-bold text-[var(--text-primary)]">OpenRouter Copilot</h4>
+                      <h4 className="text-sm font-bold text-[var(--text-primary)]">AI Providers</h4>
                       <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                        VNIBB now uses an Appwrite-first AI flow. Market data from your runtime Appwrite database is preferred over internet sources.
+                        VNIBB uses an Appwrite-first AI flow. Market data from your runtime Appwrite database is preferred over internet sources.
                       </p>
                     </div>
                     <div className="rounded-full border border-blue-500/30 bg-blue-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-300">
@@ -391,16 +413,61 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 <div>
-                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]">Provider Mode</h4>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]">Provider</h4>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
+                      onClick={() => {
+                        setAiProvider('openrouter')
+                        setAiBaseUrlInput(OPENROUTER_BASE_URL)
+                        if (aiSettingsError) setAiSettingsError(null)
+                      }}
+                      className={cn(
+                        'rounded-lg border px-3 py-3 text-left transition-all',
+                        aiProvider === 'openrouter'
+                          ? 'border-blue-500 bg-blue-600/15 text-blue-300'
+                          : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
+                      )}
+                    >
+                      <div className="text-xs font-bold uppercase tracking-wider">OpenRouter</div>
+                      <div className="mt-1 text-[11px] text-[var(--text-muted)]">Recommended. Use your Oracle app key or a browser-local OpenRouter key.</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAiProvider('openai_compatible')
+                        setAiMode('browser_key')
+                        setAiWebSearch(false)
+                        if (!aiBaseUrlInput || aiBaseUrlInput === OPENROUTER_BASE_URL) {
+                          setAiBaseUrlInput(OPENAI_COMPATIBLE_BASE_URL)
+                        }
+                        if (aiSettingsError) setAiSettingsError(null)
+                      }}
+                      className={cn(
+                        'rounded-lg border px-3 py-3 text-left transition-all',
+                        aiProvider === 'openai_compatible'
+                          ? 'border-blue-500 bg-blue-600/15 text-blue-300'
+                          : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
+                      )}
+                    >
+                      <div className="text-xs font-bold uppercase tracking-wider">OpenAI-Compatible</div>
+                      <div className="mt-1 text-[11px] text-[var(--text-muted)]">Bring your own API key and base URL for OpenAI-style `/chat/completions` providers.</div>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]">Credential Source</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={aiProvider !== 'openrouter'}
                       onClick={() => {
                         setAiMode('app_default')
                         if (aiSettingsError) setAiSettingsError(null)
                       }}
                       className={cn(
-                        'rounded-lg border px-3 py-3 text-left transition-all',
+                        'rounded-lg border px-3 py-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50',
                         aiMode === 'app_default'
                           ? 'border-blue-500 bg-blue-600/15 text-blue-300'
                           : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
@@ -423,7 +490,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       )}
                     >
                       <div className="text-xs font-bold uppercase tracking-wider">Browser Key</div>
-                      <div className="mt-1 text-[11px] text-[var(--text-muted)]">Store your personal OpenRouter key only in this browser instance.</div>
+                      <div className="mt-1 text-[11px] text-[var(--text-muted)]">Store your provider key only in this browser instance.</div>
                     </button>
                   </div>
                 </div>
@@ -447,7 +514,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
                   />
                   <p className="mt-2 text-[10px] text-[var(--text-muted)]">
-                    Any OpenRouter model slug is allowed. Start with `openai/gpt-4o-mini` for a low-cost default.
+                    {aiProvider === 'openrouter'
+                      ? 'Any OpenRouter model slug is allowed. Start with `openai/gpt-4o-mini` for a low-cost default.'
+                      : 'Enter the model ID supported by your OpenAI-compatible provider.'}
                   </p>
                 </div>
 
@@ -456,7 +525,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     htmlFor="settings-ai-api-key"
                     className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]"
                   >
-                    OpenRouter API Key
+                    {aiProvider === 'openrouter' ? 'Provider API Key' : 'OpenAI-Compatible API Key'}
                   </label>
                   <input
                     id="settings-ai-api-key"
@@ -466,13 +535,38 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       setAiApiKeyInput(event.target.value)
                       if (aiSettingsError) setAiSettingsError(null)
                     }}
-                    placeholder="Optional unless Browser Key mode is enabled"
+                    placeholder={aiMode === 'browser_key' ? 'Required for browser-local mode' : 'Optional unless Browser Key mode is enabled'}
                     className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
                   />
                   <p className="mt-2 text-[10px] text-[var(--text-muted)]">
                     This key stays in your browser local storage. VNIBB does not persist it server-side.
                   </p>
                 </div>
+
+                {aiProvider === 'openai_compatible' && (
+                  <div>
+                    <label
+                      htmlFor="settings-ai-base-url"
+                      className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]"
+                    >
+                      Base URL
+                    </label>
+                    <input
+                      id="settings-ai-base-url"
+                      type="text"
+                      value={aiBaseUrlInput}
+                      onChange={(event) => {
+                        setAiBaseUrlInput(event.target.value)
+                        if (aiSettingsError) setAiSettingsError(null)
+                      }}
+                      placeholder="https://api.openai.com/v1"
+                      className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                    />
+                    <p className="mt-2 text-[10px] text-[var(--text-muted)]">
+                      This must expose an OpenAI-style `/chat/completions` endpoint.
+                    </p>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
@@ -492,11 +586,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       type="checkbox"
                       checked={aiWebSearch}
                       onChange={(event) => setAiWebSearch(event.target.checked)}
+                      disabled={aiProvider !== 'openrouter'}
                       className="mt-0.5 h-4 w-4 rounded"
                     />
                     <span>
                       <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Allow web search</span>
-                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Keep this off unless you want the model to supplement Appwrite data with external web context.</span>
+                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">{aiProvider === 'openrouter'
+                        ? 'Keep this off unless you want the model to supplement Appwrite data with external web context.'
+                        : 'Web search is currently available only through the OpenRouter path.'}</span>
                     </span>
                   </label>
                 </div>
@@ -520,9 +617,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     type="button"
                     onClick={() => {
                       const nextSettings = clearStoredAISettings()
+                      setAiProvider(nextSettings.provider)
                       setAiMode(nextSettings.mode)
                       setAiModelInput(nextSettings.model)
                       setAiApiKeyInput(nextSettings.apiKey)
+                      setAiBaseUrlInput(nextSettings.baseUrl)
                       setAiWebSearch(nextSettings.webSearch)
                       setAiPreferAppwriteData(nextSettings.preferAppwriteData)
                       setAiSettingsError(null)

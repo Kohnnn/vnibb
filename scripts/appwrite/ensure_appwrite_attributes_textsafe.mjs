@@ -68,6 +68,14 @@ async function loadSchemaMap(pathLike) {
   return parsed
 }
 
+function isAlreadyExistsError(err) {
+  if (!err) return false
+  if (err.code === 409) return true
+  if (typeof err.type === 'string' && err.type.includes('already_exists')) return true
+  if (typeof err.message === 'string' && err.message.toLowerCase().includes('already exists')) return true
+  return false
+}
+
 function normalizeColumnKey(columnName) {
   // Appwrite attribute keys must be <= 36 chars.
   return String(columnName).slice(0, 36)
@@ -170,17 +178,27 @@ async function main() {
         continue
       }
 
-      await databases.createLongtextAttribute({
-        databaseId,
-        collectionId,
-        key,
-        required: false,
-        array: false,
-      })
+      try {
+        await databases.createLongtextAttribute({
+          databaseId,
+          collectionId,
+          key,
+          required: false,
+          array: false,
+        })
 
-      createdAttributes += 1
-      existingKeys.add(key)
-      console.log(`[attr] ${collectionId}.${key} (from ${sourceKey})`)
+        createdAttributes += 1
+        existingKeys.add(key)
+        console.log(`[attr] ${collectionId}.${key} (from ${sourceKey})`)
+      } catch (err) {
+        if (isAlreadyExistsError(err)) {
+          skippedAttributes += 1
+          existingKeys.add(key)
+          console.log(`[skip] ${collectionId}.${key} already exists`)
+          continue
+        }
+        throw err
+      }
     }
   }
 

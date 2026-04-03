@@ -51,7 +51,7 @@ def _extract_text_content(content: Any) -> str:
 
 class LlmService:
     def __init__(self):
-        self.base_url = settings.openrouter_base_url.rstrip("/")
+        self.default_openrouter_base_url = settings.openrouter_base_url.rstrip("/")
 
     @property
     def is_available(self) -> bool:
@@ -70,35 +70,57 @@ class LlmService:
             request_settings.get("model") or settings.llm_model or "openai/gpt-4o-mini"
         ).strip()
         override_key = str(request_settings.get("apiKey") or "").strip()
+        override_base_url = str(request_settings.get("baseUrl") or "").strip().rstrip("/")
         mode = str(
             request_settings.get("mode") or ("browser_key" if override_key else "app_default")
         ).strip()
-        api_key = override_key or str(settings.openrouter_api_key or "").strip()
 
-        if provider != "openrouter":
-            raise RuntimeError("Only OpenRouter is supported in the current AI rollout.")
         if not model:
             raise RuntimeError("No AI model is configured.")
-        if not api_key:
+
+        if provider == "openrouter":
+            api_key = override_key or str(settings.openrouter_api_key or "").strip()
+            base_url = override_base_url or self.default_openrouter_base_url
+            if not api_key:
+                raise RuntimeError(
+                    "AI Copilot is not configured. Set OPENROUTER_API_KEY or provide a browser-local key in Settings."
+                )
+        elif provider == "openai_compatible":
+            if mode != "browser_key":
+                raise RuntimeError(
+                    "OpenAI-compatible providers currently require a browser-local API key."
+                )
+            api_key = override_key
+            base_url = override_base_url
+            if not api_key:
+                raise RuntimeError(
+                    "Add your provider API key in Settings before using the OpenAI-compatible mode."
+                )
+            if not base_url:
+                raise RuntimeError(
+                    "Add a base URL in Settings before using the OpenAI-compatible mode."
+                )
+        else:
             raise RuntimeError(
-                "AI Copilot is not configured. Set OPENROUTER_API_KEY or provide a browser-local key in Settings."
+                "Unsupported AI provider. Use OpenRouter or an OpenAI-compatible endpoint."
             )
 
         return {
             "provider": provider,
             "model": model,
             "api_key": api_key,
+            "base_url": base_url,
             "mode": mode,
         }
 
-    def _openrouter_headers(self, api_key: str) -> dict[str, str]:
+    def _request_headers(self, provider: str, api_key: str) -> dict[str, str]:
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        if settings.openrouter_site_url:
+        if provider == "openrouter" and settings.openrouter_site_url:
             headers["HTTP-Referer"] = settings.openrouter_site_url
-        if settings.openrouter_app_name:
+        if provider == "openrouter" and settings.openrouter_app_name:
             headers["X-OpenRouter-Title"] = settings.openrouter_app_name
         return headers
 
@@ -108,7 +130,12 @@ class LlmService:
         context: dict[str, Any],
         request_settings: dict[str, Any] | None = None,
     ) -> list[dict[str, str]]:
-        web_search_enabled = bool((request_settings or {}).get("webSearch"))
+        effective_provider = (
+            str((request_settings or {}).get("provider") or "openrouter").strip().lower()
+        )
+        web_search_enabled = (
+            bool((request_settings or {}).get("webSearch")) and effective_provider == "openrouter"
+        )
         appwrite_first = bool(context.get("prefer_appwrite_data", True))
         context_blob = json.dumps(context, ensure_ascii=True, default=str)
         if len(context_blob) > MAX_CONTEXT_CHARS:
@@ -164,18 +191,28 @@ class LlmService:
         request_settings: dict[str, Any] | None,
         stream: bool,
     ) -> dict[str, Any]:
+        effective_provider = (
+            str((request_settings or {}).get("provider") or "openrouter").strip().lower()
+        )
         payload: dict[str, Any] = {
             "model": model,
             "messages": self._build_messages(messages, context, request_settings),
             "stream": stream,
             "temperature": 0.2,
             "max_tokens": settings.llm_max_tokens,
-            "provider": {
+        }
+
+        if effective_provider == "openrouter":
+            payload["provider"] = {
                 "allow_fallbacks": True,
                 "data_collection": "deny",
-            },
-        }
-        if request_settings and request_settings.get("webSearch"):
+            }
+
+        if (
+            effective_provider == "openrouter"
+            and request_settings
+            and request_settings.get("webSearch")
+        ):
             payload["plugins"] = [{"id": "web", "enabled": True, "max_results": 5}]
         return payload
 
@@ -204,8 +241,8 @@ class LlmService:
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
                 async with client.stream(
                     "POST",
-                    f"{self.base_url}/chat/completions",
-                    headers=self._openrouter_headers(config["api_key"]),
+                    f"{config['base_url']}/chat/completions",
+                    headers=self._request_headers(config["provider"], config["api_key"]),
                     json=payload,
                 ) as response:
                     if response.status_code >= 400:
@@ -232,7 +269,7 @@ class LlmService:
                         if chunk_text:
                             yield chunk_text
         except Exception as exc:
-            logger.error("OpenRouter streaming failed: %s", exc)
+            logger.error("%s streaming failed: %s", config.get("provider", "llm"), exc)
             yield f"\n\n**Error encountered:** {exc}"
 
     async def chat(
@@ -253,8 +290,8 @@ class LlmService:
 
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._openrouter_headers(config["api_key"]),
+                f"{config['base_url']}/chat/completions",
+                headers=self._request_headers(config["provider"], config["api_key"]),
                 json=payload,
             )
         if response.status_code >= 400:
