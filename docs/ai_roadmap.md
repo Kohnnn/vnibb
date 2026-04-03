@@ -89,6 +89,8 @@ This is the highest-value gap versus OpenBB. It turns AI from text output into r
 
 ## Batch 2: Chart Artifacts
 
+Status: shipped MVP
+
 ### Why
 
 OpenBB is visibly stronger when AI can generate a visual answer, not just describe one.
@@ -97,6 +99,20 @@ OpenBB is visibly stronger when AI can generate a visual answer, not just descri
 
 - add structured chart payloads for a small approved chart set
 - render inline chart artifacts in copilot responses
+
+### MVP shipped
+
+- normalized price trend line charts
+- comparison quality/growth bar charts
+- sector change overview charts
+- foreign flow comparison charts
+- inline chart rendering in sidebar copilot, widget copilot, and AI analysis widget
+
+### Remaining follow-up
+
+- richer chart controls and legend toggles
+- allow artifact-to-widget promotion from AI output
+- add chart export actions
 
 ### Candidate charts
 

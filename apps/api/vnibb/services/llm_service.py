@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from vnibb.core.config import settings
-from vnibb.services.ai_artifact_service import build_table_artifacts
+from vnibb.services.ai_artifact_service import build_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -435,7 +435,7 @@ class LlmService:
         raw_text = await self._request_completion_text(config, payload)
         rendered = _render_validated_markdown(raw_text, context)
         rendered["sources"] = _build_used_source_entries(context, rendered["used_source_ids"])
-        rendered["artifacts"] = build_table_artifacts(_latest_user_message(messages), context)
+        rendered["artifacts"] = build_artifacts(_latest_user_message(messages), context)
         rendered["config"] = {
             "provider": config["provider"],
             "model": config["model"],

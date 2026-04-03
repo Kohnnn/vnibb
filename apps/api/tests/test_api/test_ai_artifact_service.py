@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vnibb.services.ai_artifact_service import build_table_artifacts
+from vnibb.services.ai_artifact_service import build_chart_artifacts, build_table_artifacts
 
 
 def test_build_table_artifacts_returns_comparison_snapshot_for_compare_prompt():
@@ -113,9 +113,106 @@ def test_build_table_artifacts_returns_sector_and_foreign_flow_tables_when_reque
     assert "sector_breadth_snapshot" in artifact_ids
     assert "foreign_flow_leaderboard" in artifact_ids
 
-    sector_artifact = next(artifact for artifact in artifacts if artifact["id"] == "sector_breadth_snapshot")
-    foreign_flow_artifact = next(artifact for artifact in artifacts if artifact["id"] == "foreign_flow_leaderboard")
+    sector_artifact = next(
+        artifact for artifact in artifacts if artifact["id"] == "sector_breadth_snapshot"
+    )
+    foreign_flow_artifact = next(
+        artifact for artifact in artifacts if artifact["id"] == "foreign_flow_leaderboard"
+    )
 
     assert sector_artifact["sourceIds"] == ["MKT-SECTORS"]
     assert [row["symbol"] for row in foreign_flow_artifact["rows"]] == ["VNM", "FPT"]
     assert foreign_flow_artifact["sourceIds"] == ["VNM-FOREIGN", "FPT-FOREIGN"]
+
+
+def test_build_chart_artifacts_returns_compare_charts_for_compare_prompt():
+    artifacts = build_chart_artifacts(
+        "Compare VNM and FPT on valuation and growth",
+        {
+            "market_context": [
+                {
+                    "symbol": "VNM",
+                    "price_context": {
+                        "recent_series": [
+                            {"time": "2026-04-01", "close": 72.4},
+                            {"time": "2026-04-02", "close": 73.0},
+                        ]
+                    },
+                    "ratios": {"roe": 18.6, "revenue_growth": 7.4},
+                    "available_source_ids": ["VNM-PRICES", "VNM-RATIOS"],
+                },
+                {
+                    "symbol": "FPT",
+                    "price_context": {
+                        "recent_series": [
+                            {"time": "2026-04-01", "close": 128.9},
+                            {"time": "2026-04-02", "close": 131.0},
+                        ]
+                    },
+                    "ratios": {"roe": 21.2, "revenue_growth": 16.9},
+                    "available_source_ids": ["FPT-PRICES", "FPT-RATIOS"],
+                },
+            ]
+        },
+    )
+
+    artifact_ids = [artifact["id"] for artifact in artifacts]
+    assert "price_trend_chart" in artifact_ids
+    assert "comparison_quality_chart" in artifact_ids
+
+    price_artifact = next(
+        artifact for artifact in artifacts if artifact["id"] == "price_trend_chart"
+    )
+    quality_artifact = next(
+        artifact for artifact in artifacts if artifact["id"] == "comparison_quality_chart"
+    )
+
+    assert price_artifact["type"] == "chart"
+    assert price_artifact["chartType"] == "line"
+    assert price_artifact["series"][0]["key"] == "VNM"
+    assert price_artifact["sourceIds"] == ["VNM-PRICES", "FPT-PRICES"]
+    assert quality_artifact["chartType"] == "bar"
+    assert quality_artifact["valueKind"] == "percent"
+    assert [row["symbol"] for row in quality_artifact["rows"]] == ["VNM", "FPT"]
+
+
+def test_build_chart_artifacts_returns_sector_and_foreign_flow_charts():
+    artifacts = build_chart_artifacts(
+        "Show sector breadth and foreign flow trends",
+        {
+            "broad_market_context": {
+                "sectors": {
+                    "sector_leaders": [
+                        {
+                            "sector_code": "TECH",
+                            "sector_name": "Technology",
+                            "change_pct": 3.2,
+                        }
+                    ],
+                    "sector_laggards": [
+                        {
+                            "sector_code": "UTIL",
+                            "sector_name": "Utilities",
+                            "change_pct": -1.4,
+                        }
+                    ],
+                }
+            },
+            "market_context": [
+                {
+                    "symbol": "VNM",
+                    "foreign_trading": {"summary": {"net_value_20d": 340.0}},
+                    "available_source_ids": ["VNM-FOREIGN"],
+                },
+                {
+                    "symbol": "FPT",
+                    "foreign_trading": {"summary": {"net_value_20d": 210.0}},
+                    "available_source_ids": ["FPT-FOREIGN"],
+                },
+            ],
+        },
+    )
+
+    artifact_ids = [artifact["id"] for artifact in artifacts]
+    assert "sector_change_chart" in artifact_ids
+    assert "foreign_flow_chart" in artifact_ids

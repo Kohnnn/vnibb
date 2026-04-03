@@ -10,9 +10,9 @@ import { cn } from '@/lib/utils';
 import {
   consumeCopilotStream,
   openCopilotChatStream,
+  type CopilotArtifact,
   type CopilotReasoningStep,
   type CopilotSourceRef,
-  type CopilotTableArtifact,
 } from '@/lib/api';
 import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -33,7 +33,7 @@ function appendReasoningStep(existing: string[], step: CopilotReasoningStep): st
 function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetProps) {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [sources, setSources] = useState<CopilotSourceRef[]>([]);
-  const [artifacts, setArtifacts] = useState<CopilotTableArtifact[]>([]);
+  const [artifacts, setArtifacts] = useState<CopilotArtifact[]>([]);
   const [reasoningLog, setReasoningLog] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
