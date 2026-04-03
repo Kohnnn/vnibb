@@ -97,6 +97,11 @@ async function saveMigrationState(pathLike, state) {
   await writeFile(absolutePath, JSON.stringify(state, null, 2), 'utf8')
 }
 
+async function saveMigrationStateIfLive(pathLike, state, dryRun) {
+  if (dryRun) return
+  await saveMigrationState(pathLike, state)
+}
+
 function serializeCursor(value) {
   if (value === null || value === undefined) return null
   if (value instanceof Date) return value.toISOString()
@@ -634,12 +639,25 @@ async function main() {
         const rows = result.rows
         if (rows.length === 0) break
 
+        const prevCreated = stats.created
+        const prevUpdated = stats.updated
+        const prevFailed = stats.failed
         await processRows(rows)
+
+        const batchCreated = stats.created - prevCreated
+        const batchUpdated = stats.updated - prevUpdated
+        const batchFailed = stats.failed - prevFailed
+        if (batchFailed === rows.length && batchCreated === 0 && batchUpdated === 0) {
+          console.warn(
+            `[${collectionId}] batch failed completely; stopping before cursor advance to avoid skipping rows`
+          )
+          break
+        }
 
         offset += rows.length
         tableState.lastOffset = offset
         tableState.updatedAt = new Date().toISOString()
-        await saveMigrationState(resolvedStatePath, migrationState)
+        await saveMigrationStateIfLive(resolvedStatePath, migrationState, dryRun)
 
         console.log(
           `[${collectionId}] progress ${Math.min(offset, targetEnd)}/${targetEnd}` +
@@ -747,7 +765,20 @@ async function main() {
           break
         }
 
+        const prevCreated = stats.created
+        const prevUpdated = stats.updated
+        const prevFailed = stats.failed
         await processRows(rows)
+
+        const batchCreated = stats.created - prevCreated
+        const batchUpdated = stats.updated - prevUpdated
+        const batchFailed = stats.failed - prevFailed
+        if (batchFailed === rows.length && batchCreated === 0 && batchUpdated === 0) {
+          console.warn(
+            `[${collectionId}] batch failed completely; stopping before cursor advance to avoid skipping rows`
+          )
+          break
+        }
 
         processedThisRun += rows.length
         lastCursor = serializeCursor(rows[rows.length - 1]?.[cursorColumn])
@@ -755,7 +786,7 @@ async function main() {
         tableState.updatedAt = new Date().toISOString()
         tableState.lastRunRows = processedThisRun
         tableState.finished = false
-        await saveMigrationState(resolvedStatePath, migrationState)
+        await saveMigrationStateIfLive(resolvedStatePath, migrationState, dryRun)
 
         const cursorStatus = upperBound
           ? `${lastCursor}/${upperBound}`
@@ -784,7 +815,7 @@ async function main() {
       }
 
       tableState.updatedAt = new Date().toISOString()
-      await saveMigrationState(resolvedStatePath, migrationState)
+      await saveMigrationStateIfLive(resolvedStatePath, migrationState, dryRun)
     }
 
     console.log(
@@ -803,7 +834,11 @@ async function main() {
 
   console.log('\n--- Migration Summary ---')
   console.log(JSON.stringify(globalStats, null, 2))
-  console.log(`Migration state saved: ${resolvedStatePath}`)
+  if (dryRun) {
+    console.log(`Dry run complete; migration state not written: ${resolvedStatePath}`)
+  } else {
+    console.log(`Migration state saved: ${resolvedStatePath}`)
+  }
 }
 
 main().catch(err => {

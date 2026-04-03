@@ -126,6 +126,10 @@ function fromPersistedMessage(message: PersistedMessage): Message {
     };
 }
 
+function getProviderLabel(provider: AISettings['provider']): string {
+    return provider === 'openai_compatible' ? 'OpenAI-compatible' : 'OpenRouter';
+}
+
 export function AICopilot({
     isOpen,
     onClose,
@@ -316,7 +320,7 @@ export function AICopilot({
                 <span className="text-xs text-blue-400">
                     {widgetContext ? `Context: @${widgetContext} · ` : ''}
                     {activeTabName ? `${activeTabName} · ` : ''}
-                    {currentSymbol} · {aiSettings.mode === 'browser_key' ? 'Browser key' : 'App default'} · {aiSettings.model}
+                    {currentSymbol} · {getProviderLabel(aiSettings.provider)} · {aiSettings.mode === 'browser_key' ? 'Browser key' : 'App default'} · {aiSettings.model}
                 </span>
                 {messages.length > 0 && (
                     <button

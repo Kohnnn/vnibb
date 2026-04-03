@@ -41,9 +41,10 @@ class WidgetContext(BaseModel):
 
 class CopilotRequestSettings(BaseModel):
     mode: Literal["app_default", "browser_key"] = "app_default"
-    provider: Literal["openrouter"] = "openrouter"
+    provider: Literal["openrouter", "openai_compatible"] = "openrouter"
     model: str | None = None
     apiKey: str | None = None
+    baseUrl: str | None = None
     webSearch: bool = False
     preferAppwriteData: bool = True
 

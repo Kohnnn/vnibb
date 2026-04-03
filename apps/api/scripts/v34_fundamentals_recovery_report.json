@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-04-02T16:36:12.935247+00:00",
+  "stages": [
+    "company_news"
+  ],
+  "limit": 200,
+  "batch_size": 25,
+  "total_symbols": 200,
+  "completed_symbols": 200,
+  "failed_symbols_count": 0,
+  "failed_symbols": [],
+  "stage_stats": {
+    "company_news": {
+      "success_symbols": 200,
+      "failed_symbols": 0,
+      "completed_batches": 8
+    }
+  },
+  "checkpoint_file": "scripts\\v34_backfill_fundamentals_checkpoint.json",
+  "processed_batches": 8,
+  "elapsed_seconds": 103.81,
+  "stop_reason": "completed",
+  "max_runtime_minutes": 20.0,
+  "max_batches": null,
+  "call_timeout_seconds": 120.0
+}

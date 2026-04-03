@@ -63,6 +63,14 @@ async function loadSchemaMap(pathLike) {
   return parsed
 }
 
+function isAlreadyExistsError(err) {
+  if (!err) return false
+  if (err.code === 409) return true
+  if (typeof err.type === 'string' && err.type.includes('already_exists')) return true
+  if (typeof err.message === 'string' && err.message.toLowerCase().includes('already exists')) return true
+  return false
+}
+
 async function getResolvedDatabaseId(databases, preferredId) {
   if (preferredId) {
     try {
@@ -82,6 +90,11 @@ async function getResolvedDatabaseId(databases, preferredId) {
   return dbList.databases[0].$id
 }
 
+function parseIntSafe(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
 function selectedCollections(schemaMap) {
   const tableFilterRaw = getEnv('MIGRATION_TABLES', '')
   const tableFilter = new Set(
@@ -97,7 +110,7 @@ function selectedCollections(schemaMap) {
   })
 }
 
-async function waitForAttribute(databases, databaseId, collectionId, key, timeoutMs = 180000) {
+async function waitForAttribute(databases, databaseId, collectionId, key, timeoutMs = parseIntSafe(getEnv('APPWRITE_SCHEMA_WAIT_MS', '180000'), 180000)) {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
     const attribute = await databases.getAttribute({ databaseId, collectionId, key })
@@ -112,7 +125,7 @@ async function waitForAttribute(databases, databaseId, collectionId, key, timeou
   throw new Error(`Timed out waiting for attribute: ${collectionId}.${key}`)
 }
 
-async function waitForIndex(databases, databaseId, collectionId, key, timeoutMs = 180000) {
+async function waitForIndex(databases, databaseId, collectionId, key, timeoutMs = parseIntSafe(getEnv('APPWRITE_SCHEMA_WAIT_MS', '180000'), 180000)) {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
     const index = await databases.getIndex({ databaseId, collectionId, key })
@@ -141,6 +154,7 @@ async function main() {
 
   let created = 0
   let skipped = 0
+  let pending = 0
 
   for (const item of selectedCollections(schemaMap)) {
     const collectionId = item.collectionId
@@ -158,23 +172,48 @@ async function main() {
         continue
       }
 
+      let attributesReady = true
       for (const attrKey of indexSpec.attributes || []) {
-        await waitForAttribute(databases, databaseId, collectionId, attrKey)
+        try {
+          await waitForAttribute(databases, databaseId, collectionId, attrKey)
+        } catch (err) {
+          if (String(err?.message || '').toLowerCase().includes('timed out waiting for attribute')) {
+            pending += 1
+            console.log(`[pending] ${collectionId}.${indexSpec.key} waiting on ${attrKey}`)
+            attributesReady = false
+            break
+          }
+          throw err
+        }
       }
 
-      await databases.createIndex({
-        databaseId,
-        collectionId,
-        key: indexSpec.key,
-        type: indexSpec.type || 'key',
-        attributes: indexSpec.attributes || [],
-        orders: indexSpec.orders,
-        lengths: indexSpec.lengths
-      })
-      await waitForIndex(databases, databaseId, collectionId, indexSpec.key)
-      existingKeys.add(indexSpec.key)
-      created += 1
-      console.log(`[index] ${collectionId}.${indexSpec.key}`)
+      if (!attributesReady) {
+        continue
+      }
+
+      try {
+        await databases.createIndex({
+          databaseId,
+          collectionId,
+          key: indexSpec.key,
+          type: indexSpec.type || 'key',
+          attributes: indexSpec.attributes || [],
+          orders: indexSpec.orders,
+          lengths: indexSpec.lengths
+        })
+        await waitForIndex(databases, databaseId, collectionId, indexSpec.key)
+        existingKeys.add(indexSpec.key)
+        created += 1
+        console.log(`[index] ${collectionId}.${indexSpec.key}`)
+      } catch (err) {
+        if (isAlreadyExistsError(err)) {
+          skipped += 1
+          existingKeys.add(indexSpec.key)
+          console.log(`[skip] ${collectionId}.${indexSpec.key} already exists`)
+          continue
+        }
+        throw err
+      }
     }
   }
 
@@ -182,6 +221,7 @@ async function main() {
   console.log(`Database: ${databaseId}`)
   console.log(`Created indexes: ${created}`)
   console.log(`Skipped indexes: ${skipped}`)
+  console.log(`Pending indexes: ${pending}`)
   if (loadedEnvFile) {
     console.log(`Loaded env from: ${loadedEnvFile}`)
   }

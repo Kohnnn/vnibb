@@ -24,6 +24,16 @@ SYSTEM_DASHBOARD_KEYS = (
 )
 SYSTEM_LAYOUT_STATUSES = ("draft", "published")
 DOC_ID_RE = re.compile(r"[^a-z0-9_-]+")
+SYSTEM_DASHBOARD_KEY_ALIASES = {
+    "default-fundamental": "fundamental",
+    "default-technical": "technical",
+    "default-quant": "quant",
+    "default-global-markets": "global-markets",
+}
+SYSTEM_LAYOUT_STATUS_ALIASES = {
+    "draft": "dr",
+    "published": "pub",
+}
 
 
 class SystemLayoutTemplateRecord(BaseModel):
@@ -94,8 +104,12 @@ class SystemLayoutTemplateService:
         normalized_status = status_value.strip().lower()
         if normalized_status not in SYSTEM_LAYOUT_STATUSES:
             raise HTTPException(status_code=400, detail="Unsupported system dashboard template status")
-        safe_key = DOC_ID_RE.sub("-", normalized_dashboard_key).strip("-")
-        return f"system-layout-{normalized_status}-{safe_key}"
+        safe_key = SYSTEM_DASHBOARD_KEY_ALIASES.get(
+            normalized_dashboard_key,
+            DOC_ID_RE.sub("-", normalized_dashboard_key).strip("-")[:20],
+        )
+        safe_status = SYSTEM_LAYOUT_STATUS_ALIASES[normalized_status]
+        return f"slt-{safe_status}-{safe_key}"
 
     def _documents_url(self) -> str:
         self._assert_configured()

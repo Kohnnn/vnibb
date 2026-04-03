@@ -63,6 +63,14 @@ async function loadSchemaMap(pathLike) {
   return parsed
 }
 
+function isAlreadyExistsError(err) {
+  if (!err) return false
+  if (err.code === 409) return true
+  if (typeof err.type === 'string' && err.type.includes('already_exists')) return true
+  if (typeof err.message === 'string' && err.message.toLowerCase().includes('already exists')) return true
+  return false
+}
+
 async function getResolvedDatabaseId(databases, preferredId) {
   if (preferredId) {
     try {
@@ -82,6 +90,11 @@ async function getResolvedDatabaseId(databases, preferredId) {
   return dbList.databases[0].$id
 }
 
+function parseIntSafe(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
 function selectedCollections(schemaMap) {
   const tableFilterRaw = getEnv('MIGRATION_TABLES', '')
   const tableFilter = new Set(
@@ -97,7 +110,7 @@ function selectedCollections(schemaMap) {
   })
 }
 
-async function waitForAttribute(databases, databaseId, collectionId, key, timeoutMs = 180000) {
+async function waitForAttribute(databases, databaseId, collectionId, key, timeoutMs = parseIntSafe(getEnv('APPWRITE_SCHEMA_WAIT_MS', '180000'), 180000)) {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
     const attribute = await databases.getAttribute({ databaseId, collectionId, key })
@@ -168,6 +181,8 @@ async function main() {
 
   let created = 0
   let skipped = 0
+  let pending = 0
+  const skipWait = ['1', 'true', 'yes', 'on'].includes(String(getEnv('APPWRITE_SCHEMA_SKIP_WAIT', '0')).toLowerCase())
 
   for (const item of selectedCollections(schemaMap)) {
     const collectionId = item.collectionId
@@ -185,11 +200,29 @@ async function main() {
         continue
       }
 
-      await createAttribute(databases, databaseId, collectionId, spec)
-      await waitForAttribute(databases, databaseId, collectionId, spec.key)
-      existingKeys.add(spec.key)
-      created += 1
-      console.log(`[attr] ${collectionId}.${spec.key} (${spec.type || 'string'})`)
+      try {
+        await createAttribute(databases, databaseId, collectionId, spec)
+        if (!skipWait) {
+          await waitForAttribute(databases, databaseId, collectionId, spec.key)
+        }
+        existingKeys.add(spec.key)
+        created += 1
+        console.log(`[attr] ${collectionId}.${spec.key} (${spec.type || 'string'})`)
+      } catch (err) {
+        if (isAlreadyExistsError(err)) {
+          skipped += 1
+          existingKeys.add(spec.key)
+          console.log(`[skip] ${collectionId}.${spec.key} already exists`)
+          continue
+        }
+        if (!skipWait && String(err?.message || '').toLowerCase().includes('timed out waiting for attribute')) {
+          existingKeys.add(spec.key)
+          pending += 1
+          console.log(`[pending] ${collectionId}.${spec.key} created but still processing`)
+          continue
+        }
+        throw err
+      }
     }
   }
 
@@ -197,6 +230,7 @@ async function main() {
   console.log(`Database: ${databaseId}`)
   console.log(`Created query attrs: ${created}`)
   console.log(`Skipped query attrs: ${skipped}`)
+  console.log(`Pending query attrs: ${pending}`)
   if (loadedEnvFile) {
     console.log(`Loaded env from: ${loadedEnvFile}`)
   }
