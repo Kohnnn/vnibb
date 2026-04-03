@@ -71,6 +71,14 @@ function isAlreadyExistsError(err) {
   return false
 }
 
+function isAttributePendingError(err) {
+  if (!err) return false
+  if (typeof err.type === 'string' && err.type.includes('attribute_not_found')) return true
+  if (typeof err.message === 'string' && err.message.toLowerCase().includes('attribute could not be found')) return true
+  if (typeof err.message === 'string' && err.message.toLowerCase().includes('timed out waiting for attribute')) return true
+  return false
+}
+
 async function getResolvedDatabaseId(databases, preferredId) {
   if (preferredId) {
     try {
@@ -177,7 +185,7 @@ async function main() {
         try {
           await waitForAttribute(databases, databaseId, collectionId, attrKey)
         } catch (err) {
-          if (String(err?.message || '').toLowerCase().includes('timed out waiting for attribute')) {
+          if (isAttributePendingError(err)) {
             pending += 1
             console.log(`[pending] ${collectionId}.${indexSpec.key} waiting on ${attrKey}`)
             attributesReady = false

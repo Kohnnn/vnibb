@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-02T16:36:12.935247+00:00",
+  "generated_at": "2026-04-03T00:44:06.274890+00:00",
   "stages": [
     "company_news"
   ],
@@ -18,7 +18,7 @@
   },
   "checkpoint_file": "scripts\\v34_backfill_fundamentals_checkpoint.json",
   "processed_batches": 8,
-  "elapsed_seconds": 103.81,
+  "elapsed_seconds": 105.58,
   "stop_reason": "completed",
   "max_runtime_minutes": 20.0,
   "max_batches": null,

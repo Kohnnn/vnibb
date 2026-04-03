@@ -62,6 +62,14 @@ async function loadSchemaMap(pathLike) {
   return parsed
 }
 
+function isAlreadyExistsError(err) {
+  if (!err) return false
+  if (err.code === 409) return true
+  if (typeof err.type === 'string' && err.type.includes('already_exists')) return true
+  if (typeof err.message === 'string' && err.message.toLowerCase().includes('already exists')) return true
+  return false
+}
+
 async function resolveAppwriteDatabaseId(databases, preferredId) {
   if (preferredId) {
     try {
@@ -141,16 +149,24 @@ async function main() {
       console.log(`[delete] ${collectionId}`)
     }
 
-    await databases.createCollection({
-      databaseId,
-      collectionId,
-      name: collectionName,
-      permissions: buildCollectionPermissions(permissionsMode),
-      documentSecurity: useDocumentSecurity(permissionsMode),
-      enabled: true,
-    })
+    try {
+      await databases.createCollection({
+        databaseId,
+        collectionId,
+        name: collectionName,
+        permissions: buildCollectionPermissions(permissionsMode),
+        documentSecurity: useDocumentSecurity(permissionsMode),
+        enabled: true,
+      })
 
-    console.log(`[recreate] ${collectionId}`)
+      console.log(`[recreate] ${collectionId}`)
+    } catch (err) {
+      if (isAlreadyExistsError(err)) {
+        console.log(`[skip] ${collectionId} already exists (race)`)
+        continue
+      }
+      throw err
+    }
   }
 
   console.log('\nCollection reset complete')

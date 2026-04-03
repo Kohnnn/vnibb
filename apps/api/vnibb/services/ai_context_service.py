@@ -11,16 +11,29 @@ from vnibb.core.appwrite_client import (
     get_appwrite_stock,
     get_appwrite_stock_prices,
     list_appwrite_documents,
+    list_appwrite_documents_paginated,
 )
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
-from vnibb.models.stock import Stock, StockPrice
-from vnibb.models.trading import FinancialRatio
+from vnibb.models.market import MarketSector, SectorPerformance
+from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
+from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 
 logger = logging.getLogger(__name__)
 
 SYMBOL_RE = re.compile(r"\b[A-Z]{2,4}\b")
+SYMBOL_STOPWORDS = {
+    "AND",
+    "ARE",
+    "FOR",
+    "NOT",
+    "THE",
+    "THIS",
+    "THAT",
+    "WITH",
+}
 SENSITIVE_KEYS = {
     "api_key",
     "apikey",
@@ -35,6 +48,11 @@ MAX_DICT_ITEMS = 20
 MAX_LIST_ITEMS = 20
 MAX_STRING_LENGTH = 500
 PRICE_WINDOW = 20
+FLOW_WINDOW = 20
+NEWS_LIMIT = 4
+EVENT_LIMIT = 4
+SECTOR_LIMIT = 4
+MARKET_INDEX_CODES = ("VNINDEX", "VN30", "HNX", "UPCOM")
 
 
 def _query_equal(attribute: str, values: Sequence[Any]) -> dict[str, Any]:
@@ -67,6 +85,10 @@ def _iso_value(value: Any) -> str | None:
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return str(value)
+
+
+def _compact_dict(data: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in data.items() if value not in (None, "", [], {})}
 
 
 def _truncate_text(value: str) -> str:
@@ -113,7 +135,7 @@ def _dedupe_symbols(symbols: Sequence[str]) -> list[str]:
     seen: set[str] = set()
     for symbol in symbols:
         value = str(symbol or "").strip().upper()
-        if not value or value in seen:
+        if not value or value in seen or value in SYMBOL_STOPWORDS:
             continue
         seen.add(value)
         normalized.append(value)
@@ -181,6 +203,266 @@ def _build_price_context(price_rows: list[dict[str, Any]]) -> dict[str, Any] | N
     }
 
 
+def _build_news_context(news_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    articles: list[dict[str, Any]] = []
+    sentiment_counts: dict[str, int] = {}
+
+    for row in news_rows:
+        title = _truncate_text(str(row.get("title") or ""))
+        if not title:
+            continue
+
+        sentiment = str(row.get("sentiment") or "").strip().lower()
+        if sentiment:
+            sentiment_counts[sentiment] = sentiment_counts.get(sentiment, 0) + 1
+
+        article = _compact_dict(
+            {
+                "title": title,
+                "summary": _truncate_text(str(row.get("summary") or "")) or None,
+                "source": row.get("source"),
+                "published_date": _iso_value(row.get("published_date") or row.get("published_at")),
+                "sentiment": sentiment or None,
+                "url": row.get("url"),
+                "price_change_ratio": _coerce_number(row.get("price_change_ratio")),
+            }
+        )
+        articles.append(article)
+
+    if not articles:
+        return None
+
+    return {
+        "latest_articles": articles[:NEWS_LIMIT],
+        "sentiment_counts": sentiment_counts or None,
+    }
+
+
+def _build_indices_context(index_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest_by_code: dict[str, dict[str, Any]] = {}
+    for row in index_rows:
+        code = str(row.get("index_code") or "").strip().upper()
+        if not code or code in latest_by_code:
+            continue
+        latest_by_code[code] = _compact_dict(
+            {
+                "index_code": code,
+                "time": _iso_value(row.get("time")),
+                "close": _coerce_number(row.get("close")),
+                "change": _coerce_number(row.get("change")),
+                "change_pct": _coerce_number(row.get("change_pct")),
+                "volume": _coerce_number(row.get("volume")),
+            }
+        )
+
+    return [latest_by_code[code] for code in MARKET_INDEX_CODES if code in latest_by_code]
+
+
+def _build_sector_context(
+    sector_rows: list[dict[str, Any]],
+    sector_names: dict[str, str],
+) -> dict[str, Any] | None:
+    if not sector_rows:
+        return None
+
+    normalized_rows: list[dict[str, Any]] = []
+    for row in sector_rows:
+        code = str(row.get("sector_code") or "").strip().upper()
+        if not code:
+            continue
+        normalized_rows.append(
+            _compact_dict(
+                {
+                    "sector_code": code,
+                    "sector_name": sector_names.get(code),
+                    "trade_date": _iso_value(row.get("trade_date")),
+                    "change_pct": _coerce_number(row.get("change_pct")),
+                    "advance_count": row.get("advance_count"),
+                    "decline_count": row.get("decline_count"),
+                    "unchanged_count": row.get("unchanged_count"),
+                    "top_gainer_symbol": row.get("top_gainer_symbol"),
+                    "top_gainer_change": _coerce_number(row.get("top_gainer_change")),
+                    "top_loser_symbol": row.get("top_loser_symbol"),
+                    "top_loser_change": _coerce_number(row.get("top_loser_change")),
+                }
+            )
+        )
+
+    if not normalized_rows:
+        return None
+
+    ordered = sorted(normalized_rows, key=lambda item: item.get("change_pct") or 0, reverse=True)
+    breadth = {
+        "advance_count": sum(int(item.get("advance_count") or 0) for item in normalized_rows),
+        "decline_count": sum(int(item.get("decline_count") or 0) for item in normalized_rows),
+        "unchanged_count": sum(int(item.get("unchanged_count") or 0) for item in normalized_rows),
+        "sector_count": len(normalized_rows),
+    }
+
+    return {
+        "latest_trade_date": ordered[0].get("trade_date"),
+        "breadth": breadth,
+        "sector_leaders": ordered[:SECTOR_LIMIT],
+        "sector_laggards": list(reversed(ordered[-SECTOR_LIMIT:])),
+    }
+
+
+def _sum_numeric(rows: Sequence[dict[str, Any]], field: str) -> float | None:
+    values = [_coerce_number(row.get(field)) for row in rows]
+    numeric_values = [value for value in values if value is not None]
+    if not numeric_values:
+        return None
+    return round(sum(numeric_values), 2)
+
+
+def _build_flow_context(
+    rows: list[dict[str, Any]],
+    *,
+    extra_fields: Sequence[str] = (),
+) -> dict[str, Any] | None:
+    normalized_rows: list[dict[str, Any]] = []
+    for row in rows:
+        trade_date = str(row.get("trade_date") or row.get("time") or "")[:10]
+        if not trade_date:
+            continue
+
+        normalized = {
+            "trade_date": trade_date,
+            "buy_value": _coerce_number(row.get("buy_value")),
+            "sell_value": _coerce_number(row.get("sell_value")),
+            "net_value": _coerce_number(row.get("net_value")),
+            "buy_volume": _coerce_number(row.get("buy_volume")),
+            "sell_volume": _coerce_number(row.get("sell_volume")),
+            "net_volume": _coerce_number(row.get("net_volume")),
+        }
+        for field in extra_fields:
+            value = row.get(field)
+            normalized[field] = _coerce_number(value) if value not in (None, "") else None
+        normalized_rows.append(_compact_dict(normalized))
+
+    if not normalized_rows:
+        return None
+
+    ordered = sorted(normalized_rows, key=lambda item: item["trade_date"])
+    recent_window = ordered[-FLOW_WINDOW:]
+    recent_sessions = recent_window[-5:]
+
+    return {
+        "latest_session": ordered[-1],
+        "summary": _compact_dict(
+            {
+                "net_value_5d": _sum_numeric(recent_window[-5:], "net_value"),
+                "net_value_20d": _sum_numeric(recent_window, "net_value"),
+                "net_volume_5d": _sum_numeric(recent_window[-5:], "net_volume"),
+                "net_volume_20d": _sum_numeric(recent_window, "net_volume"),
+                "positive_sessions_20d": sum(
+                    1 for row in recent_window if (row.get("net_value") or 0) > 0
+                ),
+                "negative_sessions_20d": sum(
+                    1 for row in recent_window if (row.get("net_value") or 0) < 0
+                ),
+            }
+        ),
+        "recent_sessions": recent_sessions,
+    }
+
+
+def _build_insider_context(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    deals: list[dict[str, Any]] = []
+    buy_count = 0
+    sell_count = 0
+
+    for row in rows:
+        action = str(row.get("deal_action") or "").strip().lower()
+        if any(keyword in action for keyword in ("mua", "buy")):
+            buy_count += 1
+        if any(keyword in action for keyword in ("ban", "bán", "sell")):
+            sell_count += 1
+
+        deals.append(
+            _compact_dict(
+                {
+                    "announce_date": _iso_value(row.get("announce_date")),
+                    "deal_action": str(row.get("deal_action") or "").strip() or None,
+                    "deal_quantity": _coerce_number(row.get("deal_quantity")),
+                    "deal_price": _coerce_number(row.get("deal_price")),
+                    "deal_value": _coerce_number(row.get("deal_value")),
+                    "deal_ratio": _coerce_number(row.get("deal_ratio")),
+                    "insider_name": row.get("insider_name"),
+                    "insider_position": row.get("insider_position"),
+                }
+            )
+        )
+
+    if not deals:
+        return None
+
+    return {
+        "recent_deals": deals[:EVENT_LIMIT],
+        "summary": _compact_dict(
+            {
+                "buy_count": buy_count,
+                "sell_count": sell_count,
+                "total_disclosed_value": _sum_numeric(deals, "deal_value"),
+            }
+        ),
+    }
+
+
+def _build_company_events_context(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    events = [
+        _compact_dict(
+            {
+                "event_type": row.get("event_type"),
+                "event_date": _iso_value(row.get("event_date")),
+                "ex_date": _iso_value(row.get("ex_date")),
+                "record_date": _iso_value(row.get("record_date")),
+                "payment_date": _iso_value(row.get("payment_date")),
+                "value": _coerce_number(row.get("value")),
+                "description": _truncate_text(str(row.get("description") or "")) or None,
+            }
+        )
+        for row in rows
+    ]
+    events = [event for event in events if event]
+    if not events:
+        return None
+
+    return {"recent_events": events[:EVENT_LIMIT]}
+
+
+def _build_dividends_context(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    dividends = [
+        _compact_dict(
+            {
+                "exercise_date": _iso_value(row.get("exercise_date")),
+                "record_date": _iso_value(row.get("record_date")),
+                "payment_date": _iso_value(row.get("payment_date")),
+                "cash_year": row.get("cash_year"),
+                "dividend_rate": _coerce_number(row.get("dividend_rate")),
+                "dividend_value": _coerce_number(row.get("dividend_value")),
+                "issue_method": row.get("issue_method"),
+            }
+        )
+        for row in rows
+    ]
+    dividends = [dividend for dividend in dividends if dividend]
+    if not dividends:
+        return None
+
+    return {
+        "recent_dividends": dividends[:EVENT_LIMIT],
+        "summary": _compact_dict(
+            {
+                "cash_dividend_total_recent": _sum_numeric(
+                    dividends[:EVENT_LIMIT], "dividend_value"
+                ),
+                "latest_issue_method": dividends[0].get("issue_method"),
+            }
+        ),
+    }
+
+
 class AIContextService:
     async def build_runtime_context(
         self,
@@ -202,6 +484,9 @@ class AIContextService:
             requested_symbols.insert(0, context_symbol)
         symbols = _dedupe_symbols(requested_symbols)[:3]
 
+        broad_market_context = await self._build_market_snapshot(
+            prefer_appwrite_data=prefer_appwrite_data
+        )
         market_context = []
         for symbol in symbols:
             snapshot = await self._build_symbol_snapshot(
@@ -218,6 +503,7 @@ class AIContextService:
                 "market_data": "Server context is Appwrite-first and falls back to Postgres only when needed.",
             },
             "client_context": sanitized_client_context,
+            "broad_market_context": broad_market_context,
             "market_context": market_context,
         }
 
@@ -250,11 +536,34 @@ class AIContextService:
             "income_statement",
             "balance_sheet",
             "cash_flow",
+            "recent_news",
+            "foreign_trading",
+            "order_flow",
+            "insider_deals",
+            "company_events",
+            "dividends",
         ):
             if not merged.get(key):
                 merged[key] = fallback_snapshot.get(key)
         merged["source"] = primary_snapshot.get("source") or fallback_snapshot.get("source")
         return merged
+
+    async def _build_market_snapshot(self, *, prefer_appwrite_data: bool) -> dict[str, Any] | None:
+        primary_snapshot = None
+        if prefer_appwrite_data and settings.is_appwrite_configured:
+            primary_snapshot = await self._build_appwrite_market_snapshot()
+
+        fallback_snapshot = await self._build_postgres_market_snapshot()
+
+        if primary_snapshot and fallback_snapshot:
+            merged = dict(primary_snapshot)
+            for key in ("indices", "sectors"):
+                if not merged.get(key):
+                    merged[key] = fallback_snapshot.get(key)
+            merged["source"] = primary_snapshot.get("source") or fallback_snapshot.get("source")
+            return merged
+
+        return primary_snapshot or fallback_snapshot
 
     async def _build_appwrite_snapshot(self, symbol: str) -> dict[str, Any] | None:
         try:
@@ -265,12 +574,33 @@ class AIContextService:
                 income_doc,
                 balance_doc,
                 cash_doc,
+                news_rows,
+                foreign_trading_rows,
+                order_flow_rows,
+                insider_deal_rows,
+                company_event_rows,
+                dividend_rows,
             ) = await self._load_appwrite_documents(symbol)
         except Exception as exc:
             logger.warning("Appwrite AI context load failed for %s: %s", symbol, exc)
             return None
 
-        if not any([stock_doc, price_rows, ratio_doc, income_doc, balance_doc, cash_doc]):
+        if not any(
+            [
+                stock_doc,
+                price_rows,
+                ratio_doc,
+                income_doc,
+                balance_doc,
+                cash_doc,
+                news_rows,
+                foreign_trading_rows,
+                order_flow_rows,
+                insider_deal_rows,
+                company_event_rows,
+                dividend_rows,
+            ]
+        ):
             return None
 
         return {
@@ -355,6 +685,23 @@ class AIContextService:
                     "debt_repayment",
                 ),
             ),
+            "recent_news": _build_news_context(news_rows),
+            "foreign_trading": _build_flow_context(
+                foreign_trading_rows,
+                extra_fields=("room_available", "room_pct"),
+            ),
+            "order_flow": _build_flow_context(
+                order_flow_rows,
+                extra_fields=(
+                    "foreign_net_volume",
+                    "proprietary_net_volume",
+                    "big_order_count",
+                    "block_trade_count",
+                ),
+            ),
+            "insider_deals": _build_insider_context(insider_deal_rows),
+            "company_events": _build_company_events_context(company_event_rows),
+            "dividends": _build_dividends_context(dividend_rows),
         }
 
     async def _load_appwrite_documents(
@@ -367,6 +714,12 @@ class AIContextService:
         dict[str, Any] | None,
         dict[str, Any] | None,
         dict[str, Any] | None,
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
     ]:
         stock_doc = await get_appwrite_stock(symbol)
         price_rows = await get_appwrite_stock_prices(symbol, limit=PRICE_WINDOW, descending=True)
@@ -374,7 +727,36 @@ class AIContextService:
         income_doc = await self._get_latest_appwrite_symbol_document("income_statements", symbol)
         balance_doc = await self._get_latest_appwrite_symbol_document("balance_sheets", symbol)
         cash_doc = await self._get_latest_appwrite_symbol_document("cash_flows", symbol)
-        return stock_doc, price_rows, ratio_doc, income_doc, balance_doc, cash_doc
+        news_rows = await self._get_latest_appwrite_news(symbol)
+        foreign_trading_rows = await self._get_latest_appwrite_symbol_rows(
+            "foreign_trading", symbol, order_attribute="trade_date", limit=FLOW_WINDOW
+        )
+        order_flow_rows = await self._get_latest_appwrite_symbol_rows(
+            "order_flow_daily", symbol, order_attribute="trade_date", limit=FLOW_WINDOW
+        )
+        insider_deal_rows = await self._get_latest_appwrite_symbol_rows(
+            "insider_deals", symbol, order_attribute="announce_date", limit=EVENT_LIMIT
+        )
+        company_event_rows = await self._get_latest_appwrite_symbol_rows(
+            "company_events", symbol, order_attribute="event_date", limit=EVENT_LIMIT
+        )
+        dividend_rows = await self._get_latest_appwrite_symbol_rows(
+            "dividends", symbol, order_attribute="exercise_date", limit=EVENT_LIMIT
+        )
+        return (
+            stock_doc,
+            price_rows,
+            ratio_doc,
+            income_doc,
+            balance_doc,
+            cash_doc,
+            news_rows,
+            foreign_trading_rows,
+            order_flow_rows,
+            insider_deal_rows,
+            company_event_rows,
+            dividend_rows,
+        )
 
     async def _get_latest_appwrite_symbol_document(
         self,
@@ -391,6 +773,93 @@ class AIContextService:
             ],
         )
         return docs[0] if docs else None
+
+    async def _get_latest_appwrite_news(self, symbol: str) -> list[dict[str, Any]]:
+        return await list_appwrite_documents(
+            "company_news",
+            queries=[
+                _query_equal("symbol", [symbol.upper()]),
+                _query_order("published_date", descending=True),
+                _query_limit(NEWS_LIMIT),
+            ],
+        )
+
+    async def _get_latest_appwrite_symbol_rows(
+        self,
+        collection_id: str,
+        symbol: str,
+        *,
+        order_attribute: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        return await list_appwrite_documents(
+            collection_id,
+            queries=[
+                _query_equal("symbol", [symbol.upper()]),
+                _query_order(order_attribute, descending=True),
+                _query_limit(limit),
+            ],
+        )
+
+    async def _build_appwrite_market_snapshot(self) -> dict[str, Any] | None:
+        try:
+            index_rows = []
+            for index_code in MARKET_INDEX_CODES:
+                rows = await list_appwrite_documents(
+                    "stock_indices",
+                    queries=[
+                        _query_equal("index_code", [index_code]),
+                        _query_order("time", descending=True),
+                        _query_limit(1),
+                    ],
+                )
+                if rows:
+                    index_rows.append(rows[0])
+
+            latest_sector_rows = await list_appwrite_documents(
+                "sector_performance",
+                queries=[_query_order("trade_date", descending=True), _query_limit(1)],
+            )
+            sector_rows: list[dict[str, Any]] = []
+            sector_names: dict[str, str] = {}
+            if latest_sector_rows:
+                latest_trade_date = latest_sector_rows[0].get("trade_date")
+                if latest_trade_date:
+                    sector_rows = await list_appwrite_documents_paginated(
+                        "sector_performance",
+                        queries=[_query_equal("trade_date", [latest_trade_date])],
+                        page_size=100,
+                        max_documents=100,
+                    )
+
+            if sector_rows:
+                sector_docs = await list_appwrite_documents_paginated(
+                    "market_sectors",
+                    queries=[_query_limit(100)],
+                    page_size=100,
+                    max_documents=100,
+                )
+                sector_names = {
+                    str(doc.get("sector_code") or "").strip().upper(): str(
+                        doc.get("sector_name") or ""
+                    ).strip()
+                    for doc in sector_docs
+                    if str(doc.get("sector_code") or "").strip()
+                }
+
+            indices_context = _build_indices_context(index_rows)
+            sectors_context = _build_sector_context(sector_rows, sector_names)
+            if not indices_context and not sectors_context:
+                return None
+
+            return {
+                "source": "appwrite",
+                "indices": indices_context,
+                "sectors": sectors_context,
+            }
+        except Exception as exc:
+            logger.warning("Appwrite market AI context load failed: %s", exc)
+            return None
 
     async def _build_postgres_snapshot(self, symbol: str) -> dict[str, Any] | None:
         async with async_session_maker() as session:
@@ -457,8 +926,95 @@ class AIContextService:
                     .limit(1)
                 )
             ).scalar_one_or_none()
+            news_rows = (
+                (
+                    await session.execute(
+                        select(CompanyNews)
+                        .where(CompanyNews.symbol == symbol)
+                        .order_by(desc(CompanyNews.published_date), desc(CompanyNews.created_at))
+                        .limit(NEWS_LIMIT)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            foreign_trading_rows = (
+                (
+                    await session.execute(
+                        select(ForeignTrading)
+                        .where(ForeignTrading.symbol == symbol)
+                        .order_by(desc(ForeignTrading.trade_date), desc(ForeignTrading.updated_at))
+                        .limit(FLOW_WINDOW)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            order_flow_rows = (
+                (
+                    await session.execute(
+                        select(OrderFlowDaily)
+                        .where(OrderFlowDaily.symbol == symbol)
+                        .order_by(desc(OrderFlowDaily.trade_date), desc(OrderFlowDaily.updated_at))
+                        .limit(FLOW_WINDOW)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            insider_deal_rows = (
+                (
+                    await session.execute(
+                        select(InsiderDeal)
+                        .where(InsiderDeal.symbol == symbol)
+                        .order_by(desc(InsiderDeal.announce_date), desc(InsiderDeal.created_at))
+                        .limit(EVENT_LIMIT)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            company_event_rows = (
+                (
+                    await session.execute(
+                        select(CompanyEvent)
+                        .where(CompanyEvent.symbol == symbol)
+                        .order_by(desc(CompanyEvent.event_date), desc(CompanyEvent.updated_at))
+                        .limit(EVENT_LIMIT)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            dividend_rows = (
+                (
+                    await session.execute(
+                        select(Dividend)
+                        .where(Dividend.symbol == symbol)
+                        .order_by(desc(Dividend.exercise_date), desc(Dividend.cash_year))
+                        .limit(EVENT_LIMIT)
+                    )
+                )
+                .scalars()
+                .all()
+            )
 
-        if not any([stock_row, price_rows, ratio_row, income_row, balance_row, cash_row]):
+        if not any(
+            [
+                stock_row,
+                price_rows,
+                ratio_row,
+                income_row,
+                balance_row,
+                cash_row,
+                news_rows,
+                foreign_trading_rows,
+                order_flow_rows,
+                insider_deal_rows,
+                company_event_rows,
+                dividend_rows,
+            ]
+        ):
             return None
 
         price_context = _build_price_context(
@@ -549,6 +1105,188 @@ class AIContextService:
             }
             if cash_row
             else None,
+            "recent_news": _build_news_context(
+                [
+                    {
+                        "title": row.title,
+                        "summary": row.summary,
+                        "source": row.source,
+                        "published_date": row.published_date,
+                        "url": row.url,
+                        "price_change_ratio": row.price_change_ratio,
+                    }
+                    for row in news_rows
+                ]
+            ),
+            "foreign_trading": _build_flow_context(
+                [
+                    {
+                        "trade_date": row.trade_date,
+                        "buy_value": row.buy_value,
+                        "sell_value": row.sell_value,
+                        "net_value": row.net_value,
+                        "buy_volume": row.buy_volume,
+                        "sell_volume": row.sell_volume,
+                        "net_volume": row.net_volume,
+                        "room_available": row.room_available,
+                        "room_pct": row.room_pct,
+                    }
+                    for row in foreign_trading_rows
+                ],
+                extra_fields=("room_available", "room_pct"),
+            ),
+            "order_flow": _build_flow_context(
+                [
+                    {
+                        "trade_date": row.trade_date,
+                        "buy_value": row.buy_value,
+                        "sell_value": row.sell_value,
+                        "net_value": row.net_value,
+                        "buy_volume": row.buy_volume,
+                        "sell_volume": row.sell_volume,
+                        "net_volume": row.net_volume,
+                        "foreign_net_volume": row.foreign_net_volume,
+                        "proprietary_net_volume": row.proprietary_net_volume,
+                        "big_order_count": row.big_order_count,
+                        "block_trade_count": row.block_trade_count,
+                    }
+                    for row in order_flow_rows
+                ],
+                extra_fields=(
+                    "foreign_net_volume",
+                    "proprietary_net_volume",
+                    "big_order_count",
+                    "block_trade_count",
+                ),
+            ),
+            "insider_deals": _build_insider_context(
+                [
+                    {
+                        "announce_date": row.announce_date,
+                        "deal_action": row.deal_action,
+                        "deal_quantity": row.deal_quantity,
+                        "deal_price": row.deal_price,
+                        "deal_value": row.deal_value,
+                        "deal_ratio": row.deal_ratio,
+                        "insider_name": row.insider_name,
+                        "insider_position": row.insider_position,
+                    }
+                    for row in insider_deal_rows
+                ]
+            ),
+            "company_events": _build_company_events_context(
+                [
+                    {
+                        "event_type": row.event_type,
+                        "event_date": row.event_date,
+                        "ex_date": row.ex_date,
+                        "record_date": row.record_date,
+                        "payment_date": row.payment_date,
+                        "value": row.value,
+                        "description": row.description,
+                    }
+                    for row in company_event_rows
+                ]
+            ),
+            "dividends": _build_dividends_context(
+                [
+                    {
+                        "exercise_date": row.exercise_date,
+                        "record_date": row.record_date,
+                        "payment_date": row.payment_date,
+                        "cash_year": row.cash_year,
+                        "dividend_rate": row.dividend_rate,
+                        "dividend_value": row.dividend_value,
+                        "issue_method": row.issue_method,
+                    }
+                    for row in dividend_rows
+                ]
+            ),
+        }
+
+    async def _build_postgres_market_snapshot(self) -> dict[str, Any] | None:
+        async with async_session_maker() as session:
+            index_rows: list[StockIndex] = []
+            for index_code in MARKET_INDEX_CODES:
+                row = (
+                    await session.execute(
+                        select(StockIndex)
+                        .where(StockIndex.index_code == index_code)
+                        .order_by(desc(StockIndex.time), desc(StockIndex.created_at))
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if row:
+                    index_rows.append(row)
+
+            latest_trade_date = (
+                await session.execute(
+                    select(SectorPerformance.trade_date)
+                    .order_by(desc(SectorPerformance.trade_date))
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+
+            sector_rows: list[SectorPerformance] = []
+            sector_names: dict[str, str] = {}
+            if latest_trade_date is not None:
+                sector_rows = (
+                    (
+                        await session.execute(
+                            select(SectorPerformance).where(
+                                SectorPerformance.trade_date == latest_trade_date
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            if sector_rows:
+                sector_docs = (await session.execute(select(MarketSector))).scalars().all()
+                sector_names = {
+                    str(doc.sector_code or "").strip().upper(): str(doc.sector_name or "").strip()
+                    for doc in sector_docs
+                    if str(doc.sector_code or "").strip()
+                }
+
+        indices_context = _build_indices_context(
+            [
+                {
+                    "index_code": row.index_code,
+                    "time": row.time,
+                    "close": row.close,
+                    "change": row.change,
+                    "change_pct": row.change_pct,
+                    "volume": row.volume,
+                }
+                for row in index_rows
+            ]
+        )
+        sectors_context = _build_sector_context(
+            [
+                {
+                    "sector_code": row.sector_code,
+                    "trade_date": row.trade_date,
+                    "change_pct": row.change_pct,
+                    "advance_count": row.advance_count,
+                    "decline_count": row.decline_count,
+                    "unchanged_count": row.unchanged_count,
+                    "top_gainer_symbol": row.top_gainer_symbol,
+                    "top_gainer_change": row.top_gainer_change,
+                    "top_loser_symbol": row.top_loser_symbol,
+                    "top_loser_change": row.top_loser_change,
+                }
+                for row in sector_rows
+            ],
+            sector_names,
+        )
+        if not indices_context and not sectors_context:
+            return None
+
+        return {
+            "source": "postgres",
+            "indices": indices_context,
+            "sectors": sectors_context,
         }
 
 

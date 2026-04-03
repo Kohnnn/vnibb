@@ -3100,7 +3100,9 @@ class DataPipeline:
                 row = annual.get(year)
             return row
 
-        def _format_ratio_period(period_value: Any, fiscal_year: Any, fiscal_quarter: Any) -> str | None:
+        def _format_ratio_period(
+            period_value: Any, fiscal_year: Any, fiscal_quarter: Any
+        ) -> str | None:
             year_match = re.search(r"(20\d{2})", str(period_value or "").upper())
             year = int(year_match.group(1)) if year_match else None
             if fiscal_year is not None:
@@ -3130,8 +3132,9 @@ class DataPipeline:
             for model in (IncomeStatement, BalanceSheet, CashFlow):
                 source_rows = (
                     await session.execute(
-                        select(model.period, model.fiscal_year, model.fiscal_quarter)
-                        .where(model.symbol == symbol_value, model.period_type == normalized_period)
+                        select(model.period, model.fiscal_year, model.fiscal_quarter).where(
+                            model.symbol == symbol_value, model.period_type == normalized_period
+                        )
                     )
                 ).all()
                 for period_value, fiscal_year, fiscal_quarter in source_rows:
@@ -3162,7 +3165,9 @@ class DataPipeline:
                             FinancialRatio.period_type == normalized_period,
                         )
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             }
             created_count = 0
             for period_text, fiscal_year, fiscal_quarter in sorted(
@@ -3926,12 +3931,19 @@ class DataPipeline:
                             "published_date": published_dt,
                             "created_at": datetime.utcnow(),
                         }
-                        stmt = get_upsert_stmt(
-                            CompanyNews,
-                            ["symbol", "title", "published_date"],
-                            values,
+                        existing = await session.scalar(
+                            select(CompanyNews).where(
+                                CompanyNews.symbol == symbol,
+                                CompanyNews.title == values["title"],
+                                CompanyNews.published_date == published_dt,
+                            )
                         )
-                        await session.execute(stmt)
+                        if existing is None:
+                            session.add(CompanyNews(**values))
+                        else:
+                            existing.summary = values["summary"]
+                            existing.source = values["source"]
+                            existing.url = values["url"]
                         total += 1
                     await session.commit()
 
