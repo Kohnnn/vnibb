@@ -6,10 +6,16 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Sparkles, Loader2, X, Download, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { consumeCopilotStream, openCopilotChatStream } from '@/lib/api';
+import {
+    consumeCopilotStream,
+    openCopilotChatStream,
+    type CopilotReasoningStep,
+    type CopilotSourceRef,
+} from '@/lib/api';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { readStoredAISettings } from '@/lib/aiSettings';
+import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
 
 interface WidgetContext {
     widgetType: string;
@@ -21,7 +27,9 @@ interface Message {
     id: string;
     role: 'user' | 'assistant';
     content: string;
+    reasoning?: string;
     context?: WidgetContext;
+    sources?: CopilotSourceRef[];
     isStreaming?: boolean;
     timestamp: Date;
 }
@@ -46,6 +54,26 @@ const QUICK_PROMPTS: PromptTemplate[] = [
     { id: 'technical', label: '📈 Technical', template: 'Provide technical analysis outlook for {symbol}' },
     { id: 'news', label: '📰 News', template: 'Analyze recent news impact on {symbol}' },
 ];
+
+function appendSourcesForExport(message: Message): string {
+    if (!message.sources?.length) {
+        return message.content;
+    }
+
+    const sourceLines = message.sources.map((source) => {
+        const meta = [source.source, source.asOf ? `as of ${source.asOf}` : null]
+            .filter(Boolean)
+            .join(', ');
+        return `- [${source.id}] ${source.label || source.kind || 'Source'}${meta ? ` (${meta})` : ''}`;
+    });
+
+    return `${message.content}\n\n## Sources\n${sourceLines.join('\n')}`;
+}
+
+function appendReasoningStep(existing: string | undefined, step: CopilotReasoningStep): string {
+    const line = `[${step.eventType}] ${step.message}`;
+    return existing ? `${existing}\n${line}` : line;
+}
 
 export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopilotWidgetProps) {
     const [messages, setMessages] = useState<Message[]>([
@@ -127,10 +155,10 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                             : m
                     ));
                 },
-                onDone: () => {
+                onDone: (event) => {
                     setMessages(prev => prev.map(m =>
                         m.id === assistantMsgId
-                            ? { ...m, isStreaming: false }
+                            ? { ...m, isStreaming: false, sources: event.sources || [] }
                             : m
                     ));
                 },
@@ -197,7 +225,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
 
     const exportChat = () => {
         const chatText = messages
-            .map(m => `[${m.role.toUpperCase()}] ${m.content}`)
+            .map(m => `[${m.role.toUpperCase()}] ${appendSourcesForExport(m)}`)
             .join('\n\n---\n\n');
 
         const blob = new Blob([chatText], { type: 'text/markdown' });
@@ -279,6 +307,11 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                                 </button>
                             )}
                         </div>
+                        {message.role === 'assistant' && Boolean(message.sources?.length) && (
+                            <div className="mt-2 w-full max-w-[90%]">
+                                <CopilotEvidencePanel sources={message.sources || []} />
+                            </div>
+                        )}
                     </div>
                 ))}
 

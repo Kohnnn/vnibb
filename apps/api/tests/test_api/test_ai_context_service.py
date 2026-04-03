@@ -47,8 +47,25 @@ async def test_build_runtime_context_includes_broad_market_and_symbol_context(mo
         "source": "appwrite",
         "indices": [{"index_code": "VNINDEX", "change_pct": 0.8}],
         "sectors": {"breadth": {"advance_count": 140, "decline_count": 95}},
+        "available_source_ids": ["MKT-INDICES", "MKT-SECTORS"],
     }
     assert [item["symbol"] for item in context["market_context"]] == ["VCB", "VNM", "FPT"]
+    assert context["market_context"][0]["available_source_ids"] == ["VCB-PROFILE", "VCB-NEWS"]
+    assert [item["id"] for item in context["source_catalog"]] == [
+        "MKT-INDICES",
+        "MKT-SECTORS",
+        "VCB-PROFILE",
+        "VCB-NEWS",
+        "VNM-PROFILE",
+        "VNM-NEWS",
+        "FPT-PROFILE",
+        "FPT-NEWS",
+    ]
+    assert context["retrieval_policy"]["source_precedence"] == [
+        "appwrite",
+        "postgres",
+        "browser_context",
+    ]
     assert "api_key" not in context["client_context"]["widgetPayload"]
 
 

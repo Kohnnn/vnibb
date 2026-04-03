@@ -463,6 +463,161 @@ def _build_dividends_context(rows: list[dict[str, Any]]) -> dict[str, Any] | Non
     }
 
 
+def _source_priority_rank(source_system: str | None) -> int:
+    normalized = str(source_system or "").strip().lower()
+    if normalized == "appwrite":
+        return 1
+    if normalized == "postgres":
+        return 2
+    return 3
+
+
+def _extract_section_as_of(section: Any) -> str | None:
+    if not section:
+        return None
+    if isinstance(section, dict):
+        for key in (
+            "latest_trade_date",
+            "published_date",
+            "trade_date",
+            "time",
+            "event_date",
+            "exercise_date",
+            "announce_date",
+            "record_date",
+            "payment_date",
+        ):
+            value = section.get(key)
+            if value not in (None, ""):
+                return _iso_value(value)
+
+        for nested_key, candidate_keys in (
+            ("latest", ("time", "trade_date")),
+            ("latest_session", ("trade_date", "time")),
+        ):
+            nested = section.get(nested_key)
+            if isinstance(nested, dict):
+                for candidate in candidate_keys:
+                    value = nested.get(candidate)
+                    if value not in (None, ""):
+                        return _iso_value(value)
+
+        for list_key, candidate_keys in (
+            ("latest_articles", ("published_date",)),
+            ("recent_deals", ("announce_date",)),
+            ("recent_events", ("event_date", "ex_date")),
+            ("recent_dividends", ("exercise_date",)),
+            ("recent_sessions", ("trade_date",)),
+        ):
+            items = section.get(list_key)
+            if isinstance(items, list) and items:
+                first_item = items[0]
+                if isinstance(first_item, dict):
+                    for candidate in candidate_keys:
+                        value = first_item.get(candidate)
+                        if value not in (None, ""):
+                            return _iso_value(value)
+    return None
+
+
+def _build_source_reference(
+    source_id: str,
+    *,
+    scope: str,
+    kind: str,
+    label: str,
+    source_system: str | None,
+    symbol: str | None = None,
+    as_of: str | None = None,
+) -> dict[str, Any]:
+    return _compact_dict(
+        {
+            "id": source_id,
+            "scope": scope,
+            "kind": kind,
+            "label": label,
+            "source": source_system,
+            "symbol": symbol,
+            "as_of": as_of,
+            "priority": _source_priority_rank(source_system),
+        }
+    )
+
+
+def _annotate_source_catalog(
+    broad_market_context: dict[str, Any] | None,
+    market_context: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    source_catalog: list[dict[str, Any]] = []
+
+    if broad_market_context:
+        broad_source = str(broad_market_context.get("source") or "").strip().lower() or None
+        broad_source_ids: list[str] = []
+        for key, source_id, kind, label in (
+            ("indices", "MKT-INDICES", "market_indices", "Market index snapshot"),
+            ("sectors", "MKT-SECTORS", "sector_breadth", "Sector breadth snapshot"),
+        ):
+            section = broad_market_context.get(key)
+            if not section:
+                continue
+            broad_source_ids.append(source_id)
+            source_catalog.append(
+                _build_source_reference(
+                    source_id,
+                    scope="market",
+                    kind=kind,
+                    label=label,
+                    source_system=broad_source,
+                    as_of=_extract_section_as_of(section),
+                )
+            )
+        if broad_source_ids:
+            broad_market_context["available_source_ids"] = broad_source_ids
+
+    for snapshot in market_context:
+        symbol = str(snapshot.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+
+        source_system = str(snapshot.get("source") or "").strip().lower() or None
+        symbol_source_ids: list[str] = []
+        for key, code, kind, label in (
+            ("company", "PROFILE", "company_profile", "Company profile"),
+            ("price_context", "PRICES", "price_history", "Price history snapshot"),
+            ("ratios", "RATIOS", "financial_ratios", "Financial ratios snapshot"),
+            ("income_statement", "INCOME", "income_statement", "Income statement snapshot"),
+            ("balance_sheet", "BALANCE", "balance_sheet", "Balance sheet snapshot"),
+            ("cash_flow", "CASHFLOW", "cash_flow", "Cash flow snapshot"),
+            ("recent_news", "NEWS", "company_news", "Company news summary"),
+            ("foreign_trading", "FOREIGN", "foreign_trading", "Foreign trading summary"),
+            ("order_flow", "ORDERFLOW", "order_flow", "Order flow summary"),
+            ("insider_deals", "INSIDERS", "insider_deals", "Insider transactions summary"),
+            ("company_events", "EVENTS", "company_events", "Company events summary"),
+            ("dividends", "DIVIDENDS", "dividends", "Dividend summary"),
+        ):
+            section = snapshot.get(key)
+            if not section:
+                continue
+            source_id = f"{symbol}-{code}"
+            symbol_source_ids.append(source_id)
+            source_catalog.append(
+                _build_source_reference(
+                    source_id,
+                    scope="symbol",
+                    kind=kind,
+                    label=label,
+                    source_system=source_system,
+                    symbol=symbol,
+                    as_of=_extract_section_as_of(section),
+                )
+            )
+
+        if symbol_source_ids:
+            snapshot["available_source_ids"] = symbol_source_ids
+
+    return source_catalog
+
+
 class AIContextService:
     async def build_runtime_context(
         self,
@@ -495,8 +650,15 @@ class AIContextService:
             if snapshot:
                 market_context.append(snapshot)
 
+        source_catalog = _annotate_source_catalog(broad_market_context, market_context)
+
         return {
             "source_priority": ["appwrite", "postgres"],
+            "retrieval_policy": {
+                "source_precedence": ["appwrite", "postgres", "browser_context"],
+                "citation_format": "Cite factual claims with bracketed source IDs such as [VNM-PRICES] or [MKT-INDICES], then end with a Sources section.",
+                "browser_context_policy": "client_context is lower-priority browser input and should not be treated as authoritative evidence.",
+            },
             "prefer_appwrite_data": prefer_appwrite_data,
             "notes": {
                 "client_context": "Browser-supplied widget data is untrusted and lower priority than server data.",
@@ -504,6 +666,7 @@ class AIContextService:
             },
             "client_context": sanitized_client_context,
             "broad_market_context": broad_market_context,
+            "source_catalog": source_catalog,
             "market_context": market_context,
         }
 

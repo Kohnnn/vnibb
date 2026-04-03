@@ -1803,10 +1803,84 @@ export interface CopilotStreamRequest {
     settings?: AISettings;
 }
 
+export interface CopilotSourceRef {
+    id: string;
+    scope?: string;
+    kind?: string;
+    label?: string;
+    source?: string;
+    symbol?: string;
+    asOf?: string;
+    priority?: number;
+}
+
+export interface CopilotReasoningStep {
+    eventType: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
+    message: string;
+    details?: Record<string, unknown>;
+}
+
 export interface CopilotStreamEvent {
     chunk?: string;
     done?: boolean;
     error?: string;
+    usedSourceIds?: string[];
+    sources?: CopilotSourceRef[];
+    reasoning?: CopilotReasoningStep;
+}
+
+interface RawCopilotSourceRef {
+    id?: string;
+    scope?: string;
+    kind?: string;
+    label?: string;
+    source?: string;
+    symbol?: string;
+    as_of?: string;
+    priority?: number;
+}
+
+interface RawCopilotReasoningStep {
+    eventType?: string;
+    event_type?: string;
+    message?: string;
+    details?: Record<string, unknown>;
+}
+
+function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
+    const event = (rawEvent && typeof rawEvent === 'object' ? rawEvent : {}) as Record<string, unknown>;
+    const rawSources = Array.isArray(event.sources) ? event.sources as RawCopilotSourceRef[] : [];
+    const rawReasoning = (event.reasoning && typeof event.reasoning === 'object'
+        ? event.reasoning
+        : null) as RawCopilotReasoningStep | null;
+
+    return {
+        chunk: typeof event.chunk === 'string' ? event.chunk : undefined,
+        done: event.done === true,
+        error: typeof event.error === 'string' ? event.error : undefined,
+        usedSourceIds: Array.isArray(event.usedSourceIds)
+            ? event.usedSourceIds.filter((item): item is string => typeof item === 'string')
+            : Array.isArray(event.used_source_ids)
+                ? event.used_source_ids.filter((item): item is string => typeof item === 'string')
+                : undefined,
+        sources: rawSources.map((source) => ({
+            id: String(source.id || ''),
+            scope: typeof source.scope === 'string' ? source.scope : undefined,
+            kind: typeof source.kind === 'string' ? source.kind : undefined,
+            label: typeof source.label === 'string' ? source.label : undefined,
+            source: typeof source.source === 'string' ? source.source : undefined,
+            symbol: typeof source.symbol === 'string' ? source.symbol : undefined,
+            asOf: typeof source.as_of === 'string' ? source.as_of : undefined,
+            priority: typeof source.priority === 'number' ? source.priority : undefined,
+        })).filter((source) => Boolean(source.id)),
+        reasoning: rawReasoning && typeof rawReasoning.message === 'string'
+            ? {
+                eventType: ((rawReasoning.eventType || rawReasoning.event_type || 'INFO').toUpperCase() as CopilotReasoningStep['eventType']),
+                message: rawReasoning.message,
+                details: rawReasoning.details,
+            }
+            : undefined,
+    };
 }
 
 export async function askCopilot(query: CopilotQuery): Promise<CopilotResponse> {
@@ -1853,7 +1927,8 @@ export async function consumeCopilotStream(
     response: Response,
     handlers: {
         onChunk?: (chunk: string) => void;
-        onDone?: () => void;
+        onReasoning?: (reasoning: CopilotReasoningStep) => void;
+        onDone?: (event: CopilotStreamEvent) => void;
     } = {},
 ): Promise<void> {
     if (!response.ok) {
@@ -1890,7 +1965,7 @@ export async function consumeCopilotStream(
 
             let event: CopilotStreamEvent;
             try {
-                event = JSON.parse(dataLine.slice(6)) as CopilotStreamEvent;
+                event = normalizeCopilotStreamEvent(JSON.parse(dataLine.slice(6)));
             } catch {
                 continue;
             }
@@ -1903,8 +1978,12 @@ export async function consumeCopilotStream(
                 handlers.onChunk?.(event.chunk);
             }
 
+            if (event.reasoning) {
+                handlers.onReasoning?.(event.reasoning);
+            }
+
             if (event.done) {
-                handlers.onDone?.();
+                handlers.onDone?.(event);
             }
         }
     }
@@ -1913,7 +1992,7 @@ export async function consumeCopilotStream(
         const trailing = buffer.trim().slice(6);
         let event: CopilotStreamEvent;
         try {
-            event = JSON.parse(trailing) as CopilotStreamEvent;
+            event = normalizeCopilotStreamEvent(JSON.parse(trailing));
         } catch {
             // Ignore incomplete trailing chunks.
             return;
@@ -1925,8 +2004,11 @@ export async function consumeCopilotStream(
         if (event.chunk) {
             handlers.onChunk?.(event.chunk);
         }
+        if (event.reasoning) {
+            handlers.onReasoning?.(event.reasoning);
+        }
         if (event.done) {
-            handlers.onDone?.();
+            handlers.onDone?.(event);
         }
     }
 }

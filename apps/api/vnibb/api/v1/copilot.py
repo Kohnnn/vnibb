@@ -101,6 +101,7 @@ async def chat_stream(request: ChatStreamRequest):
             request_settings = (
                 request.settings.model_dump(exclude_none=True) if request.settings else {}
             )
+            yield f"data: {json.dumps({'reasoning': {'eventType': 'INFO', 'message': 'Building Appwrite-first runtime context'}})}\n\n"
 
             context_dict = {}
             if request.context:
@@ -123,17 +124,15 @@ async def chat_stream(request: ChatStreamRequest):
                 client_context=context_dict,
                 prefer_appwrite_data=bool(request_settings.get("preferAppwriteData", True)),
             )
+            yield f"data: {json.dumps({'reasoning': {'eventType': 'SUCCESS', 'message': 'Runtime context ready', 'details': {'symbolCount': len(runtime_context.get('market_context') or []), 'sourceCount': len(runtime_context.get('source_catalog') or [])}}})}\n\n"
 
             # Stream from LLM
-            async for chunk in llm_service.generate_response_stream(
+            async for event in llm_service.generate_response_stream_events(
                 messages,
                 runtime_context,
                 request_settings=request_settings,
             ):
-                if chunk:
-                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-
-            yield f"data: {json.dumps({'done': True})}\n\n"
+                yield f"data: {json.dumps(event)}\n\n"
 
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
