@@ -130,6 +130,12 @@ Dashboard persistence notes:
 - Widget-local state that used to live in separate browser keys is being consolidated into widget config so it can follow normal dashboard persistence and migration paths.
 - This now covers widget-owned state such as notes, watchlists, price alerts, peer-comparison saved sets, and research-browser saved sources.
 - Legacy widget aliases are normalized on load before dashboards are re-saved. Current canonical widget IDs include `ticker_profile`, `unified_financials`, `major_shareholders`, and `database_inspector`.
+- Legacy layout caps are also normalized on load, removing stale `maxW`/`maxH` values that used to block manual widget resizing.
+
+Copilot notes:
+- The VniAgent prompt library is now expected to be opened from within the copilot sidebar. Global prompt actions route into the sidebar instead of a disconnected standalone modal.
+- App-default copilot mode normalizes unsupported legacy provider values back to `openrouter` so stale runtime config does not break AI requests.
+- Copilot no longer depends on a browser-minted Appwrite JWT for the streaming chat route, which avoids noisy Appwrite `/account/jwts` CORS failures on deployed web origins.
 
 ## Request/Response Examples
 
