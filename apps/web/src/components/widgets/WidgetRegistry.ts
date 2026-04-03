@@ -94,6 +94,11 @@ import { SmartMoneyWidget } from './SmartMoneyWidget';
 import { RelativeRotationWidget } from './RelativeRotationWidget';
 import { RiskDashboardWidget } from './RiskDashboardWidget';
 import { QuantSummaryWidget } from './QuantSummaryWidget';
+import {
+    tradingViewWidgetDefaultLayouts,
+    tradingViewWidgetDescriptions,
+    tradingViewWidgetNames,
+} from '@/lib/tradingViewWidgets';
 import type { ComponentType } from 'react';
 import dynamic from 'next/dynamic';
 
@@ -108,6 +113,16 @@ export interface WidgetProps {
     widgetGroup?: WidgetGroupId;
 }
 
+function createTradingViewDynamicWidget(exportName: string): ComponentType<WidgetProps> {
+    return dynamic(
+        () => import('./TradingViewNativeWidgets').then((module) => module[exportName as keyof typeof module] as any),
+        {
+            ssr: false,
+            loading: () => null,
+        }
+    ) as ComponentType<WidgetProps>;
+}
+
 const PriceChartWidget = dynamic(
     () => import('./PriceChartWidget').then((m) => m.PriceChartWidget as any),
     {
@@ -116,29 +131,31 @@ const PriceChartWidget = dynamic(
     }
 ) as ComponentType<WidgetProps>;
 
-const TradingViewChartWidget = dynamic(
-    () => import('./TradingViewChartWidget').then((m) => m.TradingViewChartWidget as any),
-    {
-        ssr: false,
-        loading: () => null,
-    }
-) as ComponentType<WidgetProps>;
-
-const TradingViewTickerTapeWidget = dynamic(
-    () => import('./TradingViewTickerTapeWidget').then((m) => m.TradingViewTickerTapeWidget as any),
-    {
-        ssr: false,
-        loading: () => null,
-    }
-) as ComponentType<WidgetProps>;
-
-const TradingViewTechnicalAnalysisWidget = dynamic(
-    () => import('./TradingViewTechnicalAnalysisWidget').then((m) => m.TradingViewTechnicalAnalysisWidget as any),
-    {
-        ssr: false,
-        loading: () => null,
-    }
-) as ComponentType<WidgetProps>;
+const TradingViewChartWidget = createTradingViewDynamicWidget('TradingViewChartWidget');
+const TradingViewSymbolOverviewWidget = createTradingViewDynamicWidget('TradingViewSymbolOverviewWidget');
+const TradingViewMiniChartWidget = createTradingViewDynamicWidget('TradingViewMiniChartWidget');
+const TradingViewMarketSummaryWidget = createTradingViewDynamicWidget('TradingViewMarketSummaryWidget');
+const TradingViewMarketOverviewWidget = createTradingViewDynamicWidget('TradingViewMarketOverviewWidget');
+const TradingViewStockMarketWidget = createTradingViewDynamicWidget('TradingViewStockMarketWidget');
+const TradingViewMarketDataWidget = createTradingViewDynamicWidget('TradingViewMarketDataWidget');
+const TradingViewTickerTapeWidget = createTradingViewDynamicWidget('TradingViewTickerTapeWidget');
+const TradingViewTickerTagWidget = createTradingViewDynamicWidget('TradingViewTickerTagWidget');
+const TradingViewSingleTickerWidget = createTradingViewDynamicWidget('TradingViewSingleTickerWidget');
+const TradingViewTickerWidget = createTradingViewDynamicWidget('TradingViewTickerWidget');
+const TradingViewStockHeatmapWidget = createTradingViewDynamicWidget('TradingViewStockHeatmapWidget');
+const TradingViewCryptoHeatmapWidget = createTradingViewDynamicWidget('TradingViewCryptoHeatmapWidget');
+const TradingViewForexCrossRatesWidget = createTradingViewDynamicWidget('TradingViewForexCrossRatesWidget');
+const TradingViewEtfHeatmapWidget = createTradingViewDynamicWidget('TradingViewEtfHeatmapWidget');
+const TradingViewForexHeatmapWidget = createTradingViewDynamicWidget('TradingViewForexHeatmapWidget');
+const TradingViewScreenerWidget = createTradingViewDynamicWidget('TradingViewScreenerWidget');
+const TradingViewCryptoMarketWidget = createTradingViewDynamicWidget('TradingViewCryptoMarketWidget');
+const TradingViewSymbolInfoWidget = createTradingViewDynamicWidget('TradingViewSymbolInfoWidget');
+const TradingViewTechnicalAnalysisWidget = createTradingViewDynamicWidget('TradingViewTechnicalAnalysisWidget');
+const TradingViewFundamentalDataWidget = createTradingViewDynamicWidget('TradingViewFundamentalDataWidget');
+const TradingViewCompanyProfileWidget = createTradingViewDynamicWidget('TradingViewCompanyProfileWidget');
+const TradingViewTopStoriesWidget = createTradingViewDynamicWidget('TradingViewTopStoriesWidget');
+const TradingViewEconomicCalendarWidget = createTradingViewDynamicWidget('TradingViewEconomicCalendarWidget');
+const TradingViewEconomicMapWidget = createTradingViewDynamicWidget('TradingViewEconomicMapWidget');
 
 const FinancialsWidget = dynamic(
     () => import('./FinancialsWidget').then((m) => m.FinancialsWidget as any),
@@ -240,8 +257,30 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     ticker_profile: TickerProfileWidget as ComponentType<WidgetProps>,
     price_chart: PriceChartWidget as ComponentType<WidgetProps>,
     tradingview_chart: TradingViewChartWidget as ComponentType<WidgetProps>,
+    tradingview_symbol_overview: TradingViewSymbolOverviewWidget as ComponentType<WidgetProps>,
+    tradingview_mini_chart: TradingViewMiniChartWidget as ComponentType<WidgetProps>,
+    tradingview_market_summary: TradingViewMarketSummaryWidget as ComponentType<WidgetProps>,
+    tradingview_market_overview: TradingViewMarketOverviewWidget as ComponentType<WidgetProps>,
+    tradingview_stock_market: TradingViewStockMarketWidget as ComponentType<WidgetProps>,
+    tradingview_market_data: TradingViewMarketDataWidget as ComponentType<WidgetProps>,
     tradingview_ticker_tape: TradingViewTickerTapeWidget as ComponentType<WidgetProps>,
+    tradingview_ticker_tag: TradingViewTickerTagWidget as ComponentType<WidgetProps>,
+    tradingview_single_ticker: TradingViewSingleTickerWidget as ComponentType<WidgetProps>,
+    tradingview_ticker: TradingViewTickerWidget as ComponentType<WidgetProps>,
+    tradingview_stock_heatmap: TradingViewStockHeatmapWidget as ComponentType<WidgetProps>,
+    tradingview_crypto_heatmap: TradingViewCryptoHeatmapWidget as ComponentType<WidgetProps>,
+    tradingview_forex_cross_rates: TradingViewForexCrossRatesWidget as ComponentType<WidgetProps>,
+    tradingview_etf_heatmap: TradingViewEtfHeatmapWidget as ComponentType<WidgetProps>,
+    tradingview_forex_heatmap: TradingViewForexHeatmapWidget as ComponentType<WidgetProps>,
+    tradingview_screener: TradingViewScreenerWidget as ComponentType<WidgetProps>,
+    tradingview_crypto_market: TradingViewCryptoMarketWidget as ComponentType<WidgetProps>,
+    tradingview_symbol_info: TradingViewSymbolInfoWidget as ComponentType<WidgetProps>,
     tradingview_technical_analysis: TradingViewTechnicalAnalysisWidget as ComponentType<WidgetProps>,
+    tradingview_fundamental_data: TradingViewFundamentalDataWidget as ComponentType<WidgetProps>,
+    tradingview_company_profile: TradingViewCompanyProfileWidget as ComponentType<WidgetProps>,
+    tradingview_top_stories: TradingViewTopStoriesWidget as ComponentType<WidgetProps>,
+    tradingview_economic_calendar: TradingViewEconomicCalendarWidget as ComponentType<WidgetProps>,
+    tradingview_economic_map: TradingViewEconomicMapWidget as ComponentType<WidgetProps>,
     key_metrics: KeyMetricsWidget as ComponentType<WidgetProps>,
     share_statistics: ShareStatisticsWidget as ComponentType<WidgetProps>,
     screener: ScreenerWidget as ComponentType<WidgetProps>,
@@ -375,9 +414,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     ticker_profile: { w: 4, h: 6, minW: 3, minH: 5 },
 
     price_chart: { w: 16, h: 10, minW: 10, minH: 8 },
-    tradingview_chart: { w: 15, h: 10, minW: 10, minH: 8 },
-    tradingview_ticker_tape: { w: 24, h: 4, minW: 12, minH: 3 },
-    tradingview_technical_analysis: { w: 9, h: 10, minW: 8, minH: 8 },
+    ...tradingViewWidgetDefaultLayouts,
     key_metrics: { w: 8, h: 11, minW: 6, minH: 8 },
     share_statistics: { w: 4, h: 7, minW: 3, minH: 5 },
     screener: { w: 12, h: 10, minW: 8, minH: 8 },
@@ -487,9 +524,7 @@ export const widgetNames: Record<WidgetType, string> = {
     ticker_profile: 'Company Profile',
 
     price_chart: 'Price Chart',
-    tradingview_chart: 'TradingView Chart',
-    tradingview_ticker_tape: 'TradingView Ticker Tape',
-    tradingview_technical_analysis: 'TradingView Technicals',
+    ...tradingViewWidgetNames,
     key_metrics: 'Key Metrics',
     share_statistics: 'Share Statistics',
     screener: 'Stock Screener',
@@ -596,9 +631,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     valuation_band: 'Statistical valuation bands highlighting current multiple vs mean and sigma range',
     ticker_profile: 'Detailed company description',
     price_chart: 'Professional candlestick charting',
-    tradingview_chart: 'TradingView-powered chart for global assets and external symbols',
-    tradingview_ticker_tape: 'Global macro ticker tape with FX, commodities, and crypto context',
-    tradingview_technical_analysis: 'TradingView technical rating gauge for the active global symbol',
+    ...tradingViewWidgetDescriptions,
     key_metrics: 'Summary of critical financial ratios',
     share_statistics: 'Share float and ownership data',
     screener: 'Filter stocks by 80+ criteria',

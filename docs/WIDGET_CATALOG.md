@@ -1,10 +1,14 @@
-# Widget Catalog (V52)
+# Widget Catalog (Legacy Snapshot)
 
-Date: 2026-02-22
+Date: 2026-04-04
 
-This catalog lists widget types currently registered in `apps/web/src/data/widgetDefinitions.ts`.
+This file predates the TradingView native widget expansion and should be treated as a legacy snapshot.
 
-Total registered widgets: **59**.
+For current TradingView-native coverage, use:
+
+- `docs/TRADINGVIEW_WIDGET_CATALOG.md`
+- `apps/web/src/data/widgetDefinitions.ts`
+- `apps/web/src/lib/tradingViewWidgets.ts`
 
 ## Category summary
 
@@ -92,3 +96,6 @@ Total registered widgets: **59**.
 - Runtime widget resizing is no longer capped by the behavior table's old width limits. Base sizes still matter for autofit and initial placement, but users can expand widgets more freely unless a widget instance has an explicit max constraint.
 - Notes, watchlist, price-alert, peer-comparison, and research-browser state now persist via widget config so they travel with dashboard layout persistence instead of separate widget-specific browser storage keys.
 - Browser-only persistence is now reserved for cases that are genuinely device-local, such as notification permission hints and non-dashboard UI niceties like recent widget picks.
+- Legacy saved widget layout caps are stripped during dashboard migration, so old `maxW`/`maxH` values no longer block manual resizing of widgets like Transaction Flow, Major Shareholders, and Officers & Management.
+- Prompt Library is now VniAgent-owned. Global "Prompts" actions open the VniAgent sidebar and then open the contextual prompt library there instead of using a disconnected standalone modal.
+- Dashboard template surfaces should consume `apps/web/src/types/dashboard-templates.ts` as the canonical template dataset. Category presentation is now aligned around `market`, `fundamentals`, `technical`, `quant`, `research`, and `global`.

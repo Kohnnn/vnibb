@@ -176,7 +176,9 @@ class Settings(BaseSettings):
     openrouter_app_name: str = "VNIBB"
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
-    llm_provider: str = "openrouter"  # openrouter, openai, gemini, anthropic, ollama
+    llm_provider: str = (
+        "openrouter"  # openrouter, openai_compatible (legacy values normalize to openrouter)
+    )
     llm_model: str = "openai/gpt-4o-mini"
     llm_timeout: int = 30
     llm_max_tokens: int = 1024

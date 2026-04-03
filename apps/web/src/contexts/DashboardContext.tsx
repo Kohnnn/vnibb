@@ -40,7 +40,7 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 16;
+const CURRENT_MIGRATION_VERSION = 17;
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
@@ -255,43 +255,43 @@ const GLOBAL_MARKETS_TEMPLATE: TemplateWidget[] = [
         type: 'tradingview_chart',
         syncGroupId: 1,
         config: { symbol: 'NASDAQ:QQQ' },
-        layout: { x: 0, y: 4, w: 15, h: 10, minW: 10, minH: 8 }
+        layout: { x: 0, y: 4, w: 14, h: 10, minW: 10, minH: 8 }
     },
     {
         type: 'tradingview_technical_analysis',
         syncGroupId: 1,
         config: { symbol: 'NASDAQ:QQQ' },
-        layout: { x: 15, y: 4, w: 9, h: 10, minW: 8, minH: 8 }
+        layout: { x: 14, y: 4, w: 10, h: 10, minW: 8, minH: 8 }
     },
     {
-        type: 'market_overview',
+        type: 'tradingview_market_overview',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 14, w: 8, h: 7, minW: 6, minH: 6 }
+        layout: { x: 0, y: 14, w: 12, h: 8, minW: 8, minH: 6 }
     },
     {
-        type: 'forex_rates',
+        type: 'tradingview_market_data',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 14, w: 8, h: 7, minW: 6, minH: 6 }
+        layout: { x: 12, y: 14, w: 12, h: 8, minW: 8, minH: 6 }
     },
     {
-        type: 'commodities',
+        type: 'tradingview_forex_cross_rates',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 14, w: 8, h: 7, minW: 6, minH: 6 }
+        layout: { x: 0, y: 22, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'world_indices',
+        type: 'tradingview_stock_heatmap',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 21, w: 10, h: 8, minW: 8, minH: 6 }
+        layout: { x: 8, y: 22, w: 8, h: 7, minW: 6, minH: 5 }
     },
     {
-        type: 'market_news',
+        type: 'tradingview_top_stories',
         syncGroupId: 1,
-        config: { mode: 'all' },
-        layout: { x: 10, y: 21, w: 14, h: 8, minW: 10, minH: 6 }
+        config: { feedMode: 'all_symbols' },
+        layout: { x: 16, y: 22, w: 8, h: 7, minW: 6, minH: 5 }
     },
 ];
 
@@ -968,6 +968,64 @@ const migrateLegacyWidgetTypes = (dashboards: Dashboard[]): Dashboard[] => {
             }
 
             dashboardChanged = true;
+
+            return {
+                ...tab,
+                widgets,
+            };
+        });
+
+        if (!dashboardChanged) {
+            return dashboard;
+        }
+
+        return {
+            ...dashboard,
+            tabs,
+            updatedAt: new Date().toISOString(),
+        };
+    });
+};
+
+const migrateLegacyWidgetLayoutBounds = (dashboards: Dashboard[]): Dashboard[] => {
+    return dashboards.map((dashboard) => {
+        let dashboardChanged = false;
+
+        const tabs = dashboard.tabs.map((tab) => {
+            let tabChanged = false;
+
+            const widgets = tab.widgets.map((widget) => {
+                const defaults = getWidgetDefaultLayout(widget.type);
+                const nextMinW = Math.min(widget.layout.minW ?? defaults.minW, defaults.minW);
+                const nextMinH = Math.min(widget.layout.minH ?? defaults.minH, defaults.minH);
+
+                if (
+                    widget.layout.minW === nextMinW
+                    && widget.layout.minH === nextMinH
+                    && widget.layout.maxW === undefined
+                    && widget.layout.maxH === undefined
+                ) {
+                    return widget;
+                }
+
+                tabChanged = true;
+                dashboardChanged = true;
+
+                return {
+                    ...widget,
+                    layout: {
+                        ...widget.layout,
+                        minW: nextMinW,
+                        minH: nextMinH,
+                        maxW: undefined,
+                        maxH: undefined,
+                    },
+                };
+            });
+
+            if (!tabChanged) {
+                return tab;
+            }
 
             return {
                 ...tab,
@@ -2424,6 +2482,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     dashboards = migrateLegacyWidgetTypes(dashboards);
                 }
 
+                if (migrationVersion < 17) {
+                    dashboards = migrateLegacyWidgetLayoutBounds(dashboards);
+                }
+
                 // Final safety validation for all widgets
                 dashboards = dashboards.map(d => ({
                     ...d,
@@ -2446,6 +2508,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             dashboards = migrateLegacySidebarDashboards(dashboards);
             dashboards = migrateStaleNewTabs(dashboards);
             dashboards = migrateLegacyWidgetTypes(dashboards);
+            dashboards = migrateLegacyWidgetLayoutBounds(dashboards);
             const cleanedSidebar = migrateSidebarClutter(dashboards, folders);
             dashboards = cleanedSidebar.dashboards;
             folders = cleanedSidebar.folders;

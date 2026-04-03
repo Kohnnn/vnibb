@@ -1,8 +1,9 @@
 'use client';
 
-import { memo, useState } from 'react';
-import { X, Layout, TrendingUp, Search, Newspaper, ChevronRight, Globe2 } from 'lucide-react';
-import { DASHBOARD_TEMPLATES, DashboardTemplate } from '@/types/dashboard-templates';
+import { memo, useMemo, useState } from 'react';
+import { X, Activity, BarChart3, Layout, TrendingUp, Search, ChevronRight, Globe2, Sigma, Newspaper } from 'lucide-react';
+import { getWidgetDefinition } from '@/data/widgetDefinitions';
+import { DASHBOARD_TEMPLATES, DASHBOARD_TEMPLATE_CATEGORIES, type DashboardTemplate, type DashboardTemplateCategory } from '@/types/dashboard-templates';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -12,37 +13,48 @@ interface TemplateSelectorProps {
   onSelectTemplate: (template: DashboardTemplate) => void;
 }
 
-const CATEGORY_ICONS: Record<string, any> = {
-  trading: TrendingUp,
-  analysis: Search,
-  research: Layout,
-  overview: Newspaper,
+const CATEGORY_ICONS: Record<DashboardTemplateCategory, any> = {
+  market: Activity,
+  fundamentals: BarChart3,
+  technical: TrendingUp,
+  quant: Sigma,
+  research: Newspaper,
   global: Globe2,
 };
 
-const CATEGORY_PREVIEW_STYLES: Record<string, string> = {
-  trading: 'from-emerald-500/15 via-emerald-500/5 to-cyan-500/10',
-  analysis: 'from-sky-500/15 via-blue-500/5 to-cyan-500/10',
-  research: 'from-amber-500/15 via-orange-500/5 to-yellow-500/10',
-  overview: 'from-blue-500/15 via-indigo-500/5 to-cyan-500/10',
+const CATEGORY_PREVIEW_STYLES: Record<DashboardTemplateCategory, string> = {
+  market: 'from-blue-500/15 via-cyan-500/5 to-emerald-500/10',
+  fundamentals: 'from-amber-500/15 via-orange-500/5 to-yellow-500/10',
+  technical: 'from-emerald-500/15 via-teal-500/5 to-cyan-500/10',
+  quant: 'from-fuchsia-500/15 via-violet-500/5 to-cyan-500/10',
+  research: 'from-slate-200/10 via-slate-400/5 to-blue-500/10',
   global: 'from-violet-500/15 via-fuchsia-500/5 to-cyan-500/10',
 };
 
 function formatWidgetType(type: string) {
-  return type
+  return getWidgetDefinition(type)?.name || type
     .split('_')
     .map(chunk => chunk.charAt(0).toUpperCase() + chunk.slice(1))
     .join(' ');
 }
 
 function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: TemplateSelectorProps) {
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<DashboardTemplateCategory | null>(null);
 
   if (!open) return null;
 
   const filteredTemplates = selectedCategory
     ? DASHBOARD_TEMPLATES.filter(t => t.category === selectedCategory)
     : DASHBOARD_TEMPLATES;
+
+  const categoryCounts = useMemo(() => {
+    return Object.fromEntries(
+      DASHBOARD_TEMPLATE_CATEGORIES.map((category) => [
+        category.id,
+        DASHBOARD_TEMPLATES.filter((template) => template.category === category.id).length,
+      ])
+    ) as Record<DashboardTemplateCategory, number>;
+  }, []);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center animate-in fade-in duration-200">
@@ -87,19 +99,23 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
           >
             All Templates
           </button>
-          {Object.entries(CATEGORY_ICONS).map(([cat, Icon]) => (
+          {DASHBOARD_TEMPLATE_CATEGORIES.map((category) => {
+            const Icon = CATEGORY_ICONS[category.id]
+            return (
             <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
+              key={category.id}
+              onClick={() => setSelectedCategory(category.id)}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                selectedCategory === cat ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-[var(--bg-secondary)]'
+                selectedCategory === category.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-[var(--bg-secondary)]'
               )}
             >
               <Icon className="w-3 h-3" />
-              {cat}
+              {category.label}
+              <span className="text-[9px] opacity-75">{categoryCounts[category.id]}</span>
             </button>
-          ))}
+            )
+          })}
         </div>
 
         {/* Templates Grid */}
@@ -117,11 +133,11 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
                 <div className={cn(
                   "aspect-video w-full mb-3 rounded-xl border border-[var(--border-default)] relative overflow-hidden group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] transition-all",
                   "bg-gradient-to-br",
-                  CATEGORY_PREVIEW_STYLES[template.category] || CATEGORY_PREVIEW_STYLES.overview
+                  CATEGORY_PREVIEW_STYLES[template.category]
                 )}>
                   <div className="absolute inset-0 p-3 flex flex-col justify-between">
                     <div className="grid grid-cols-3 gap-1.5">
-                      {template.widgets.slice(0, 3).map((widget, idx) => (
+                      {template.widgets.slice(0, 4).map((widget, idx) => (
                         <div
                           key={`${template.id}-preview-top-${idx}`}
                           className="h-5 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/85"
@@ -129,7 +145,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
                       ))}
                     </div>
                     <div className="space-y-1">
-                      {template.widgets.slice(0, 3).map((widget, idx) => (
+                      {template.widgets.slice(0, 4).map((widget, idx) => (
                         <div
                           key={`${template.id}-preview-label-${idx}`}
                           className="inline-flex items-center mr-1 mb-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-1.5 py-0.5"
@@ -149,6 +165,11 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
                   </div>
                 </div>
                 
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                    {DASHBOARD_TEMPLATE_CATEGORIES.find((category) => category.id === template.category)?.label || template.category}
+                  </span>
+                </div>
                 <h3 className="font-bold text-[var(--text-primary)] text-sm group-hover:text-blue-400 transition-colors">{template.name}</h3>
                 <p className="text-[11px] text-[var(--text-muted)] mt-1 line-clamp-2 leading-relaxed">
                     {template.description}
@@ -156,7 +177,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
                 
                 <div className="mt-auto pt-3 flex items-center justify-between border-t border-[var(--border-default)]/70">
                     <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tighter">
-                      {template.widgets.length} Components
+                      {template.widgets.length} widgets
                     </span>
                     <ChevronRight size={14} className="text-[var(--text-muted)] group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
                 </div>

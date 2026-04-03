@@ -2,11 +2,11 @@
 
 import { useState, useMemo, useEffect, useCallback, memo } from 'react';
 import { useDashboard } from '@/contexts/DashboardContext';
-import { getWidgetDefinition, normalizeWidgetType, widgetCategories, widgetDefinitions } from '@/data/widgetDefinitions';
+import { getWidgetDefinition, getWidgetLibrarySectionId, normalizeWidgetType, widgetDefinitions, widgetLibrarySections } from '@/data/widgetDefinitions';
 import {
     Search, X, ChevronRight,
-    Box, Star, BarChart3, TrendingUp, Globe,
-    Newspaper, PieChart, Info, Layers,
+    Activity, BarChart3, Brain, Box, Globe,
+    Info, Layers, Newspaper, TrendingUp,
     Plus, Clock, Maximize2, Sigma
 } from 'lucide-react';
 import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
@@ -22,15 +22,15 @@ interface WidgetLibraryProps {
 }
 
 const CATEGORY_ICONS: Record<string, any> = {
-    'core_data': BarChart3,
+    'fundamentals': BarChart3,
+    'market': Activity,
     'charting': TrendingUp,
     'global_markets': Globe,
-    'quant': Sigma,
-    'calendar': Newspaper,
-    'screener': Search,
-    'analysis': PieChart,
+    'quant_signals': Sigma,
     'ownership': Box,
-    'estimates': Star,
+    'news_events': Newspaper,
+    'ai_research': Brain,
+    'screeners_tools': Layers,
 };
 
 const WIDGET_TYPE_SET = new Set<WidgetType>(widgetDefinitions.map((widget) => widget.type));
@@ -99,9 +99,9 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
             );
         };
 
-        return widgetCategories.map(cat => ({
+        return widgetLibrarySections.map(cat => ({
             ...cat,
-            widgets: widgetDefinitions.filter((widget) => widget.category === cat.id && matchesWidget(widget))
+            widgets: widgetDefinitions.filter((widget) => getWidgetLibrarySectionId(widget.type) === cat.id && matchesWidget(widget))
         })).filter(cat => cat.widgets.length > 0);
     }, [searchQuery]);
 

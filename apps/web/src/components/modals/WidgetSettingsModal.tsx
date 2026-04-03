@@ -1,10 +1,17 @@
 // Widget Settings Modal
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Save, RotateCcw } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { RotateCcw, Save, X } from 'lucide-react';
+
 import { useDashboard } from '@/contexts/DashboardContext';
-import type { WidgetInstance } from '@/types/dashboard';
+import {
+    getTradingViewDefaultConfig,
+    getTradingViewSettingsFields,
+    isTradingViewWidget,
+    type TradingViewSettingField,
+} from '@/lib/tradingViewWidgets';
+import type { WidgetConfig } from '@/types/dashboard';
 
 interface WidgetSettingsModalProps {
     isOpen: boolean;
@@ -12,6 +19,48 @@ interface WidgetSettingsModalProps {
     widgetId: string | null;
     dashboardId: string | null;
     tabId: string | null;
+}
+
+function toSymbolListText(value: unknown): string {
+    if (!Array.isArray(value)) return '';
+
+    return value
+        .map((entry) => {
+            if (typeof entry === 'string') return entry;
+            if (entry && typeof entry === 'object' && 'proName' in entry) {
+                return String((entry as { proName?: unknown }).proName || '');
+            }
+            return '';
+        })
+        .filter(Boolean)
+        .join('\n');
+}
+
+function parseSymbolListText(value: string): string[] {
+    return value
+        .split(/[,\n]/)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+
+function buildAdvancedConfigDraft(config: WidgetConfig, fields: TradingViewSettingField[]): string {
+    const typedKeys = new Set(['refreshInterval', ...fields.map((field) => field.key)]);
+    const advancedConfig = Object.fromEntries(
+        Object.entries(config).filter(([key]) => !typedKeys.has(key))
+    );
+
+    return JSON.stringify(advancedConfig, null, 2);
+}
+
+function pruneConfig(config: WidgetConfig): WidgetConfig {
+    return Object.fromEntries(
+        Object.entries(config).filter(([, value]) => {
+            if (value === undefined || value === null) return false;
+            if (typeof value === 'string') return value.trim().length > 0;
+            if (Array.isArray(value)) return value.length > 0;
+            return true;
+        })
+    );
 }
 
 export function WidgetSettingsModal({
@@ -22,7 +71,8 @@ export function WidgetSettingsModal({
     tabId
 }: WidgetSettingsModalProps) {
     const { state, updateWidget } = useDashboard();
-    const [config, setConfig] = useState<string>('{}');
+    const [draftConfig, setDraftConfig] = useState<WidgetConfig>({});
+    const [advancedConfig, setAdvancedConfig] = useState<string>('{}');
     const [refreshInterval, setRefreshInterval] = useState<number>(0);
     const [error, setError] = useState<string | null>(null);
 
@@ -32,32 +82,65 @@ export function WidgetSettingsModal({
             ?.widgets.find(w => w.id === widgetId)
         : null;
 
-    useEffect(() => {
-        if (isOpen && widget) {
-            // Initialize form state
-            setRefreshInterval(widget.config.refreshInterval || 0);
+    const tradingViewFields = useMemo(
+        () => getTradingViewSettingsFields(widget?.type),
+        [widget?.type]
+    );
+    const tradingViewMode = isTradingViewWidget(widget?.type);
 
-            // For other config, stringify it generally or handle specific fields
-            // We'll exclude known fields from the JSON editor if we map them explicitly
-            const { refreshInterval: _, ...otherConfig } = widget.config;
-            setConfig(JSON.stringify(otherConfig, null, 2));
+    useEffect(() => {
+        if (!isOpen || !widget) {
+            return;
         }
-    }, [isOpen, widget]);
+
+        const resolvedConfig = tradingViewMode
+            ? {
+                ...getTradingViewDefaultConfig(widget.type),
+                ...widget.config,
+            }
+            : { ...widget.config };
+
+        setDraftConfig(resolvedConfig);
+        setRefreshInterval(typeof widget.config.refreshInterval === 'number' ? widget.config.refreshInterval : 0);
+        setAdvancedConfig(buildAdvancedConfigDraft(resolvedConfig, tradingViewFields));
+        setError(null);
+    }, [isOpen, tradingViewFields, tradingViewMode, widget]);
+
+    const handleConfigValueChange = (key: string, value: unknown) => {
+        setDraftConfig((current) => ({
+            ...current,
+            [key]: value,
+        }));
+    };
+
+    const handleReset = () => {
+        if (!widget) return;
+
+        const resetConfig = tradingViewMode ? getTradingViewDefaultConfig(widget.type) : {};
+        setDraftConfig(resetConfig);
+        setRefreshInterval(0);
+        setAdvancedConfig('{}');
+        setError(null);
+    };
 
     const handleSave = () => {
         if (!widget || !dashboardId || !tabId || !widgetId) return;
 
         try {
-            const parsedConfig = JSON.parse(config);
-            const newConfig = {
-                ...parsedConfig,
-                refreshInterval: refreshInterval > 0 ? refreshInterval : undefined
-            };
+            const parsedAdvancedConfig = advancedConfig.trim().length > 0
+                ? JSON.parse(advancedConfig)
+                : {};
 
-            updateWidget(dashboardId, tabId, widgetId, { config: newConfig });
+            const nextConfig = pruneConfig({
+                ...parsedAdvancedConfig,
+                ...draftConfig,
+                refreshInterval: refreshInterval > 0 ? refreshInterval : undefined,
+            });
+
+            updateWidget(dashboardId, tabId, widgetId, { config: nextConfig });
             onClose();
-        } catch (e) {
-            setError('Invalid JSON configuration');
+        } catch (saveError) {
+            setError(saveError instanceof Error ? saveError.message : 'Invalid JSON configuration');
         }
     };
 
@@ -65,8 +148,7 @@ export function WidgetSettingsModal({
 
     return (
         <div data-tour="widget-settings-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="w-full max-w-lg bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] flex flex-col overflow-hidden">
-                {/* Header */}
+            <div className="w-full max-w-2xl bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] flex flex-col overflow-hidden">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-modal)]">
                     <h2 className="text-lg font-semibold text-[var(--text-primary)]">
                         Settings: <span className="text-blue-400">{widget.type}</span>
@@ -80,9 +162,7 @@ export function WidgetSettingsModal({
                     </button>
                 </div>
 
-                {/* Content */}
-                <div className="p-6 space-y-6">
-                    {/* Common Settings */}
+                <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh]">
                     <div className="space-y-4">
                         <label
                             htmlFor="widget-refresh-interval"
@@ -96,17 +176,103 @@ export function WidgetSettingsModal({
                                 type="number"
                                 min="0"
                                 value={refreshInterval}
-                                onChange={(e) => setRefreshInterval(parseInt(e.target.value) || 0)}
+                                onChange={(event) => setRefreshInterval(parseInt(event.target.value, 10) || 0)}
                                 className="bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500 w-32"
                             />
                             <span className="text-xs text-[var(--text-muted)]">Set to 0 to disable</span>
                         </div>
                     </div>
 
-                    <div className="border-t border-[var(--border-default)]" />
+                    {tradingViewMode && tradingViewFields.length > 0 ? (
+                        <div className="space-y-4 border-t border-[var(--border-default)] pt-6">
+                            <div>
+                                <div className="text-sm font-medium text-[var(--text-secondary)]">TradingView Settings</div>
+                                <p className="mt-1 text-xs text-[var(--text-muted)]">
+                                    Common TradingView options are mapped below. Use advanced JSON for nested properties like tabs, studies, or compare symbols.
+                                </p>
+                            </div>
+                            <div className="grid gap-4 md:grid-cols-2">
+                                {tradingViewFields.map((field) => {
+                                    const fieldId = `widget-config-${field.key}`;
 
-                    {/* Advanced Configuration (JSON) */}
-                    <div className="space-y-2">
+                                    if (field.type === 'boolean') {
+                                        return (
+                                            <label key={field.key} htmlFor={fieldId} className="flex items-center justify-between gap-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] md:col-span-2">
+                                                <div>
+                                                    <div>{field.label}</div>
+                                                    {field.description ? (
+                                                        <div className="mt-1 text-xs text-[var(--text-muted)]">{field.description}</div>
+                                                    ) : null}
+                                                </div>
+                                                <input
+                                                    id={fieldId}
+                                                    type="checkbox"
+                                                    checked={Boolean(draftConfig[field.key])}
+                                                    onChange={(event) => handleConfigValueChange(field.key, event.target.checked)}
+                                                    className="h-4 w-4 rounded border-[var(--border-default)] bg-[var(--bg-primary)] text-blue-500 focus:ring-blue-500"
+                                                />
+                                            </label>
+                                        );
+                                    }
+
+                                    if (field.type === 'select') {
+                                        return (
+                                            <label key={field.key} htmlFor={fieldId} className="space-y-2">
+                                                <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
+                                                <select
+                                                    id={fieldId}
+                                                    value={String(draftConfig[field.key] ?? '')}
+                                                    onChange={(event) => handleConfigValueChange(field.key, event.target.value)}
+                                                    className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                                                >
+                                                    <option value="">Default</option>
+                                                    {(field.options || []).map((option) => (
+                                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                                    ))}
+                                                </select>
+                                                {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                            </label>
+                                        );
+                                    }
+
+                                    if (field.type === 'symbol_list') {
+                                        return (
+                                            <label key={field.key} htmlFor={fieldId} className="space-y-2 md:col-span-2">
+                                                <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
+                                                <textarea
+                                                    id={fieldId}
+                                                    value={toSymbolListText(draftConfig[field.key])}
+                                                    onChange={(event) => handleConfigValueChange(field.key, parseSymbolListText(event.target.value))}
+                                                    className="w-full min-h-[96px] bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500 resize-y"
+                                                    placeholder={field.placeholder || 'One symbol per line'}
+                                                />
+                                                {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                            </label>
+                                        );
+                                    }
+
+                                    return (
+                                        <label key={field.key} htmlFor={fieldId} className="space-y-2">
+                                            <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
+                                            <input
+                                                id={fieldId}
+                                                type={field.type === 'number' ? 'number' : 'text'}
+                                                min={field.min}
+                                                step={field.step}
+                                                value={String(draftConfig[field.key] ?? '')}
+                                                onChange={(event) => handleConfigValueChange(field.key, field.type === 'number' ? Number(event.target.value) : event.target.value)}
+                                                className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                                                placeholder={field.placeholder}
+                                            />
+                                            {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ) : null}
+
+                    <div className="border-t border-[var(--border-default)] pt-6 space-y-2">
                         <div className="flex items-center justify-between">
                             <label
                                 htmlFor="widget-advanced-config"
@@ -115,29 +281,31 @@ export function WidgetSettingsModal({
                                 Advanced Configuration (JSON)
                             </label>
                             <button
-                                onClick={() => setConfig('{}')}
-                            className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                                onClick={handleReset}
+                                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                                type="button"
                             >
                                 <RotateCcw size={12} /> Reset
                             </button>
                         </div>
                         <textarea
                             id="widget-advanced-config"
-                            value={config}
-                            onChange={(e) => {
-                                setConfig(e.target.value);
+                            value={advancedConfig}
+                            onChange={(event) => {
+                                setAdvancedConfig(event.target.value);
                                 setError(null);
                             }}
                             className={`w-full h-40 bg-[var(--bg-secondary)] border ${error ? 'border-red-500' : 'border-[var(--border-default)]'} rounded-lg p-3 text-sm font-mono text-[var(--text-secondary)] focus:outline-none focus:border-blue-500 resize-none`}
                         />
-                        {error && <p className="text-xs text-red-400">{error}</p>}
+                        {error ? <p className="text-xs text-red-400">{error}</p> : null}
                         <p className="text-xs text-[var(--text-muted)]">
-                            Edit widget-specific properties directly.
+                            {tradingViewMode
+                                ? 'This JSON is merged with the typed controls above. Nested TradingView options belong here.'
+                                : 'Edit widget-specific properties directly.'}
                         </p>
                     </div>
                 </div>
 
-                {/* Footer */}
                 <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border-default)] bg-[var(--bg-modal)]">
                     <button
                         onClick={onClose}

@@ -1,5 +1,6 @@
 // Widget Definitions - Library of available widgets
-import type { WidgetDefinition, WidgetCategoryInfo, WidgetCategory } from '@/types/dashboard';
+import { tradingViewCatalogEntries } from '@/lib/tradingViewWidgets';
+import type { WidgetDefinition, WidgetCategoryInfo, WidgetCategory, WidgetType } from '@/types/dashboard';
 
 // ============================================================================
 // Category definitions
@@ -120,36 +121,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 8, h: 6, minW: 6, minH: 4 },
         recommended: true
     },
-    {
-        type: 'tradingview_chart',
-        name: 'TradingView Chart',
-        description: 'TradingView advanced chart for crypto, global indices, and external symbols',
-        category: 'global_markets',
-        defaultConfig: {},
-        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
-        recommended: true,
-        searchKeywords: ['tv', 'trading view', 'global', 'macro', 'crypto', 'forex', 'indices']
-    },
-    {
-        type: 'tradingview_ticker_tape',
-        name: 'TradingView Ticker Tape',
-        description: 'Global macro ticker tape with FX, commodity, and crypto symbols plus VND cross context',
-        category: 'global_markets',
-        defaultConfig: {},
-        defaultLayout: { w: 24, h: 4, minW: 12, minH: 3 },
-        recommended: true,
-        searchKeywords: ['tv', 'trading view', 'ticker tape', 'tape', 'macro', 'global', 'crypto', 'forex']
-    },
-    {
-        type: 'tradingview_technical_analysis',
-        name: 'TradingView Technicals',
-        description: 'TradingView technical analysis gauge for global ETFs, FX, commodities, and crypto',
-        category: 'global_markets',
-        defaultConfig: {},
-        defaultLayout: { w: 9, h: 10, minW: 8, minH: 8 },
-        recommended: true,
-        searchKeywords: ['tv', 'trading view', 'technical', 'gauge', 'macro', 'global']
-    },
+    ...tradingViewCatalogEntries,
     {
         type: 'valuation_multiples_chart',
         name: 'Valuation Multiples Chart',
@@ -916,6 +888,141 @@ export const widgetDefinitions: WidgetDefinition[] = [
     }
 ];
 
+export type WidgetLibrarySectionId =
+    | 'fundamentals'
+    | 'market'
+    | 'charting'
+    | 'global_markets'
+    | 'quant_signals'
+    | 'ownership'
+    | 'news_events'
+    | 'ai_research'
+    | 'screeners_tools';
+
+export interface WidgetLibrarySectionInfo {
+    id: WidgetLibrarySectionId;
+    name: string;
+    description: string;
+    icon: string;
+}
+
+export const widgetLibrarySections: WidgetLibrarySectionInfo[] = [
+    {
+        id: 'fundamentals',
+        name: 'Fundamentals',
+        description: 'Statements, ratios, valuation, and issuer-level fundamentals',
+        icon: 'BarChart3',
+    },
+    {
+        id: 'market',
+        name: 'Market Pulse',
+        description: 'Tape, movers, breadth, sector rotation, and market context',
+        icon: 'Activity',
+    },
+    {
+        id: 'charting',
+        name: 'Charting',
+        description: 'Price charts and visual technical workspaces',
+        icon: 'TrendingUp',
+    },
+    {
+        id: 'global_markets',
+        name: 'Global Markets',
+        description: 'TradingView, world indices, FX, macro, and global risk context',
+        icon: 'Globe',
+    },
+    {
+        id: 'quant_signals',
+        name: 'Quant & Signals',
+        description: 'Factor, momentum, seasonality, and signal-driven widgets',
+        icon: 'Sigma',
+    },
+    {
+        id: 'ownership',
+        name: 'Ownership',
+        description: 'Shareholders, insiders, officers, and capital structure context',
+        icon: 'Users',
+    },
+    {
+        id: 'news_events',
+        name: 'News & Events',
+        description: 'Headlines, filings, earnings calendars, and corporate actions',
+        icon: 'Newspaper',
+    },
+    {
+        id: 'ai_research',
+        name: 'AI & Research',
+        description: 'Comparison, research workflows, and assisted analysis surfaces',
+        icon: 'Brain',
+    },
+    {
+        id: 'screeners_tools',
+        name: 'Screeners & Tools',
+        description: 'Screening, watchlists, alerts, notes, and utility workflows',
+        icon: 'Layers',
+    },
+];
+
+const DEFAULT_WIDGET_LIBRARY_SECTION_BY_CATEGORY: Record<WidgetCategory, WidgetLibrarySectionId> = {
+    core_data: 'fundamentals',
+    charting: 'charting',
+    global_markets: 'global_markets',
+    calendar: 'news_events',
+    ownership: 'ownership',
+    estimates: 'ai_research',
+    screener: 'screeners_tools',
+    analysis: 'ai_research',
+    quant: 'quant_signals',
+};
+
+const WIDGET_LIBRARY_SECTION_OVERRIDES: Partial<Record<WidgetType, WidgetLibrarySectionId>> = {
+    market_overview: 'market',
+    market_news: 'market',
+    top_movers: 'market',
+    market_breadth: 'market',
+    sector_performance: 'market',
+    market_heatmap: 'market',
+    sector_board: 'market',
+    market_movers_sectors: 'market',
+    sector_rotation_radar: 'market',
+    index_comparison: 'market',
+    transaction_flow: 'market',
+    money_flow_trend: 'market',
+    industry_bubble: 'market',
+    bank_metrics: 'fundamentals',
+    financial_ratios: 'fundamentals',
+    income_statement: 'fundamentals',
+    balance_sheet: 'fundamentals',
+    cash_flow: 'fundamentals',
+    income_sankey: 'fundamentals',
+    cashflow_waterfall: 'fundamentals',
+    unified_financials: 'fundamentals',
+    quick_stats: 'fundamentals',
+    dividend_ladder: 'fundamentals',
+    earnings_history: 'news_events',
+    dividend_payment: 'news_events',
+    stock_splits: 'news_events',
+    company_filings: 'news_events',
+    news_feed: 'news_events',
+    events_calendar: 'news_events',
+    earnings_season_monitor: 'news_events',
+    news_corporate_actions: 'news_events',
+    peer_comparison: 'ai_research',
+    comparison_analysis: 'ai_research',
+    ai_analysis: 'ai_research',
+    research_browser: 'ai_research',
+    analyst_estimates: 'ai_research',
+    watchlist: 'screeners_tools',
+    portfolio_tracker: 'screeners_tools',
+    price_alerts: 'screeners_tools',
+    notes: 'screeners_tools',
+    database_inspector: 'screeners_tools',
+    intraday_trades: 'screeners_tools',
+    block_trade: 'screeners_tools',
+    orderbook: 'screeners_tools',
+    foreign_trading: 'ownership',
+};
+
 const LEGACY_WIDGET_TYPE_ALIASES = {
     company_profile: 'ticker_profile',
     financials: 'unified_financials',
@@ -936,6 +1043,23 @@ export function getWidgetDefinition(type: string): WidgetDefinition | undefined 
     const normalizedType = normalizeWidgetType(type);
     if (!normalizedType) return undefined;
     return widgetDefinitions.find(w => w.type === normalizedType);
+}
+
+export function getWidgetLibrarySectionId(type: WidgetType | string): WidgetLibrarySectionId | null {
+    const normalizedType = normalizeWidgetType(type);
+    if (!normalizedType) return null;
+
+    const override = WIDGET_LIBRARY_SECTION_OVERRIDES[normalizedType];
+    if (override) {
+        return override;
+    }
+
+    const widget = getWidgetDefinition(normalizedType);
+    if (!widget) {
+        return null;
+    }
+
+    return DEFAULT_WIDGET_LIBRARY_SECTION_BY_CATEGORY[widget.category];
 }
 
 // Helper to get widgets by category

@@ -46,6 +46,7 @@ import {
     DropdownMenuSubTrigger,
     DropdownMenuSubContent
 } from '@/components/ui/dropdown-menu';
+import { isTradingViewWidget, usesTradingViewWidgetSymbol } from '@/lib/tradingViewWidgets';
 import { cn } from '@/lib/utils';
 import { exportToCSV, exportToJSON, exportToPNG } from '@/lib/exportWidget';
 
@@ -255,7 +256,8 @@ export function WidgetWrapper({
         ? effectiveSymbol
         : (symbol || effectiveSymbol);
     const usesExternalTradingViewSymbol =
-        (widgetType === 'tradingview_chart' || widgetType === 'tradingview_technical_analysis') &&
+        isTradingViewWidget(widgetType) &&
+        usesTradingViewWidgetSymbol(widgetType) &&
         displaySymbol.includes(':');
 
     const { data: profileData } = useProfile(displaySymbol || '', Boolean(displaySymbol) && !usesExternalTradingViewSymbol);

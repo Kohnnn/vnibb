@@ -23,6 +23,12 @@ from vnibb.services.copilot_service import copilot_service
 from vnibb.services.llm_service import llm_service
 
 router = APIRouter()
+SUPPORTED_COPILOT_PROVIDERS = {"openrouter", "openai_compatible"}
+
+
+def _normalize_copilot_provider(provider: str | None) -> str:
+    normalized = str(provider or "openrouter").strip().lower()
+    return normalized if normalized in SUPPORTED_COPILOT_PROVIDERS else "openrouter"
 
 
 # ============ Models ============
@@ -154,9 +160,14 @@ async def chat_stream(request: ChatStreamRequest):
             request_settings = (
                 request.settings.model_dump(exclude_none=True) if request.settings else {}
             )
+            request_settings["provider"] = _normalize_copilot_provider(
+                request_settings.get("provider")
+            )
             if str(request_settings.get("mode") or "app_default") != "browser_key":
                 runtime_config = await ai_runtime_config_service.get_runtime_config()
-                request_settings["provider"] = str(runtime_config.get("provider") or "openrouter")
+                request_settings["provider"] = _normalize_copilot_provider(
+                    runtime_config.get("provider")
+                )
                 request_settings["model"] = str(runtime_config.get("model") or "").strip()
             yield f"data: {json.dumps({'reasoning': {'eventType': 'INFO', 'message': 'Building Appwrite-first runtime context'}})}\n\n"
 

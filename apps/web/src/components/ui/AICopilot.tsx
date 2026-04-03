@@ -75,6 +75,7 @@ interface AICopilotProps {
     widgetContext?: string;
     widgetContextData?: Record<string, unknown>;
     activeTabName?: string;
+    promptLibraryRequestId?: number;
 }
 
 interface ConnectedWidgetSummary {
@@ -302,6 +303,7 @@ export function AICopilot({
     widgetContext,
     widgetContextData,
     activeTabName,
+    promptLibraryRequestId = 0,
 }: AICopilotProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
@@ -314,6 +316,7 @@ export function AICopilot({
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const contextualStarterKeyRef = useRef<string | null>(null);
+    const lastPromptLibraryRequestIdRef = useRef(0);
 
     // Data fetching for context
     const { data: profile } = useProfile(currentSymbol);
@@ -376,6 +379,19 @@ export function AICopilot({
             inputRef.current?.focus();
         }
     }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen || promptLibraryRequestId <= 0) {
+            return;
+        }
+
+        if (lastPromptLibraryRequestIdRef.current === promptLibraryRequestId) {
+            return;
+        }
+
+        lastPromptLibraryRequestIdRef.current = promptLibraryRequestId;
+        setIsPromptLibraryOpen(true);
+    }, [isOpen, promptLibraryRequestId]);
 
     useEffect(() => {
         const syncSettings = () => setAISettings(readStoredAISettings());

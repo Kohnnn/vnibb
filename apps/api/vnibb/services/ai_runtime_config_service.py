@@ -12,15 +12,20 @@ from vnibb.models.app_kv import AppKeyValue
 logger = logging.getLogger(__name__)
 
 AI_RUNTIME_CONFIG_KEY = "ai_runtime_config"
+SUPPORTED_AI_PROVIDERS = {"openrouter", "openai_compatible"}
 
 
 class AIRuntimeConfigService:
     def __init__(self) -> None:
         self._memory_override: dict[str, str] | None = None
 
+    def _normalize_provider(self, provider: str | None) -> str:
+        normalized = str(provider or "openrouter").strip().lower()
+        return normalized if normalized in SUPPORTED_AI_PROVIDERS else "openrouter"
+
     def _default_config(self) -> dict[str, str | None]:
         return {
-            "provider": str(settings.llm_provider or "openrouter").strip().lower(),
+            "provider": self._normalize_provider(settings.llm_provider),
             "model": str(settings.llm_model or "openai/gpt-4o-mini").strip(),
             "updated_at": None,
         }
@@ -43,9 +48,7 @@ class AIRuntimeConfigService:
                 record = await session.get(AppKeyValue, AI_RUNTIME_CONFIG_KEY)
                 if record and isinstance(record.value, dict):
                     self._memory_override = {
-                        "provider": str(record.value.get("provider") or "openrouter")
-                        .strip()
-                        .lower(),
+                        "provider": self._normalize_provider(record.value.get("provider")),
                         "model": self._normalize_model(record.value.get("model")),
                         "updated_at": str(record.value.get("updated_at") or "") or None,
                     }

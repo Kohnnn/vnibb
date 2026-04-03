@@ -1,185 +1,98 @@
-// Apps/Templates Library - Pre-configured dashboard templates
-
 'use client';
 
-import { useState } from 'react';
-import { X, Layout, TrendingUp, BarChart3, LineChart, Globe, Briefcase, Search, Bitcoin } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import {
+    Activity,
+    BarChart3,
+    Globe,
+    Layout,
+    Newspaper,
+    Search,
+    Sigma,
+    TrendingUp,
+    X,
+} from 'lucide-react';
+
 import { useDashboard } from '@/contexts/DashboardContext';
-import type { WidgetType } from '@/types/dashboard';
-
-interface AppTemplate {
-    id: string;
-    name: string;
-    description: string;
-    icon: React.ReactNode;
-    category: 'market' | 'analysis' | 'research' | 'global';
-    widgets: { type: WidgetType; config?: Record<string, unknown>; layout?: { x: number; y: number; w: number; h: number } }[];
-    color: string;
-}
-
-const APP_TEMPLATES: AppTemplate[] = [
-    {
-        id: 'global-macro-tradingview',
-        name: 'Global Markets',
-        description: 'TradingView-first macro workspace for crypto, global indices, forex, and commodities.',
-        icon: <Bitcoin size={24} />,
-        category: 'global',
-        color: '#8B5CF6',
-        widgets: [
-            { type: 'tradingview_ticker_tape', layout: { x: 0, y: 0, w: 24, h: 4 } },
-            { type: 'tradingview_chart', config: { symbol: 'NASDAQ:QQQ' }, layout: { x: 0, y: 4, w: 15, h: 10 } },
-            { type: 'tradingview_technical_analysis', config: { symbol: 'NASDAQ:QQQ' }, layout: { x: 15, y: 4, w: 9, h: 10 } },
-            { type: 'market_overview', layout: { x: 0, y: 14, w: 8, h: 7 } },
-            { type: 'forex_rates', layout: { x: 8, y: 14, w: 8, h: 7 } },
-            { type: 'commodities', layout: { x: 16, y: 14, w: 8, h: 7 } },
-            { type: 'world_indices', layout: { x: 0, y: 21, w: 10, h: 8 } },
-            { type: 'market_news', config: { mode: 'all' }, layout: { x: 10, y: 21, w: 14, h: 8 } },
-        ],
-    },
-    {
-        id: 'vietnam-overview',
-        name: 'Vietnam Market Overview',
-        description: 'Complete overview of Vietnam stock market with screener, charts, and company profiles',
-        icon: <Globe size={24} />,
-        category: 'market',
-        color: '#3B82F6',
-        widgets: [
-            { type: 'screener' },
-            { type: 'price_chart' },
-            { type: 'ticker_profile' },
-            { type: 'key_metrics' },
-            { type: 'market_movers_sectors' },
-        ],
-    },
-    {
-        id: 'technical-analysis',
-        name: 'Technical Analysis',
-        description: 'Price charts, technical indicators, and trading signals',
-        icon: <LineChart size={24} />,
-        category: 'analysis',
-        color: '#10B981',
-        widgets: [
-            { type: 'price_chart' },
-            { type: 'ticker_info' },
-            { type: 'share_statistics' },
-        ],
-    },
-    {
-        id: 'fundamental-research',
-        name: 'Fundamental Research',
-        description: 'Financial statements, key metrics, company filings, and ownership analysis',
-        icon: <Briefcase size={24} />,
-        category: 'research',
-        color: '#06B6D4',
-        widgets: [
-            { type: 'ticker_profile' },
-            { type: 'key_metrics' },
-            { type: 'earnings_history' },
-            { type: 'company_filings' },
-            { type: 'news_corporate_actions' },
-        ],
-    },
-    {
-        id: 'fundamental-deep-dive',
-        name: 'Fundamental Deep Dive',
-        description: 'Long-term research setup with statements, ratios, and side-by-side comparison',
-        icon: <Briefcase size={24} />,
-        category: 'research',
-        color: '#14B8A6',
-        widgets: [
-            { type: 'ticker_profile' },
-            { type: 'key_metrics' },
-            { type: 'income_statement' },
-            { type: 'balance_sheet' },
-            { type: 'cash_flow' },
-            { type: 'financial_ratios' },
-            { type: 'comparison_analysis' },
-        ],
-    },
-    {
-        id: 'dividend-value',
-        name: 'Dividend & Value',
-        description: 'Yield-focused workflow with dividend ladder, valuation, and corporate action tracking',
-        icon: <TrendingUp size={24} />,
-        category: 'research',
-        color: '#22C55E',
-        widgets: [
-            { type: 'key_metrics' },
-            { type: 'dividend_ladder' },
-            { type: 'dividend_payment' },
-            { type: 'financial_ratios' },
-            { type: 'events_calendar' },
-            { type: 'news_corporate_actions' },
-        ],
-    },
-    {
-        id: 'earnings-calendar',
-        name: 'Company Calendar',
-        description: 'Track earnings, dividends, stock splits, and corporate filings',
-        icon: <BarChart3 size={24} />,
-        category: 'research',
-        color: '#F59E0B',
-        widgets: [
-            { type: 'earnings_history' },
-            { type: 'dividend_payment' },
-            { type: 'stock_splits' },
-            { type: 'company_filings' },
-        ],
-    },
-    {
-        id: 'earnings-season-monitor',
-        name: 'Earnings Season',
-        description: 'Monitor fresh quarterly releases, earnings quality, and follow-up statement work.',
-        icon: <BarChart3 size={24} />,
-        category: 'research',
-        color: '#F97316',
-        widgets: [
-            { type: 'earnings_season_monitor', layout: { x: 0, y: 0, w: 14, h: 8 } },
-            { type: 'events_calendar', layout: { x: 14, y: 0, w: 10, h: 8 } },
-            { type: 'financial_ratios', layout: { x: 0, y: 8, w: 8, h: 6 } },
-            { type: 'income_statement', layout: { x: 8, y: 8, w: 8, h: 6 } },
-            { type: 'cash_flow', layout: { x: 16, y: 8, w: 8, h: 6 } },
-        ],
-    },
-];
+import { getWidgetDefinition } from '@/data/widgetDefinitions';
+import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { cn } from '@/lib/utils';
+import {
+    DASHBOARD_TEMPLATES,
+    DASHBOARD_TEMPLATE_CATEGORIES,
+    type DashboardTemplate,
+    type DashboardTemplateCategory,
+} from '@/types/dashboard-templates';
 
 interface AppsLibraryProps {
     isOpen: boolean;
     onClose: () => void;
 }
 
+const CATEGORY_ICONS: Record<DashboardTemplateCategory, typeof Activity> = {
+    market: Activity,
+    fundamentals: BarChart3,
+    technical: TrendingUp,
+    quant: Sigma,
+    research: Newspaper,
+    global: Globe,
+};
+
+const CATEGORY_STYLES: Record<DashboardTemplateCategory, string> = {
+    market: 'from-blue-500/15 via-cyan-500/5 to-emerald-500/10',
+    fundamentals: 'from-amber-500/15 via-orange-500/5 to-yellow-500/10',
+    technical: 'from-emerald-500/15 via-teal-500/5 to-cyan-500/10',
+    quant: 'from-fuchsia-500/15 via-violet-500/5 to-cyan-500/10',
+    research: 'from-slate-200/10 via-slate-400/5 to-blue-500/10',
+    global: 'from-violet-500/15 via-fuchsia-500/5 to-cyan-500/10',
+};
+
+function getTemplateWidgetLabel(type: string): string {
+    return getWidgetDefinition(type)?.name || type.replace(/_/g, ' ');
+}
+
 export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedCategory, setSelectedCategory] = useState<'all' | 'market' | 'analysis' | 'research' | 'global'>('all');
-    const { createDashboard, addWidget, setActiveDashboard, activeDashboard } = useDashboard();
+    const [selectedCategory, setSelectedCategory] = useState<DashboardTemplateCategory | 'all'>('all');
+    const { createDashboard, addWidget, setActiveDashboard } = useDashboard();
+
+    const filteredTemplates = useMemo(() => {
+        const normalizedQuery = searchQuery.trim().toLowerCase();
+        return DASHBOARD_TEMPLATES.filter((template) => {
+            const matchesSearch = !normalizedQuery
+                || template.name.toLowerCase().includes(normalizedQuery)
+                || template.description.toLowerCase().includes(normalizedQuery)
+                || template.widgets.some((widget) => getTemplateWidgetLabel(widget.type).toLowerCase().includes(normalizedQuery));
+            const matchesCategory = selectedCategory === 'all' || template.category === selectedCategory;
+            return matchesSearch && matchesCategory;
+        });
+    }, [searchQuery, selectedCategory]);
+
+    const categoryCounts = useMemo(() => {
+        return Object.fromEntries(
+            DASHBOARD_TEMPLATE_CATEGORIES.map((category) => [
+                category.id,
+                DASHBOARD_TEMPLATES.filter((template) => template.category === category.id).length,
+            ])
+        ) as Record<DashboardTemplateCategory, number>;
+    }, []);
 
     if (!isOpen) return null;
 
-    const filteredTemplates = APP_TEMPLATES.filter(template => {
-        const matchesSearch = template.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            template.description.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesCategory = selectedCategory === 'all' || template.category === selectedCategory;
-        return matchesSearch && matchesCategory;
-    });
-
-    const handleApplyTemplate = (template: AppTemplate) => {
-        // Create a new dashboard with the template name
+    const handleApplyTemplate = (template: DashboardTemplate) => {
         const dashboard = createDashboard({
             name: template.name,
             folderId: template.category === 'global' ? 'folder-initial' : undefined,
         });
 
-        // Add widgets to the first tab
         const tabId = dashboard.tabs[0]?.id;
         if (tabId) {
-            template.widgets.forEach((widget, index) => {
-                const col = index % 2;
-                const row = Math.floor(index / 2);
+            template.widgets.forEach((widget) => {
                 addWidget(dashboard.id, tabId, {
                     type: widget.type,
                     tabId,
                     config: widget.config || {},
-                    layout: widget.layout || { x: col * 6, y: row * 4, w: 6, h: 4 }
+                    layout: widget.layout || getWidgetDefaultLayout(widget.type),
                 });
             });
         }
@@ -190,7 +103,6 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-            {/* Backdrop */}
             <div
                 className="absolute inset-0 bg-slate-950/60"
                 role="button"
@@ -205,100 +117,134 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
                 onClick={onClose}
             />
 
-                {/* Modal */}
-                <div className="relative w-full max-w-3xl max-h-[80vh] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col">
-                    {/* Header */}
-                    <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] shrink-0">
-                        <div>
-                            <h2 className="text-base font-semibold text-[var(--text-primary)]">Apps Library</h2>
-                            <p className="text-xs text-[var(--text-muted)] mt-0.5">Pre-configured dashboard templates</p>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                            aria-label="Close apps library"
-                        >
-                            <X size={18} />
-                        </button>
+            <div className="relative flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
+                <div className="flex items-center justify-between border-b border-[var(--border-default)] bg-[var(--bg-surface)] px-5 py-4">
+                    <div>
+                        <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--text-primary)]">
+                            <Layout size={18} className="text-blue-500" />
+                            Workspace Templates
+                        </h2>
+                        <p className="mt-1 text-xs text-[var(--text-muted)]">Launch curated workspaces from one canonical template library.</p>
                     </div>
+                    <button
+                        onClick={onClose}
+                        className="rounded-full p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                        aria-label="Close apps library"
+                    >
+                        <X size={18} />
+                    </button>
+                </div>
 
-                    {/* Search and Filters */}
-                    <div className="px-4 py-3 border-b border-[var(--border-color)] shrink-0">
-                        <div className="flex items-center gap-3">
-                            <div className="relative flex-1">
-                                <Search
-                                    size={14}
-                                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-                                />
-                                <input
-                                    type="text"
-                                    placeholder="Search templates..."
-                                    value={searchQuery}
-                                    aria-label="Search templates"
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full pl-8 pr-3 py-1.5 rounded bg-[var(--bg-primary)] border border-[var(--border-default)] text-[var(--text-primary)] text-xs placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50"
-                                />
-                            </div>
-                            <div className="flex gap-1">
-                                {(['all', 'market', 'analysis', 'research', 'global'] as const).map(cat => (
+                <div className="border-b border-[var(--border-default)] bg-[var(--bg-surface)]/70 px-4 py-3">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                        <div className="relative flex-1">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                            <input
+                                type="text"
+                                placeholder="Search templates or widget names..."
+                                value={searchQuery}
+                                aria-label="Search templates"
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-blue-500/50"
+                            />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                onClick={() => setSelectedCategory('all')}
+                                className={cn(
+                                    'rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all',
+                                    selectedCategory === 'all'
+                                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                                        : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                                )}
+                            >
+                                All Templates
+                            </button>
+                            {DASHBOARD_TEMPLATE_CATEGORIES.map((category) => {
+                                const Icon = CATEGORY_ICONS[category.id];
+                                return (
                                     <button
-                                        key={cat}
-                                        onClick={() => setSelectedCategory(cat)}
-                                        className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${selectedCategory === cat
-                                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
-                                            }`}
+                                        key={category.id}
+                                        onClick={() => setSelectedCategory(category.id)}
+                                        className={cn(
+                                            'flex items-center gap-2 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all',
+                                            selectedCategory === category.id
+                                                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                                                : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                                        )}
                                     >
-                                        {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                                        <Icon size={12} />
+                                        {category.label}
+                                        <span className="text-[9px] opacity-75">{categoryCounts[category.id]}</span>
                                     </button>
-                                ))}
-                            </div>
+                                );
+                            })}
                         </div>
-                    </div>
-
-                    {/* Templates Grid */}
-                    <div className="flex-1 min-h-0 p-4 overflow-y-auto">
-                        <div className="grid grid-cols-2 gap-3">
-                            {filteredTemplates.map(template => (
-                                <button
-                                    key={template.id}
-                                    onClick={() => handleApplyTemplate(template)}
-                                    className="group flex flex-col p-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] hover:border-[var(--border-accent)] transition-all text-left"
-                                >
-                                    {/* Icon */}
-                                    <div
-                                        className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
-                                        style={{ backgroundColor: `${template.color}20`, color: template.color }}
-                                    >
-                                        {template.icon}
-                                    </div>
-
-                                    {/* Content */}
-                                    <h3 className="text-sm font-medium text-[var(--text-primary)] group-hover:text-blue-400 transition-colors">
-                                        {template.name}
-                                    </h3>
-                                    <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">
-                                        {template.description}
-                                    </p>
-
-                                    {/* Widget count */}
-                                    <div className="mt-3 flex items-center gap-1.5">
-                                        <Layout size={12} className="text-[var(--text-muted)]" />
-                                        <span className="text-[10px] text-[var(--text-muted)]">
-                                            {template.widgets.length} widgets
-                                        </span>
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-
-                        {filteredTemplates.length === 0 && (
-                            <div className="text-center py-8">
-                                <p className="text-[var(--text-muted)] text-sm">No templates found</p>
-                            </div>
-                        )}
                     </div>
                 </div>
-</div>
+
+                <div className="flex-1 overflow-y-auto bg-[var(--bg-primary)] p-5">
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                        {filteredTemplates.map((template) => (
+                            <button
+                                key={template.id}
+                                onClick={() => handleApplyTemplate(template)}
+                                className="group flex flex-col rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 text-left transition-all hover:border-blue-500/40 hover:bg-[var(--bg-hover)]"
+                            >
+                                <div
+                                    className={cn(
+                                        'relative mb-4 aspect-[16/8] overflow-hidden rounded-xl border border-[var(--border-default)] bg-gradient-to-br',
+                                        CATEGORY_STYLES[template.category]
+                                    )}
+                                >
+                                    <div className="absolute inset-0 p-3">
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {template.widgets.slice(0, 3).map((widget, index) => (
+                                                <div
+                                                    key={`${template.id}-box-${index}`}
+                                                    className="h-6 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/85"
+                                                />
+                                            ))}
+                                        </div>
+                                        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-1.5">
+                                            {template.widgets.slice(0, 4).map((widget) => (
+                                                <span
+                                                    key={`${template.id}-${widget.type}`}
+                                                    className="rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--text-secondary)]"
+                                                >
+                                                    {getTemplateWidgetLabel(widget.type)}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mb-2 flex items-center gap-2">
+                                    <span className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                                        {DASHBOARD_TEMPLATE_CATEGORIES.find((category) => category.id === template.category)?.label || template.category}
+                                    </span>
+                                    <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                                        {template.widgets.length} widgets
+                                    </span>
+                                </div>
+
+                                <h3 className="text-sm font-bold text-[var(--text-primary)] transition-colors group-hover:text-blue-400">
+                                    {template.name}
+                                </h3>
+                                <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                                    {template.description}
+                                </p>
+                            </button>
+                        ))}
+                    </div>
+
+                    {filteredTemplates.length === 0 && (
+                        <div className="py-10 text-center text-sm text-[var(--text-muted)]">
+                            No templates match this search.
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
     );
 }

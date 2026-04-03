@@ -223,6 +223,65 @@ async def test_chat_stream_uses_admin_runtime_model_for_app_default_mode(client,
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_normalizes_unsupported_runtime_provider_to_openrouter(
+    client, monkeypatch
+):
+    captured: dict[str, object] = {}
+
+    async def fake_build_runtime_context(*, message, history, client_context, prefer_appwrite_data):
+        return {
+            "market_context": [],
+            "source_catalog": [],
+            "prefer_appwrite_data": prefer_appwrite_data,
+        }
+
+    async def fake_get_runtime_config():
+        return {"provider": "gemini", "model": "openai/gpt-4o-mini"}
+
+    async def fake_generate_response_stream_events(messages, context, request_settings=None):
+        captured["request_settings"] = request_settings
+        yield {"chunk": "Normalized"}
+        yield {"done": True, "usedSourceIds": [], "sources": [], "artifacts": [], "actions": []}
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.ai_context_service.build_runtime_context",
+        fake_build_runtime_context,
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.ai_runtime_config_service.get_runtime_config",
+        fake_get_runtime_config,
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.llm_service.generate_response_stream_events",
+        fake_generate_response_stream_events,
+    )
+
+    response = await client.post(
+        "/api/v1/copilot/chat/stream",
+        json={
+            "message": "Analyze VCI",
+            "history": [],
+            "settings": {
+                "mode": "app_default",
+                "provider": "openrouter",
+                "model": "",
+                "webSearch": False,
+                "preferAppwriteData": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["request_settings"] == {
+        "mode": "app_default",
+        "provider": "openrouter",
+        "model": "openai/gpt-4o-mini",
+        "webSearch": False,
+        "preferAppwriteData": True,
+    }
+
+
+@pytest.mark.asyncio
 async def test_submit_outcome_records_telemetry(client, monkeypatch):
     captured: dict[str, object] = {}
 

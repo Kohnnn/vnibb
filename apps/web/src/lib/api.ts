@@ -329,13 +329,16 @@ async function getAuthorizationToken(): Promise<string | null> {
 }
 
 async function getAuthorizationTokenForCopilot(): Promise<string | null> {
+    if (authProvider === 'appwrite') {
+        // Copilot routes do not require a browser-minted Appwrite JWT. Skipping the
+        // direct `/account/jwts` call avoids noisy cross-origin failures when the
+        // deployed web origin is not configured as an Appwrite platform.
+        return null;
+    }
+
     try {
         return await getAuthorizationToken();
     } catch (error) {
-        if (authProvider === 'appwrite') {
-            console.warn('Copilot proceeding without Appwrite JWT:', error);
-            return null;
-        }
         throw error;
     }
 }
