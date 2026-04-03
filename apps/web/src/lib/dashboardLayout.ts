@@ -52,6 +52,7 @@ export interface WidgetDefaultLayout {
 interface ResolvedLayoutBehavior extends LayoutBehavior {
   maxW: number
   maxH?: number
+  autoFitMaxW: number
 }
 
 const FALLBACK_BEHAVIOR: LayoutBehavior = {
@@ -83,7 +84,6 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   balance_sheet: { preferredW: 14, preferredH: 18, minW: 10, minH: 14, orientation: 'horizontal', expandPriority: 4 },
   cash_flow: { preferredW: 10, preferredH: 18, minW: 8, minH: 14, orientation: 'horizontal', expandPriority: 4 },
   cashflow_waterfall: { preferredW: 14, preferredH: 10, minW: 10, minH: 7, orientation: 'horizontal', expandPriority: 4 },
-  institutional_ownership: { preferredW: 10, preferredH: 6, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
   major_shareholders: { preferredW: 10, preferredH: 6, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
   insider_trading: { preferredW: 10, preferredH: 6, minW: 8, minH: 5, maxW: 12, orientation: 'vertical', expandPriority: 1 },
   officers_management: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, maxW: 14, orientation: 'vertical', expandPriority: 2 },
@@ -227,10 +227,8 @@ function resolveLayoutBehavior(item: CompactableLayoutItem, cols: number): Resol
   const preferredWBase = explicit?.preferredW ?? item.layout.w ?? FALLBACK_BEHAVIOR.preferredW
   const preferredHBase = explicit?.preferredH ?? item.layout.h ?? FALLBACK_BEHAVIOR.preferredH
 
-  const maxW = Math.min(
-    item.layout.maxW ?? explicit?.maxW ?? (inferredOrientation === 'horizontal' ? cols : preferredWBase + 4),
-    cols
-  )
+  const maxW = Math.min(item.layout.maxW ?? cols, cols)
+  const autoFitMaxW = Math.min(item.layout.maxW ?? explicit?.maxW ?? maxW, cols)
   const maxH = item.layout.maxH ?? explicit?.maxH
 
   return {
@@ -240,6 +238,7 @@ function resolveLayoutBehavior(item: CompactableLayoutItem, cols: number): Resol
     minH,
     maxW,
     maxH,
+    autoFitMaxW,
     orientation: inferredOrientation,
     expandPriority: explicit?.expandPriority ?? (inferredOrientation === 'horizontal' ? 3 : inferredOrientation === 'balanced' ? 2 : 1),
   }
@@ -256,7 +255,7 @@ function normalizeItemLayout<T extends CompactableLayoutItem>(item: T, cols: num
       h: clamp(item.layout.h || behavior.preferredH, behavior.minH, behavior.maxH ?? Number.MAX_SAFE_INTEGER),
       minW: behavior.minW,
       minH: behavior.minH,
-      maxW: item.layout.maxW ?? behavior.maxW,
+      maxW: item.layout.maxW,
       maxH: item.layout.maxH ?? behavior.maxH,
     },
   }
@@ -276,7 +275,7 @@ function expandRowWidths<RowItem extends CompactableLayoutItem>(row: Array<RowIt
     for (const index of orderedIndexes) {
       if (remaining <= 0) break
       const item = row[index]
-      const maxWidth = item.__behavior.maxW
+      const maxWidth = item.__behavior.autoFitMaxW
       if (item.layout.w >= maxWidth) continue
 
       item.layout.w += 1

@@ -3,13 +3,14 @@
 import { useState, useCallback, useMemo, useEffect, memo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, TrendingUp, TrendingDown, Minus, Star, Trash2 } from 'lucide-react';
-import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 import { getSymbols } from '@/lib/api';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import type { WidgetGroupId } from '@/types/widget';
 
 const STORAGE_KEY = 'vnibb-watchlist-v1';
@@ -37,16 +38,71 @@ interface SortConfig {
 interface WatchlistWidgetProps {
     id: string;
     symbol?: string;
+    config?: Record<string, unknown>;
     isEditing?: boolean;
     widgetGroup?: WidgetGroupId;
 }
 
-function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: WatchlistWidgetProps & { onRemove?: () => void }) {
-    const [symbols, setSymbols, clearSymbols] = useLocalStorage<string[]>(STORAGE_KEY, []);
-    const [sortConfig, setSortConfig] = useLocalStorage<SortConfig>(SORT_STORAGE_KEY, {
-        field: 'symbol',
-        order: 'asc'
-    });
+function hasOwnConfigKey(config: Record<string, unknown> | undefined, key: string): boolean {
+    return Boolean(config) && Object.prototype.hasOwnProperty.call(config, key);
+}
+
+function parseLegacySymbols(): string[] {
+    if (typeof window === 'undefined') return [];
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        return stored ? (JSON.parse(stored) as string[]).filter((value): value is string => typeof value === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
+function parseLegacySortConfig(): SortConfig {
+    if (typeof window === 'undefined') return { field: 'symbol', order: 'asc' };
+    try {
+        const stored = localStorage.getItem(SORT_STORAGE_KEY);
+        if (!stored) return { field: 'symbol', order: 'asc' };
+        const parsed = JSON.parse(stored) as Partial<SortConfig>;
+        return {
+            field: parsed.field === 'price' || parsed.field === 'changePercent' || parsed.field === 'volume' ? parsed.field : 'symbol',
+            order: parsed.order === 'desc' ? 'desc' : 'asc',
+        };
+    } catch {
+        return { field: 'symbol', order: 'asc' };
+    }
+}
+
+function parseWatchlistSymbols(config: Record<string, unknown> | undefined): string[] {
+    const rawValue = config?.watchlistSymbols;
+    if (!Array.isArray(rawValue)) {
+        return hasOwnConfigKey(config, 'watchlistSymbols') ? [] : parseLegacySymbols();
+    }
+
+    return rawValue
+        .filter((value): value is string => typeof value === 'string' && Boolean(value))
+        .map((value) => value.toUpperCase());
+}
+
+function parseWatchlistSort(config: Record<string, unknown> | undefined): SortConfig {
+    const rawValue = config?.watchlistSort;
+    if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) {
+        return hasOwnConfigKey(config, 'watchlistSort') ? { field: 'symbol', order: 'asc' } : parseLegacySortConfig();
+    }
+
+    const parsed = rawValue as Partial<SortConfig>;
+    return {
+        field: parsed.field === 'price' || parsed.field === 'changePercent' || parsed.field === 'volume' ? parsed.field : 'symbol',
+        order: parsed.order === 'desc' ? 'desc' : 'asc',
+    };
+}
+
+function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup }: WatchlistWidgetProps & { onRemove?: () => void }) {
+    const { updateWidget } = useDashboard();
+    const widgetLocation = useDashboardWidget(id);
+    const persistedSymbols = useMemo(() => parseWatchlistSymbols(config), [config]);
+    const persistedSortConfig = useMemo(() => parseWatchlistSort(config), [config]);
+    const [symbols, setSymbols] = useState<string[]>(persistedSymbols);
+    const [sortConfig, setSortConfig] = useState<SortConfig>(persistedSortConfig);
 
     const [newSymbol, setNewSymbol] = useState('');
     const [showAddInput, setShowAddInput] = useState(false);
@@ -66,6 +122,36 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: Watc
 
     const { prices: livePrices, isConnected } = useWebSocket({ symbols });
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+
+    useEffect(() => {
+        setSymbols((current) => JSON.stringify(current) === JSON.stringify(persistedSymbols) ? current : persistedSymbols);
+    }, [persistedSymbols]);
+
+    useEffect(() => {
+        setSortConfig((current) => JSON.stringify(current) === JSON.stringify(persistedSortConfig) ? current : persistedSortConfig);
+    }, [persistedSortConfig]);
+
+    useEffect(() => {
+        if (!widgetLocation) return;
+
+        const currentConfig = widgetLocation.widget.config || {};
+        const nextConfig = {
+            ...currentConfig,
+            watchlistSymbols: symbols,
+            watchlistSort: sortConfig,
+        };
+
+        if (
+            JSON.stringify(currentConfig.watchlistSymbols ?? []) === JSON.stringify(symbols)
+            && JSON.stringify(currentConfig.watchlistSort ?? {}) === JSON.stringify(sortConfig)
+        ) {
+            return;
+        }
+
+        updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, {
+            config: nextConfig,
+        });
+    }, [id, sortConfig, symbols, updateWidget, widgetLocation]);
 
     useEffect(() => {
         if (livePrices.size > 0) {
@@ -135,9 +221,9 @@ function WatchlistWidgetComponent({ id, isEditing, onRemove, widgetGroup }: Watc
     }, [setSymbols]);
 
     const handleClearAll = useCallback(() => {
-        clearSymbols();
+        setSymbols([]);
         setShowClearConfirm(false);
-    }, [clearSymbols]);
+    }, []);
 
     const handleSort = useCallback((field: SortField) => {
         setSortConfig(prev => ({

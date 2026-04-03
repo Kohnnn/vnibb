@@ -19,7 +19,7 @@ const FALLBACK_PROMPTS: Prompt[] = [
         template: 'Using {widget_or_symbol} as the primary context, analyze the trend in dividend payouts for {symbol} over the past 5 years. Include dividend yield, payout ratio, and sustainability assessment.',
         content: 'Using {widget_or_symbol} as the primary context, analyze the trend in dividend payouts for {symbol} over the past 5 years. Include dividend yield, payout ratio, and sustainability assessment.',
         category: 'analysis',
-        recommendedWidgetKeys: ['financials'],
+        recommendedWidgetKeys: ['unified_financials'],
         isDefault: true,
         source: 'system',
     },
@@ -41,7 +41,7 @@ const FALLBACK_PROMPTS: Prompt[] = [
         template: 'Summarize the key financial signals for {symbol} from {widget_or_symbol}. Focus on revenue growth, margins, leverage, cash generation, and the single biggest balance-sheet risk.',
         content: 'Summarize the key financial signals for {symbol} from {widget_or_symbol}. Focus on revenue growth, margins, leverage, cash generation, and the single biggest balance-sheet risk.',
         category: 'fundamentals',
-        recommendedWidgetKeys: ['financials'],
+        recommendedWidgetKeys: ['unified_financials'],
         isDefault: true,
         source: 'system',
     },
@@ -52,7 +52,7 @@ const FALLBACK_PROMPTS: Prompt[] = [
         template: 'Based on the historical earnings data in {widget_or_symbol} and current market conditions, provide an outlook for the next quarter for {symbol}. Include key drivers, key risks, and what would invalidate the forecast.',
         content: 'Based on the historical earnings data in {widget_or_symbol} and current market conditions, provide an outlook for the next quarter for {symbol}. Include key drivers, key risks, and what would invalidate the forecast.',
         category: 'analysis',
-        recommendedWidgetKeys: ['financials'],
+        recommendedWidgetKeys: ['unified_financials'],
         isDefault: true,
         source: 'system',
     },
@@ -249,8 +249,6 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
         onClose();
     };
 
-    if (!isOpen) return null;
-
     const filteredPrompts = useMemo(() => prompts.filter(prompt => {
         const matchesSearch = prompt.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             prompt.content.toLowerCase().includes(searchQuery.toLowerCase());
@@ -258,6 +256,8 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
         const matchesWidget = !widgetTypeKey || !prompt.recommendedWidgetKeys?.length || prompt.recommendedWidgetKeys.includes(widgetTypeKey);
         return matchesSearch && matchesCategory && matchesWidget;
     }), [prompts, searchQuery, selectedCategory, widgetTypeKey]);
+
+    if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">

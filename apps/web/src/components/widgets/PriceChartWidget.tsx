@@ -182,13 +182,13 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
           </div>
         </div>
 
-        <div className="relative flex-1 min-h-[320px]">
+        <div className="relative flex-1 min-h-[220px]">
           <TradingViewAdvancedChart
             symbol={symbol}
             timeframe={selectedTimeframe}
             mode={chartMode}
             className="h-full"
-            height={320}
+            height={220}
           />
           <div className="pointer-events-none absolute bottom-2 left-3 text-[10px] text-[var(--text-muted)]">
             Lightweight TradingView-style chart using live VNIBB data without local chart caching

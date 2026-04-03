@@ -133,7 +133,7 @@ export function TradingViewAdvancedChart({
   timeframe,
   mode = 'candles',
   className,
-  height = 400,
+  height = 220,
 }: TradingViewAdvancedChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);

@@ -66,7 +66,7 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     calculation: 'Combines cached profile metadata, website, listing context, and related corporate actions or dividend details.',
     interpretation: 'Use it to confirm what the company actually does before comparing its valuation or technical setup against peers.',
   },
-  institutional_ownership: {
+  major_shareholders: {
     purpose: 'Shows who owns the stock and how concentrated that ownership base appears.',
     calculation: 'Organizes shareholder and institutional ownership records into a ranked ownership view.',
     interpretation: 'Concentrated ownership can support strong trends but can also reduce float and increase gap risk if sentiment changes.',

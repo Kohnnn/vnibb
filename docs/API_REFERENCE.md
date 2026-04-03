@@ -117,9 +117,19 @@ Market data notes:
 - `GET /rs/{symbol}`
 
 ### Utility / Admin
+- `GET /dashboard/`
+- `POST /dashboard/`
+- `PATCH /dashboard/{dashboard_id}`
+- `DELETE /dashboard/{dashboard_id}`
 - `GET /chart-data/{symbol}`
 - `GET /admin/data-health`
 - `POST /admin/data-health/auto-backfill`
+
+Dashboard persistence notes:
+- Frontend dashboard layout, tabs, and per-widget config state are persisted through the dashboard endpoints when the active dashboard has a backend ID.
+- Widget-local state that used to live in separate browser keys is being consolidated into widget config so it can follow normal dashboard persistence and migration paths.
+- This now covers widget-owned state such as notes, watchlists, price alerts, peer-comparison saved sets, and research-browser saved sources.
+- Legacy widget aliases are normalized on load before dashboards are re-saved. Current canonical widget IDs include `ticker_profile`, `unified_financials`, `major_shareholders`, and `database_inspector`.
 
 ## Request/Response Examples
 

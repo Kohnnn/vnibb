@@ -11,6 +11,8 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { fetchStockQuote, quoteQueryKey } from '@/lib/queries';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 
 // ============ Types ============
 
@@ -36,7 +38,9 @@ interface PriceUpdate {
 }
 
 interface PriceAlertsWidgetProps {
+    id: string;
     symbol?: string;
+    config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
 }
@@ -109,7 +113,7 @@ class NotificationService {
 
 // ============ Alert Storage ============
 
-function loadAlerts(): PriceAlert[] {
+function loadLegacyAlerts(): PriceAlert[] {
     if (typeof window === 'undefined') return [];
     try {
         const stored = localStorage.getItem(STORAGE_KEY);
@@ -119,9 +123,27 @@ function loadAlerts(): PriceAlert[] {
     }
 }
 
-function saveAlerts(alerts: PriceAlert[]): void {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(alerts));
+function hasOwnConfigKey(config: Record<string, unknown> | undefined, key: string): boolean {
+    return Boolean(config) && Object.prototype.hasOwnProperty.call(config, key);
+}
+
+function parsePersistedAlerts(config: Record<string, unknown> | undefined): PriceAlert[] {
+    const rawValue = config?.alerts;
+    if (!Array.isArray(rawValue)) {
+        return hasOwnConfigKey(config, 'alerts') ? [] : loadLegacyAlerts();
+    }
+
+    return rawValue.filter((alert): alert is PriceAlert => {
+        if (!alert || typeof alert !== 'object') return false;
+        const candidate = alert as Partial<PriceAlert>;
+        return typeof candidate.id === 'string'
+            && typeof candidate.symbol === 'string'
+            && typeof candidate.condition === 'string'
+            && typeof candidate.threshold === 'number'
+            && typeof candidate.createdAt === 'string'
+            && typeof candidate.isActive === 'boolean'
+            && typeof candidate.notificationSent === 'boolean';
+    });
 }
 
 // ============ Alert Checker ============
@@ -165,9 +187,11 @@ function formatThreshold(alert: PriceAlert): string {
 
 // ============ Component ============
 
-export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetProps) {
+export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetConfig }: PriceAlertsWidgetProps) {
+    const { updateWidget } = useDashboard();
+    const widgetLocation = useDashboardWidget(id);
     const queryClient = useQueryClient();
-    const [alerts, setAlerts] = useState<PriceAlert[]>([]);
+    const [alerts, setAlerts] = useState<PriceAlert[]>(() => parsePersistedAlerts(widgetConfig));
     const [showAdd, setShowAdd] = useState(false);
     const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
     const [newAlert, setNewAlert] = useState({
@@ -187,16 +211,31 @@ export function PriceAlertsWidget({ symbol: initialSymbol }: PriceAlertsWidgetPr
 
     // Load alerts and check permission on mount
     useEffect(() => {
-        setAlerts(loadAlerts());
+        setAlerts(parsePersistedAlerts(widgetConfig));
         setNotificationPermission(notificationServiceRef.current.getPermission());
-    }, []);
+    }, [widgetConfig]);
 
-    // Save alerts when they change
+    // Persist alerts in widget config so they follow dashboard sync instead of separate browser-only storage.
     useEffect(() => {
-        if (alerts.length > 0 || localStorage.getItem(STORAGE_KEY)) {
-            saveAlerts(alerts);
+        if (!widgetLocation) {
+            return;
         }
-    }, [alerts]);
+
+        const currentAlerts = Array.isArray(widgetLocation.widget.config?.alerts)
+            ? widgetLocation.widget.config?.alerts
+            : [];
+
+        if (JSON.stringify(currentAlerts) === JSON.stringify(alerts)) {
+            return;
+        }
+
+        updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, {
+            config: {
+                ...widgetLocation.widget.config,
+                alerts,
+            },
+        });
+    }, [alerts, id, updateWidget, widgetLocation]);
 
     // Get unique symbols from active alerts
     const activeSymbols = [...new Set(

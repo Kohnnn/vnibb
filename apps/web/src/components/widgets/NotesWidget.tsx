@@ -5,33 +5,52 @@
 import { useState, useEffect } from 'react';
 import { StickyNote, Save, Trash2 } from 'lucide-react';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 
 interface NotesWidgetProps {
+    id: string;
     symbol: string;
+    config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
 }
 
-const STORAGE_KEY = 'vnibb_notes';
+function parseNotesBySymbol(value: unknown): Record<string, string> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return {};
+    }
 
-export function NotesWidget({ symbol, isEditing, onRemove }: NotesWidgetProps) {
+    return Object.fromEntries(
+        Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    );
+}
+
+export function NotesWidget({ id, symbol, config, isEditing, onRemove }: NotesWidgetProps) {
+    const { updateWidget } = useDashboard();
+    const widgetLocation = useDashboardWidget(id);
+    const persistedNotes = parseNotesBySymbol(config?.notesBySymbol);
     const [notes, setNotes] = useState('');
     const [savedNotes, setSavedNotes] = useState<Record<string, string>>({});
     const [isSaved, setIsSaved] = useState(true);
 
     useEffect(() => {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            setSavedNotes(parsed);
-            setNotes(parsed[symbol] || '');
-        }
-    }, [symbol]);
+        setSavedNotes(persistedNotes);
+        setNotes(persistedNotes[symbol] || '');
+        setIsSaved(true);
+    }, [persistedNotes, symbol]);
 
     const saveNote = () => {
         const updated = { ...savedNotes, [symbol]: notes };
         setSavedNotes(updated);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        if (widgetLocation) {
+            updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, {
+                config: {
+                    ...widgetLocation.widget.config,
+                    notesBySymbol: updated,
+                },
+            });
+        }
         setIsSaved(true);
     };
 
@@ -40,7 +59,14 @@ export function NotesWidget({ symbol, isEditing, onRemove }: NotesWidgetProps) {
         const updated = { ...savedNotes };
         delete updated[symbol];
         setSavedNotes(updated);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        if (widgetLocation) {
+            updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, {
+                config: {
+                    ...widgetLocation.widget.config,
+                    notesBySymbol: updated,
+                },
+            });
+        }
         setIsSaved(true);
     };
 
@@ -59,7 +85,7 @@ export function NotesWidget({ symbol, isEditing, onRemove }: NotesWidgetProps) {
                     {!isSaved && <span className="text-orange-400">•</span>}
                 </div>
                 <div className="flex items-center gap-2">
-                    <WidgetMeta note="Local notes" align="right" />
+                    <WidgetMeta note="Saved in dashboard" align="right" />
                     <button
                         onClick={saveNote}
                         className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-green-400"

@@ -170,11 +170,11 @@ export function ValuationBandWidget({ id, symbol, onRemove }: ValuationBandWidge
               </div>
             </div>
 
-            <div className="flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+            <div className="flex min-h-[220px] flex-1 flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
               <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
                 Historical {seriesConfig.label} vs statistical band
               </div>
-              <ChartMountGuard className="h-[260px]" minHeight={220}>
+              <ChartMountGuard className="flex-1 min-h-[180px]" minHeight={180}>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <XAxis dataKey="period" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />

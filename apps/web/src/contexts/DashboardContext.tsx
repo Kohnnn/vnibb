@@ -27,6 +27,7 @@ import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
 import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync } from '@/lib/useDashboardSync';
+import { normalizeWidgetType } from '@/data/widgetDefinitions';
 import { autoFitGridItems, compactGridItems, findNextAvailableLayout, getWidgetDefaultLayout, preserveTemplateGridItems } from '@/lib/dashboardLayout';
 import { getPublishedSystemDashboardTemplates } from '@/lib/api';
 
@@ -39,7 +40,7 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 15;
+const CURRENT_MIGRATION_VERSION = 16;
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
@@ -865,8 +866,8 @@ const INITIAL_QUANT_TEMPLATE: TemplateWidget[] = [
     },
 ];
 
-// Map template name to widgets
-const DASHBOARD_TEMPLATES: Record<string, TemplateWidget[]> = {
+// Map tab-template keys to widget definitions.
+const TAB_WIDGET_TEMPLATES: Record<string, TemplateWidget[]> = {
     overview: OVERVIEW_TEMPLATE,
     financials: FINANCIALS_TEMPLATE,
     quant: QUANT_TEMPLATE,
@@ -878,8 +879,8 @@ const DASHBOARD_TEMPLATES: Record<string, TemplateWidget[]> = {
     calendar: CALENDAR_TEMPLATE,
 };
 
-// Map tab names to template names for migration
-const TAB_NAME_TO_TEMPLATE: Record<string, string> = {
+// Map tab names to template keys for migration.
+const TAB_NAME_TO_TEMPLATE_KEY: Record<string, string> = {
     'overview': 'overview',
     'overview 1': 'overview',
     'financials': 'financials',
@@ -908,10 +909,10 @@ const migrateEmptyTabs = (dashboards: Dashboard[]): Dashboard[] => {
             if (tab.widgets.length > 0) return tab;
 
             // Find matching template by tab name (case-insensitive)
-            const templateName = TAB_NAME_TO_TEMPLATE[tab.name.toLowerCase()];
+            const templateName = TAB_NAME_TO_TEMPLATE_KEY[tab.name.toLowerCase()];
             if (!templateName) return tab;
 
-            const template = DASHBOARD_TEMPLATES[templateName];
+            const template = TAB_WIDGET_TEMPLATES[templateName];
             if (!template) return tab;
 
             // Apply template to empty tab
@@ -919,6 +920,71 @@ const migrateEmptyTabs = (dashboards: Dashboard[]): Dashboard[] => {
             return { ...tab, widgets };
         }),
     }));
+};
+
+const widgetFingerprint = (type: string, config: unknown): string => {
+    const normalizedConfig = config && typeof config === 'object' ? config : {};
+    return `${type}:${JSON.stringify(normalizedConfig)}`;
+};
+
+const migrateLegacyWidgetTypes = (dashboards: Dashboard[]): Dashboard[] => {
+    return dashboards.map((dashboard) => {
+        let dashboardChanged = false;
+
+        const tabs = dashboard.tabs.map((tab) => {
+            const seenCanonicalWidgets = new Set<string>();
+            let changed = false;
+
+            const widgets = tab.widgets.flatMap((widget) => {
+                const normalizedType = normalizeWidgetType(widget.type);
+                if (!normalizedType) {
+                    changed = true;
+                    return [];
+                }
+
+                const fingerprint = widgetFingerprint(normalizedType, widget.config);
+                const isLegacyAlias = normalizedType !== widget.type;
+
+                if (isLegacyAlias && seenCanonicalWidgets.has(fingerprint)) {
+                    changed = true;
+                    return [];
+                }
+
+                seenCanonicalWidgets.add(fingerprint);
+
+                if (!isLegacyAlias) {
+                    return [widget];
+                }
+
+                changed = true;
+                return [{
+                    ...widget,
+                    type: normalizedType,
+                }];
+            });
+
+            if (!changed) {
+                return tab;
+            }
+
+            dashboardChanged = true;
+
+            return {
+                ...tab,
+                widgets,
+            };
+        });
+
+        if (!dashboardChanged) {
+            return dashboard;
+        }
+
+        return {
+            ...dashboard,
+            tabs,
+            updatedAt: new Date().toISOString(),
+        };
+    });
 };
 
 const migrateLegacyDashboardNames = (dashboards: Dashboard[]): Dashboard[] => {
@@ -1168,7 +1234,7 @@ const createTabWithTemplate = (
     templateName: string
 ): DashboardTab => {
     const tabId = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const template = DASHBOARD_TEMPLATES[templateName] || [];
+    const template = TAB_WIDGET_TEMPLATES[templateName] || [];
     const widgets = createWidgetsFromTemplate(template, tabId);
 
     return {
@@ -1196,7 +1262,7 @@ function layoutsOverlap(
 function findSafeWidgetPlacement(
     widgets: WidgetInstance[],
     type: WidgetCreate['type'],
-    desired: { w: number; h: number; minW?: number; minH?: number }
+    desired: { w: number; h: number; minW?: number; minH?: number; maxW?: number; maxH?: number }
 ) {
     const fallback = findNextAvailableLayout(widgets, type);
     const normalizedWidgets = widgets
@@ -1218,6 +1284,8 @@ function findSafeWidgetPlacement(
                     h: desired.h,
                     minW: desired.minW ?? fallback.minW,
                     minH: desired.minH ?? fallback.minH,
+                    maxW: desired.maxW ?? fallback.maxW,
+                    maxH: desired.maxH ?? fallback.maxH,
                 };
             }
         }
@@ -1230,6 +1298,8 @@ function findSafeWidgetPlacement(
         h: desired.h,
         minW: desired.minW ?? fallback.minW,
         minH: desired.minH ?? fallback.minH,
+        maxW: desired.maxW ?? fallback.maxW,
+        maxH: desired.maxH ?? fallback.maxH,
     };
 }
 
@@ -2350,6 +2420,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     dashboards = refreshSystemDashboardTemplates(dashboards);
                 }
 
+                if (migrationVersion < 16) {
+                    dashboards = migrateLegacyWidgetTypes(dashboards);
+                }
+
                 // Final safety validation for all widgets
                 dashboards = dashboards.map(d => ({
                     ...d,
@@ -2371,6 +2445,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
             dashboards = migrateLegacySidebarDashboards(dashboards);
             dashboards = migrateStaleNewTabs(dashboards);
+            dashboards = migrateLegacyWidgetTypes(dashboards);
             const cleanedSidebar = migrateSidebarClutter(dashboards, folders);
             dashboards = cleanedSidebar.dashboards;
             folders = cleanedSidebar.folders;
@@ -2554,9 +2629,9 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     }, []);
 
     const applyTemplate = useCallback((dashboardId: string, tabId: string, templateName: string) => {
-        const template = DASHBOARD_TEMPLATES[templateName];
+        const template = TAB_WIDGET_TEMPLATES[templateName];
         if (!template) {
-            console.warn(`Template "${templateName}" not found. Available: ${Object.keys(DASHBOARD_TEMPLATES).join(', ')}`);
+            console.warn(`Template "${templateName}" not found. Available: ${Object.keys(TAB_WIDGET_TEMPLATES).join(', ')}`);
             return;
         }
 
@@ -2580,6 +2655,8 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             h: data.layout?.h ?? defaults.h,
             minW: data.layout?.minW ?? defaults.minW ?? 3,
             minH: data.layout?.minH ?? defaults.minH ?? 2,
+            maxW: data.layout?.maxW ?? defaults.maxW,
+            maxH: data.layout?.maxH ?? defaults.maxH,
         };
         const requestedPosition = {
             x: data.layout?.x,
@@ -2608,6 +2685,8 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 h: requestedLayout.h,
                 minW: requestedLayout.minW,
                 minH: requestedLayout.minH,
+                maxW: requestedLayout.maxW,
+                maxH: requestedLayout.maxH,
             };
 
         const widget: WidgetInstance = {
@@ -2624,6 +2703,8 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 h: placement.h,
                 minW: placement.minW,
                 minH: placement.minH,
+                maxW: placement.maxW,
+                maxH: placement.maxH,
             },
         };
         dispatch({ type: 'ADD_WIDGET', payload: { dashboardId, tabId, widget } });
@@ -2673,6 +2754,8 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             h: widget.layout.h,
             minW: widget.layout.minW,
             minH: widget.layout.minH,
+            maxW: widget.layout.maxW,
+            maxH: widget.layout.maxH,
         });
         const clonedWidget: WidgetInstance = {
             ...widget,
@@ -2768,7 +2851,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         reorderDashboards,
         activeDashboard,
         activeTab,
-        availableTemplates: Object.keys(DASHBOARD_TEMPLATES),
+        availableTemplates: Object.keys(TAB_WIDGET_TEMPLATES),
     };
 
     return (

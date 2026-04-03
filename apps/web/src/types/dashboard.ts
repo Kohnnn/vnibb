@@ -35,15 +35,12 @@ export type WidgetType =
     | 'key_metrics'
     | 'share_statistics'
     | 'screener'
-    | 'company_profile'
-    | 'financials'
     | 'earnings_history'
     | 'earnings_season_monitor'
     | 'dividend_payment'
     | 'stock_splits'
     | 'company_filings'
     | 'insider_trading'
-    | 'institutional_ownership'
     | 'analyst_estimates'
     | 'news_feed'
     | 'events_calendar'
@@ -131,8 +128,7 @@ export type WidgetType =
     | 'news_corporate_actions'
     | 'dividend_ladder'
     | 'ai_analysis'
-    | 'unified_financials'
-    | 'database_browser';
+    | 'unified_financials';
 
 
 
@@ -301,7 +297,14 @@ export interface WidgetDefinition {
     description: string;
     category: WidgetCategory;
     defaultConfig: WidgetConfig;
-    defaultLayout: { w: number; h: number; minW: number; minH: number };
+    defaultLayout: {
+        w: number;
+        h: number;
+        minW: number;
+        minH: number;
+        maxW?: number;
+        maxH?: number;
+    };
     recommended?: boolean;
     searchKeywords?: string[];
 }

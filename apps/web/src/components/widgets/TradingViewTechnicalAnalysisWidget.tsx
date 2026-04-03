@@ -81,7 +81,7 @@ export function TradingViewTechnicalAnalysisWidget({
             align="right"
           />
         </div>
-        <div className="flex-1 min-h-[340px]">
+        <div className="flex-1 min-h-[220px]">
           <div ref={containerRef} className="tradingview-widget-container h-full w-full" />
         </div>
       </div>

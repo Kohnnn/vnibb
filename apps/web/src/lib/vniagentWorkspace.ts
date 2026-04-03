@@ -48,7 +48,7 @@ export function getIntentFromSource(source: CopilotSourceRef): VniAgentWidgetInt
 
   switch (source.kind) {
     case 'company_profile':
-      return { widgetType: 'company_profile', label: 'Company Profile', symbol: source.symbol }
+      return { widgetType: 'ticker_profile', label: 'Company Profile', symbol: source.symbol }
     case 'price_history':
       return { widgetType: 'price_chart', label: 'Price Chart', symbol: source.symbol }
     case 'financial_ratios':

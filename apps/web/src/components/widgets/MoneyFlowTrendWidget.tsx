@@ -168,7 +168,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendW
             ) : !hasData ? (
               <WidgetEmpty message={`No money-flow trend data available for ${upperSymbol}.`} icon={<Activity size={18} />} />
             ) : (
-              <ChartMountGuard className="h-full min-h-[340px]" minHeight={320}>
+              <ChartMountGuard className="h-full min-h-[220px]" minHeight={220}>
                 <ResponsiveContainer width="100%" height="100%">
                   <ScatterChart margin={{ top: 16, right: 20, bottom: 24, left: 16 }}>
                     <ReferenceArea x1={0} x2={100} y1={100} y2={140} fill={QUADRANT_STYLES.accumulation.bg} />
