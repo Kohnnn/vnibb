@@ -22,9 +22,9 @@ import { useProfile, useStockQuote, useFinancialRatios } from '@/lib/queries';
 import {
     consumeCopilotStream,
     openCopilotChatStream,
+    type CopilotArtifact,
     type CopilotReasoningStep,
     type CopilotSourceRef,
-    type CopilotTableArtifact,
 } from '@/lib/api';
 import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import {
@@ -42,7 +42,7 @@ interface Message {
     reasoning?: string;
     usedSourceIds?: string[];
     sources?: CopilotSourceRef[];
-    artifacts?: CopilotTableArtifact[];
+    artifacts?: CopilotArtifact[];
     timestamp: Date;
 }
 
@@ -53,7 +53,7 @@ interface PersistedMessage {
     reasoning?: string;
     usedSourceIds?: string[];
     sources?: CopilotSourceRef[];
-    artifacts?: CopilotTableArtifact[];
+    artifacts?: CopilotArtifact[];
     timestamp: string;
 }
 

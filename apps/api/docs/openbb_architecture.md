@@ -88,11 +88,12 @@ Patterns VNIBB now implements:
    - VNIBB uses active symbol, active tab, widget snapshots, and Appwrite-first backend context.
 4. **Table artifact responses**
    - VNIBB now returns deterministic comparison and ranking tables derived from validated runtime context.
+5. **Chart artifact responses**
+   - VNIBB now returns deterministic chart payloads for price trends, comparison metrics, sector breadth, and foreign flow views.
 
 Patterns we have not implemented yet:
 
-1. chart artifacts
-2. HTML artifact responses
-3. full tool-orchestration callbacks in the OpenBB style
+1. HTML artifact responses
+2. full tool-orchestration callbacks in the OpenBB style
 
 For the current VNIBB AI implementation details, see `docs/ai_copilot.md`.

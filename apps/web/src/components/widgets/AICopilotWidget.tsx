@@ -9,9 +9,9 @@ import remarkGfm from 'remark-gfm';
 import {
     consumeCopilotStream,
     openCopilotChatStream,
+    type CopilotArtifact,
     type CopilotReasoningStep,
     type CopilotSourceRef,
-    type CopilotTableArtifact,
 } from '@/lib/api';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -32,7 +32,7 @@ interface Message {
     reasoning?: string;
     context?: WidgetContext;
     sources?: CopilotSourceRef[];
-    artifacts?: CopilotTableArtifact[];
+    artifacts?: CopilotArtifact[];
     isStreaming?: boolean;
     timestamp: Date;
 }

@@ -1825,10 +1825,12 @@ export interface CopilotSourceRef {
     priority?: number;
 }
 
+export type CopilotArtifactValueKind = 'text' | 'number' | 'percent' | 'currency' | 'large_number';
+
 export interface CopilotTableArtifactColumn {
     key: string;
     label: string;
-    kind?: 'text' | 'number' | 'percent' | 'currency' | 'large_number';
+    kind?: CopilotArtifactValueKind;
 }
 
 export interface CopilotTableArtifact {
@@ -1840,6 +1842,27 @@ export interface CopilotTableArtifact {
     rows: Array<Record<string, string | number | null>>;
     sourceIds?: string[];
 }
+
+export interface CopilotChartArtifactSeries {
+    key: string;
+    label: string;
+    color?: string;
+}
+
+export interface CopilotChartArtifact {
+    id: string;
+    type: 'chart';
+    title: string;
+    description?: string;
+    chartType: 'line' | 'bar';
+    xKey: string;
+    valueKind?: CopilotArtifactValueKind;
+    series: CopilotChartArtifactSeries[];
+    rows: Array<Record<string, string | number | null>>;
+    sourceIds?: string[];
+}
+
+export type CopilotArtifact = CopilotTableArtifact | CopilotChartArtifact;
 
 export interface CopilotReasoningStep {
     eventType: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
@@ -1854,7 +1877,7 @@ export interface CopilotStreamEvent {
     usedSourceIds?: string[];
     sources?: CopilotSourceRef[];
     reasoning?: CopilotReasoningStep;
-    artifacts?: CopilotTableArtifact[];
+    artifacts?: CopilotArtifact[];
 }
 
 interface RawCopilotSourceRef {
@@ -1892,10 +1915,35 @@ interface RawCopilotTableArtifact {
     source_ids?: string[];
 }
 
+interface RawCopilotChartArtifactSeries {
+    key?: string;
+    label?: string;
+    color?: string;
+}
+
+interface RawCopilotChartArtifact {
+    id?: string;
+    type?: string;
+    title?: string;
+    description?: string;
+    chartType?: string;
+    chart_type?: string;
+    xKey?: string;
+    x_key?: string;
+    valueKind?: string;
+    value_kind?: string;
+    series?: RawCopilotChartArtifactSeries[];
+    rows?: Array<Record<string, string | number | null>>;
+    sourceIds?: string[];
+    source_ids?: string[];
+}
+
 function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
     const event = (rawEvent && typeof rawEvent === 'object' ? rawEvent : {}) as Record<string, unknown>;
     const rawSources = Array.isArray(event.sources) ? event.sources as RawCopilotSourceRef[] : [];
-    const rawArtifacts = Array.isArray(event.artifacts) ? event.artifacts as RawCopilotTableArtifact[] : [];
+    const rawArtifacts = Array.isArray(event.artifacts)
+        ? event.artifacts as Array<RawCopilotTableArtifact | RawCopilotChartArtifact>
+        : [];
     const rawReasoning = (event.reasoning && typeof event.reasoning === 'object'
         ? event.reasoning
         : null) as RawCopilotReasoningStep | null;
@@ -1919,31 +1967,70 @@ function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
             asOf: typeof source.as_of === 'string' ? source.as_of : undefined,
             priority: typeof source.priority === 'number' ? source.priority : undefined,
         })).filter((source) => Boolean(source.id)),
-        artifacts: rawArtifacts.map((artifact) => ({
-            id: String(artifact.id || ''),
-            type: 'table' as const,
-            title: String(artifact.title || ''),
-            description: typeof artifact.description === 'string' ? artifact.description : undefined,
-            columns: Array.isArray(artifact.columns)
-                ? artifact.columns
-                    .map((column) => ({
-                        key: String(column.key || ''),
-                        label: String(column.label || ''),
-                        kind: typeof column.kind === 'string'
-                            ? column.kind as CopilotTableArtifactColumn['kind']
-                            : undefined,
-                    }))
-                    .filter((column) => Boolean(column.key && column.label))
-                : [],
-            rows: Array.isArray(artifact.rows)
-                ? artifact.rows.filter((row) => row && typeof row === 'object')
-                : [],
-            sourceIds: Array.isArray(artifact.sourceIds)
-                ? artifact.sourceIds.filter((item): item is string => typeof item === 'string')
-                : Array.isArray(artifact.source_ids)
-                    ? artifact.source_ids.filter((item): item is string => typeof item === 'string')
-                    : undefined,
-        })).filter((artifact) => Boolean(artifact.id && artifact.title && artifact.columns.length && artifact.rows.length)),
+        artifacts: rawArtifacts.map((artifact) => {
+            const normalizedType = String((artifact as RawCopilotChartArtifact).type || '').toLowerCase();
+            const normalizedSourceIds = Array.isArray((artifact as RawCopilotChartArtifact).sourceIds)
+                ? (artifact as RawCopilotChartArtifact).sourceIds!.filter((item): item is string => typeof item === 'string')
+                : Array.isArray((artifact as RawCopilotChartArtifact).source_ids)
+                    ? (artifact as RawCopilotChartArtifact).source_ids!.filter((item): item is string => typeof item === 'string')
+                    : undefined;
+
+            if (normalizedType === 'chart') {
+                const chartArtifact = artifact as RawCopilotChartArtifact;
+                return {
+                    id: String(chartArtifact.id || ''),
+                    type: 'chart' as const,
+                    title: String(chartArtifact.title || ''),
+                    description: typeof chartArtifact.description === 'string' ? chartArtifact.description : undefined,
+                    chartType: ((chartArtifact.chartType || chartArtifact.chart_type || 'line').toLowerCase() as CopilotChartArtifact['chartType']),
+                    xKey: String(chartArtifact.xKey || chartArtifact.x_key || ''),
+                    valueKind: typeof (chartArtifact.valueKind || chartArtifact.value_kind) === 'string'
+                        ? (chartArtifact.valueKind || chartArtifact.value_kind) as CopilotArtifactValueKind
+                        : undefined,
+                    series: Array.isArray(chartArtifact.series)
+                        ? chartArtifact.series
+                            .map((series) => ({
+                                key: String(series.key || ''),
+                                label: String(series.label || ''),
+                                color: typeof series.color === 'string' ? series.color : undefined,
+                            }))
+                            .filter((series) => Boolean(series.key && series.label))
+                        : [],
+                    rows: Array.isArray(chartArtifact.rows)
+                        ? chartArtifact.rows.filter((row) => row && typeof row === 'object')
+                        : [],
+                    sourceIds: normalizedSourceIds,
+                } satisfies CopilotChartArtifact;
+            }
+
+            const tableArtifact = artifact as RawCopilotTableArtifact;
+            return {
+                id: String(tableArtifact.id || ''),
+                type: 'table' as const,
+                title: String(tableArtifact.title || ''),
+                description: typeof tableArtifact.description === 'string' ? tableArtifact.description : undefined,
+                columns: Array.isArray(tableArtifact.columns)
+                    ? tableArtifact.columns
+                        .map((column) => ({
+                            key: String(column.key || ''),
+                            label: String(column.label || ''),
+                            kind: typeof column.kind === 'string'
+                                ? column.kind as CopilotArtifactValueKind
+                                : undefined,
+                        }))
+                        .filter((column) => Boolean(column.key && column.label))
+                    : [],
+                rows: Array.isArray(tableArtifact.rows)
+                    ? tableArtifact.rows.filter((row) => row && typeof row === 'object')
+                    : [],
+                sourceIds: normalizedSourceIds,
+            } satisfies CopilotTableArtifact;
+        }).filter((artifact) => {
+            if (artifact.type === 'chart') {
+                return Boolean(artifact.id && artifact.title && artifact.xKey && artifact.series.length && artifact.rows.length);
+            }
+            return Boolean(artifact.id && artifact.title && artifact.columns.length && artifact.rows.length);
+        }),
         reasoning: rawReasoning && typeof rawReasoning.message === 'string'
             ? {
                 eventType: ((rawReasoning.eventType || rawReasoning.event_type || 'INFO').toUpperCase() as CopilotReasoningStep['eventType']),
