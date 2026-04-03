@@ -1864,10 +1864,40 @@ export interface CopilotChartArtifact {
 
 export type CopilotArtifact = CopilotTableArtifact | CopilotChartArtifact;
 
+export interface CopilotActionSuggestion {
+    id: string;
+    type: 'set_global_symbol' | 'add_widget';
+    label: string;
+    description?: string;
+    confirmText?: string;
+    payload: Record<string, unknown>;
+    sourceIds?: string[];
+}
+
 export interface CopilotReasoningStep {
     eventType: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
     message: string;
     details?: Record<string, unknown>;
+}
+
+export interface CopilotResponseMeta {
+    responseId: string;
+    provider: string;
+    model: string;
+    mode: string;
+    latencyMs: number;
+}
+
+export interface CopilotFeedbackRequest {
+    responseId: string;
+    vote: 'up' | 'down';
+    surface: 'sidebar' | 'widget' | 'analysis';
+    notes?: string;
+}
+
+export interface CopilotFeedbackResponse {
+    accepted: boolean;
+    matched: boolean;
 }
 
 export interface CopilotStreamEvent {
@@ -1878,6 +1908,8 @@ export interface CopilotStreamEvent {
     sources?: CopilotSourceRef[];
     reasoning?: CopilotReasoningStep;
     artifacts?: CopilotArtifact[];
+    actions?: CopilotActionSuggestion[];
+    responseMeta?: CopilotResponseMeta;
 }
 
 interface RawCopilotSourceRef {
@@ -1938,12 +1970,40 @@ interface RawCopilotChartArtifact {
     source_ids?: string[];
 }
 
+interface RawCopilotActionSuggestion {
+    id?: string;
+    type?: string;
+    label?: string;
+    description?: string;
+    confirmText?: string;
+    confirm_text?: string;
+    payload?: Record<string, unknown>;
+    sourceIds?: string[];
+    source_ids?: string[];
+}
+
+interface RawCopilotResponseMeta {
+    responseId?: string;
+    response_id?: string;
+    provider?: string;
+    model?: string;
+    mode?: string;
+    latencyMs?: number;
+    latency_ms?: number;
+}
+
 function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
     const event = (rawEvent && typeof rawEvent === 'object' ? rawEvent : {}) as Record<string, unknown>;
     const rawSources = Array.isArray(event.sources) ? event.sources as RawCopilotSourceRef[] : [];
     const rawArtifacts = Array.isArray(event.artifacts)
         ? event.artifacts as Array<RawCopilotTableArtifact | RawCopilotChartArtifact>
         : [];
+    const rawActions = Array.isArray(event.actions) ? event.actions as RawCopilotActionSuggestion[] : [];
+    const rawResponseMeta = (event.responseMeta && typeof event.responseMeta === 'object'
+        ? event.responseMeta
+        : event.response_meta && typeof event.response_meta === 'object'
+            ? event.response_meta
+            : null) as RawCopilotResponseMeta | null;
     const rawReasoning = (event.reasoning && typeof event.reasoning === 'object'
         ? event.reasoning
         : null) as RawCopilotReasoningStep | null;
@@ -2031,6 +2091,38 @@ function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
             }
             return Boolean(artifact.id && artifact.title && artifact.columns.length && artifact.rows.length);
         }),
+        actions: rawActions.map((action) => ({
+            id: String(action.id || ''),
+            type: action.type === 'set_global_symbol'
+                ? ('set_global_symbol' as const)
+                : ('add_widget' as const),
+            label: String(action.label || ''),
+            description: typeof action.description === 'string' ? action.description : undefined,
+            confirmText: typeof action.confirmText === 'string'
+                ? action.confirmText
+                : typeof action.confirm_text === 'string'
+                    ? action.confirm_text
+                    : undefined,
+            payload: action.payload && typeof action.payload === 'object' ? action.payload : {},
+            sourceIds: Array.isArray(action.sourceIds)
+                ? action.sourceIds.filter((item): item is string => typeof item === 'string')
+                : Array.isArray(action.source_ids)
+                    ? action.source_ids.filter((item): item is string => typeof item === 'string')
+                    : undefined,
+        })).filter((action) => Boolean(action.id && action.label)),
+        responseMeta: rawResponseMeta && typeof (rawResponseMeta.responseId || rawResponseMeta.response_id) === 'string'
+            ? {
+                responseId: String(rawResponseMeta.responseId || rawResponseMeta.response_id || ''),
+                provider: String(rawResponseMeta.provider || ''),
+                model: String(rawResponseMeta.model || ''),
+                mode: String(rawResponseMeta.mode || ''),
+                latencyMs: typeof rawResponseMeta.latencyMs === 'number'
+                    ? rawResponseMeta.latencyMs
+                    : typeof rawResponseMeta.latency_ms === 'number'
+                        ? rawResponseMeta.latency_ms
+                        : 0,
+            }
+            : undefined,
         reasoning: rawReasoning && typeof rawReasoning.message === 'string'
             ? {
                 eventType: ((rawReasoning.eventType || rawReasoning.event_type || 'INFO').toUpperCase() as CopilotReasoningStep['eventType']),
@@ -2045,6 +2137,15 @@ export async function askCopilot(query: CopilotQuery): Promise<CopilotResponse> 
     return fetchAPI<CopilotResponse>('/copilot/ask', {
         method: 'POST',
         body: JSON.stringify(query),
+    });
+}
+
+export async function submitCopilotFeedback(
+    request: CopilotFeedbackRequest,
+): Promise<CopilotFeedbackResponse> {
+    return fetchAPI<CopilotFeedbackResponse>('/copilot/feedback', {
+        method: 'POST',
+        body: JSON.stringify(request),
     });
 }
 

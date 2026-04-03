@@ -8,12 +8,16 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import {
-  consumeCopilotStream,
-  openCopilotChatStream,
-  type CopilotArtifact,
-  type CopilotReasoningStep,
-  type CopilotSourceRef,
+    type CopilotActionSuggestion,
+    consumeCopilotStream,
+    openCopilotChatStream,
+    type CopilotArtifact,
+    type CopilotResponseMeta,
+    type CopilotReasoningStep,
+    type CopilotSourceRef,
 } from '@/lib/api';
+import { CopilotFeedbackBar } from '@/components/ui/CopilotFeedbackBar';
+import { CopilotActionPanel } from '@/components/ui/CopilotActionPanel';
 import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { readStoredAISettings } from '@/lib/aiSettings';
@@ -34,6 +38,9 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [sources, setSources] = useState<CopilotSourceRef[]>([]);
   const [artifacts, setArtifacts] = useState<CopilotArtifact[]>([]);
+  const [actions, setActions] = useState<CopilotActionSuggestion[]>([]);
+  const [responseMeta, setResponseMeta] = useState<CopilotResponseMeta | null>(null);
+  const [feedbackVote, setFeedbackVote] = useState<'up' | 'down' | undefined>(undefined);
   const [reasoningLog, setReasoningLog] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +58,9 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
     setAnalysis('');
     setSources([]);
     setArtifacts([]);
+    setActions([]);
+    setResponseMeta(null);
+    setFeedbackVote(undefined);
     setReasoningLog([]);
 
     try {
@@ -84,6 +94,8 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         onDone: (event) => {
           setSources(event.sources || []);
           setArtifacts(event.artifacts || []);
+          setActions(event.actions || []);
+          setResponseMeta(event.responseMeta || null);
         },
       });
     } catch (err: any) {
@@ -167,6 +179,15 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
                       {analysis}
                   </ReactMarkdown>
               </div>
+              {responseMeta && (
+                <CopilotFeedbackBar
+                  responseMeta={responseMeta}
+                  surface="analysis"
+                  currentVote={feedbackVote}
+                  onVoteChange={(vote) => setFeedbackVote(vote)}
+                />
+              )}
+              {Boolean(actions.length) && <CopilotActionPanel actions={actions} />}
               {Boolean(artifacts.length) && <CopilotArtifactPanel artifacts={artifacts} />}
               {Boolean(sources.length) && <CopilotEvidencePanel sources={sources} />}
             </div>

@@ -128,6 +128,8 @@ OpenBB is visibly stronger when AI can generate a visual answer, not just descri
 
 ## Batch 3: Widget Actions
 
+Status: shipped MVP
+
 ### Why
 
 This is the biggest product-level difference between VNIBB today and OpenBB.
@@ -136,6 +138,25 @@ This is the biggest product-level difference between VNIBB today and OpenBB.
 
 - let AI suggest or trigger approved dashboard actions
 - start with explicit allowlisted actions only
+
+### MVP shipped
+
+- deterministic action suggestions returned in the copilot SSE `done` event
+- explicit confirmation panels before execution
+- allowlisted actions for:
+  - switching the linked global symbol
+  - adding widgets to the current editable tab
+- initial widget actions for:
+  - `price_chart`
+  - `comparison_analysis`
+  - `market_breadth`
+  - `foreign_trading`
+
+### Remaining follow-up
+
+- support direct symbol-aware widget seeding for compare widgets
+- add source-linked jump-to-widget and add-widget flows
+- expand the allowlist to chart and table promotion actions
 
 ### Candidate actions
 
@@ -152,6 +173,8 @@ This is the biggest product-level difference between VNIBB today and OpenBB.
 
 ## Batch 4: Feedback And Quality Loop
 
+Status: shipped MVP
+
 ### Why
 
 OpenBB benefits from explicit user feedback loops. VNIBB needs this before more autonomy is added.
@@ -161,6 +184,27 @@ OpenBB benefits from explicit user feedback loops. VNIBB needs this before more 
 - thumbs up/down on assistant messages
 - store provider, model, latency, used source IDs, reasoning events, and feedback outcome
 - add review dashboards for AI quality analysis
+
+### MVP shipped
+
+- thumbs up/down feedback controls in sidebar copilot, widget copilot, and AI analysis widget
+- backend feedback endpoint tied to response IDs
+- response telemetry logging for:
+  - provider
+  - model
+  - mode
+  - latency
+  - used source IDs
+  - artifact IDs
+  - action IDs
+  - reasoning events
+  - feedback outcome
+
+### Remaining follow-up
+
+- internal review dashboard or admin page for recent AI telemetry
+- richer feedback capture such as notes and classification labels
+- artifact-level feedback and action-level success tracking
 
 ### Metrics
 

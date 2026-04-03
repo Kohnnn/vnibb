@@ -20,13 +20,17 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProfile, useStockQuote, useFinancialRatios } from '@/lib/queries';
 import {
+    type CopilotActionSuggestion,
     consumeCopilotStream,
     openCopilotChatStream,
     type CopilotArtifact,
+    type CopilotResponseMeta,
     type CopilotReasoningStep,
     type CopilotSourceRef,
 } from '@/lib/api';
 import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
+import { CopilotActionPanel } from '@/components/ui/CopilotActionPanel';
+import { CopilotFeedbackBar } from '@/components/ui/CopilotFeedbackBar';
 import {
     AI_SETTINGS_UPDATED_EVENT,
     readStoredAISettings,
@@ -43,6 +47,9 @@ interface Message {
     usedSourceIds?: string[];
     sources?: CopilotSourceRef[];
     artifacts?: CopilotArtifact[];
+    actions?: CopilotActionSuggestion[];
+    responseMeta?: CopilotResponseMeta;
+    feedbackVote?: 'up' | 'down';
     timestamp: Date;
 }
 
@@ -54,6 +61,9 @@ interface PersistedMessage {
     usedSourceIds?: string[];
     sources?: CopilotSourceRef[];
     artifacts?: CopilotArtifact[];
+    actions?: CopilotActionSuggestion[];
+    responseMeta?: CopilotResponseMeta;
+    feedbackVote?: 'up' | 'down';
     timestamp: string;
 }
 
@@ -129,6 +139,9 @@ function toPersistedMessage(message: Message): PersistedMessage {
         usedSourceIds: message.usedSourceIds,
         sources: message.sources,
         artifacts: message.artifacts,
+        actions: message.actions,
+        responseMeta: message.responseMeta,
+        feedbackVote: message.feedbackVote,
         timestamp: message.timestamp.toISOString(),
     };
 }
@@ -142,6 +155,9 @@ function fromPersistedMessage(message: PersistedMessage): Message {
         usedSourceIds: message.usedSourceIds,
         sources: message.sources,
         artifacts: message.artifacts,
+        actions: message.actions,
+        responseMeta: message.responseMeta,
+        feedbackVote: message.feedbackVote,
         timestamp: new Date(message.timestamp),
     };
 }
@@ -325,6 +341,8 @@ export function AICopilot({
                                 usedSourceIds: event.usedSourceIds || [],
                                 sources: event.sources || [],
                                 artifacts: event.artifacts || [],
+                                actions: event.actions || [],
+                                responseMeta: event.responseMeta,
                             }
                             : msg
                     ));
@@ -455,6 +473,25 @@ export function AICopilot({
                             {showReasoning[message.id] && message.reasoning && (
                                 <div className="ml-4 p-2 text-xs text-[var(--text-secondary)] bg-[var(--bg-tertiary)]/70 rounded border-l-2 border-blue-500">
                                     {message.reasoning}
+                                </div>
+                            )}
+                            {message.role === 'assistant' && message.responseMeta && (
+                                <div className="mr-4">
+                                    <CopilotFeedbackBar
+                                        responseMeta={message.responseMeta}
+                                        surface="sidebar"
+                                        currentVote={message.feedbackVote}
+                                        onVoteChange={(vote) => {
+                                            setMessages((prev) => prev.map((item) =>
+                                                item.id === message.id ? { ...item, feedbackVote: vote } : item
+                                            ));
+                                        }}
+                                    />
+                                </div>
+                            )}
+                            {message.role === 'assistant' && Boolean(message.actions?.length) && (
+                                <div className="mr-4">
+                                    <CopilotActionPanel actions={message.actions || []} />
                                 </div>
                             )}
                             {message.role === 'assistant' && Boolean(message.artifacts?.length) && (

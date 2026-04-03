@@ -23,10 +23,14 @@ The active copilot flow is:
    - normalized evidence metadata on `done`
    - inline table artifacts on `done`
    - inline chart artifacts on `done`
+   - suggested dashboard actions on `done`
+   - response metadata on `done`
 7. Frontend renders:
    - answer body
    - inline table artifacts
    - inline chart artifacts
+   - confirmed dashboard actions
+   - thumbs up/down feedback controls
    - collapsible evidence panel
    - process/reasoning log
 
@@ -104,6 +108,8 @@ Browser widget data remains lower-priority than backend data.
 - structured output validation before the UI sees the answer
 - deterministic table artifacts derived from validated runtime context for comparison, sector breadth, and foreign flow prompts
 - deterministic chart artifacts derived from validated runtime context for price trends, comparison metrics, sector breadth, and foreign flow prompts
+- deterministic action suggestions for switching the linked symbol and adding allowlisted widgets after explicit user confirmation
+- response-level telemetry with response IDs, provider/model metadata, latency, source IDs, artifact IDs, action IDs, and recorded feedback outcome
 
 ### Frontend
 
@@ -111,6 +117,8 @@ Browser widget data remains lower-priority than backend data.
 - authenticated SSE chat transport
 - inline table artifact rendering in copilot surfaces
 - inline chart artifact rendering in copilot surfaces
+- action confirmation panels in copilot surfaces
+- thumbs up/down feedback bars in copilot surfaces
 - evidence panel in sidebar copilot, widget copilot, and AI analysis widget
 - reasoning/status display while the answer is being prepared
 
@@ -134,6 +142,8 @@ The copilot stream currently supports these event shapes:
 - `{"reasoning": {"eventType": "INFO|SUCCESS|WARNING|ERROR", "message": "...", "details": {...}}}`
 - `{"chunk": "markdown text"}`
 - `{"done": true, "usedSourceIds": [...], "sources": [...], "artifacts": [...]}`
+- `{"done": true, ..., "actions": [...]}`
+- `{"done": true, ..., "responseMeta": {...}}`
 - `{"error": "..."}`
 
 ## Next OpenBB-Inspired Steps
@@ -141,7 +151,7 @@ The copilot stream currently supports these event shapes:
 The strongest remaining OpenBB-style improvements are:
 
 1. HTML artifacts for richer AI-generated reports
-2. Source-usage logging for answer quality review
-3. Optional tool-call orchestration for controlled backend tools
-4. User feedback and quality loops
-5. Document-native context ingestion
+2. Review dashboards for AI quality analysis
+3. Document-native context ingestion
+4. More advanced tool orchestration beyond the current allowlisted actions
+5. Richer feedback capture such as notes and per-artifact ratings
