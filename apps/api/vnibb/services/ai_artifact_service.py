@@ -149,6 +149,7 @@ def _build_table_artifact(
         "columns": columns,
         "rows": filtered_rows,
         "sourceIds": source_ids,
+        "widgetTarget": _widget_target_for_artifact(artifact_id, filtered_rows),
     }
 
 
@@ -182,7 +183,41 @@ def _build_chart_artifact(
         "series": series,
         "rows": filtered_rows,
         "sourceIds": source_ids,
+        "widgetTarget": _widget_target_for_artifact(artifact_id, filtered_rows),
     }
+
+
+def _widget_target_for_artifact(
+    artifact_id: str,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    symbols = [row.get("symbol") for row in rows if isinstance(row.get("symbol"), str)]
+    deduped_symbols = list(dict.fromkeys(symbols))
+
+    if artifact_id in {"comparison_snapshot", "comparison_quality_chart"}:
+        return {
+            "widgetType": "comparison_analysis",
+            "label": "Comparison Analysis",
+            "config": {"initialSymbols": deduped_symbols},
+        }
+    if artifact_id == "price_trend_chart":
+        return {
+            "widgetType": "price_chart",
+            "label": "Price Chart",
+            "symbol": deduped_symbols[0] if deduped_symbols else None,
+        }
+    if artifact_id in {"sector_breadth_snapshot", "sector_change_chart"}:
+        return {
+            "widgetType": "market_breadth",
+            "label": "Market Breadth",
+        }
+    if artifact_id in {"foreign_flow_leaderboard", "foreign_flow_chart"}:
+        return {
+            "widgetType": "foreign_trading",
+            "label": "Foreign Trading",
+            "symbol": deduped_symbols[0] if deduped_symbols else None,
+        }
+    return None
 
 
 def _price_trend_chart(

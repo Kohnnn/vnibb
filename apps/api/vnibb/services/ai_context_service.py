@@ -547,8 +547,39 @@ def _build_source_reference(
             "symbol": symbol,
             "as_of": as_of,
             "priority": _source_priority_rank(source_system),
+            "widget_target": _widget_target_for_source(kind, symbol),
         }
     )
+
+
+def _widget_target_for_source(kind: str, symbol: str | None) -> dict[str, Any] | None:
+    mapping = {
+        "company_profile": ("company_profile", "Company Profile"),
+        "price_history": ("price_chart", "Price Chart"),
+        "financial_ratios": ("financial_ratios", "Financial Ratios"),
+        "income_statement": ("income_statement", "Income Statement"),
+        "balance_sheet": ("balance_sheet", "Balance Sheet"),
+        "cash_flow": ("cash_flow", "Cash Flow"),
+        "company_news": ("news_feed", "News Feed"),
+        "foreign_trading": ("foreign_trading", "Foreign Trading"),
+        "order_flow": ("transaction_flow", "Transaction Flow"),
+        "insider_deals": ("insider_trading", "Insider Trading"),
+        "company_events": ("events_calendar", "Events Calendar"),
+        "dividends": ("dividend_payment", "Dividend Payment"),
+        "market_indices": ("market_overview", "Market Overview"),
+        "sector_breadth": ("market_breadth", "Market Breadth"),
+    }
+    widget = mapping.get(kind)
+    if not widget:
+        return None
+    widget_type, widget_label = widget
+    payload: dict[str, Any] = {
+        "widgetType": widget_type,
+        "label": widget_label,
+    }
+    if symbol:
+        payload["symbol"] = symbol
+    return payload
 
 
 def _annotate_source_catalog(

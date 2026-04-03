@@ -532,7 +532,7 @@ class LlmService:
         }
         return rendered
 
-    def _record_response_telemetry(
+    async def _record_response_telemetry(
         self,
         *,
         rendered: dict[str, Any],
@@ -551,7 +551,7 @@ class LlmService:
         }
         rendered["response_meta"] = response_meta
 
-        ai_telemetry_service.record_response(
+        await ai_telemetry_service.record_response(
             response_id=response_meta["responseId"],
             provider=config["provider"],
             model=config["model"],
@@ -641,7 +641,7 @@ class LlmService:
                 {"actionCount": len(rendered["actions"])},
             )
 
-        response_meta = self._record_response_telemetry(
+        response_meta = await self._record_response_telemetry(
             rendered=rendered,
             messages=messages,
             context=context,
@@ -684,7 +684,7 @@ class LlmService:
             return
 
         try:
-            self._record_response_telemetry(
+            await self._record_response_telemetry(
                 rendered=rendered,
                 messages=messages,
                 context=context,
@@ -712,7 +712,7 @@ class LlmService:
             request_settings,
             resolved_config=config,
         )
-        response_meta = self._record_response_telemetry(
+        response_meta = await self._record_response_telemetry(
             rendered=rendered,
             messages=[{"role": "user", "content": _truncate_text(message)}],
             context=context or {},

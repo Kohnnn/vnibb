@@ -7,7 +7,14 @@ from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
+from vnibb.core.database import async_session_maker
+from vnibb.models.app_kv import AppKeyValue
+
 logger = logging.getLogger(__name__)
+
+AI_TELEMETRY_KEY = "ai_telemetry_log"
 
 
 def _utc_now_iso() -> str:
@@ -19,8 +26,58 @@ class AITelemetryService:
         self.max_records = max(1, int(max_records))
         self._records: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._lock = Lock()
+        self._loaded = False
 
-    def record_response(
+    async def _ensure_loaded(self) -> None:
+        if self._loaded:
+            return
+
+        try:
+            async with async_session_maker() as session:
+                record = await session.get(AppKeyValue, AI_TELEMETRY_KEY)
+                if record and isinstance(record.value, dict):
+                    raw_records = record.value.get("records") or []
+                    if isinstance(raw_records, list):
+                        with self._lock:
+                            self._records.clear()
+                            for item in raw_records:
+                                if not isinstance(item, dict):
+                                    continue
+                                response_id = str(item.get("response_id") or "").strip()
+                                if not response_id:
+                                    continue
+                                self._records[response_id] = item
+                            while len(self._records) > self.max_records:
+                                self._records.popitem(last=False)
+        except SQLAlchemyError as exc:
+            logger.warning("AI telemetry load failed: %s", exc)
+        finally:
+            self._loaded = True
+
+    async def _persist(self) -> None:
+        payload = {
+            "records": [dict(record) for record in self._records.values()],
+            "updated_at": _utc_now_iso(),
+        }
+        try:
+            async with async_session_maker() as session:
+                record = await session.get(AppKeyValue, AI_TELEMETRY_KEY)
+                if record:
+                    record.value = payload
+                    record.updated_at = datetime.now(UTC).replace(tzinfo=None)
+                else:
+                    session.add(
+                        AppKeyValue(
+                            key=AI_TELEMETRY_KEY,
+                            value=payload,
+                            updated_at=datetime.now(UTC).replace(tzinfo=None),
+                        )
+                    )
+                await session.commit()
+        except SQLAlchemyError as exc:
+            logger.warning("AI telemetry persist failed: %s", exc)
+
+    async def record_response(
         self,
         *,
         response_id: str,
@@ -35,6 +92,7 @@ class AITelemetryService:
         current_symbol: str | None,
         prompt_preview: str,
     ) -> dict[str, Any]:
+        await self._ensure_loaded()
         record = {
             "response_id": response_id,
             "provider": provider,
@@ -58,10 +116,11 @@ class AITelemetryService:
             while len(self._records) > self.max_records:
                 self._records.popitem(last=False)
 
+        await self._persist()
         logger.info("AI response telemetry %s", json.dumps(record, ensure_ascii=True, default=str))
         return record
 
-    def record_feedback(
+    async def record_feedback(
         self,
         *,
         response_id: str,
@@ -69,6 +128,7 @@ class AITelemetryService:
         surface: str,
         notes: str | None = None,
     ) -> dict[str, Any]:
+        await self._ensure_loaded()
         feedback = {
             "vote": str(vote or "").strip().lower(),
             "surface": str(surface or "unknown").strip().lower(),
@@ -86,6 +146,9 @@ class AITelemetryService:
                 matched = True
                 response_record = dict(existing)
 
+        if matched:
+            await self._persist()
+
         payload = {
             "response_id": response_id,
             "matched": matched,
@@ -96,7 +159,7 @@ class AITelemetryService:
         logger.info("AI feedback telemetry %s", json.dumps(payload, ensure_ascii=True, default=str))
         return payload
 
-    def record_outcome(
+    async def record_outcome(
         self,
         *,
         response_id: str,
@@ -106,6 +169,7 @@ class AITelemetryService:
         surface: str,
         notes: str | None = None,
     ) -> dict[str, Any]:
+        await self._ensure_loaded()
         outcome = {
             "kind": str(kind or "").strip().lower(),
             "item_id": str(item_id or "").strip(),
@@ -126,6 +190,9 @@ class AITelemetryService:
                 matched = True
                 response_record = dict(existing)
 
+        if matched:
+            await self._persist()
+
         payload = {
             "response_id": response_id,
             "matched": matched,
@@ -136,7 +203,8 @@ class AITelemetryService:
         logger.info("AI outcome telemetry %s", json.dumps(payload, ensure_ascii=True, default=str))
         return payload
 
-    def get_recent_records(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_recent_records(self, limit: int = 50) -> list[dict[str, Any]]:
+        await self._ensure_loaded()
         safe_limit = max(1, min(int(limit), self.max_records))
         with self._lock:
             return [dict(record) for record in list(self._records.values())[-safe_limit:]][::-1]

@@ -236,7 +236,7 @@ async def ask_endpoint(request: AskRequest):
 
 @router.post("/feedback", response_model=FeedbackResponse, summary="Record copilot feedback")
 async def submit_feedback(request: FeedbackRequest):
-    payload = ai_telemetry_service.record_feedback(
+    payload = await ai_telemetry_service.record_feedback(
         response_id=request.responseId,
         vote=request.vote,
         surface=request.surface,
@@ -249,7 +249,7 @@ async def submit_feedback(request: FeedbackRequest):
     "/outcome", response_model=OutcomeResponse, summary="Record copilot artifact/action outcome"
 )
 async def submit_outcome(request: OutcomeRequest):
-    payload = ai_telemetry_service.record_outcome(
+    payload = await ai_telemetry_service.record_outcome(
         response_id=request.responseId,
         kind=request.kind,
         item_id=request.itemId,

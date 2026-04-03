@@ -93,7 +93,9 @@ Browser widget data remains lower-priority than backend data.
 - browser-local BYOK overrides
 - optional OpenAI-compatible browser-local provider mode
 - OpenRouter model catalog endpoint for settings-driven model selection
+- OpenRouter free-model detection and admin runtime status checks
 - backend prompt library service with default and shared prompt support
+- shared prompt versioning and history
 - Appwrite-first context assembly for:
   - stock profile
   - prices
@@ -108,6 +110,7 @@ Browser widget data remains lower-priority than backend data.
   - market indices
   - sector breadth
 - validated source references such as `VNM-PRICES` and `MKT-INDICES`
+- backend-provided widget targets attached to sources and artifacts
 - structured output validation before the UI sees the answer
 - deterministic table artifacts derived from validated runtime context for comparison, sector breadth, and foreign flow prompts
 - deterministic chart artifacts derived from validated runtime context for price trends, comparison metrics, sector breadth, and foreign flow prompts
@@ -118,8 +121,10 @@ Browser widget data remains lower-priority than backend data.
 
 - browser-local AI settings
 - OpenRouter model suggestions and searchable model selection
+- OpenRouter free-model helper link under model selection
 - integrated VniAgent prompt library in the main agent panel
 - admin-managed shared prompt library editing
+- admin-managed shared prompt version history
 - authenticated SSE chat transport
 - inline table artifact rendering in copilot surfaces
 - inline chart artifact rendering in copilot surfaces
@@ -132,8 +137,8 @@ Browser widget data remains lower-priority than backend data.
 Current telemetry note:
 
 - recent AI telemetry review is currently process-local and in-memory
-- it is available through the admin review panel for the running API instance
-- it is not yet a durable cross-restart store
+- recent AI telemetry review is available through the admin review panel
+- AI telemetry now persists durably through the application metadata store across restarts
 
 ## What We Explicitly Did Not Copy
 
@@ -164,7 +169,7 @@ The copilot stream currently supports these event shapes:
 The strongest remaining OpenBB-style improvements are:
 
 1. HTML artifacts for richer AI-generated reports
-2. Review dashboards for AI quality analysis
+2. Richer review dashboards and filters for AI quality analysis
 3. Document-native context ingestion
 4. More advanced tool orchestration beyond the current allowlisted actions
 5. Richer feedback capture such as per-artifact ratings and workspace-level review actions
