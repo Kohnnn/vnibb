@@ -65,6 +65,14 @@ async function loadSchemaMap(pathLike) {
   return parsed
 }
 
+function isAlreadyExistsError(err) {
+  if (!err) return false
+  if (err.code === 409) return true
+  if (typeof err.type === 'string' && err.type.includes('already_exists')) return true
+  if (typeof err.message === 'string' && err.message.toLowerCase().includes('already exists')) return true
+  return false
+}
+
 function buildCollectionPermissions(permissionsMode) {
   if (permissionsMode === 'publicRead') {
     return [Permission.read(Role.any())]
@@ -140,17 +148,26 @@ async function main() {
     const permissions = buildCollectionPermissions(permissionsMode)
     const documentSecurity = useDocumentSecurity(permissionsMode)
 
-    await databases.createCollection({
-      databaseId,
-      collectionId,
-      name: collectionName,
-      permissions,
-      documentSecurity,
-      enabled: true,
-    })
+    try {
+      await databases.createCollection({
+        databaseId,
+        collectionId,
+        name: collectionName,
+        permissions,
+        documentSecurity,
+        enabled: true,
+      })
 
-    created += 1
-    console.log(`[create] ${collectionId} (documentSecurity=${documentSecurity})`)
+      created += 1
+      console.log(`[create] ${collectionId} (documentSecurity=${documentSecurity})`)
+    } catch (err) {
+      if (isAlreadyExistsError(err)) {
+        skipped += 1
+        console.log(`[skip] ${collectionId} already exists (race)`)
+        continue
+      }
+      throw err
+    }
   }
 
   console.log('\nCollection bootstrap complete')

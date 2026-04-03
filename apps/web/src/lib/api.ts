@@ -165,17 +165,18 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
                 detail: response.statusText || 'Unknown error'
             }));
 
-            const normalizedDetail = Array.isArray(errorData.detail)
-                ? errorData.detail
+            const detailSource = errorData.detail ?? errorData.details ?? null;
+            const normalizedDetail = Array.isArray(detailSource)
+                ? detailSource
                     .map((item: any) => {
                         const location = Array.isArray(item?.loc) ? item.loc.join('.') : null
                         return location ? `${location}: ${item?.msg || 'invalid'}` : item?.msg || 'invalid'
                     })
                     .join('; ')
-                : typeof errorData.detail === 'string'
-                    ? errorData.detail
-                    : errorData.detail
-                        ? JSON.stringify(errorData.detail)
+                : typeof detailSource === 'string'
+                    ? detailSource
+                    : detailSource
+                        ? JSON.stringify(detailSource)
                         : null;
 
             // Generate user-friendly error message based on status

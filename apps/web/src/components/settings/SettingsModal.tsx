@@ -30,6 +30,7 @@ import {
   writeAdminLayoutControlsVisible,
   writeAdminLayoutKey,
 } from '@/lib/adminLayoutAccess';
+import { getAdminSystemDashboardTemplateBundle } from '@/lib/api';
 import {
   clearStoredAISettings,
   OPENAI_COMPATIBLE_BASE_URL,
@@ -57,6 +58,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [isTickerMenuOpen, setIsTickerMenuOpen] = useState(false);
   const [adminLayoutKeyInput, setAdminLayoutKeyInput] = useState('');
   const [showGlobalLayoutControls, setShowGlobalLayoutControls] = useState(false);
+  const [isAdminLayoutKeyValidating, setIsAdminLayoutKeyValidating] = useState(false);
   const [aiProvider, setAiProvider] = useState<AIProvider>('openrouter');
   const [aiMode, setAiMode] = useState<AIProviderMode>('app_default');
   const [aiModelInput, setAiModelInput] = useState('openai/gpt-4o-mini');
@@ -746,18 +748,34 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => {
-                          writeAdminLayoutKey(adminLayoutKeyInput)
-                          const hasKey = adminLayoutKeyInput.trim().length > 0
-                          if (!hasKey) {
+                        onClick={async () => {
+                          const trimmedKey = adminLayoutKeyInput.trim()
+                          if (!trimmedKey) {
+                            clearAdminLayoutKey()
                             writeAdminLayoutControlsVisible(false)
                             setShowGlobalLayoutControls(false)
+                            setPreferenceStatus('Admin layout key cleared.')
+                            return
                           }
-                          setPreferenceStatus(hasKey ? 'Admin layout key saved locally.' : 'Admin layout key cleared.')
+
+                          try {
+                            setIsAdminLayoutKeyValidating(true)
+                            await getAdminSystemDashboardTemplateBundle('default-fundamental', trimmedKey)
+                            writeAdminLayoutKey(trimmedKey)
+                            setPreferenceStatus('Admin layout key validated and saved locally.')
+                          } catch (error) {
+                            clearAdminLayoutKey()
+                            writeAdminLayoutControlsVisible(false)
+                            setShowGlobalLayoutControls(false)
+                            setPreferenceStatus(error instanceof Error ? `Admin key invalid: ${error.message}` : 'Admin key validation failed.')
+                          } finally {
+                            setIsAdminLayoutKeyValidating(false)
+                          }
                         }}
-                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                        disabled={isAdminLayoutKeyValidating}
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        Save Key
+                        {isAdminLayoutKeyValidating ? 'Validating…' : 'Save Key'}
                       </button>
                       <button
                         type="button"
@@ -774,14 +792,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       </button>
                     </div>
                     <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${adminLayoutKeyInput.trim() ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
-                        Admin key: {adminLayoutKeyInput.trim() ? 'active' : 'inactive'}
+                      <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${readAdminLayoutKey().trim() ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
+                        Admin key: {readAdminLayoutKey().trim() ? 'active' : 'inactive'}
                       </div>
                       <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${showGlobalLayoutControls ? 'border-blue-500/30 bg-blue-500/10 text-blue-300' : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
                         Layout controls: {showGlobalLayoutControls ? 'visible' : 'hidden'}
                       </div>
                     </div>
-                    {adminLayoutKeyInput.trim() ? (
+                    {readAdminLayoutKey().trim() ? (
                       <div className="mt-4 flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3">
                         <div className="pr-4">
                           <div className="text-sm font-semibold text-[var(--text-primary)]">Show global layout controls</div>

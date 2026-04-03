@@ -6,7 +6,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks, Body, Header
+from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks, Header, Request, Body
 from sqlalchemy import text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -123,9 +123,17 @@ async def get_admin_system_layout_bundle(dashboard_key: str) -> SystemLayoutTemp
 )
 async def save_admin_system_layout(
     dashboard_key: str,
-    data: Dict[str, Any] = Body(...),
+    request: Request,
     x_admin_actor: Optional[str] = Header(default=None, alias="X-Admin-Actor"),
 ) -> SystemLayoutTemplateBundleResponse:
+    try:
+        data = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="request body must be a JSON object")
+
     dashboard_payload = data.get("dashboard")
     if not isinstance(dashboard_payload, dict):
         raise HTTPException(status_code=400, detail="dashboard payload must be an object")
