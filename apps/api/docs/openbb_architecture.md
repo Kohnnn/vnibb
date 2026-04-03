@@ -86,12 +86,13 @@ Patterns VNIBB now implements:
    - VNIBB now generates a `source_catalog`, validates `used_source_ids`, and exposes evidence metadata to the UI.
 3. **Context-aware copilot behavior**
    - VNIBB uses active symbol, active tab, widget snapshots, and Appwrite-first backend context.
+4. **Table artifact responses**
+   - VNIBB now returns deterministic comparison and ranking tables derived from validated runtime context.
 
 Patterns we have not implemented yet:
 
-1. table artifacts
-2. chart artifacts
-3. HTML artifact responses
-4. full tool-orchestration callbacks in the OpenBB style
+1. chart artifacts
+2. HTML artifact responses
+3. full tool-orchestration callbacks in the OpenBB style
 
 For the current VNIBB AI implementation details, see `docs/ai_copilot.md`.

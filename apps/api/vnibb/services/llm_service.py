@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from vnibb.core.config import settings
+from vnibb.services.ai_artifact_service import build_table_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +200,13 @@ def _build_used_source_entries(
         if isinstance(entry, dict) and str(entry.get("id") or "").strip()
     }
     return [source_map[source_id] for source_id in used_source_ids if source_id in source_map]
+
+
+def _latest_user_message(messages: Sequence[dict[str, str]]) -> str:
+    for message in reversed(list(messages)):
+        if _normalize_message_role(message.get("role") or "user") == "user":
+            return str(message.get("content") or "")
+    return ""
 
 
 def _reasoning_event(
@@ -427,6 +435,7 @@ class LlmService:
         raw_text = await self._request_completion_text(config, payload)
         rendered = _render_validated_markdown(raw_text, context)
         rendered["sources"] = _build_used_source_entries(context, rendered["used_source_ids"])
+        rendered["artifacts"] = build_table_artifacts(_latest_user_message(messages), context)
         rendered["config"] = {
             "provider": config["provider"],
             "model": config["model"],
@@ -456,13 +465,13 @@ class LlmService:
         except RuntimeError as exc:
             yield _reasoning_event("ERROR", str(exc))
             yield {"chunk": f"### AI Copilot\n\n{exc}"}
-            yield {"done": True, "usedSourceIds": [], "sources": []}
+            yield {"done": True, "usedSourceIds": [], "sources": [], "artifacts": []}
             return
         except Exception as exc:
             logger.error("llm structured stream failed: %s", exc)
             yield _reasoning_event("ERROR", str(exc))
             yield {"chunk": f"\n\n**Error encountered:** {exc}"}
-            yield {"done": True, "usedSourceIds": [], "sources": []}
+            yield {"done": True, "usedSourceIds": [], "sources": [], "artifacts": []}
             return
 
         source_count = len(rendered["used_source_ids"])
@@ -471,6 +480,12 @@ class LlmService:
             "Validated response sources",
             {"usedSourceCount": source_count},
         )
+        if rendered["artifacts"]:
+            yield _reasoning_event(
+                "SUCCESS",
+                "Prepared table artifacts",
+                {"artifactCount": len(rendered["artifacts"])},
+            )
 
         body_markdown = rendered["answer_markdown"] or rendered["final_markdown"]
         for chunk in _chunk_markdown(body_markdown):
@@ -480,6 +495,7 @@ class LlmService:
             "done": True,
             "usedSourceIds": rendered["used_source_ids"],
             "sources": rendered["sources"],
+            "artifacts": rendered["artifacts"],
         }
 
     async def generate_response_stream(
@@ -524,6 +540,7 @@ class LlmService:
                 "mode": rendered["config"]["mode"],
                 "used_source_ids": rendered["used_source_ids"],
                 "sources": rendered["sources"],
+                "artifacts": rendered["artifacts"],
             },
         }
 

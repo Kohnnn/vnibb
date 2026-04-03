@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from vnibb.services.ai_context_service import (
@@ -123,3 +125,40 @@ def test_build_dividends_context_keeps_recent_items_and_summary():
     assert context is not None
     assert context["summary"]["cash_dividend_total_recent"] == 2000.0
     assert context["summary"]["latest_issue_method"] == "cash"
+
+
+@pytest.mark.asyncio
+async def test_build_runtime_context_expands_single_symbol_with_peers_for_compare_prompts(
+    monkeypatch,
+):
+    service = AIContextService()
+    captured_symbols: list[str] = []
+
+    async def fake_build_market_snapshot(*, prefer_appwrite_data: bool):
+        return None
+
+    async def fake_build_symbol_snapshot(symbol: str, *, prefer_appwrite_data: bool):
+        captured_symbols.append(symbol)
+        return {"symbol": symbol, "source": "appwrite", "company": {"symbol": symbol}}
+
+    async def fake_get_peers(symbol: str, limit: int = 2):
+        assert symbol == "VNM"
+        assert limit == 2
+        return SimpleNamespace(peers=[SimpleNamespace(symbol="FPT"), SimpleNamespace(symbol="MWG")])
+
+    monkeypatch.setattr(service, "_build_market_snapshot", fake_build_market_snapshot)
+    monkeypatch.setattr(service, "_build_symbol_snapshot", fake_build_symbol_snapshot)
+    monkeypatch.setattr(
+        "vnibb.services.ai_context_service.comparison_service.get_peers",
+        fake_get_peers,
+    )
+
+    context = await service.build_runtime_context(
+        message="Compare VNM with peers",
+        history=[],
+        client_context={"symbol": "VNM"},
+        prefer_appwrite_data=True,
+    )
+
+    assert captured_symbols == ["VNM", "FPT", "MWG"]
+    assert [item["symbol"] for item in context["market_context"]] == ["VNM", "FPT", "MWG"]

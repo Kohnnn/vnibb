@@ -30,6 +30,16 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
             "done": True,
             "usedSourceIds": ["VNM-PRICES"],
             "sources": [{"id": "VNM-PRICES", "label": "Price history snapshot"}],
+            "artifacts": [
+                {
+                    "id": "comparison_snapshot",
+                    "type": "table",
+                    "title": "Comparison Snapshot",
+                    "columns": [{"key": "symbol", "label": "Symbol", "kind": "text"}],
+                    "rows": [{"symbol": "VNM"}],
+                    "sourceIds": ["VNM-PRICES"],
+                }
+            ],
         }
 
     monkeypatch.setattr(
@@ -71,6 +81,7 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
     assert '"chunk": "Hello"' in response.text
     assert '"chunk": " world"' in response.text
     assert '"usedSourceIds": ["VNM-PRICES"]' in response.text
+    assert '"artifacts": [{"id": "comparison_snapshot"' in response.text
     assert '"done": true' in response.text.lower()
     assert captured["prefer_appwrite_data"] is True
     assert captured["runtime_context"] == {

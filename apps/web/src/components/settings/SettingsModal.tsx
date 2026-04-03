@@ -27,8 +27,10 @@ import {
   clearAdminLayoutKey,
   readAdminLayoutControlsVisible,
   readAdminLayoutKey,
+  readAdminLayoutKeyValidated,
   writeAdminLayoutControlsVisible,
   writeAdminLayoutKey,
+  writeAdminLayoutKeyValidated,
 } from '@/lib/adminLayoutAccess';
 import { getAdminSystemDashboardTemplateBundle } from '@/lib/api';
 import {
@@ -762,9 +764,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             setIsAdminLayoutKeyValidating(true)
                             await getAdminSystemDashboardTemplateBundle('default-fundamental', trimmedKey)
                             writeAdminLayoutKey(trimmedKey)
+                            writeAdminLayoutKeyValidated(true)
                             setPreferenceStatus('Admin layout key validated and saved locally.')
                           } catch (error) {
                             clearAdminLayoutKey()
+                            writeAdminLayoutKeyValidated(false)
                             writeAdminLayoutControlsVisible(false)
                             setShowGlobalLayoutControls(false)
                             setPreferenceStatus(error instanceof Error ? `Admin key invalid: ${error.message}` : 'Admin key validation failed.')
@@ -781,6 +785,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         type="button"
                         onClick={() => {
                           clearAdminLayoutKey()
+                          writeAdminLayoutKeyValidated(false)
                           writeAdminLayoutControlsVisible(false)
                           setAdminLayoutKeyInput('')
                           setShowGlobalLayoutControls(false)
@@ -792,14 +797,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       </button>
                     </div>
                     <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${readAdminLayoutKey().trim() ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
-                        Admin key: {readAdminLayoutKey().trim() ? 'active' : 'inactive'}
+                      <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${readAdminLayoutKeyValidated() ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
+                        Admin key: {readAdminLayoutKeyValidated() ? 'active' : 'inactive'}
                       </div>
                       <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${showGlobalLayoutControls ? 'border-blue-500/30 bg-blue-500/10 text-blue-300' : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-muted)]'}`}>
                         Layout controls: {showGlobalLayoutControls ? 'visible' : 'hidden'}
                       </div>
                     </div>
-                    {readAdminLayoutKey().trim() ? (
+                    {readAdminLayoutKeyValidated() ? (
                       <div className="mt-4 flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3">
                         <div className="pr-4">
                           <div className="text-sm font-semibold text-[var(--text-primary)]">Show global layout controls</div>

@@ -59,7 +59,7 @@ VNIBB is more than one app folder. It is a working system made of cooperating la
 
 ## Architecture
 
-For the current copilot design and OpenBB-inspired AI notes, see `docs/ai_copilot.md` and `apps/api/docs/openbb_architecture.md`.
+For the current copilot design and OpenBB-inspired AI notes, see `docs/ai_copilot.md`, `docs/ai_roadmap.md`, and `apps/api/docs/openbb_architecture.md`.
 
 ### System Architecture
 
