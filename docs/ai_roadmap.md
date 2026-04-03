@@ -38,6 +38,8 @@ These pieces are already in place:
 - structured output validation
 - validated source catalog and evidence panels
 - reasoning/status SSE events
+- integrated VniAgent prompt library with backend default/shared prompt support
+- OpenRouter model catalog-backed selection UX
 
 ## Batch 1: Table Artifacts
 

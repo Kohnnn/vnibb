@@ -267,28 +267,53 @@ function DashboardContent() {
     const serializeSystemDashboardForPublish = useCallback((dashboard: typeof activeDashboard) => {
         if (!dashboard) return null;
         return {
-            ...dashboard,
-            adminUnlocked: false,
+            id: dashboard.id,
+            name: dashboard.name,
+            description: dashboard.description,
+            folderId: dashboard.folderId,
+            order: dashboard.order,
+            isDefault: dashboard.isDefault,
             isEditable: false,
             isDeletable: false,
+            showGroupLabels: dashboard.showGroupLabels,
             tabs: dashboard.tabs.map((tab) => ({
-                ...tab,
+                id: tab.id,
+                name: tab.name,
+                order: tab.order,
                 widgets: tab.widgets.map((widget) => {
                     const defaults = getWidgetDefaultLayout(widget.type);
+                    const cleanConfig = Object.fromEntries(
+                        Object.entries(widget.config || {}).filter(([, value]) => value !== undefined)
+                    );
                     return {
-                        ...widget,
+                        id: widget.id,
+                        type: widget.type,
+                        tabId: widget.tabId,
+                        syncGroupId: widget.syncGroupId,
+                        widgetGroup: widget.widgetGroup,
+                        config: cleanConfig,
                         layout: {
-                            ...widget.layout,
+                            i: widget.id,
                             x: Number.isFinite(widget.layout.x) ? widget.layout.x : 0,
                             y: Number.isFinite(widget.layout.y) ? widget.layout.y : 0,
                             w: Number.isFinite(widget.layout.w) ? widget.layout.w : defaults.w,
                             h: Number.isFinite(widget.layout.h) ? widget.layout.h : defaults.h,
                             minW: Number.isFinite(widget.layout.minW) ? widget.layout.minW : defaults.minW,
                             minH: Number.isFinite(widget.layout.minH) ? widget.layout.minH : defaults.minH,
+                            maxW: Number.isFinite(widget.layout.maxW) ? widget.layout.maxW : undefined,
+                            maxH: Number.isFinite(widget.layout.maxH) ? widget.layout.maxH : undefined,
+                            static: widget.layout.static === true ? true : undefined,
                         },
                     };
                 }),
             })),
+            syncGroups: dashboard.syncGroups.map((group) => ({
+                id: group.id,
+                name: group.name,
+                color: group.color,
+                currentSymbol: group.currentSymbol,
+            })),
+            createdAt: dashboard.createdAt,
             updatedAt: new Date().toISOString(),
         };
     }, []);

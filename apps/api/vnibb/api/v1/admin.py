@@ -17,6 +17,7 @@ from vnibb.core.config import settings
 from vnibb.core.appwrite_client import check_appwrite_connectivity, appwrite_runtime_summary
 from vnibb.core.middleware.logging import get_recent_error_events
 from vnibb.models.sync_status import SyncStatus
+from vnibb.services.ai_prompt_library_service import ai_prompt_library_service
 from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
 from vnibb.services.system_layout_template_service import (
@@ -98,6 +99,21 @@ async def save_ai_runtime_config(model: str = Body(..., embed=True)) -> Dict[str
     if not normalized:
         raise HTTPException(status_code=400, detail="Model is required")
     return await ai_runtime_config_service.save_runtime_config(model=normalized)
+
+
+@router.get("/ai-prompts", dependencies=[Depends(require_admin_access)])
+async def get_ai_prompt_library() -> Dict[str, Any]:
+    prompts = await ai_prompt_library_service.get_shared_prompts()
+    return {"count": len(prompts), "data": prompts}
+
+
+@router.put("/ai-prompts", dependencies=[Depends(require_admin_access)])
+async def save_ai_prompt_library(data: Any = Body(...)) -> Dict[str, Any]:
+    prompts = data.get("prompts") if isinstance(data, dict) else None
+    if not isinstance(prompts, list):
+        raise HTTPException(status_code=400, detail="prompts array is required")
+    saved = await ai_prompt_library_service.save_shared_prompts(prompts)
+    return {"count": len(saved), "data": saved}
 
 
 @router.get("/providers/status", dependencies=[Depends(require_admin_access)])

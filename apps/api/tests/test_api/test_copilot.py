@@ -325,3 +325,102 @@ async def test_admin_ai_telemetry_returns_recent_records(client, monkeypatch):
     assert response.status_code == 200
     assert response.json()["count"] == 1
     assert response.json()["data"][0]["response_id"] == "resp-1"
+
+
+@pytest.mark.asyncio
+async def test_get_prompts_returns_prompt_library(client, monkeypatch):
+    async def fake_get_public_prompts():
+        return [
+            {
+                "id": "shared-thesis",
+                "label": "Shared Thesis",
+                "template": "Build a clear thesis for {symbol}",
+                "category": "analysis",
+                "recommendedWidgetKeys": ["financials"],
+                "isDefault": False,
+                "source": "shared",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.ai_prompt_library_service.get_public_prompts",
+        fake_get_public_prompts,
+    )
+
+    response = await client.get("/api/v1/copilot/prompts")
+
+    assert response.status_code == 200
+    assert response.json()["prompts"][0]["id"] == "shared-thesis"
+    assert response.json()["prompts"][0]["source"] == "shared"
+
+
+@pytest.mark.asyncio
+async def test_get_models_returns_model_catalog(client, monkeypatch):
+    async def fake_get_models():
+        return [
+            {
+                "id": "openai/gpt-4o-mini",
+                "name": "GPT-4o Mini",
+                "provider": "openrouter",
+                "recommended": True,
+                "tier": "balanced",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.ai_model_catalog_service.get_openrouter_models",
+        fake_get_models,
+    )
+
+    response = await client.get("/api/v1/copilot/models?provider=openrouter")
+
+    assert response.status_code == 200
+    assert response.json()["models"][0]["id"] == "openai/gpt-4o-mini"
+
+
+@pytest.mark.asyncio
+async def test_admin_ai_prompt_library_round_trip(client, monkeypatch):
+    async def fake_get_shared_prompts():
+        return [
+            {
+                "id": "shared-thesis",
+                "label": "Shared Thesis",
+                "template": "Build a clear thesis for {symbol}",
+                "category": "analysis",
+                "recommendedWidgetKeys": [],
+                "isDefault": False,
+                "source": "shared",
+            }
+        ]
+
+    async def fake_save_shared_prompts(prompts):
+        return prompts
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.admin.ai_prompt_library_service.get_shared_prompts",
+        fake_get_shared_prompts,
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.admin.ai_prompt_library_service.save_shared_prompts",
+        fake_save_shared_prompts,
+    )
+
+    get_response = await client.get("/api/v1/admin/ai-prompts")
+    put_response = await client.put(
+        "/api/v1/admin/ai-prompts",
+        json={
+            "prompts": [
+                {
+                    "id": "shared-tech",
+                    "label": "Shared Tech",
+                    "template": "Read the technical setup for {symbol}",
+                    "category": "technical",
+                }
+            ]
+        },
+    )
+
+    assert get_response.status_code == 200
+    assert get_response.json()["count"] == 1
+    assert put_response.status_code == 200
+    assert put_response.json()["data"][0]["id"] == "shared-tech"

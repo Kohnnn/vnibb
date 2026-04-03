@@ -1,60 +1,113 @@
-// Prompts Library - AI analysis prompt templates
+// VniAgent Prompt Library - Context-aware prompt templates
 
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Search, Plus, Trash2, MessageSquare, TrendingUp, BarChart, FileText, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { X, Search, Plus, Trash2, MessageSquare, TrendingUp, BarChart, FileText, Sparkles, Layers3, LineChart, Newspaper } from 'lucide-react';
+import { getCopilotPrompts, type PromptTemplate } from '@/lib/api';
 
-interface Prompt {
-    id: string;
+type Prompt = PromptTemplate & {
     name: string;
     content: string;
-    category: 'analysis' | 'comparison' | 'fundamentals' | 'custom';
-    isDefault?: boolean;
 }
 
-const DEFAULT_PROMPTS: Prompt[] = [
+const FALLBACK_PROMPTS: Prompt[] = [
     {
         id: 'dividend-analysis',
+        label: 'Dividend Analysis',
         name: 'Dividend Analysis',
-        content: 'Analyze the trend in dividend payouts for this company over the past 5 years. Include dividend yield, payout ratio, and sustainability assessment.',
+        template: 'Using {widget_or_symbol} as the primary context, analyze the trend in dividend payouts for {symbol} over the past 5 years. Include dividend yield, payout ratio, and sustainability assessment.',
+        content: 'Using {widget_or_symbol} as the primary context, analyze the trend in dividend payouts for {symbol} over the past 5 years. Include dividend yield, payout ratio, and sustainability assessment.',
         category: 'analysis',
+        recommendedWidgetKeys: ['financials'],
         isDefault: true,
+        source: 'system',
     },
     {
         id: 'peer-comparison',
-        name: 'VN30 Peer Comparison',
-        content: 'Compare the valuation multiples (P/E, P/B, EV/EBITDA) of this company with its VN30 peers. Identify if it is undervalued or overvalued relative to the sector.',
+        label: 'Peer Comparison',
+        name: 'Peer Comparison',
+        template: 'From the current comparison context for {symbol}, compare valuation multiples, profitability, and momentum. Identify the most attractive and least attractive name and explain why.',
+        content: 'From the current comparison context for {symbol}, compare valuation multiples, profitability, and momentum. Identify the most attractive and least attractive name and explain why.',
         category: 'comparison',
+        recommendedWidgetKeys: ['comparison'],
         isDefault: true,
+        source: 'system',
     },
     {
         id: 'financial-summary',
+        label: 'Financial Summary',
         name: 'Financial Summary',
-        content: 'Summarize the key financials and recent news for this stock. Include revenue growth, profit margins, debt levels, and any significant corporate announcements.',
+        template: 'Summarize the key financial signals for {symbol} from {widget_or_symbol}. Focus on revenue growth, margins, leverage, cash generation, and the single biggest balance-sheet risk.',
+        content: 'Summarize the key financial signals for {symbol} from {widget_or_symbol}. Focus on revenue growth, margins, leverage, cash generation, and the single biggest balance-sheet risk.',
         category: 'fundamentals',
+        recommendedWidgetKeys: ['financials'],
         isDefault: true,
+        source: 'system',
     },
     {
         id: 'earnings-forecast',
+        label: 'Earnings Forecast',
         name: 'Earnings Forecast',
-        content: 'Based on the historical earnings data and current market conditions, provide an outlook for the next quarter\'s earnings. Include key drivers and risks.',
+        template: 'Based on the historical earnings data in {widget_or_symbol} and current market conditions, provide an outlook for the next quarter for {symbol}. Include key drivers, key risks, and what would invalidate the forecast.',
+        content: 'Based on the historical earnings data in {widget_or_symbol} and current market conditions, provide an outlook for the next quarter for {symbol}. Include key drivers, key risks, and what would invalidate the forecast.',
         category: 'analysis',
+        recommendedWidgetKeys: ['financials'],
         isDefault: true,
+        source: 'system',
     },
     {
         id: 'technical-analysis',
+        label: 'Technical Outlook',
         name: 'Technical Outlook',
-        content: 'Provide a technical analysis of this stock including support/resistance levels, trend direction, and key indicators (RSI, MACD, Moving Averages).',
-        category: 'analysis',
+        template: 'Read the current chart context for {symbol}. Provide support, resistance, trend direction, invalidation levels, and the clearest trade setup from this widget.',
+        content: 'Read the current chart context for {symbol}. Provide support, resistance, trend direction, invalidation levels, and the clearest trade setup from this widget.',
+        category: 'technical',
+        recommendedWidgetKeys: ['price_chart'],
         isDefault: true,
+        source: 'system',
     },
     {
         id: 'ownership-analysis',
+        label: 'Ownership Structure',
         name: 'Ownership Structure',
-        content: 'Analyze the ownership structure of this company. Identify major shareholders, institutional holdings, and any recent changes in ownership patterns.',
+        template: 'Analyze the ownership and control context for {symbol}. Identify major holders, alignment risks, and anything that could materially affect governance or float.',
+        content: 'Analyze the ownership and control context for {symbol}. Identify major holders, alignment risks, and anything that could materially affect governance or float.',
         category: 'fundamentals',
         isDefault: true,
+        source: 'system',
+    },
+    {
+        id: 'foreign-flow-read',
+        label: 'Foreign Flow Read',
+        name: 'Foreign Flow Read',
+        template: 'Use {widget_or_symbol} to explain whether foreign participation in {symbol} is persistent accumulation, noisy rotation, or distribution. State what that implies for conviction.',
+        content: 'Use {widget_or_symbol} to explain whether foreign participation in {symbol} is persistent accumulation, noisy rotation, or distribution. State what that implies for conviction.',
+        category: 'analysis',
+        recommendedWidgetKeys: ['foreign_trading'],
+        isDefault: true,
+        source: 'system',
+    },
+    {
+        id: 'breadth-regime',
+        label: 'Breadth Regime',
+        name: 'Breadth Regime',
+        template: 'Using the current market breadth context on {tab}, explain whether the market is risk-on, risk-off, or mixed. Call out sector leadership and what it means for positioning.',
+        content: 'Using the current market breadth context on {tab}, explain whether the market is risk-on, risk-off, or mixed. Call out sector leadership and what it means for positioning.',
+        category: 'analysis',
+        recommendedWidgetKeys: ['market_breadth'],
+        isDefault: true,
+        source: 'system',
+    },
+    {
+        id: 'news-impact',
+        label: 'News Impact',
+        name: 'News Impact',
+        template: 'Summarize the most important recent news and event risk for {symbol}. Explain what matters immediately versus what matters over the next quarter.',
+        content: 'Summarize the most important recent news and event risk for {symbol}. Explain what matters immediately versus what matters over the next quarter.',
+        category: 'news',
+        isDefault: true,
+        source: 'system',
     },
 ];
 
@@ -62,6 +115,8 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
     analysis: <TrendingUp size={12} />,
     comparison: <BarChart size={12} />,
     fundamentals: <FileText size={12} />,
+    technical: <LineChart size={12} />,
+    news: <Newspaper size={12} />,
     custom: <MessageSquare size={12} />,
 };
 
@@ -69,16 +124,45 @@ const CATEGORY_COLORS: Record<string, string> = {
     analysis: '#3B82F6',
     comparison: '#10B981',
     fundamentals: '#06B6D4',
+    technical: '#8B5CF6',
+    news: '#F97316',
     custom: '#F59E0B',
 };
+
+function normalizePromptCategory(category?: Prompt['category']): NonNullable<Prompt['category']> {
+    if (!category) return 'custom';
+    return category;
+}
+
+const PROMPTS_STORAGE_KEY = 'vnibb-vniagent-prompts';
+const LEGACY_PROMPTS_STORAGE_KEY = 'vnibb-prompts';
 
 interface PromptsLibraryProps {
     isOpen: boolean;
     onClose: () => void;
     onSelectPrompt?: (prompt: string) => void;
+    symbol?: string;
+    widgetContext?: string;
+    widgetTypeKey?: string | null;
+    activeTabName?: string;
 }
 
-export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibraryProps) {
+function applyPromptContext(
+    prompt: string,
+    symbol?: string,
+    widgetContext?: string,
+    activeTabName?: string,
+): string {
+    const resolvedSymbol = symbol || 'the current symbol';
+    const widgetOrSymbol = widgetContext ? `the @${widgetContext} widget` : resolvedSymbol;
+    return prompt
+        .replaceAll('{symbol}', resolvedSymbol)
+        .replaceAll('{widget}', widgetContext || 'current widget')
+        .replaceAll('{widget_or_symbol}', widgetOrSymbol)
+        .replaceAll('{tab}', activeTabName || 'current workspace');
+}
+
+export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widgetContext, widgetTypeKey, activeTabName }: PromptsLibraryProps) {
     const [prompts, setPrompts] = useState<Prompt[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<'all' | Prompt['category']>('all');
@@ -88,19 +172,53 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
 
     // Load prompts from localStorage on mount
     useEffect(() => {
-        const stored = localStorage.getItem('vnibb-prompts');
-        if (stored) {
-            setPrompts(JSON.parse(stored));
-        } else {
-            setPrompts(DEFAULT_PROMPTS);
-            localStorage.setItem('vnibb-prompts', JSON.stringify(DEFAULT_PROMPTS));
-        }
+        let cancelled = false;
+
+        const loadPrompts = async () => {
+            const stored = localStorage.getItem(PROMPTS_STORAGE_KEY) || localStorage.getItem(LEGACY_PROMPTS_STORAGE_KEY);
+            let localPrompts: Prompt[] = [];
+            if (stored) {
+                try {
+                    localPrompts = JSON.parse(stored) as Prompt[];
+                } catch {
+                    localPrompts = [];
+                }
+            }
+
+            try {
+                const response = await getCopilotPrompts();
+                if (cancelled) return;
+                const serverPrompts = response.prompts.map((prompt) => ({
+                    ...prompt,
+                    name: prompt.label,
+                    content: prompt.template,
+                }));
+                const merged = [...serverPrompts, ...localPrompts.filter((prompt) => prompt.source !== 'system' && prompt.source !== 'shared')];
+                setPrompts(merged);
+                localStorage.setItem(PROMPTS_STORAGE_KEY, JSON.stringify(merged.filter((prompt) => prompt.source !== 'system' && prompt.source !== 'shared')));
+            } catch {
+                const fallback = localPrompts.length ? localPrompts : FALLBACK_PROMPTS;
+                setPrompts(fallback);
+                if (!localPrompts.length) {
+                    localStorage.setItem(PROMPTS_STORAGE_KEY, JSON.stringify(FALLBACK_PROMPTS.filter((prompt) => !prompt.isDefault)));
+                }
+            }
+        };
+
+        void loadPrompts();
+
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     // Save prompts to localStorage
     const savePrompts = (newPrompts: Prompt[]) => {
         setPrompts(newPrompts);
-        localStorage.setItem('vnibb-prompts', JSON.stringify(newPrompts));
+        localStorage.setItem(
+            PROMPTS_STORAGE_KEY,
+            JSON.stringify(newPrompts.filter((prompt) => !prompt.isDefault && prompt.source !== 'shared'))
+        );
     };
 
     const handleAddPrompt = () => {
@@ -108,9 +226,12 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
 
         const newPrompt: Prompt = {
             id: `custom-${Date.now()}`,
+            label: newPromptName.trim(),
             name: newPromptName.trim(),
+            template: newPromptContent.trim(),
             content: newPromptContent.trim(),
             category: 'custom',
+            source: 'local',
         };
 
         savePrompts([...prompts, newPrompt]);
@@ -124,18 +245,19 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
     };
 
     const handleSelectPrompt = (prompt: Prompt) => {
-        onSelectPrompt?.(prompt.content);
+        onSelectPrompt?.(applyPromptContext(prompt.content, symbol, widgetContext, activeTabName));
         onClose();
     };
 
     if (!isOpen) return null;
 
-    const filteredPrompts = prompts.filter(prompt => {
+    const filteredPrompts = useMemo(() => prompts.filter(prompt => {
         const matchesSearch = prompt.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             prompt.content.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesCategory = selectedCategory === 'all' || prompt.category === selectedCategory;
-        return matchesSearch && matchesCategory;
-    });
+        const matchesWidget = !widgetTypeKey || !prompt.recommendedWidgetKeys?.length || prompt.recommendedWidgetKeys.includes(widgetTypeKey);
+        return matchesSearch && matchesCategory && matchesWidget;
+    }), [prompts, searchQuery, selectedCategory, widgetTypeKey]);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -161,8 +283,8 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                     <div className="flex items-center gap-2">
                         <Sparkles size={18} className="text-blue-400" />
                         <div>
-                            <h2 className="text-base font-semibold text-[var(--text-primary)]">Prompts Library</h2>
-                            <p className="text-xs text-[var(--text-muted)]">AI analysis templates for Vietnam market</p>
+                            <h2 className="text-base font-semibold text-[var(--text-primary)]">VniAgent Prompt Library</h2>
+                            <p className="text-xs text-[var(--text-muted)]">Context-aware prompt templates for Vietnam market research</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -185,6 +307,13 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
 
                 {/* Search and Filters */}
                 <div className="px-4 py-3 border-b border-[var(--border-color)] shrink-0">
+                    {(symbol || widgetContext || activeTabName) && (
+                        <div className="mb-3 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                            {symbol ? <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-blue-300">{symbol}</span> : null}
+                            {widgetContext ? <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-cyan-200 inline-flex items-center gap-1"><Layers3 size={10} />@{widgetContext}</span> : null}
+                            {activeTabName ? <span className="rounded-full border border-[var(--border-default)] px-2 py-1">{activeTabName}</span> : null}
+                        </div>
+                    )}
                     <div className="flex items-center gap-3">
                         <div className="relative flex-1">
                             <Search
@@ -201,7 +330,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                             />
                         </div>
                         <div className="flex gap-1">
-                            {(['all', 'analysis', 'comparison', 'fundamentals', 'custom'] as const).map(cat => (
+                            {(['all', 'analysis', 'comparison', 'fundamentals', 'technical', 'news', 'custom'] as const).map(cat => (
                                 <button
                                     key={cat}
                                     onClick={() => setSelectedCategory(cat)}
@@ -259,7 +388,9 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                 {/* Prompts List */}
                 <div className="flex-1 min-h-0 p-4 overflow-y-auto">
                     <div className="space-y-2">
-                        {filteredPrompts.map(prompt => (
+                        {filteredPrompts.map(prompt => {
+                            const normalizedCategory = normalizePromptCategory(prompt.category);
+                            return (
                             <div
                                 key={prompt.id}
                                 className="group flex items-start gap-3 p-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] hover:border-[var(--border-accent)] transition-all cursor-pointer"
@@ -277,11 +408,11 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                                 <div
                                     className="w-6 h-6 rounded flex items-center justify-center shrink-0 mt-0.5"
                                     style={{
-                                        backgroundColor: `${CATEGORY_COLORS[prompt.category]}20`,
-                                        color: CATEGORY_COLORS[prompt.category]
+                                        backgroundColor: `${CATEGORY_COLORS[normalizedCategory]}20`,
+                                        color: CATEGORY_COLORS[normalizedCategory]
                                     }}
                                 >
-                                    {CATEGORY_ICONS[prompt.category]}
+                                    {CATEGORY_ICONS[normalizedCategory]}
                                 </div>
 
                                 {/* Content */}
@@ -290,6 +421,11 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                                         <h3 className="text-xs font-medium text-[var(--text-primary)] group-hover:text-blue-400 transition-colors">
                                             {prompt.name}
                                         </h3>
+                                        {prompt.recommendedWidgetKeys?.length ? (
+                                            <span className="px-1.5 py-0.5 rounded text-[9px] bg-cyan-500/10 text-cyan-300">
+                                                Widget-aware
+                                            </span>
+                                        ) : null}
                                         {prompt.isDefault && (
                                             <span className="px-1.5 py-0.5 rounded text-[9px] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
                                                 Default
@@ -297,7 +433,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                                         )}
                                     </div>
                                     <p className="text-[11px] text-[var(--text-muted)] mt-1 line-clamp-2">
-                                        {prompt.content}
+                                        {applyPromptContext(prompt.content, symbol, widgetContext, activeTabName)}
                                     </p>
                                 </div>
 
@@ -315,7 +451,8 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt }: PromptsLibra
                                     </button>
                                 )}
                             </div>
-                        ))}
+                            )
+                        })}
                     </div>
 
                     {filteredPrompts.length === 0 && (

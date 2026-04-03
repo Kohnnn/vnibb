@@ -176,7 +176,7 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
                 detail: response.statusText || 'Unknown error'
             }));
 
-            const detailSource = errorData.detail ?? errorData.details ?? errorData.message ?? null;
+            const detailSource = errorData.detail ?? errorData.message ?? errorData.details ?? null;
             const normalizedDetail = Array.isArray(detailSource)
                 ? detailSource
                     .map((item: any) => {
@@ -1835,6 +1835,20 @@ export interface PromptTemplate {
     id: string;
     label: string;
     template: string;
+    category?: 'analysis' | 'comparison' | 'fundamentals' | 'technical' | 'news' | 'custom';
+    recommendedWidgetKeys?: string[];
+    isDefault?: boolean;
+    source?: string;
+}
+
+export interface ModelOption {
+    id: string;
+    name: string;
+    provider: string;
+    description?: string | null;
+    recommended?: boolean;
+    tier?: string | null;
+    context_length?: number | null;
 }
 
 export interface CopilotHistoryMessage {
@@ -1989,6 +2003,11 @@ export interface AdminAITelemetryRecord {
 export interface AdminAITelemetryResponse {
     count: number;
     data: AdminAITelemetryRecord[];
+}
+
+export interface AdminAIPromptLibraryResponse {
+    count: number;
+    data: PromptTemplate[];
 }
 
 export interface AdminProviderStatusResponse {
@@ -2278,6 +2297,27 @@ export async function getAdminAITelemetry(
     });
 }
 
+export async function getAdminAIPromptLibrary(
+    adminKey: string,
+): Promise<AdminAIPromptLibraryResponse> {
+    return fetchAPI<AdminAIPromptLibraryResponse>('/admin/ai-prompts', {
+        headers: { 'X-Admin-Key': adminKey },
+        timeout: 15000,
+    });
+}
+
+export async function saveAdminAIPromptLibrary(
+    adminKey: string,
+    prompts: PromptTemplate[],
+): Promise<AdminAIPromptLibraryResponse> {
+    return fetchAPI<AdminAIPromptLibraryResponse>('/admin/ai-prompts', {
+        method: 'PUT',
+        headers: { 'X-Admin-Key': adminKey },
+        body: JSON.stringify({ prompts }),
+        timeout: 15000,
+    });
+}
+
 export async function getAdminAIRuntimeConfig(
     adminKey: string,
 ): Promise<AdminAIRuntimeConfigResponse> {
@@ -2292,6 +2332,13 @@ export async function getAdminProviderStatus(
 ): Promise<AdminProviderStatusResponse> {
     return fetchAPI<AdminProviderStatusResponse>('/admin/providers/status', {
         headers: { 'X-Admin-Key': adminKey },
+        timeout: 15000,
+    });
+}
+
+export async function getCopilotModelCatalog(provider: 'openrouter' = 'openrouter'): Promise<{ models: ModelOption[] }> {
+    return fetchAPI<{ models: ModelOption[] }>('/copilot/models', {
+        params: { provider },
         timeout: 15000,
     });
 }

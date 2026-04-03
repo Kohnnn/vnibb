@@ -1,4 +1,4 @@
-// Right Sidebar for AI Copilot and Context
+// Right Sidebar for VniAgent and workspace context
 'use client';
 
 import { MessageSquare, ChevronRight } from 'lucide-react';
@@ -40,12 +40,12 @@ export function RightSidebar({
             <div className="h-10 flex items-center justify-between px-4 border-b border-[var(--border-color)] bg-[var(--bg-tertiary)]/70">
                 <div className="flex items-center gap-2 text-blue-400">
                     <MessageSquare size={16} />
-                    <span className="font-semibold text-sm">Copilot</span>
+                    <span className="font-semibold text-sm">VniAgent</span>
                 </div>
                 <button
                     onClick={onToggle}
                     className="p-1 hover:bg-[var(--bg-elevated)] rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                    aria-label="Close Copilot"
+                    aria-label="Close VniAgent"
                 >
                     <ChevronRight size={16} />
                 </button>
@@ -72,8 +72,8 @@ export function SidebarTrigger({ isOpen, onClick }: { isOpen: boolean; onClick: 
         <button
             onClick={onClick}
             className="p-2 text-[var(--text-secondary)] transition-colors hover:text-blue-400"
-            title="Open Copilot"
-            aria-label="Open Copilot"
+            title="Open VniAgent"
+            aria-label="Open VniAgent"
         >
             <MessageSquare size={20} />
         </button>
