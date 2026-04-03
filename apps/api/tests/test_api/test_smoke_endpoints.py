@@ -1535,7 +1535,9 @@ async def test_market_indices_smoke_returns_data(client, monkeypatch):
         "vnibb.api.v1.market.VnstockMarketOverviewFetcher.fetch",
         fake_market_overview_fetch,
     )
-    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[])
+    )
 
     response = await client.get("/api/v1/market/indices?limit=1")
     assert response.status_code == 200
@@ -1569,6 +1571,84 @@ async def test_market_indices_use_yahoo_fast_path_when_available(client, monkeyp
     payload = response.json()
     assert payload["source"] == "yahoo_finance+db_fallback"
     assert payload["data"][0]["current_value"] == pytest.approx(1345.2)
+
+
+@pytest.mark.asyncio
+async def test_market_indices_use_vnstock_fallback_for_missing_yahoo_codes_even_with_db_rows(
+    client, test_db, monkeypatch
+):
+    test_db.add_all(
+        [
+            StockIndex(
+                id=21,
+                index_code="VN30",
+                time=date(2026, 3, 20),
+                open=1338.0,
+                high=1344.0,
+                low=1332.0,
+                close=1340.0,
+                volume=880_000,
+                change=4.0,
+                change_pct=0.3,
+            ),
+            StockIndex(
+                id=22,
+                index_code="VN30",
+                time=date(2026, 3, 19),
+                open=1330.0,
+                high=1338.0,
+                low=1324.0,
+                close=1336.0,
+                volume=820_000,
+                change=6.0,
+                change_pct=0.45,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    async def fake_yahoo_fetch():
+        return [
+            {
+                "index_name": "VNINDEX",
+                "current_value": 1345.2,
+                "change": 8.4,
+                "change_pct": 0.63,
+                "high": 1349.1,
+                "low": 1338.0,
+                "volume": 1_200_000,
+                "time": "2026-03-21T08:15:00",
+                "source": "yahoo_finance",
+            }
+        ]
+
+    async def fake_market_overview_fetch(_params):
+        return [
+            {
+                "index_name": "VN30",
+                "current_value": 1355.4,
+                "change": 7.8,
+                "change_pct": 0.58,
+                "high": 1358.1,
+                "low": 1348.0,
+                "volume": 910_000,
+                "time": "2026-03-21T08:15:00",
+            }
+        ]
+
+    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_market_indices", fake_yahoo_fetch)
+    monkeypatch.setattr(
+        "vnibb.api.v1.market.VnstockMarketOverviewFetcher.fetch",
+        fake_market_overview_fetch,
+    )
+
+    response = await client.get("/api/v1/market/indices?limit=2")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "yahoo_finance+vnstock_fallback"
+    assert payload["data"][0]["index_name"] == "VNINDEX"
+    assert payload["data"][1]["index_name"] == "VN30"
+    assert payload["data"][1]["current_value"] == pytest.approx(1355.4)
 
 
 @pytest.mark.asyncio
@@ -1639,7 +1719,9 @@ async def test_market_indices_prefer_db_rows_over_scaled_provider_payload(
         "vnibb.api.v1.market.VnstockMarketOverviewFetcher.fetch",
         fake_market_overview_fetch,
     )
-    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[])
+    )
 
     response = await client.get("/api/v1/market/indices?limit=2")
     assert response.status_code == 200
@@ -1694,7 +1776,9 @@ async def test_market_indices_recompute_zero_change_pct_from_db_history(
         "vnibb.api.v1.market.VnstockMarketOverviewFetcher.fetch",
         fake_market_overview_fetch,
     )
-    monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[]))
+    monkeypatch.setattr(
+        "vnibb.api.v1.market._fetch_yahoo_market_indices", lambda: asyncio.sleep(0, result=[])
+    )
 
     response = await client.get("/api/v1/market/indices?limit=1")
     assert response.status_code == 200
@@ -2385,7 +2469,9 @@ async def test_financial_ratios_endpoint_builds_ttm_row_from_latest_quarter(clie
 
 
 @pytest.mark.asyncio
-async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_support(client, monkeypatch):
+async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_support(
+    client, monkeypatch
+):
     async def fake_ratio_fetch(_params):
         return []
 
@@ -2439,9 +2525,16 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
 
     monkeypatch.setattr("vnibb.api.v1.equity.VnstockFinancialRatiosFetcher.fetch", fake_ratio_fetch)
     monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", fake_get_financials_with_ttm)
-    monkeypatch.setattr("vnibb.api.v1.equity._load_financial_statement_fallback", fake_statement_fallback)
-    monkeypatch.setattr("vnibb.api.v1.equity._cross_fill_income_statement_rows", fake_cross_fill_income_statement_rows)
-    monkeypatch.setattr("vnibb.api.v1.equity._resolve_profile_market_cap", fake_resolve_profile_market_cap)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity._load_financial_statement_fallback", fake_statement_fallback
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity._cross_fill_income_statement_rows",
+        fake_cross_fill_income_statement_rows,
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity._resolve_profile_market_cap", fake_resolve_profile_market_cap
+    )
 
     response = await client.get("/api/v1/equity/VCI/ratios?period=quarter")
     assert response.status_code == 200
@@ -2456,10 +2549,46 @@ async def test_financial_ratios_endpoint_backfills_quarter_rows_from_statement_s
 async def test_income_statement_ttm_fallback_builds_single_db_row(client, test_db, monkeypatch):
     test_db.add_all(
         [
-            IncomeStatement(id=900, symbol="VNM", period="2024-Q1", period_type="quarter", fiscal_year=2024, fiscal_quarter=1, revenue=100.0, net_income=20.0),
-            IncomeStatement(id=901, symbol="VNM", period="2024-Q2", period_type="quarter", fiscal_year=2024, fiscal_quarter=2, revenue=120.0, net_income=24.0),
-            IncomeStatement(id=902, symbol="VNM", period="2024-Q3", period_type="quarter", fiscal_year=2024, fiscal_quarter=3, revenue=140.0, net_income=28.0),
-            IncomeStatement(id=903, symbol="VNM", period="2024-Q4", period_type="quarter", fiscal_year=2024, fiscal_quarter=4, revenue=160.0, net_income=32.0),
+            IncomeStatement(
+                id=900,
+                symbol="VNM",
+                period="2024-Q1",
+                period_type="quarter",
+                fiscal_year=2024,
+                fiscal_quarter=1,
+                revenue=100.0,
+                net_income=20.0,
+            ),
+            IncomeStatement(
+                id=901,
+                symbol="VNM",
+                period="2024-Q2",
+                period_type="quarter",
+                fiscal_year=2024,
+                fiscal_quarter=2,
+                revenue=120.0,
+                net_income=24.0,
+            ),
+            IncomeStatement(
+                id=902,
+                symbol="VNM",
+                period="2024-Q3",
+                period_type="quarter",
+                fiscal_year=2024,
+                fiscal_quarter=3,
+                revenue=140.0,
+                net_income=28.0,
+            ),
+            IncomeStatement(
+                id=903,
+                symbol="VNM",
+                period="2024-Q4",
+                period_type="quarter",
+                fiscal_year=2024,
+                fiscal_quarter=4,
+                revenue=160.0,
+                net_income=32.0,
+            ),
         ]
     )
     await test_db.commit()

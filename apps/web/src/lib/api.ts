@@ -176,7 +176,7 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
                 detail: response.statusText || 'Unknown error'
             }));
 
-            const detailSource = errorData.detail ?? errorData.details ?? null;
+            const detailSource = errorData.detail ?? errorData.details ?? errorData.message ?? null;
             const normalizedDetail = Array.isArray(detailSource)
                 ? detailSource
                     .map((item: any) => {
@@ -1900,6 +1900,56 @@ export interface CopilotFeedbackResponse {
     matched: boolean;
 }
 
+export interface CopilotOutcomeRequest {
+    responseId: string;
+    kind: 'artifact' | 'action';
+    itemId: string;
+    status: 'shown' | 'executed' | 'failed';
+    surface: 'sidebar' | 'widget' | 'analysis';
+    notes?: string;
+}
+
+export interface CopilotOutcomeResponse {
+    accepted: boolean;
+    matched: boolean;
+}
+
+export interface AdminAITelemetryOutcome {
+    kind: string;
+    item_id: string;
+    status: string;
+    surface: string;
+    notes?: string | null;
+    recorded_at: string;
+}
+
+export interface AdminAITelemetryRecord {
+    response_id: string;
+    provider: string;
+    model: string;
+    mode: string;
+    latency_ms: number;
+    used_source_ids: string[];
+    artifact_ids: string[];
+    action_ids: string[];
+    reasoning_events: Array<Record<string, unknown>>;
+    current_symbol?: string | null;
+    prompt_preview?: string;
+    created_at: string;
+    feedback?: {
+        vote: string;
+        surface: string;
+        notes?: string | null;
+        received_at: string;
+    } | null;
+    outcomes?: AdminAITelemetryOutcome[];
+}
+
+export interface AdminAITelemetryResponse {
+    count: number;
+    data: AdminAITelemetryRecord[];
+}
+
 export interface CopilotStreamEvent {
     chunk?: string;
     done?: boolean;
@@ -2146,6 +2196,26 @@ export async function submitCopilotFeedback(
     return fetchAPI<CopilotFeedbackResponse>('/copilot/feedback', {
         method: 'POST',
         body: JSON.stringify(request),
+    });
+}
+
+export async function submitCopilotOutcome(
+    request: CopilotOutcomeRequest,
+): Promise<CopilotOutcomeResponse> {
+    return fetchAPI<CopilotOutcomeResponse>('/copilot/outcome', {
+        method: 'POST',
+        body: JSON.stringify(request),
+    });
+}
+
+export async function getAdminAITelemetry(
+    adminKey: string,
+    limit = 25,
+): Promise<AdminAITelemetryResponse> {
+    return fetchAPI<AdminAITelemetryResponse>('/admin/ai-telemetry', {
+        headers: { 'X-Admin-Key': adminKey },
+        params: { limit },
+        timeout: 20000,
     });
 }
 

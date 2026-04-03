@@ -205,6 +205,7 @@ OpenBB benefits from explicit user feedback loops. VNIBB needs this before more 
 - internal review dashboard or admin page for recent AI telemetry
 - richer feedback capture such as notes and classification labels
 - artifact-level feedback and action-level success tracking
+- durable telemetry storage beyond the current in-memory review buffer
 
 ### Metrics
 

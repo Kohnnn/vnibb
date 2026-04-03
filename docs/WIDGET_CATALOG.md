@@ -85,3 +85,5 @@ Total registered widgets: **59**.
 - This document reflects registered widget definitions, not all component files under `src/components/widgets`.
 - Some widgets combine multiple APIs and local dashboard state for filtering, caching, and layout persistence.
 - Source providers include vnstock-backed services and cached VNIBB API responses.
+- Market Overview and header index chips share `GET /market/indices` as the baseline snapshot. The frontend can then overlay WebSocket index updates during market hours.
+- `GET /market/indices` prefers Yahoo Finance for mapped index symbols and falls back to `vnstock` for any missing required indices before using persisted DB snapshots.

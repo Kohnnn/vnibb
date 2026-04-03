@@ -76,6 +76,12 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 - `GET /market/heatmap`
 - `GET /market/research/rss-feed`
 
+Market data notes:
+- `GET /market/indices` is a mixed-source snapshot for `VNINDEX`, `VN30`, `HNX`, and `UPCOM`.
+- Yahoo Finance is the fast path for mapped symbols. Any required index missing from Yahoo falls back to `vnstock` before persisted DB rows are used as a last-known snapshot.
+- Yahoo Vietnam quotes are delayed by the exchange/data-provider terms; they should be treated as delayed market data rather than exchange-native realtime data.
+- The web header overlays the snapshot with WebSocket index updates during market hours when the realtime channel is available.
+
 ### Listing / Trading / Derivatives
 - `GET /listing/symbols`
 - `GET /listing/exchanges`

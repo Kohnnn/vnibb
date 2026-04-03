@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useMemo } from 'react';
 import {
   Bar,
   BarChart,
@@ -13,10 +14,19 @@ import {
   YAxis,
 } from 'recharts';
 
-import type { CopilotArtifact, CopilotArtifactValueKind, CopilotChartArtifact, CopilotTableArtifact } from '@/lib/api';
+import {
+  submitCopilotOutcome,
+  type CopilotArtifact,
+  type CopilotArtifactValueKind,
+  type CopilotChartArtifact,
+  type CopilotResponseMeta,
+  type CopilotTableArtifact,
+} from '@/lib/api';
 
 interface CopilotArtifactPanelProps {
   artifacts: CopilotArtifact[];
+  responseMeta?: CopilotResponseMeta;
+  surface?: 'sidebar' | 'widget' | 'analysis';
 }
 
 function formatArtifactValue(
@@ -146,7 +156,25 @@ function renderChartArtifact(artifact: CopilotChartArtifact) {
   );
 }
 
-export function CopilotArtifactPanel({ artifacts }: CopilotArtifactPanelProps) {
+export function CopilotArtifactPanel({ artifacts, responseMeta, surface = 'sidebar' }: CopilotArtifactPanelProps) {
+  const artifactKey = useMemo(() => artifacts.map((artifact) => artifact.id).join('|'), [artifacts]);
+
+  useEffect(() => {
+    if (!responseMeta?.responseId || !artifacts.length) {
+      return;
+    }
+
+    artifacts.forEach((artifact) => {
+      void submitCopilotOutcome({
+        responseId: responseMeta.responseId,
+        kind: 'artifact',
+        itemId: artifact.id,
+        status: 'shown',
+        surface,
+      }).catch(() => undefined)
+    })
+  }, [artifactKey, artifacts, responseMeta?.responseId, surface])
+
   if (!artifacts.length) {
     return null;
   }

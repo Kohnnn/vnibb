@@ -491,12 +491,20 @@ export function AICopilot({
                             )}
                             {message.role === 'assistant' && Boolean(message.actions?.length) && (
                                 <div className="mr-4">
-                                    <CopilotActionPanel actions={message.actions || []} />
+                                    <CopilotActionPanel
+                                        actions={message.actions || []}
+                                        responseMeta={message.responseMeta}
+                                        surface="sidebar"
+                                    />
                                 </div>
                             )}
                             {message.role === 'assistant' && Boolean(message.artifacts?.length) && (
                                 <div className="mr-4">
-                                    <CopilotArtifactPanel artifacts={message.artifacts || []} />
+                                    <CopilotArtifactPanel
+                                        artifacts={message.artifacts || []}
+                                        responseMeta={message.responseMeta}
+                                        surface="sidebar"
+                                    />
                                 </div>
                             )}
                             {message.role === 'assistant' && Boolean(message.sources?.length) && (

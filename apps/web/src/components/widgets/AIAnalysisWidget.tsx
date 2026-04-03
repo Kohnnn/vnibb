@@ -187,8 +187,12 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
                   onVoteChange={(vote) => setFeedbackVote(vote)}
                 />
               )}
-              {Boolean(actions.length) && <CopilotActionPanel actions={actions} />}
-              {Boolean(artifacts.length) && <CopilotArtifactPanel artifacts={artifacts} />}
+              {Boolean(actions.length) && (
+                <CopilotActionPanel actions={actions} responseMeta={responseMeta || undefined} surface="analysis" />
+              )}
+              {Boolean(artifacts.length) && (
+                <CopilotArtifactPanel artifacts={artifacts} responseMeta={responseMeta || undefined} surface="analysis" />
+              )}
               {Boolean(sources.length) && <CopilotEvidencePanel sources={sources} />}
             </div>
           ) : (

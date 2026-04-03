@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw, Shield, Sparkles } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import { AICopilotTelemetryReview } from '@/components/admin/AICopilotTelemetryReview';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -827,6 +828,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                   </div>
                 </div>
+
+                <AICopilotTelemetryReview
+                  adminKey={adminLayoutKeyInput}
+                  enabled={readAdminLayoutKeyValidated()}
+                />
               </div>
             )}
           </div>

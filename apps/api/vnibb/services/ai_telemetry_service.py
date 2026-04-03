@@ -49,6 +49,7 @@ class AITelemetryService:
             "prompt_preview": prompt_preview,
             "created_at": _utc_now_iso(),
             "feedback": None,
+            "outcomes": [],
         }
 
         with self._lock:
@@ -93,6 +94,46 @@ class AITelemetryService:
             "model": response_record.get("model") if response_record else None,
         }
         logger.info("AI feedback telemetry %s", json.dumps(payload, ensure_ascii=True, default=str))
+        return payload
+
+    def record_outcome(
+        self,
+        *,
+        response_id: str,
+        kind: str,
+        item_id: str,
+        status: str,
+        surface: str,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        outcome = {
+            "kind": str(kind or "").strip().lower(),
+            "item_id": str(item_id or "").strip(),
+            "status": str(status or "").strip().lower(),
+            "surface": str(surface or "unknown").strip().lower(),
+            "notes": str(notes or "").strip()[:500] or None,
+            "recorded_at": _utc_now_iso(),
+        }
+
+        matched = False
+        response_record: dict[str, Any] | None = None
+        with self._lock:
+            existing = self._records.get(response_id)
+            if existing is not None:
+                outcomes = existing.setdefault("outcomes", [])
+                outcomes.append(outcome)
+                self._records.move_to_end(response_id)
+                matched = True
+                response_record = dict(existing)
+
+        payload = {
+            "response_id": response_id,
+            "matched": matched,
+            "outcome": outcome,
+            "provider": response_record.get("provider") if response_record else None,
+            "model": response_record.get("model") if response_record else None,
+        }
+        logger.info("AI outcome telemetry %s", json.dumps(payload, ensure_ascii=True, default=str))
         return payload
 
     def get_recent_records(self, limit: int = 50) -> list[dict[str, Any]]:

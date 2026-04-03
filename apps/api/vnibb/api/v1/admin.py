@@ -17,6 +17,7 @@ from vnibb.core.config import settings
 from vnibb.core.appwrite_client import check_appwrite_connectivity, appwrite_runtime_summary
 from vnibb.core.middleware.logging import get_recent_error_events
 from vnibb.models.sync_status import SyncStatus
+from vnibb.services.ai_telemetry_service import ai_telemetry_service
 from vnibb.services.system_layout_template_service import (
     SYSTEM_DASHBOARD_KEYS,
     SystemLayoutTemplateBundleResponse,
@@ -76,6 +77,15 @@ def require_admin_access(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+@router.get("/ai-telemetry", dependencies=[Depends(require_admin_access)])
+async def get_ai_telemetry(limit: int = Query(default=25, ge=1, le=200)) -> Dict[str, Any]:
+    records = ai_telemetry_service.get_recent_records(limit=limit)
+    return {
+        "count": len(records),
+        "data": records,
+    }
+
+
 @router.get("/providers/status", dependencies=[Depends(require_admin_access)])
 async def get_provider_status() -> Dict[str, Any]:
     """Return runtime provider configuration and migration connectivity status."""
@@ -96,7 +106,11 @@ async def get_provider_status() -> Dict[str, Any]:
     }
 
 
-@router.get("/system-layouts", response_model=SystemLayoutTemplateListResponse, dependencies=[Depends(require_admin_access)])
+@router.get(
+    "/system-layouts",
+    response_model=SystemLayoutTemplateListResponse,
+    dependencies=[Depends(require_admin_access)],
+)
 async def list_admin_system_layouts() -> SystemLayoutTemplateListResponse:
     records = []
     for dashboard_key in SYSTEM_DASHBOARD_KEYS:
@@ -131,12 +145,20 @@ async def save_admin_system_layout(
         try:
             data = json.loads(data)
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"request body string is not valid JSON: {exc}") from exc
+            raise HTTPException(
+                status_code=400, detail=f"request body string is not valid JSON: {exc}"
+            ) from exc
 
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="request body must be a JSON object")
 
     dashboard_payload = data.get("dashboard")
+    if isinstance(dashboard_payload, str):
+        try:
+            dashboard_payload = json.loads(dashboard_payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"dashboard payload string is not valid JSON: {exc}") from exc
+
     if not isinstance(dashboard_payload, dict):
         raise HTTPException(status_code=400, detail="dashboard payload must be an object")
 

@@ -6,11 +6,13 @@ import { Check, Plus, RotateCcw, Sparkles, X } from 'lucide-react';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
-import type { CopilotActionSuggestion } from '@/lib/api';
+import { submitCopilotOutcome, type CopilotActionSuggestion, type CopilotResponseMeta } from '@/lib/api';
 import type { WidgetType } from '@/types/dashboard';
 
 interface CopilotActionPanelProps {
   actions: CopilotActionSuggestion[];
+  responseMeta?: CopilotResponseMeta;
+  surface?: 'sidebar' | 'widget' | 'analysis';
 }
 
 function resolveWidgetType(action: CopilotActionSuggestion): WidgetType | null {
@@ -18,7 +20,7 @@ function resolveWidgetType(action: CopilotActionSuggestion): WidgetType | null {
   return typeof widgetType === 'string' ? (widgetType as WidgetType) : null;
 }
 
-export function CopilotActionPanel({ actions }: CopilotActionPanelProps) {
+export function CopilotActionPanel({ actions, responseMeta, surface = 'sidebar' }: CopilotActionPanelProps) {
   const { activeDashboard, activeTab, addWidget } = useDashboard();
   const { globalSymbol, setGlobalSymbol } = useSymbolLink();
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
@@ -33,20 +35,45 @@ export function CopilotActionPanel({ actions }: CopilotActionPanelProps) {
     return null;
   }
 
-  const executeAction = (action: CopilotActionSuggestion) => {
+  const recordOutcome = async (
+    action: CopilotActionSuggestion,
+    status: 'executed' | 'failed',
+    notes?: string,
+  ) => {
+    if (!responseMeta?.responseId) {
+      return;
+    }
+    try {
+      await submitCopilotOutcome({
+        responseId: responseMeta.responseId,
+        kind: 'action',
+        itemId: action.id,
+        status,
+        surface,
+        notes,
+      });
+    } catch {
+      // Ignore telemetry failures in UI.
+    }
+  };
+
+  const executeAction = async (action: CopilotActionSuggestion) => {
     if (action.type === 'set_global_symbol') {
       const nextSymbol = typeof action.payload.symbol === 'string' ? action.payload.symbol : null;
       if (!nextSymbol) {
+        await recordOutcome(action, 'failed', 'Missing symbol payload');
         return;
       }
       setGlobalSymbol(nextSymbol);
       setExecutedActionIds((prev) => ({ ...prev, [action.id]: `Switched to ${nextSymbol}` }));
       setPendingActionId(null);
+      await recordOutcome(action, 'executed');
       return;
     }
 
     const widgetType = resolveWidgetType(action);
     if (!widgetType || !activeDashboard || !activeTab || !canEditCurrentDashboard) {
+      await recordOutcome(action, 'failed', 'Dashboard not editable or widget type unavailable');
       return;
     }
 
@@ -69,6 +96,7 @@ export function CopilotActionPanel({ actions }: CopilotActionPanelProps) {
     });
     setExecutedActionIds((prev) => ({ ...prev, [action.id]: `Added ${widgetLabel}` }));
     setPendingActionId(null);
+    await recordOutcome(action, 'executed');
   };
 
   return (
@@ -124,7 +152,9 @@ export function CopilotActionPanel({ actions }: CopilotActionPanelProps) {
                   <div className="mt-2 flex gap-2">
                     <button
                       type="button"
-                      onClick={() => executeAction(action)}
+                      onClick={() => {
+                        void executeAction(action)
+                      }}
                       className="inline-flex items-center gap-1 rounded-md bg-cyan-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-cyan-500"
                     >
                       <Check size={10} />
