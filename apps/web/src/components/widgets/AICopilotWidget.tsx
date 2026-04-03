@@ -1,4 +1,4 @@
-// AI Copilot Widget - Enhanced with SSE streaming and markdown rendering
+// VniAgent Widget - Enhanced with SSE streaming and markdown rendering
 
 'use client';
 
@@ -90,7 +90,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
         {
             id: 'welcome',
             role: 'assistant',
-            content: '🤖 **AI Copilot** - Your intelligent stock analysis assistant.\n\nAsk me about Vietnamese stocks! Try:\n- "Analyze VNM"\n- "Compare VNM and FPT"\n- "Technical outlook for VCB"',
+            content: '🤖 **VniAgent** - Your workspace-native Vietnam equity agent.\n\nAsk me about Vietnamese stocks! Try:\n- "Analyze VNM"\n- "Compare VNM and FPT"\n- "Technical outlook for VCB"',
             timestamp: new Date(),
         }
     ]);
@@ -273,7 +273,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
             <div className="flex items-center justify-between pb-2 mb-2 border-b border-[var(--border-color)]">
                 <div className="flex items-center gap-2">
                     <Sparkles size={16} className="text-cyan-400" />
-                    <span className="text-sm font-medium text-[var(--text-primary)]">AI Copilot</span>
+                    <span className="text-sm font-medium text-[var(--text-primary)]">VniAgent</span>
                     {context?.symbol && (
                         <span className="text-xs px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded">
                             {context.symbol}
@@ -394,7 +394,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                 <input
                     type="text"
                     value={input}
-                    aria-label="Copilot message"
+                    aria-label="VniAgent message"
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={context?.symbol ? `Ask about ${context.symbol}...` : 'Ask about stocks...'}

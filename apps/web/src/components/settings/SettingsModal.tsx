@@ -34,10 +34,15 @@ import {
   writeAdminLayoutKeyValidated,
 } from '@/lib/adminLayoutAccess';
 import {
+  getAdminAIPromptLibrary,
   getAdminAIRuntimeConfig,
   getAdminProviderStatus,
+  getCopilotModelCatalog,
   getAdminSystemDashboardTemplateBundle,
+  saveAdminAIPromptLibrary,
   saveAdminAIRuntimeConfig,
+  type ModelOption,
+  type PromptTemplate,
 } from '@/lib/api';
 import {
   clearStoredAISettings,
@@ -72,6 +77,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [isAdminAiRuntimeSaving, setIsAdminAiRuntimeSaving] = useState(false);
   const [adminOpenRouterConfigured, setAdminOpenRouterConfigured] = useState<boolean | null>(null);
   const [adminRuntimeProvider, setAdminRuntimeProvider] = useState<string | null>(null);
+  const [sharedPrompts, setSharedPrompts] = useState<PromptTemplate[]>([]);
+  const [isAdminPromptLibraryLoading, setIsAdminPromptLibraryLoading] = useState(false);
+  const [isAdminPromptLibrarySaving, setIsAdminPromptLibrarySaving] = useState(false);
+  const [newSharedPromptLabel, setNewSharedPromptLabel] = useState('');
+  const [newSharedPromptTemplate, setNewSharedPromptTemplate] = useState('');
+  const [newSharedPromptCategory, setNewSharedPromptCategory] = useState<NonNullable<PromptTemplate['category']>>('analysis');
   const [aiProvider, setAiProvider] = useState<AIProvider>('openrouter');
   const [aiMode, setAiMode] = useState<AIProviderMode>('app_default');
   const [aiModelInput, setAiModelInput] = useState('openai/gpt-4o-mini');
@@ -79,6 +90,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [aiBaseUrlInput, setAiBaseUrlInput] = useState(OPENROUTER_BASE_URL);
   const [aiWebSearch, setAiWebSearch] = useState(false);
   const [aiPreferAppwriteData, setAiPreferAppwriteData] = useState(true);
+  const [openRouterModels, setOpenRouterModels] = useState<ModelOption[]>([]);
+  const [isOpenRouterModelsLoading, setIsOpenRouterModelsLoading] = useState(false);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const { resolvedTheme } = useTheme();
   const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
@@ -87,6 +100,38 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { state, activeDashboard, setActiveDashboard, setActiveTab: setDashboardActiveTab } = useDashboard();
 
   const tickerSuggestions = useMemo(() => searchStocks(defaultTickerInput, 6), [defaultTickerInput]);
+
+  const recommendedOpenRouterModels = useMemo(
+    () => openRouterModels.filter((model) => model.recommended).slice(0, 8),
+    [openRouterModels]
+  )
+
+  const loadOpenRouterModels = useCallback(async () => {
+    try {
+      setIsOpenRouterModelsLoading(true)
+      const response = await getCopilotModelCatalog('openrouter')
+      setOpenRouterModels(response.models || [])
+    } catch {
+      // Keep the UI usable with the existing input even if catalog fetch fails.
+    } finally {
+      setIsOpenRouterModelsLoading(false)
+    }
+  }, [])
+
+  const loadAdminPromptLibrary = useCallback(async (adminKey: string) => {
+    const trimmedKey = adminKey.trim()
+    if (!trimmedKey) return
+
+    try {
+      setIsAdminPromptLibraryLoading(true)
+      const response = await getAdminAIPromptLibrary(trimmedKey)
+      setSharedPrompts(response.data || [])
+    } catch (error) {
+      setPreferenceStatus(error instanceof Error ? `VniAgent prompt library load failed: ${error.message}` : 'VniAgent prompt library load failed.')
+    } finally {
+      setIsAdminPromptLibraryLoading(false)
+    }
+  }, [])
 
   const loadAdminAiRuntimeConfig = useCallback(async (adminKey: string) => {
     const trimmedKey = adminKey.trim()
@@ -100,7 +145,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setAdminOpenRouterConfigured(Boolean(providerStatus.providers.openrouter_configured))
       setAdminRuntimeProvider(typeof providerStatus.providers.ai_runtime_provider === 'string' ? providerStatus.providers.ai_runtime_provider : null)
     } catch (error) {
-      setPreferenceStatus(error instanceof Error ? `AI runtime load failed: ${error.message}` : 'AI runtime load failed.')
+      setPreferenceStatus(error instanceof Error ? `VniAgent runtime load failed: ${error.message}` : 'VniAgent runtime load failed.')
     } finally {
       setIsAdminAiRuntimeLoading(false)
     }
@@ -125,11 +170,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setAiBaseUrlInput(aiSettings.baseUrl);
       setAiWebSearch(aiSettings.webSearch);
       setAiPreferAppwriteData(aiSettings.preferAppwriteData);
+      void loadOpenRouterModels()
       if (readAdminLayoutKeyValidated()) {
         void loadAdminAiRuntimeConfig(readAdminLayoutKey())
+        void loadAdminPromptLibrary(readAdminLayoutKey())
       }
     }
-  }, [globalSymbol, isOpen, loadAdminAiRuntimeConfig]);
+  }, [globalSymbol, isOpen, loadAdminAiRuntimeConfig, loadAdminPromptLibrary, loadOpenRouterModels]);
 
   useEffect(() => {
     if (!preferenceStatus) return;
@@ -229,14 +276,56 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setAiPreferAppwriteData(nextSettings.preferAppwriteData);
     setPreferenceStatus(
       nextSettings.mode === 'browser_key'
-        ? `AI settings saved locally: ${nextSettings.provider} browser key + ${nextSettings.model}.`
-        : 'AI settings saved locally: app default provider + admin-managed model.',
+        ? `VniAgent settings saved locally: ${nextSettings.provider} browser key + ${nextSettings.model}.`
+        : 'VniAgent settings saved locally: app default provider + admin-managed model.',
     );
   };
 
+  const addSharedPromptDraft = () => {
+    const label = newSharedPromptLabel.trim()
+    const template = newSharedPromptTemplate.trim()
+    if (!label || !template) {
+      setPreferenceStatus('Provide both a prompt title and template before adding a shared VniAgent prompt.')
+      return
+    }
+
+    const nextPrompt: PromptTemplate = {
+      id: `shared-${Date.now()}`,
+      label,
+      template,
+      category: newSharedPromptCategory,
+      source: 'shared',
+      recommendedWidgetKeys: [],
+      isDefault: false,
+    }
+    setSharedPrompts((prev) => [...prev, nextPrompt])
+    setNewSharedPromptLabel('')
+    setNewSharedPromptTemplate('')
+    setNewSharedPromptCategory('analysis')
+  }
+
+  const saveSharedPromptLibrary = async () => {
+    const trimmedKey = adminLayoutKeyInput.trim()
+    if (!trimmedKey) {
+      setPreferenceStatus('Admin key required before saving shared VniAgent prompts.')
+      return
+    }
+
+    try {
+      setIsAdminPromptLibrarySaving(true)
+      const response = await saveAdminAIPromptLibrary(trimmedKey, sharedPrompts)
+      setSharedPrompts(response.data || [])
+      setPreferenceStatus(`Shared VniAgent prompt library saved (${response.count} prompts).`)
+    } catch (error) {
+      setPreferenceStatus(error instanceof Error ? `Shared VniAgent prompt save failed: ${error.message}` : 'Shared VniAgent prompt save failed.')
+    } finally {
+      setIsAdminPromptLibrarySaving(false)
+    }
+  }
+
   const tabs = [
     { id: 'general' as const, label: 'General', icon: SettingsIcon },
-    { id: 'ai' as const, label: 'AI', icon: Sparkles },
+    { id: 'ai' as const, label: 'VniAgent', icon: Sparkles },
     { id: 'data' as const, label: 'Data Sources', icon: Database },
     { id: 'notifications' as const, label: 'Notifications', icon: Bell },
     { id: 'appearance' as const, label: 'Appearance', icon: Palette },
@@ -438,7 +527,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <h4 className="text-sm font-bold text-[var(--text-primary)]">AI Providers</h4>
+                      <h4 className="text-sm font-bold text-[var(--text-primary)]">VniAgent Providers</h4>
                       <p className="mt-1 text-[11px] text-[var(--text-muted)]">
                         VNIBB uses an Appwrite-first AI flow. Market data from your runtime Appwrite database is preferred over internet sources.
                       </p>
@@ -542,6 +631,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <input
                     id="settings-ai-model"
                     type="text"
+                    list="vniagent-openrouter-models"
                     value={aiModelInput}
                     onChange={(event) => {
                       setAiModelInput(event.target.value)
@@ -558,6 +648,32 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       ? 'Any OpenRouter model slug is allowed. Start with `openai/gpt-4o-mini` for a low-cost default.'
                       : 'Enter the model ID supported by your OpenAI-compatible provider.'}
                   </p>
+                  {aiProvider === 'openrouter' && (
+                    <>
+                      <datalist id="vniagent-openrouter-models">
+                        {openRouterModels.map((model) => (
+                          <option key={model.id} value={model.id}>{model.name}</option>
+                        ))}
+                      </datalist>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {recommendedOpenRouterModels.map((model) => (
+                          <button
+                            key={model.id}
+                            type="button"
+                            onClick={() => setAiModelInput(model.id)}
+                            disabled={aiProvider === 'openrouter' && aiMode === 'app_default'}
+                            className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-[10px] font-semibold text-blue-300 disabled:cursor-not-allowed disabled:opacity-60"
+                            title={model.description || model.name}
+                          >
+                            {model.name}
+                          </button>
+                        ))}
+                        {isOpenRouterModelsLoading && (
+                          <span className="text-[10px] text-[var(--text-muted)]">Loading OpenRouter models…</span>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div>
@@ -651,7 +767,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     onClick={applyAISettings}
                     className="rounded-lg border border-blue-500/40 bg-blue-600/15 px-4 py-2 text-sm font-semibold text-blue-300 transition-colors hover:bg-blue-600/25"
                   >
-                    Save AI Settings
+                    Save VniAgent Settings
                   </button>
                   <button
                     type="button"
@@ -665,11 +781,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       setAiWebSearch(nextSettings.webSearch)
                       setAiPreferAppwriteData(nextSettings.preferAppwriteData)
                       setAiSettingsError(null)
-                      setPreferenceStatus('AI settings reset to defaults for this browser.')
+                      setPreferenceStatus('VniAgent settings reset to defaults for this browser.')
                     }}
                     className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                   >
-                    Reset AI Settings
+                    Reset VniAgent Settings
                   </button>
                 </div>
               </div>
@@ -867,7 +983,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
                 {readAdminLayoutKeyValidated() && (
                   <div>
-                    <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">AI Runtime Defaults</h4>
+                    <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">VniAgent Runtime Defaults</h4>
                     <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
                       <div className="text-sm font-bold text-[var(--text-primary)]">App default OpenRouter model</div>
                       <div className="mt-1 text-xs text-[var(--text-muted)]">
@@ -883,11 +999,30 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       </div>
                       <input
                         type="text"
+                        list="vniagent-admin-openrouter-models"
                         value={adminAiModelInput}
                         onChange={(event) => setAdminAiModelInput(event.target.value)}
                         placeholder="openai/gpt-4o-mini"
                         className="mt-4 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
                       />
+                      <datalist id="vniagent-admin-openrouter-models">
+                        {openRouterModels.map((model) => (
+                          <option key={model.id} value={model.id}>{model.name}</option>
+                        ))}
+                      </datalist>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {recommendedOpenRouterModels.map((model) => (
+                          <button
+                            key={model.id}
+                            type="button"
+                            onClick={() => setAdminAiModelInput(model.id)}
+                            className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-[10px] font-semibold text-blue-300"
+                            title={model.description || model.name}
+                          >
+                            {model.name}
+                          </button>
+                        ))}
+                      </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
@@ -895,16 +1030,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             const trimmedKey = adminLayoutKeyInput.trim()
                             const trimmedModel = adminAiModelInput.trim()
                             if (!trimmedKey || !trimmedModel) {
-                              setPreferenceStatus('Provide both an admin key and a model slug before saving AI runtime defaults.')
+                              setPreferenceStatus('Provide both an admin key and a model slug before saving VniAgent runtime defaults.')
                               return
                             }
                             try {
                               setIsAdminAiRuntimeSaving(true)
                               const saved = await saveAdminAIRuntimeConfig(trimmedKey, trimmedModel)
                               setAdminAiModelInput(saved.model || trimmedModel)
-                              setPreferenceStatus(`Admin AI model saved: ${saved.model}.`)
+                              setPreferenceStatus(`Admin VniAgent model saved: ${saved.model}.`)
                             } catch (error) {
-                              setPreferenceStatus(error instanceof Error ? `AI runtime save failed: ${error.message}` : 'AI runtime save failed.')
+                              setPreferenceStatus(error instanceof Error ? `VniAgent runtime save failed: ${error.message}` : 'VniAgent runtime save failed.')
                             } finally {
                               setIsAdminAiRuntimeSaving(false)
                             }
@@ -921,6 +1056,100 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminAiRuntimeLoading ? 'Loading…' : 'Reload'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {readAdminLayoutKeyValidated() && (
+                  <div>
+                    <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Shared VniAgent Prompt Library</h4>
+                    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 space-y-4">
+                      <div className="text-xs text-[var(--text-muted)]">
+                        Shared prompts appear in every user&apos;s VniAgent prompt library. Use placeholders like <code>{'{symbol}'}</code>, <code>{'{widget_or_symbol}'}</code>, and <code>{'{tab}'}</code>.
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <input
+                          type="text"
+                          value={newSharedPromptLabel}
+                          onChange={(event) => setNewSharedPromptLabel(event.target.value)}
+                          placeholder="Prompt title"
+                          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                        />
+                        <select
+                          value={newSharedPromptCategory}
+                          onChange={(event) => setNewSharedPromptCategory(event.target.value as NonNullable<PromptTemplate['category']>)}
+                          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                        >
+                          <option value="analysis">Analysis</option>
+                          <option value="comparison">Comparison</option>
+                          <option value="fundamentals">Fundamentals</option>
+                          <option value="technical">Technical</option>
+                          <option value="news">News</option>
+                          <option value="custom">Custom</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={addSharedPromptDraft}
+                          className="rounded-lg border border-blue-500/40 bg-blue-600/15 px-4 py-2 text-sm font-semibold text-blue-300 transition-colors hover:bg-blue-600/25"
+                        >
+                          Add Shared Prompt
+                        </button>
+                      </div>
+
+                      <textarea
+                        value={newSharedPromptTemplate}
+                        onChange={(event) => setNewSharedPromptTemplate(event.target.value)}
+                        placeholder="Prompt template"
+                        rows={3}
+                        className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                      />
+
+                      <div className="space-y-2">
+                        {isAdminPromptLibraryLoading ? (
+                          <div className="text-xs text-[var(--text-muted)]">Loading shared prompts…</div>
+                        ) : sharedPrompts.length ? (
+                          sharedPrompts.map((prompt, index) => (
+                            <div key={prompt.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold text-[var(--text-primary)]">{prompt.label}</div>
+                                  <div className="mt-1 text-[10px] uppercase tracking-wider text-cyan-300">{prompt.category || 'custom'}</div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setSharedPrompts((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                                  className="rounded-lg border border-[var(--border-default)] px-3 py-1 text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                              <div className="mt-2 text-[11px] text-[var(--text-muted)] whitespace-pre-wrap">{prompt.template}</div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-xs text-[var(--text-muted)]">No shared prompts saved yet.</div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void loadAdminPromptLibrary(adminLayoutKeyInput)}
+                          disabled={isAdminPromptLibraryLoading || isAdminPromptLibrarySaving}
+                          className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isAdminPromptLibraryLoading ? 'Loading…' : 'Reload Shared Prompts'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void saveSharedPromptLibrary()}
+                          disabled={isAdminPromptLibraryLoading || isAdminPromptLibrarySaving}
+                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isAdminPromptLibrarySaving ? 'Saving…' : 'Save Shared Prompts'}
                         </button>
                       </div>
                     </div>

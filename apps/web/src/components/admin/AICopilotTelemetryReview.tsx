@@ -44,7 +44,7 @@ export function AICopilotTelemetryReview({ adminKey, enabled }: AICopilotTelemet
     <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-bold text-[var(--text-primary)]">AI Telemetry Review</div>
+          <div className="text-sm font-bold text-[var(--text-primary)]">VniAgent Telemetry Review</div>
           <div className="mt-1 text-xs text-[var(--text-muted)]">
             Review recent copilot responses, feedback votes, and artifact/action outcomes captured in this API process.
           </div>

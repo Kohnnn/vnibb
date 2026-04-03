@@ -1,4 +1,4 @@
-// AI Copilot Sidebar - OpenBB-style AI assistant
+// VniAgent Sidebar - OpenBB-style workspace agent
 
 'use client';
 
@@ -19,6 +19,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProfile, useStockQuote, useFinancialRatios } from '@/lib/queries';
+import { PromptsLibrary } from '@/components/modals/PromptsLibrary';
 import {
     type CopilotActionSuggestion,
     consumeCopilotStream,
@@ -308,6 +309,7 @@ export function AICopilot({
     const [showReasoning, setShowReasoning] = useState<Record<string, boolean>>({});
     const [aiSettings, setAISettings] = useState<AISettings>(() => readStoredAISettings());
     const [currentStatus, setCurrentStatus] = useState<string | null>(null);
+    const [isPromptLibraryOpen, setIsPromptLibraryOpen] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -325,6 +327,10 @@ export function AICopilot({
         [widgetContext, widgetContextData]
     );
     const widgetDataPreview = useMemo(() => getWidgetDataPreview(widgetSummary), [widgetSummary]);
+    const latestResolvedResponseMeta = useMemo(
+        () => [...messages].reverse().find((message) => message.role === 'assistant' && message.responseMeta)?.responseMeta,
+        [messages]
+    );
     const suggestedPrompts = useMemo(
         () => WIDGET_PROMPTS[activeWidgetKey || ''] || TAB_PROMPTS[activeTabKey] || DEFAULT_PROMPTS,
         [activeTabKey, activeWidgetKey]
@@ -490,11 +496,11 @@ export function AICopilot({
             });
 
         } catch (error) {
-            console.error('Copilot Error:', error);
+            console.error('VniAgent Error:', error);
             setCurrentStatus(null);
             setMessages((prev) => prev.map((msg) =>
                 msg.id === assistantMsgId
-                    ? { ...msg, content: `**Error**: Failed to connect to Copilot service. \n\n${String(error)}` }
+                    ? { ...msg, content: `**Error**: Failed to connect to VniAgent service. \n\n${String(error)}` }
                     : msg
             ));
         } finally {
@@ -531,24 +537,35 @@ export function AICopilot({
 
     return (
         <div className="flex flex-col h-full w-full bg-[var(--bg-primary)] text-[var(--text-primary)]">
-            {/* Header - Optional or integrated */}
-            {/* We keep the branding but remove the close button which is now in RightSidebar */}
-            {/* If wrapped in RightSidebar, we might want to skip this header or simplify it */}
-
+            <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/70 flex items-center justify-between gap-3">
+                <div>
+                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">VniAgent</div>
+                    <div className="mt-1 text-[11px] text-[var(--text-muted)]">
+                        {widgetContext ? 'Widget-native workspace agent' : 'Workspace-native Vietnam equity agent'}
+                    </div>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setIsPromptLibraryOpen(true)}
+                    className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200 transition-colors hover:bg-cyan-500/20"
+                >
+                    Prompt Library
+                </button>
+            </div>
 
             {/* Context Badge */}
             <div className="px-4 py-2 border-b border-[var(--border-color)] bg-blue-600/10 flex items-center justify-between">
                 <span className="text-xs text-blue-400">
                     {widgetContext ? `Context: @${widgetContext} · ` : ''}
                     {activeTabName ? `${activeTabName} · ` : ''}
-                    {currentSymbol} · {getProviderLabel(aiSettings.provider)} · {aiSettings.mode === 'browser_key' ? `Browser key · ${aiSettings.model}` : 'App default · admin-managed model'}
+                    {currentSymbol} · {getProviderLabel(aiSettings.provider)} · {aiSettings.mode === 'browser_key' ? `Browser key · ${aiSettings.model}` : `App default · ${latestResolvedResponseMeta?.model || 'admin-managed model'}`}
                 </span>
                 {messages.length > 0 && (
                     <button
                         onClick={handleExport}
                         className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                        title="Export chat as Markdown"
-                        aria-label="Export chat"
+                        title="Export VniAgent chat as Markdown"
+                        aria-label="Export VniAgent chat"
                     >
                         <Download size={14} />
                     </button>
@@ -583,7 +600,7 @@ export function AICopilot({
                 {messages.length === 0 ? (
                     <div className="space-y-4">
                         <div className="text-center text-[var(--text-muted)] py-8">
-                            <Bot size={40} className="mx-auto mb-3 text-[var(--text-muted)]/70" />
+                            <Sparkles size={40} className="mx-auto mb-3 text-cyan-300/70" />
                             <p className="text-sm">{getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)}</p>
                         </div>
 
@@ -682,7 +699,7 @@ export function AICopilot({
                 {isLoading && messages[messages.length - 1]?.role === 'user' && (
                     <div className="bg-[var(--bg-secondary)] rounded-lg p-3 mr-4 border border-[var(--border-color)]">
                         <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                            <div className="animate-pulse">{currentStatus || 'Thinking...'}</div>
+                            <div className="animate-pulse">{currentStatus || 'VniAgent is reasoning...'}</div>
                         </div>
                     </div>
                 )}
@@ -720,7 +737,7 @@ export function AICopilot({
                     <input
                         ref={inputRef}
                         type="text"
-                        aria-label="Copilot message"
+                        aria-label="VniAgent message"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
@@ -737,6 +754,19 @@ export function AICopilot({
                     </button>
                 </div>
             </div>
+
+            <PromptsLibrary
+                isOpen={isPromptLibraryOpen}
+                onClose={() => setIsPromptLibraryOpen(false)}
+                onSelectPrompt={(prompt) => {
+                    setInput(prompt);
+                    window.setTimeout(() => inputRef.current?.focus(), 0);
+                }}
+                symbol={currentSymbol}
+                widgetContext={widgetContext}
+                widgetTypeKey={widgetSummary?.widgetTypeKey || activeWidgetKey}
+                activeTabName={activeTabName}
+            />
         </div>
     );
 }

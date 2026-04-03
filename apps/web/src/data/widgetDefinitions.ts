@@ -897,7 +897,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     },
     {
         type: 'ai_analysis',
-        name: 'AI Analysis',
+        name: 'VniAgent Analysis',
         description: 'Deep fundamental and technical analysis using your configured OpenRouter model',
         category: 'analysis',
         defaultConfig: {},

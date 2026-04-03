@@ -176,7 +176,7 @@ export function WidgetToolbar({
           <button
             onClick={onCopilot}
             className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-blue)] hover:bg-blue-500/10 rounded transition-colors"
-            title="AI Copilot"
+            title="VniAgent"
           >
             <Sparkles size={12} />
           </button>

@@ -15,9 +15,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from vnibb.services.ai_context_service import ai_context_service
+from vnibb.services.ai_model_catalog_service import ai_model_catalog_service
+from vnibb.services.ai_prompt_library_service import ai_prompt_library_service
 from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
-from vnibb.services.copilot_service import PROMPT_TEMPLATES, copilot_service
+from vnibb.services.copilot_service import copilot_service
 from vnibb.services.llm_service import llm_service
 
 router = APIRouter()
@@ -81,9 +83,31 @@ class PromptTemplate(BaseModel):
     id: str
     label: str
     template: str
+    category: str | None = None
+    recommendedWidgetKeys: list[str] | None = None
+    isDefault: bool | None = None
+    source: str | None = None
 
 
 class PromptsResponse(BaseModel):
+    prompts: list[PromptTemplate]
+
+
+class ModelOption(BaseModel):
+    id: str
+    name: str
+    provider: str
+    description: str | None = None
+    recommended: bool = False
+    tier: str | None = None
+    context_length: int | None = None
+
+
+class ModelCatalogResponse(BaseModel):
+    models: list[ModelOption]
+
+
+class SharedPromptRequest(BaseModel):
     prompts: list[PromptTemplate]
 
 
@@ -238,23 +262,21 @@ async def submit_outcome(request: OutcomeRequest):
 
 @router.get("/prompts", response_model=PromptsResponse)
 async def get_prompts():
-    """Get available pre-built prompt templates."""
+    """Get available VniAgent prompt templates."""
     prompts = [
-        PromptTemplate(
-            id="analyze", label="📊 Analyze", template=PROMPT_TEMPLATES.get("analyze", "")
-        ),
-        PromptTemplate(
-            id="compare", label="⚖️ Compare", template=PROMPT_TEMPLATES.get("compare", "")
-        ),
-        PromptTemplate(
-            id="financials", label="💰 Financials", template=PROMPT_TEMPLATES.get("financials", "")
-        ),
-        PromptTemplate(
-            id="technical", label="📈 Technical", template=PROMPT_TEMPLATES.get("technical", "")
-        ),
-        PromptTemplate(id="news", label="📰 News", template=PROMPT_TEMPLATES.get("news", "")),
+        PromptTemplate(**prompt) for prompt in await ai_prompt_library_service.get_public_prompts()
     ]
     return PromptsResponse(prompts=prompts)
+
+
+@router.get("/models", response_model=ModelCatalogResponse)
+async def get_models(provider: Literal["openrouter"] = "openrouter"):
+    if provider != "openrouter":
+        return ModelCatalogResponse(models=[])
+    models = [
+        ModelOption(**model) for model in await ai_model_catalog_service.get_openrouter_models()
+    ]
+    return ModelCatalogResponse(models=models)
 
 
 @router.get("/suggestions", response_model=CopilotSuggestionResponse)

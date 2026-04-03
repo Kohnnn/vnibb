@@ -1,6 +1,6 @@
-# AI Copilot
+# VniAgent
 
-This document describes the current VNIBB AI copilot architecture and the OpenBB patterns we deliberately borrowed.
+This document describes the current VNIBB VniAgent architecture and the OpenBB patterns we deliberately borrowed.
 
 For the phased delivery plan, see `docs/ai_roadmap.md`.
 
@@ -91,6 +91,8 @@ Browser widget data remains lower-priority than backend data.
 - OpenRouter as the app-managed default provider
 - browser-local BYOK overrides
 - optional OpenAI-compatible browser-local provider mode
+- OpenRouter model catalog endpoint for settings-driven model selection
+- backend prompt library service with default and shared prompt support
 - Appwrite-first context assembly for:
   - stock profile
   - prices
@@ -114,6 +116,9 @@ Browser widget data remains lower-priority than backend data.
 ### Frontend
 
 - browser-local AI settings
+- OpenRouter model suggestions and searchable model selection
+- integrated VniAgent prompt library in the main agent panel
+- admin-managed shared prompt library editing
 - authenticated SSE chat transport
 - inline table artifact rendering in copilot surfaces
 - inline chart artifact rendering in copilot surfaces

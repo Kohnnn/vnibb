@@ -486,11 +486,11 @@ export function Header({
                   ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-200'
                   : 'border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
               )}
-              title="Open AI copilot"
-              aria-label={isAIOpen ? 'Close AI copilot' : 'Open AI copilot'}
+              title="Open VniAgent"
+              aria-label={isAIOpen ? 'Close VniAgent' : 'Open VniAgent'}
             >
               <Sparkles size={13} />
-              <span className="hidden md:inline">AI Copilot</span>
+              <span className="hidden md:inline">VniAgent</span>
             </button>
           )}
 
