@@ -1825,6 +1825,22 @@ export interface CopilotSourceRef {
     priority?: number;
 }
 
+export interface CopilotTableArtifactColumn {
+    key: string;
+    label: string;
+    kind?: 'text' | 'number' | 'percent' | 'currency' | 'large_number';
+}
+
+export interface CopilotTableArtifact {
+    id: string;
+    type: 'table';
+    title: string;
+    description?: string;
+    columns: CopilotTableArtifactColumn[];
+    rows: Array<Record<string, string | number | null>>;
+    sourceIds?: string[];
+}
+
 export interface CopilotReasoningStep {
     eventType: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
     message: string;
@@ -1838,6 +1854,7 @@ export interface CopilotStreamEvent {
     usedSourceIds?: string[];
     sources?: CopilotSourceRef[];
     reasoning?: CopilotReasoningStep;
+    artifacts?: CopilotTableArtifact[];
 }
 
 interface RawCopilotSourceRef {
@@ -1858,9 +1875,27 @@ interface RawCopilotReasoningStep {
     details?: Record<string, unknown>;
 }
 
+interface RawCopilotTableArtifactColumn {
+    key?: string;
+    label?: string;
+    kind?: string;
+}
+
+interface RawCopilotTableArtifact {
+    id?: string;
+    type?: string;
+    title?: string;
+    description?: string;
+    columns?: RawCopilotTableArtifactColumn[];
+    rows?: Array<Record<string, string | number | null>>;
+    sourceIds?: string[];
+    source_ids?: string[];
+}
+
 function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
     const event = (rawEvent && typeof rawEvent === 'object' ? rawEvent : {}) as Record<string, unknown>;
     const rawSources = Array.isArray(event.sources) ? event.sources as RawCopilotSourceRef[] : [];
+    const rawArtifacts = Array.isArray(event.artifacts) ? event.artifacts as RawCopilotTableArtifact[] : [];
     const rawReasoning = (event.reasoning && typeof event.reasoning === 'object'
         ? event.reasoning
         : null) as RawCopilotReasoningStep | null;
@@ -1884,6 +1919,31 @@ function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
             asOf: typeof source.as_of === 'string' ? source.as_of : undefined,
             priority: typeof source.priority === 'number' ? source.priority : undefined,
         })).filter((source) => Boolean(source.id)),
+        artifacts: rawArtifacts.map((artifact) => ({
+            id: String(artifact.id || ''),
+            type: 'table' as const,
+            title: String(artifact.title || ''),
+            description: typeof artifact.description === 'string' ? artifact.description : undefined,
+            columns: Array.isArray(artifact.columns)
+                ? artifact.columns
+                    .map((column) => ({
+                        key: String(column.key || ''),
+                        label: String(column.label || ''),
+                        kind: typeof column.kind === 'string'
+                            ? column.kind as CopilotTableArtifactColumn['kind']
+                            : undefined,
+                    }))
+                    .filter((column) => Boolean(column.key && column.label))
+                : [],
+            rows: Array.isArray(artifact.rows)
+                ? artifact.rows.filter((row) => row && typeof row === 'object')
+                : [],
+            sourceIds: Array.isArray(artifact.sourceIds)
+                ? artifact.sourceIds.filter((item): item is string => typeof item === 'string')
+                : Array.isArray(artifact.source_ids)
+                    ? artifact.source_ids.filter((item): item is string => typeof item === 'string')
+                    : undefined,
+        })).filter((artifact) => Boolean(artifact.id && artifact.title && artifact.columns.length && artifact.rows.length)),
         reasoning: rawReasoning && typeof rawReasoning.message === 'string'
             ? {
                 eventType: ((rawReasoning.eventType || rawReasoning.event_type || 'INFO').toUpperCase() as CopilotReasoningStep['eventType']),

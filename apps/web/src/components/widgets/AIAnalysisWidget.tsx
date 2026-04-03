@@ -12,7 +12,9 @@ import {
   openCopilotChatStream,
   type CopilotReasoningStep,
   type CopilotSourceRef,
+  type CopilotTableArtifact,
 } from '@/lib/api';
+import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { readStoredAISettings } from '@/lib/aiSettings';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
@@ -31,6 +33,7 @@ function appendReasoningStep(existing: string[], step: CopilotReasoningStep): st
 function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetProps) {
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [sources, setSources] = useState<CopilotSourceRef[]>([]);
+  const [artifacts, setArtifacts] = useState<CopilotTableArtifact[]>([]);
   const [reasoningLog, setReasoningLog] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +50,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
     setError(null);
     setAnalysis('');
     setSources([]);
+    setArtifacts([]);
     setReasoningLog([]);
 
     try {
@@ -79,6 +83,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         },
         onDone: (event) => {
           setSources(event.sources || []);
+          setArtifacts(event.artifacts || []);
         },
       });
     } catch (err: any) {
@@ -162,6 +167,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
                       {analysis}
                   </ReactMarkdown>
               </div>
+              {Boolean(artifacts.length) && <CopilotArtifactPanel artifacts={artifacts} />}
               {Boolean(sources.length) && <CopilotEvidencePanel sources={sources} />}
             </div>
           ) : (

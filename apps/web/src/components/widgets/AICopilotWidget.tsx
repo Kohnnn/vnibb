@@ -11,10 +11,12 @@ import {
     openCopilotChatStream,
     type CopilotReasoningStep,
     type CopilotSourceRef,
+    type CopilotTableArtifact,
 } from '@/lib/api';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { readStoredAISettings } from '@/lib/aiSettings';
+import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
 
 interface WidgetContext {
@@ -30,6 +32,7 @@ interface Message {
     reasoning?: string;
     context?: WidgetContext;
     sources?: CopilotSourceRef[];
+    artifacts?: CopilotTableArtifact[];
     isStreaming?: boolean;
     timestamp: Date;
 }
@@ -168,7 +171,12 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                     setCurrentStatus(null);
                     setMessages(prev => prev.map(m =>
                         m.id === assistantMsgId
-                            ? { ...m, isStreaming: false, sources: event.sources || [] }
+                            ? {
+                                ...m,
+                                isStreaming: false,
+                                sources: event.sources || [],
+                                artifacts: event.artifacts || [],
+                            }
                             : m
                     ));
                 },
@@ -296,7 +304,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
             {/* Messages */}
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 min-h-0">
                 {messages.map((message) => (
-                    <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
                         <div className={`relative max-w-[90%] rounded-lg px-3 py-2 text-sm group ${message.role === 'user'
                             ? 'bg-blue-600 text-white'
                             : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] border border-[var(--border-subtle)]'
@@ -332,6 +340,11 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                         {message.role === 'assistant' && Boolean(message.sources?.length) && (
                             <div className="mt-2 w-full max-w-[90%]">
                                 <CopilotEvidencePanel sources={message.sources || []} />
+                            </div>
+                        )}
+                        {message.role === 'assistant' && Boolean(message.artifacts?.length) && (
+                            <div className="mt-2 w-full max-w-[90%]">
+                                <CopilotArtifactPanel artifacts={message.artifacts || []} />
                             </div>
                         )}
                     </div>

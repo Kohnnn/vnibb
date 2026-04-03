@@ -20,10 +20,12 @@ from vnibb.models.market import MarketSector, SectorPerformance
 from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
+from vnibb.services.comparison_service import comparison_service
 
 logger = logging.getLogger(__name__)
 
 SYMBOL_RE = re.compile(r"\b[A-Z]{2,4}\b")
+COMPARISON_CONTEXT_KEYWORDS = ("compare", "versus", " vs ", "peer", "competitor", "rank")
 SYMBOL_STOPWORDS = {
     "AND",
     "ARE",
@@ -149,6 +151,11 @@ def _extract_symbols(*texts: str | None) -> list[str]:
             continue
         matches.extend(SYMBOL_RE.findall(text.upper()))
     return _dedupe_symbols(matches)
+
+
+def _wants_peer_expansion(*texts: str | None) -> bool:
+    combined = " ".join(str(text or "").lower() for text in texts)
+    return any(keyword in combined for keyword in COMPARISON_CONTEXT_KEYWORDS)
 
 
 def _pick_fields(data: dict[str, Any] | None, fields: Sequence[str]) -> dict[str, Any] | None:
@@ -638,6 +645,17 @@ class AIContextService:
         if context_symbol:
             requested_symbols.insert(0, context_symbol)
         symbols = _dedupe_symbols(requested_symbols)[:3]
+
+        if len(symbols) == 1 and _wants_peer_expansion(message, *recent_user_messages):
+            try:
+                peer_response = await comparison_service.get_peers(symbols[0], limit=2)
+            except Exception as exc:
+                logger.warning("Peer expansion failed for %s: %s", symbols[0], exc)
+            else:
+                peer_symbols = [
+                    peer.symbol for peer in peer_response.peers if getattr(peer, "symbol", None)
+                ]
+                symbols = _dedupe_symbols([*symbols, *peer_symbols])[:3]
 
         broad_market_context = await self._build_market_snapshot(
             prefer_appwrite_data=prefer_appwrite_data

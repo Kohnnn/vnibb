@@ -24,7 +24,9 @@ import {
     openCopilotChatStream,
     type CopilotReasoningStep,
     type CopilotSourceRef,
+    type CopilotTableArtifact,
 } from '@/lib/api';
+import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import {
     AI_SETTINGS_UPDATED_EVENT,
     readStoredAISettings,
@@ -40,6 +42,7 @@ interface Message {
     reasoning?: string;
     usedSourceIds?: string[];
     sources?: CopilotSourceRef[];
+    artifacts?: CopilotTableArtifact[];
     timestamp: Date;
 }
 
@@ -50,6 +53,7 @@ interface PersistedMessage {
     reasoning?: string;
     usedSourceIds?: string[];
     sources?: CopilotSourceRef[];
+    artifacts?: CopilotTableArtifact[];
     timestamp: string;
 }
 
@@ -124,6 +128,7 @@ function toPersistedMessage(message: Message): PersistedMessage {
         reasoning: message.reasoning,
         usedSourceIds: message.usedSourceIds,
         sources: message.sources,
+        artifacts: message.artifacts,
         timestamp: message.timestamp.toISOString(),
     };
 }
@@ -136,6 +141,7 @@ function fromPersistedMessage(message: PersistedMessage): Message {
         reasoning: message.reasoning,
         usedSourceIds: message.usedSourceIds,
         sources: message.sources,
+        artifacts: message.artifacts,
         timestamp: new Date(message.timestamp),
     };
 }
@@ -318,6 +324,7 @@ export function AICopilot({
                                 ...msg,
                                 usedSourceIds: event.usedSourceIds || [],
                                 sources: event.sources || [],
+                                artifacts: event.artifacts || [],
                             }
                             : msg
                     ));
@@ -448,6 +455,11 @@ export function AICopilot({
                             {showReasoning[message.id] && message.reasoning && (
                                 <div className="ml-4 p-2 text-xs text-[var(--text-secondary)] bg-[var(--bg-tertiary)]/70 rounded border-l-2 border-blue-500">
                                     {message.reasoning}
+                                </div>
+                            )}
+                            {message.role === 'assistant' && Boolean(message.artifacts?.length) && (
+                                <div className="mr-4">
+                                    <CopilotArtifactPanel artifacts={message.artifacts || []} />
                                 </div>
                             )}
                             {message.role === 'assistant' && Boolean(message.sources?.length) && (

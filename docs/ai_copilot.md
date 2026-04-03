@@ -2,6 +2,8 @@
 
 This document describes the current VNIBB AI copilot architecture and the OpenBB patterns we deliberately borrowed.
 
+For the phased delivery plan, see `docs/ai_roadmap.md`.
+
 ## Current State
 
 VNIBB does not use Gemini in the active copilot path anymore.
@@ -19,8 +21,10 @@ The active copilot flow is:
    - reasoning/status
    - markdown chunks
    - normalized evidence metadata on `done`
+   - inline table artifacts on `done`
 7. Frontend renders:
    - answer body
+   - inline table artifacts
    - collapsible evidence panel
    - process/reasoning log
 
@@ -96,11 +100,13 @@ Browser widget data remains lower-priority than backend data.
   - sector breadth
 - validated source references such as `VNM-PRICES` and `MKT-INDICES`
 - structured output validation before the UI sees the answer
+- deterministic table artifacts derived from validated runtime context for comparison, sector breadth, and foreign flow prompts
 
 ### Frontend
 
 - browser-local AI settings
 - authenticated SSE chat transport
+- inline table artifact rendering in copilot surfaces
 - evidence panel in sidebar copilot, widget copilot, and AI analysis widget
 - reasoning/status display while the answer is being prepared
 
@@ -123,15 +129,15 @@ The copilot stream currently supports these event shapes:
 
 - `{"reasoning": {"eventType": "INFO|SUCCESS|WARNING|ERROR", "message": "...", "details": {...}}}`
 - `{"chunk": "markdown text"}`
-- `{"done": true, "usedSourceIds": [...], "sources": [...]}`
+- `{"done": true, "usedSourceIds": [...], "sources": [...], "artifacts": [...]}`
 - `{"error": "..."}`
 
 ## Next OpenBB-Inspired Steps
 
 The strongest remaining OpenBB-style improvements are:
 
-1. Table artifacts for ranked comparisons and summaries
-2. Chart artifacts for trend, valuation, and sector breadth visuals
-3. HTML artifacts for richer AI-generated reports
-4. Source-usage logging for answer quality review
-5. Optional tool-call orchestration for controlled backend tools
+1. Chart artifacts for trend, valuation, and sector breadth visuals
+2. HTML artifacts for richer AI-generated reports
+3. Source-usage logging for answer quality review
+4. Optional tool-call orchestration for controlled backend tools
+5. User feedback and quality loops
