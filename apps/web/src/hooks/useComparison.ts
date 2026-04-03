@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { API_BASE_URL } from '@/lib/api';
@@ -135,45 +134,4 @@ export const usePeers = (symbol: string, limit = 5, enabled = true) => {
     });
 };
 
-// Storage Hook for Persistence
-const STORAGE_KEY = 'vnibb_comparison_sets';
-
-export const usePeerStorage = (initialSymbol: string) => {
-    // Initialize with defaults if not found in storage
-    const [peers, setPeers] = useState<string[]>(() => {
-        if (typeof window === 'undefined') return [initialSymbol];
-
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                // Return stored set for this symbol key if exists, else default
-                if (parsed[initialSymbol]) {
-                    return parsed[initialSymbol];
-                }
-            }
-        } catch (e) {
-            console.warn('Failed to load peers from storage:', e);
-        }
-
-        // Default fallback
-        return [initialSymbol, 'VNM', 'VIC'].slice(0, 3);
-    });
-
-    // Save to storage whenever peers change
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            const parsed = stored ? JSON.parse(stored) : {};
-            parsed[initialSymbol] = peers;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-        } catch (e) {
-            console.warn('Failed to save peers to storage:', e);
-        }
-    }, [peers, initialSymbol]);
-
-    return [peers, setPeers] as const;
-};
 

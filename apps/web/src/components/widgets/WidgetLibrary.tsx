@@ -2,13 +2,14 @@
 
 import { useState, useMemo, useEffect, useCallback, memo } from 'react';
 import { useDashboard } from '@/contexts/DashboardContext';
-import { widgetCategories, widgetDefinitions } from '@/data/widgetDefinitions';
+import { getWidgetDefinition, normalizeWidgetType, widgetCategories, widgetDefinitions } from '@/data/widgetDefinitions';
 import {
     Search, X, ChevronRight,
-    Box, Star, BarChart3, DollarSign, TrendingUp, Globe,
+    Box, Star, BarChart3, TrendingUp, Globe,
     Newspaper, PieChart, Info, Layers,
     Plus, Clock, Maximize2, Sigma
 } from 'lucide-react';
+import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WidgetPreview } from './WidgetPreview';
@@ -22,7 +23,6 @@ interface WidgetLibraryProps {
 
 const CATEGORY_ICONS: Record<string, any> = {
     'core_data': BarChart3,
-    'financials': DollarSign,
     'charting': TrendingUp,
     'global_markets': Globe,
     'quant': Sigma,
@@ -36,7 +36,8 @@ const CATEGORY_ICONS: Record<string, any> = {
 const WIDGET_TYPE_SET = new Set<WidgetType>(widgetDefinitions.map((widget) => widget.type));
 
 function isWidgetType(value: string): value is WidgetType {
-    return WIDGET_TYPE_SET.has(value as WidgetType);
+    const normalized = normalizeWidgetType(value);
+    return normalized != null && WIDGET_TYPE_SET.has(normalized);
 }
 
 function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
@@ -73,12 +74,18 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         const saved = localStorage.getItem('vnibb_recent_widgets');
         if (saved) {
             try {
-                return (JSON.parse(saved) as string[]).filter(isWidgetType);
+                return Array.from(
+                    new Set(
+                        (JSON.parse(saved) as string[])
+                            .map((value) => normalizeWidgetType(value))
+                            .filter((value): value is WidgetType => value != null)
+                    )
+                );
             } catch {
-                return ['price_chart', 'screener', 'financials', 'news_feed'];
+                return ['price_chart', 'screener', 'unified_financials', 'news_feed'];
             }
         }
-        return ['price_chart', 'screener', 'financials', 'news_feed'];
+        return ['price_chart', 'screener', 'unified_financials', 'news_feed'];
     });
 
     const filteredCategories = useMemo(() => {
@@ -104,17 +111,18 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         let yOffset = activeTab.widgets.reduce((max, w) => Math.max(max, w.layout.y + w.layout.h), 0);
 
         widgetDefs.forEach((widgetDef) => {
+            const defaultLayout = getWidgetDefaultLayout(widgetDef.type);
             addWidget(activeDashboard.id, activeTab.id, {
                 type: widgetDef.type,
                 tabId: activeTab.id,
                 layout: {
+                    ...defaultLayout,
                     x: 0,
                     y: yOffset,
-                    ...widgetDef.defaultLayout
                 },
                 config: widgetDef.defaultConfig
             });
-            yOffset += widgetDef.defaultLayout.h;
+            yOffset += defaultLayout.h;
         });
 
         const addedTypes = widgetDefs.map((widgetDef) => widgetDef.type);
@@ -154,7 +162,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         if (!selectedWidgetTypes.length) return;
         const definitionsByType = new Map(widgetDefinitions.map((widget) => [widget.type, widget]));
         const selectedDefinitions = selectedWidgetTypes
-            .map((type) => definitionsByType.get(type))
+            .map((type) => definitionsByType.get(type) || getWidgetDefinition(type))
             .filter((widget): widget is NonNullable<typeof widget> => Boolean(widget));
 
         handleAddWidgets(selectedDefinitions);

@@ -87,3 +87,8 @@ Total registered widgets: **59**.
 - Source providers include vnstock-backed services and cached VNIBB API responses.
 - Market Overview and header index chips share `GET /market/indices` as the baseline snapshot. The frontend can then overlay WebSocket index updates during market hours.
 - `GET /market/indices` prefers Yahoo Finance for mapped index symbols and falls back to `vnstock` for any missing required indices before using persisted DB snapshots.
+- Canonical widget IDs are now `ticker_profile`, `unified_financials`, `major_shareholders`, and `database_inspector`. Legacy aliases such as `company_profile`, `financials`, `institutional_ownership`, and `database_browser` are migrated out of saved dashboards.
+- Widget library metadata should be sourced from `apps/web/src/data/widgetDefinitions.ts`. Runtime component mapping lives in `apps/web/src/components/widgets/WidgetRegistry.ts`. Autofit/base sizing lives in `apps/web/src/lib/dashboardLayout.ts`.
+- Runtime widget resizing is no longer capped by the behavior table's old width limits. Base sizes still matter for autofit and initial placement, but users can expand widgets more freely unless a widget instance has an explicit max constraint.
+- Notes, watchlist, price-alert, peer-comparison, and research-browser state now persist via widget config so they travel with dashboard layout persistence instead of separate widget-specific browser storage keys.
+- Browser-only persistence is now reserved for cases that are genuinely device-local, such as notification permission hints and non-dashboard UI niceties like recent widget picks.

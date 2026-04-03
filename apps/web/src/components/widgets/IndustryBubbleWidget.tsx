@@ -228,8 +228,8 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove }: IndustryBubbleW
                 </div>
               </div>
 
-              <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
-                <ChartMountGuard className="h-[360px]" minHeight={320}>
+              <div className="flex min-h-[220px] flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+                <ChartMountGuard className="flex-1 min-h-[220px]" minHeight={220}>
                   <ResponsiveContainer width="100%" height="100%">
                     <ScatterChart margin={{ top: 16, right: 24, bottom: 24, left: 12 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.18)" />

@@ -6,7 +6,7 @@ import { ChevronDown, ChevronRight, Database, ExternalLink, Plus } from 'lucide-
 import type { CopilotSourceRef } from '@/lib/api';
 import { submitCopilotOutcome, type CopilotResponseMeta } from '@/lib/api';
 import { useDashboard } from '@/contexts/DashboardContext';
-import { getWidgetDefinition } from '@/data/widgetDefinitions';
+import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import {
   findMatchingWidgetTarget,
   focusDashboardWidget,
@@ -62,20 +62,24 @@ export function CopilotEvidencePanel({
     }
   }, [orderedSources, selectedSourceId]);
 
-  if (!orderedSources.length) {
-    return null;
-  }
-
-  const selectedSource = orderedSources.find((source) => source.id === selectedSourceId) ?? orderedSources[0];
-  const intent = useMemo(() => getIntentFromSource(selectedSource), [selectedSource]);
+  const selectedSource = orderedSources.find((source) => source.id === selectedSourceId) ?? orderedSources[0] ?? null;
+  const intent = useMemo(() => (selectedSource ? getIntentFromSource(selectedSource) : null), [selectedSource]);
   const existingTarget = useMemo(
     () => (intent ? findMatchingWidgetTarget(state, intent) : null),
     [intent, state],
   );
   const canAddWidget = Boolean(intent && activeDashboard && activeTab && ((activeDashboard.adminUnlocked === true) || activeDashboard.isEditable !== false));
 
+  if (!orderedSources.length) {
+    return null;
+  }
+
+  if (!selectedSource) {
+    return null;
+  }
+
   const recordOutcome = async (status: 'shown' | 'executed' | 'failed', notes?: string) => {
-    if (!responseMeta?.responseId) return;
+    if (!responseMeta?.responseId || !selectedSource) return;
     try {
       await submitCopilotOutcome({
         responseId: responseMeta.responseId,
@@ -101,7 +105,7 @@ export function CopilotEvidencePanel({
 
   const handleAddWidget = async () => {
     if (!intent || !activeDashboard || !activeTab) return;
-    const definition = getWidgetDefinition(intent.widgetType);
+    const defaultLayout = getWidgetDefaultLayout(intent.widgetType);
     const widgetConfig = intent.config || {};
     const widgetCreate: WidgetCreate = {
       type: intent.widgetType,
@@ -110,10 +114,12 @@ export function CopilotEvidencePanel({
       layout: {
         x: 0,
         y: Infinity,
-        w: definition?.defaultLayout.w || 6,
-        h: definition?.defaultLayout.h || 6,
-        minW: definition?.defaultLayout.minW || 3,
-        minH: definition?.defaultLayout.minH || 3,
+        w: defaultLayout.w,
+        h: defaultLayout.h,
+        minW: defaultLayout.minW,
+        minH: defaultLayout.minH,
+        maxW: defaultLayout.maxW,
+        maxH: defaultLayout.maxH,
       },
     };
     addWidget(activeDashboard.id, activeTab.id, widgetCreate)

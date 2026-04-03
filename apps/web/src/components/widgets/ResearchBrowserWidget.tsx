@@ -23,15 +23,17 @@ import {
   type ResearchRssSource,
   type ResearchRssFeedResponse,
 } from '@/lib/api'
-import { useLocalStorage } from '@/lib/hooks/useLocalStorage'
 import { useProfile } from '@/lib/queries'
 import { toTradingViewSymbol } from '@/lib/tradingView'
 import { cn } from '@/lib/utils'
 import { ResearchSourceCard } from '@/components/widgets/research/ResearchSourceCard'
+import { useDashboard } from '@/contexts/DashboardContext'
+import { useDashboardWidget } from '@/hooks/useDashboardWidget'
 
 interface ResearchBrowserWidgetProps {
   id: string
   symbol?: string
+  config?: Record<string, unknown>
   onRemove?: () => void
 }
 
@@ -169,24 +171,131 @@ function inferRssSource(source?: QuickSource | null): ResearchRssSource | null {
   return source.mode === 'rss' ? (source.id as ResearchRssSource) : null
 }
 
-export function ResearchBrowserWidget({ id, symbol, onRemove }: ResearchBrowserWidgetProps) {
-  const [activeSourceId, setActiveSourceId] = useLocalStorage<string>(
-    `vnibb_research_source_${id}`,
-    'stockbiz'
+function hasOwnConfigKey(config: Record<string, unknown> | undefined, key: string): boolean {
+  return Boolean(config) && Object.prototype.hasOwnProperty.call(config, key)
+}
+
+function readLegacyValue<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback
+
+  try {
+    const stored = localStorage.getItem(key)
+    return stored ? (JSON.parse(stored) as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function parseResearchSourceId(config: Record<string, unknown> | undefined, id: string): string {
+  const rawValue = config?.researchActiveSourceId
+  if (typeof rawValue === 'string' && QUICK_SOURCES.some((source) => source.id === rawValue)) {
+    return rawValue
+  }
+
+  const fallback = hasOwnConfigKey(config, 'researchActiveSourceId')
+    ? 'stockbiz'
+    : readLegacyValue<string>(`vnibb_research_source_${id}`, 'stockbiz')
+  return QUICK_SOURCES.some((source) => source.id === fallback) ? fallback : 'stockbiz'
+}
+
+function parseSavedSites(config: Record<string, unknown> | undefined, id: string): SavedSite[] {
+  const rawValue = config?.researchSavedSites
+  if (!Array.isArray(rawValue)) {
+    return hasOwnConfigKey(config, 'researchSavedSites')
+      ? []
+      : readLegacyValue<SavedSite[]>(`vnibb_research_saved_${id}`, [])
+  }
+
+  return rawValue.filter((site): site is SavedSite => {
+    if (!site || typeof site !== 'object') return false
+    const candidate = site as Partial<SavedSite>
+    return typeof candidate.id === 'string'
+      && typeof candidate.title === 'string'
+      && typeof candidate.url === 'string'
+      && typeof candidate.createdAt === 'string'
+  })
+}
+
+function parseActiveSavedSiteId(config: Record<string, unknown> | undefined, id: string): string | null {
+  const rawValue = config?.researchActiveSavedSiteId
+  if (typeof rawValue === 'string' || rawValue === null) {
+    return rawValue
+  }
+
+  return hasOwnConfigKey(config, 'researchActiveSavedSiteId')
+    ? null
+    : readLegacyValue<string | null>(`vnibb_research_saved_active_${id}`, null)
+}
+
+function parseLastVisited(config: Record<string, unknown> | undefined, id: string): Record<string, string> {
+  const rawValue = config?.researchLastVisitedByUrl
+  if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) {
+    return hasOwnConfigKey(config, 'researchLastVisitedByUrl')
+      ? {}
+      : readLegacyValue<Record<string, string>>(`vnibb_research_last_visited_${id}`, {})
+  }
+
+  return Object.fromEntries(
+    Object.entries(rawValue).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
   )
-  const [savedSites, setSavedSites] = useLocalStorage<SavedSite[]>(`vnibb_research_saved_${id}`, [])
-  const [activeSavedSiteId, setActiveSavedSiteId] = useLocalStorage<string | null>(
-    `vnibb_research_saved_active_${id}`,
-    null
-  )
-  const [lastVisitedByUrl, setLastVisitedByUrl] = useLocalStorage<Record<string, string>>(
-    `vnibb_research_last_visited_${id}`,
-    {}
-  )
+}
+
+export function ResearchBrowserWidget({ id, symbol, config, onRemove }: ResearchBrowserWidgetProps) {
+  const { updateWidget } = useDashboard()
+  const widgetLocation = useDashboardWidget(id)
+  const persistedSourceId = useMemo(() => parseResearchSourceId(config, id), [config, id])
+  const persistedSavedSites = useMemo(() => parseSavedSites(config, id), [config, id])
+  const persistedActiveSavedSiteId = useMemo(() => parseActiveSavedSiteId(config, id), [config, id])
+  const persistedLastVisited = useMemo(() => parseLastVisited(config, id), [config, id])
+
+  const [activeSourceId, setActiveSourceId] = useState(persistedSourceId)
+  const [savedSites, setSavedSites] = useState<SavedSite[]>(persistedSavedSites)
+  const [activeSavedSiteId, setActiveSavedSiteId] = useState<string | null>(persistedActiveSavedSiteId)
+  const [lastVisitedByUrl, setLastVisitedByUrl] = useState<Record<string, string>>(persistedLastVisited)
 
   const [customTitle, setCustomTitle] = useState('')
   const [customUrl, setCustomUrl] = useState('')
   const [inlineNotice, setInlineNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    setActiveSourceId((current) => (current === persistedSourceId ? current : persistedSourceId))
+  }, [persistedSourceId])
+
+  useEffect(() => {
+    setSavedSites((current) => (JSON.stringify(current) === JSON.stringify(persistedSavedSites) ? current : persistedSavedSites))
+  }, [persistedSavedSites])
+
+  useEffect(() => {
+    setActiveSavedSiteId((current) => (current === persistedActiveSavedSiteId ? current : persistedActiveSavedSiteId))
+  }, [persistedActiveSavedSiteId])
+
+  useEffect(() => {
+    setLastVisitedByUrl((current) => (JSON.stringify(current) === JSON.stringify(persistedLastVisited) ? current : persistedLastVisited))
+  }, [persistedLastVisited])
+
+  useEffect(() => {
+    if (!widgetLocation) return
+
+    const currentConfig = widgetLocation.widget.config || {}
+    if (
+      currentConfig.researchActiveSourceId === activeSourceId
+      && JSON.stringify(currentConfig.researchSavedSites ?? []) === JSON.stringify(savedSites)
+      && currentConfig.researchActiveSavedSiteId === activeSavedSiteId
+      && JSON.stringify(currentConfig.researchLastVisitedByUrl ?? {}) === JSON.stringify(lastVisitedByUrl)
+    ) {
+      return
+    }
+
+    updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, {
+      config: {
+        ...currentConfig,
+        researchActiveSourceId: activeSourceId,
+        researchSavedSites: savedSites,
+        researchActiveSavedSiteId: activeSavedSiteId,
+        researchLastVisitedByUrl: lastVisitedByUrl,
+      },
+    })
+  }, [activeSavedSiteId, activeSourceId, id, lastVisitedByUrl, savedSites, updateWidget, widgetLocation])
 
   const normalizedSymbol = (symbol || '').trim().toUpperCase()
   const { data: profileData } = useProfile(normalizedSymbol, Boolean(normalizedSymbol))

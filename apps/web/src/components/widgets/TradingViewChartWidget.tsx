@@ -147,7 +147,7 @@ export function TradingViewChartWidget({ id, symbol, onRemove }: TradingViewChar
             })}
           </div>
         </div>
-        <div className="flex-1 min-h-[320px]">
+        <div className="flex-1 min-h-[220px]">
           <div ref={containerRef} className="tradingview-widget-container h-full w-full" />
         </div>
       </div>

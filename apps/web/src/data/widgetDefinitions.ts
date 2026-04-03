@@ -221,14 +221,6 @@ export const widgetDefinitions: WidgetDefinition[] = [
 
     // Ownership
     {
-        type: 'institutional_ownership',
-        name: 'Institutional Ownership',
-        description: 'Institutional holders and their positions',
-        category: 'ownership',
-        defaultConfig: {},
-        defaultLayout: { w: 6, h: 6, minW: 4, minH: 4 }
-    },
-    {
         type: 'insider_trading',
         name: 'Insider Trading',
         description: 'Insider buying and selling activity',
@@ -373,6 +365,16 @@ export const widgetDefinitions: WidgetDefinition[] = [
     },
 
     // Financial Statements
+    {
+        type: 'unified_financials',
+        name: 'Financial Statements',
+        description: 'Unified income statement, balance sheet, cash flow, and ratios workspace',
+        category: 'core_data',
+        defaultConfig: {},
+        defaultLayout: { w: 24, h: 10, minW: 12, minH: 8 },
+        recommended: true,
+        searchKeywords: ['financials', 'statements', 'income', 'balance', 'cash flow', 'ratios']
+    },
     {
         type: 'balance_sheet',
         name: 'Balance Sheet',
@@ -914,9 +916,26 @@ export const widgetDefinitions: WidgetDefinition[] = [
     }
 ];
 
+const LEGACY_WIDGET_TYPE_ALIASES = {
+    company_profile: 'ticker_profile',
+    financials: 'unified_financials',
+    institutional_ownership: 'major_shareholders',
+    database_browser: 'database_inspector',
+} as const;
+
+export function normalizeWidgetType(type: string | null | undefined): WidgetDefinition['type'] | null {
+    if (!type) return null;
+    const normalized = LEGACY_WIDGET_TYPE_ALIASES[type as keyof typeof LEGACY_WIDGET_TYPE_ALIASES] || type;
+    return widgetDefinitions.some((widget) => widget.type === normalized)
+        ? (normalized as WidgetDefinition['type'])
+        : null;
+}
+
 // Helper to get widget definition by type
 export function getWidgetDefinition(type: string): WidgetDefinition | undefined {
-    return widgetDefinitions.find(w => w.type === type);
+    const normalizedType = normalizeWidgetType(type);
+    if (!normalizedType) return undefined;
+    return widgetDefinitions.find(w => w.type === normalizedType);
 }
 
 // Helper to get widgets by category

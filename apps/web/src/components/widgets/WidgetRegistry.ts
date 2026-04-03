@@ -233,14 +233,6 @@ const MarketHeatmapWidget = dynamic(
     }
 ) as ComponentType<WidgetProps>;
 
-const DatabaseBrowserWidget = dynamic(
-    () => import('./DatabaseBrowserWidget').then((m) => m.DatabaseBrowserWidget as any),
-    {
-        ssr: false,
-        loading: () => null,
-    }
-) as ComponentType<WidgetProps>;
-
 // Main widget registry
 export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     // Core widgets
@@ -253,7 +245,6 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     key_metrics: KeyMetricsWidget as ComponentType<WidgetProps>,
     share_statistics: ShareStatisticsWidget as ComponentType<WidgetProps>,
     screener: ScreenerWidget as ComponentType<WidgetProps>,
-    company_profile: TickerProfileWidget as ComponentType<WidgetProps>,
     earnings_history: EarningsHistoryWidget as ComponentType<WidgetProps>,
     earnings_season_monitor: EarningsSeasonMonitorWidget as ComponentType<WidgetProps>,
     dividend_payment: DividendPaymentWidget as ComponentType<WidgetProps>,
@@ -263,7 +254,6 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     stock_splits: StockSplitsWidget as ComponentType<WidgetProps>,
 
     // Financial widgets
-    financials: FinancialsWidget as ComponentType<WidgetProps>,
     unified_financials: FinancialsWidget as ComponentType<WidgetProps>,
     income_statement: IncomeStatementWidget as ComponentType<WidgetProps>,
     balance_sheet: BalanceSheetWidget as ComponentType<WidgetProps>,
@@ -281,7 +271,6 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     // Company info widgets
     company_filings: CompanyFilingsWidget as ComponentType<WidgetProps>,
     major_shareholders: MajorShareholdersWidget as ComponentType<WidgetProps>,
-    institutional_ownership: MajorShareholdersWidget as ComponentType<WidgetProps>,
     analyst_estimates: AnalystEstimatesWidget as ComponentType<WidgetProps>,
     officers_management: OfficersManagementWidget as ComponentType<WidgetProps>,
     subsidiaries: SubsidiariesWidget as ComponentType<WidgetProps>,
@@ -374,7 +363,6 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     market_heatmap: MarketHeatmapWidget as ComponentType<WidgetProps>,
     orderbook: OrderbookWidget as ComponentType<WidgetProps>,
     database_inspector: DatabaseInspectorWidget as ComponentType<WidgetProps>,
-    database_browser: DatabaseBrowserWidget as ComponentType<WidgetProps>,
 };
 
 
@@ -393,15 +381,12 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     key_metrics: { w: 8, h: 11, minW: 6, minH: 8 },
     share_statistics: { w: 4, h: 7, minW: 3, minH: 5 },
     screener: { w: 12, h: 10, minW: 8, minH: 8 },
-    company_profile: { w: 5, h: 6, minW: 4, minH: 5 },
-    financials: { w: 5, h: 7, minW: 4, minH: 5 },
     earnings_history: { w: 7, h: 7, minW: 5, minH: 5 },
     earnings_season_monitor: { w: 10, h: 8, minW: 8, minH: 6 },
     dividend_payment: { w: 7, h: 7, minW: 5, minH: 5 },
     stock_splits: { w: 7, h: 5, minW: 4, minH: 4 },
     company_filings: { w: 7, h: 7, minW: 5, minH: 5 },
     insider_trading: { w: 7, h: 7, minW: 5, minH: 5 },
-    institutional_ownership: { w: 7, h: 7, minW: 5, minH: 5 },
     analyst_estimates: { w: 7, h: 7, minW: 5, minH: 5 },
     news_feed: { w: 5, h: 7, minW: 4, minH: 5 },
     events_calendar: { w: 5, h: 7, minW: 4, minH: 5 },
@@ -490,7 +475,6 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     news_corporate_actions: { w: 8, h: 7, minW: 6, minH: 5 },
     ai_analysis: { w: 6, h: 10, minW: 4, minH: 8 },
     unified_financials: { w: 24, h: 18, minW: 16, minH: 12 },
-    database_browser: { w: 6, h: 8, minW: 4, minH: 6 },
 };
 
 
@@ -509,15 +493,12 @@ export const widgetNames: Record<WidgetType, string> = {
     key_metrics: 'Key Metrics',
     share_statistics: 'Share Statistics',
     screener: 'Stock Screener',
-    company_profile: 'Company Profile',
-    financials: 'Financials',
     earnings_history: 'Earnings History',
     earnings_season_monitor: 'Earnings Season Monitor',
     dividend_payment: 'Dividend Payment',
     stock_splits: 'Stock Splits',
     company_filings: 'Company Filings',
     insider_trading: 'Insider Trading',
-    institutional_ownership: 'Institutional Ownership',
     analyst_estimates: 'Analyst Estimates',
     news_feed: 'Company News',
     events_calendar: 'Events Calendar',
@@ -606,7 +587,6 @@ export const widgetNames: Record<WidgetType, string> = {
     news_corporate_actions: 'News + Corporate Actions',
     ai_analysis: 'AI Analysis',
     unified_financials: 'Financial Statements (Unified)',
-    database_browser: 'Database Browser',
 };
 
 export const widgetDescriptions: Record<WidgetType, string> = {
@@ -622,15 +602,12 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     key_metrics: 'Summary of critical financial ratios',
     share_statistics: 'Share float and ownership data',
     screener: 'Filter stocks by 80+ criteria',
-    company_profile: 'Full company background',
-    financials: 'Consolidated financial reports',
     earnings_history: 'Historical earnings surprises',
     earnings_season_monitor: 'Latest quarterly releases with quick revenue, earnings, and margin cross-checks',
     dividend_payment: 'Dividend history and yields',
     stock_splits: 'History of corporate splits',
     company_filings: 'Direct SEC/HOSE documents',
     insider_trading: 'Recent executive transactions',
-    institutional_ownership: 'Major fund holdings',
     analyst_estimates: 'Forecasts and price targets',
     news_feed: 'Ticker-specific news timeline',
     events_calendar: 'Upcoming corporate events',
@@ -719,5 +696,4 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     news_corporate_actions: 'Company news with dividends and insider deals',
     ai_analysis: 'Automated deep-dive research',
     unified_financials: 'Balance Sheet, Income, Cash Flow with tabs',
-    database_browser: 'Inspect database tables and sync status',
 };

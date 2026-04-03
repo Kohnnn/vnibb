@@ -18,7 +18,7 @@ import {
     Grid3X3,
     ArrowUpDown
 } from 'lucide-react';
-import { useComparison, usePeers, usePeerStorage } from '@/hooks/useComparison';
+import { useComparison, usePeers } from '@/hooks/useComparison';
 import { ExportButton } from '@/components/common/ExportButton';
 import { exportPeers } from '@/lib/api';
 import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
@@ -27,6 +27,8 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import {
 
     Radar as ReRadar,
@@ -43,7 +45,9 @@ import {
 } from 'recharts';
 
 interface PeerComparisonWidgetProps {
+    id: string;
     symbol: string;
+    config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
 }
@@ -68,56 +72,159 @@ const RADAR_METRICS = [
 
 const COMPARISON_SETS_KEY = 'vnibb_saved_comparison_sets';
 
-// Hook for managing saved comparison sets
-function useComparisonSets() {
-    const [sets, setSetsState] = useState<ComparisonSet[]>([]);
-
-    useEffect(() => {
-        try {
-            const stored = localStorage.getItem(COMPARISON_SETS_KEY);
-            if (stored) setSetsState(JSON.parse(stored));
-        } catch (error) {
-            console.error('Failed to load comparison sets:', error);
-        }
-    }, []);
-
-
-    const setSets = useCallback((newSets: ComparisonSet[]) => {
-        setSetsState(newSets);
-        if (typeof window !== 'undefined') {
-            localStorage.setItem(COMPARISON_SETS_KEY, JSON.stringify(newSets));
-        }
-    }, []);
-
-    const saveSet = useCallback((name: string, symbols: string[]) => {
-        const newSet: ComparisonSet = {
-            id: `set_${Date.now()}`,
-            name,
-            symbols,
-            createdAt: new Date().toISOString(),
-        };
-        setSets([...sets, newSet]);
-        return newSet;
-    }, [sets, setSets]);
-
-    const deleteSet = useCallback((id: string) => {
-        setSets(sets.filter(s => s.id !== id));
-    }, [sets, setSets]);
-
-    return { sets, saveSet, deleteSet };
+function hasOwnConfigKey(config: Record<string, unknown> | undefined, key: string): boolean {
+    return Boolean(config) && Object.prototype.hasOwnProperty.call(config, key);
 }
 
-export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerComparisonWidgetProps) {
-    const [peers, setPeers] = usePeerStorage(symbol || 'FPT');
-    const [activeTab, setActiveTab] = useState<TabMode>('table');
+function parseLegacyComparisonSets(): ComparisonSet[] {
+    if (typeof window === 'undefined') return [];
+    try {
+        const stored = localStorage.getItem(COMPARISON_SETS_KEY);
+        return stored ? JSON.parse(stored) : [];
+    } catch (error) {
+        console.error('Failed to load comparison sets:', error);
+        return [];
+    }
+}
+
+function parseComparisonSets(config: Record<string, unknown> | undefined): ComparisonSet[] {
+    const rawValue = config?.savedComparisonSets;
+    if (!Array.isArray(rawValue)) {
+        return hasOwnConfigKey(config, 'savedComparisonSets') ? [] : parseLegacyComparisonSets();
+    }
+
+    return rawValue.filter((item): item is ComparisonSet => {
+        if (!item || typeof item !== 'object') return false;
+        const candidate = item as Partial<ComparisonSet>;
+        return typeof candidate.id === 'string'
+            && typeof candidate.name === 'string'
+            && Array.isArray(candidate.symbols)
+            && typeof candidate.createdAt === 'string';
+    });
+}
+
+function parseComparisonPeers(config: Record<string, unknown> | undefined, initialSymbol: string): string[] {
+    const rawValue = config?.comparisonPeers;
+    if (Array.isArray(rawValue)) {
+        const parsed = rawValue
+            .filter((item): item is string => typeof item === 'string' && Boolean(item))
+            .map((item) => item.toUpperCase().trim());
+        if (parsed.length > 0) {
+            return Array.from(new Set(parsed)).slice(0, 6);
+        }
+        return [];
+    }
+
+    return Array.from(new Set([initialSymbol, 'VNM', 'VIC'].filter(Boolean))).slice(0, 3);
+}
+
+function parseComparisonViewMode(config: Record<string, unknown> | undefined): TabMode {
+    const rawValue = config?.comparisonViewMode;
+    return rawValue === 'radar' || rawValue === 'performance' ? rawValue : 'table';
+}
+
+function parseComparisonPeriod(config: Record<string, unknown> | undefined): string {
+    return typeof config?.comparisonPeriod === 'string' && config.comparisonPeriod.trim()
+        ? config.comparisonPeriod
+        : '1Y';
+}
+
+function parseHeatmapPreference(config: Record<string, unknown> | undefined): boolean {
+    return config?.comparisonHeatmapEnabled === true;
+}
+
+function parseSortKey(config: Record<string, unknown> | undefined): string {
+    return typeof config?.comparisonSortKey === 'string' && config.comparisonSortKey.trim()
+        ? config.comparisonSortKey
+        : 'metric';
+}
+
+function parseSortDirection(config: Record<string, unknown> | undefined): SortDirection {
+    return config?.comparisonSortDirection === 'desc' ? 'desc' : 'asc';
+}
+
+export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove }: PeerComparisonWidgetProps) {
+    const { updateWidget } = useDashboard();
+    const widgetLocation = useDashboardWidget(id);
+    const persistedPeers = useMemo(() => parseComparisonPeers(config, symbol || 'FPT'), [config, symbol]);
+    const persistedSets = useMemo(() => parseComparisonSets(config), [config]);
+    const persistedViewMode = useMemo(() => parseComparisonViewMode(config), [config]);
+    const persistedPeriod = useMemo(() => parseComparisonPeriod(config), [config]);
+    const persistedHeatmapEnabled = useMemo(() => parseHeatmapPreference(config), [config]);
+    const persistedSortKey = useMemo(() => parseSortKey(config), [config]);
+    const persistedSortDirection = useMemo(() => parseSortDirection(config), [config]);
+
+    const [peers, setPeers] = useState<string[]>(persistedPeers);
+    const [activeTab, setActiveTab] = useState<TabMode>(persistedViewMode);
     const [newPeer, setNewPeer] = useState('');
     const [showSelector, setShowSelector] = useState(false);
     const [showSetsMenu, setShowSetsMenu] = useState(false);
     const [saveSetName, setSaveSetName] = useState('');
-    const [period, setPeriod] = useState('1Y');
-    const [heatmapEnabled, setHeatmapEnabled] = useState(false);
-    const [sortKey, setSortKey] = useState<string>('metric');
-    const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+    const [period, setPeriod] = useState(persistedPeriod);
+    const [heatmapEnabled, setHeatmapEnabled] = useState(persistedHeatmapEnabled);
+    const [sortKey, setSortKey] = useState<string>(persistedSortKey);
+    const [sortDirection, setSortDirection] = useState<SortDirection>(persistedSortDirection);
+    const [sets, setSets] = useState<ComparisonSet[]>(persistedSets);
+
+    useEffect(() => {
+        setPeers((current) => JSON.stringify(current) === JSON.stringify(persistedPeers) ? current : persistedPeers);
+    }, [persistedPeers]);
+
+    useEffect(() => {
+        setSets((current) => JSON.stringify(current) === JSON.stringify(persistedSets) ? current : persistedSets);
+    }, [persistedSets]);
+
+    useEffect(() => {
+        setActiveTab((current) => current === persistedViewMode ? current : persistedViewMode);
+    }, [persistedViewMode]);
+
+    useEffect(() => {
+        setPeriod((current) => current === persistedPeriod ? current : persistedPeriod);
+    }, [persistedPeriod]);
+
+    useEffect(() => {
+        setHeatmapEnabled((current) => current === persistedHeatmapEnabled ? current : persistedHeatmapEnabled);
+    }, [persistedHeatmapEnabled]);
+
+    useEffect(() => {
+        setSortKey((current) => current === persistedSortKey ? current : persistedSortKey);
+    }, [persistedSortKey]);
+
+    useEffect(() => {
+        setSortDirection((current) => current === persistedSortDirection ? current : persistedSortDirection);
+    }, [persistedSortDirection]);
+
+    useEffect(() => {
+        if (!widgetLocation) {
+            return;
+        }
+
+        const currentConfig = widgetLocation.widget.config || {};
+        if (
+            JSON.stringify(currentConfig.comparisonPeers ?? []) === JSON.stringify(peers)
+            && JSON.stringify(currentConfig.savedComparisonSets ?? []) === JSON.stringify(sets)
+            && currentConfig.comparisonViewMode === activeTab
+            && currentConfig.comparisonPeriod === period
+            && currentConfig.comparisonHeatmapEnabled === heatmapEnabled
+            && currentConfig.comparisonSortKey === sortKey
+            && currentConfig.comparisonSortDirection === sortDirection
+        ) {
+            return;
+        }
+
+        updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, {
+            config: {
+                ...currentConfig,
+                comparisonPeers: peers,
+                savedComparisonSets: sets,
+                comparisonViewMode: activeTab,
+                comparisonPeriod: period,
+                comparisonHeatmapEnabled: heatmapEnabled,
+                comparisonSortKey: sortKey,
+                comparisonSortDirection: sortDirection,
+            },
+        });
+    }, [activeTab, heatmapEnabled, id, peers, period, sets, sortDirection, sortKey, updateWidget, widgetLocation]);
 
     const {
         data: compData,
@@ -129,7 +236,6 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
     } = useComparison(peers, { period });
 
     const { data: peerSuggestions } = usePeers(symbol, 5, !!symbol);
-    const { sets, saveSet, deleteSet } = useComparisonSets();
     const { setLinkedSymbol } = useWidgetSymbolLink();
 
     const comparisonData = useMemo(() => {
@@ -231,7 +337,13 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
 
     const handleSaveSet = () => {
         if (saveSetName.trim() && peers.length > 0) {
-            saveSet(saveSetName.trim(), peers);
+            const newSet: ComparisonSet = {
+                id: `set_${Date.now()}`,
+                name: saveSetName.trim(),
+                symbols: peers,
+                createdAt: new Date().toISOString(),
+            };
+            setSets((current) => [...current, newSet]);
             setSaveSetName('');
             setShowSetsMenu(false);
         }
@@ -408,11 +520,11 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
     const renderCharts = () => (
         <div className="flex-1 flex flex-col gap-4 p-2 overflow-auto">
             {/* Radar Chart for Key Metrics */}
-            <div className="bg-[var(--bg-secondary)] rounded-lg p-3 border border-[var(--border-subtle)] h-[300px]">
+            <div className="flex min-h-[220px] flex-col rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <h3 className="text-xs font-medium text-[var(--text-secondary)] mb-4 flex items-center gap-2">
                     <Radar size={14} /> Key Metrics Comparison
                 </h3>
-                <ChartSizeBox className="h-[85%]" minHeight={180}>
+                <ChartSizeBox className="flex-1 min-h-0" minHeight={180}>
                     {({ width, height }) => (
                         <RadarChart width={width} height={height} data={radarData}>
                             <PolarGrid stroke="var(--border-subtle)" />
@@ -442,7 +554,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
             </div>
 
             {/* Price Performance */}
-            <div className="bg-[var(--bg-secondary)] rounded-lg p-3 border border-[var(--border-subtle)] h-[300px]">
+            <div className="flex min-h-[220px] flex-col rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="text-xs font-medium text-[var(--text-secondary)] flex items-center gap-2">
                         <LineChartIcon size={14} /> Normalized Price Performance (Base 100)
@@ -459,7 +571,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                         ))}
                     </div>
                 </div>
-                <ChartSizeBox className="h-[80%]" minHeight={180}>
+                <ChartSizeBox className="flex-1 min-h-0" minHeight={180}>
                     {({ width, height }) => (
                         <LineChart width={width} height={height} data={chartPriceData}>
                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" opacity={0.45} />
@@ -595,7 +707,7 @@ export function PeerComparisonWidget({ symbol, isEditing, onRemove }: PeerCompar
                                                     <span className="text-[var(--text-muted)] ml-1">({set.symbols.length})</span>
                                                 </button>
                                                 <button
-                                                    onClick={() => deleteSet(set.id)}
+                                                    onClick={() => setSets((current) => current.filter((entry) => entry.id !== set.id))}
                                                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 transition-opacity"
                                                 >
                                                     <Trash2 size={10} />

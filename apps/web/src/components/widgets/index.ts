@@ -49,7 +49,6 @@ export { BalanceSheetWidget } from './BalanceSheetWidget';
 export { CashFlowWidget } from './CashFlowWidget';
 export { IncomeStatementWidget } from './IncomeStatementWidget';
 export { FinancialRatiosWidget } from './FinancialRatiosWidget';
-export { FinancialStatementsWidget } from './FinancialStatementsWidget';
 export { FinancialsWidget } from './FinancialsWidget';
 export { ForeignTradingWidget } from './ForeignTradingWidget';
 export { MajorShareholdersWidget } from './MajorShareholdersWidget';
@@ -113,7 +112,6 @@ export { OwnershipChangesWidget } from './OwnershipChangesWidget';
 // === Utility Widgets ===
 export { NotesWidget } from './NotesWidget';
 export { QuickStatsWidget } from './QuickStatsWidget';
-export { DatabaseBrowserWidget } from './DatabaseBrowserWidget';
 export { DatabaseInspectorWidget } from './DatabaseInspectorWidget';
 
 // === Market Overview ===
