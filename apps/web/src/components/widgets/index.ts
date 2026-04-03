@@ -31,8 +31,33 @@ export {
 // === Core Widgets ===
 export { TickerInfoWidget } from './TickerInfoWidget';
 export { PriceChartWidget } from './PriceChartWidget';
-export { TradingViewTickerTapeWidget } from './TradingViewTickerTapeWidget';
-export { TradingViewTechnicalAnalysisWidget } from './TradingViewTechnicalAnalysisWidget';
+export {
+    TradingViewChartWidget,
+    TradingViewSymbolOverviewWidget,
+    TradingViewMiniChartWidget,
+    TradingViewMarketSummaryWidget,
+    TradingViewMarketOverviewWidget,
+    TradingViewStockMarketWidget,
+    TradingViewMarketDataWidget,
+    TradingViewTickerTapeWidget,
+    TradingViewTickerTagWidget,
+    TradingViewSingleTickerWidget,
+    TradingViewTickerWidget,
+    TradingViewStockHeatmapWidget,
+    TradingViewCryptoHeatmapWidget,
+    TradingViewForexCrossRatesWidget,
+    TradingViewEtfHeatmapWidget,
+    TradingViewForexHeatmapWidget,
+    TradingViewScreenerWidget,
+    TradingViewCryptoMarketWidget,
+    TradingViewSymbolInfoWidget,
+    TradingViewTechnicalAnalysisWidget,
+    TradingViewFundamentalDataWidget,
+    TradingViewCompanyProfileWidget,
+    TradingViewTopStoriesWidget,
+    TradingViewEconomicCalendarWidget,
+    TradingViewEconomicMapWidget,
+} from './TradingViewNativeWidgets';
 export { KeyMetricsWidget } from './KeyMetricsWidget';
 export { ScreenerWidget } from './ScreenerWidget';
 export { TickerProfileWidget } from './TickerProfileWidget';

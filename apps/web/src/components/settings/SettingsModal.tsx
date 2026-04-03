@@ -551,7 +551,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       </p>
                     </div>
                     <div className="rounded-full border border-blue-500/30 bg-blue-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-300">
-                      Browser-local only
+                      Settings saved locally
                     </div>
                   </div>
                 </div>

@@ -63,7 +63,7 @@ export function OfficersManagementWidget({ symbol, onDataChange }: OfficersManag
                 />
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-1 pt-2">
+            <div className="flex-1 overflow-auto space-y-1 pt-2">
                 {timedOut && isLoading && !hasData ? (
                     <WidgetError
                         title="Loading timed out"
@@ -94,10 +94,10 @@ export function OfficersManagementWidget({ symbol, onDataChange }: OfficersManag
                                 <UserCircle size={16} className="text-blue-400" />
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                                <p className="break-words whitespace-normal text-sm font-medium text-[var(--text-primary)]">
                                     {officer.name || 'Unknown'}
                                 </p>
-                                <p className="truncate text-xs text-[var(--text-muted)]">
+                                <p className="break-words whitespace-normal text-xs text-[var(--text-muted)]">
                                     {officer.position || 'Executive'}
                                 </p>
                                 {officer.shares_owned && (

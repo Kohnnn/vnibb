@@ -34,8 +34,9 @@ import {
     type ParameterOption
 } from '@/components/widgets/WidgetParameterDropdown';
 import { type WidgetMultiSelectParam } from '@/components/widgets/WidgetWrapper';
-import { WidgetSettingsModal, AppsLibrary, PromptsLibrary, TemplateSelector } from '@/components/modals';
+import { WidgetSettingsModal, AppsLibrary, TemplateSelector } from '@/components/modals';
 import { AICopilot } from '@/components/ui/AICopilot';
+import { isTradingViewWidget, usesTradingViewWidgetSymbol } from '@/lib/tradingViewWidgets';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
@@ -105,11 +106,11 @@ function DashboardContent() {
     const [isEditing, setIsEditing] = useState(false);
     const [isWidgetLibraryOpen, setIsWidgetLibraryOpen] = useState(false);
     const [isAppsLibraryOpen, setIsAppsLibraryOpen] = useState(false);
-    const [isPromptsLibraryOpen, setIsPromptsLibraryOpen] = useState(false);
     const [isTemplateSelectorOpen, setIsTemplateSelectorOpen] = useState(false);
     const [showAICopilot, setShowAICopilot] = useState(false);
     const [copilotWidgetContext, setCopilotWidgetContext] = useState<string | undefined>(undefined);
     const [copilotWidgetData, setCopilotWidgetData] = useState<Record<string, unknown> | undefined>(undefined);
+    const [copilotPromptLibraryRequestId, setCopilotPromptLibraryRequestId] = useState(0);
     const [sidebarWidth, setSidebarWidth] = useState(208);
     const [mounted, setMounted] = useState(false);
     const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
@@ -181,7 +182,6 @@ function DashboardContent() {
 
         setIsWidgetLibraryOpen(false);
         setIsAppsLibraryOpen(false);
-        setIsPromptsLibraryOpen(false);
         setIsTemplateSelectorOpen(false);
         setWidgetSettingsState(null);
         setShowAICopilot(false);
@@ -191,6 +191,13 @@ function DashboardContent() {
     const closeWalkthrough = useCallback(() => {
         markDashboardWalkthroughCompleted();
         setIsWalkthroughOpen(false);
+    }, []);
+
+    const handleOpenGlobalPrompts = useCallback(() => {
+        setCopilotWidgetContext(undefined);
+        setCopilotWidgetData(undefined);
+        setShowAICopilot(true);
+        setCopilotPromptLibraryRequestId((current) => current + 1);
     }, []);
 
     useEffect(() => {
@@ -371,7 +378,6 @@ function DashboardContent() {
             if (event.key === 'Escape') {
                 setIsWidgetLibraryOpen(false);
                 setIsAppsLibraryOpen(false);
-                setIsPromptsLibraryOpen(false);
                 setIsTemplateSelectorOpen(false);
                 setWidgetSettingsState(null);
                 setShowAICopilot(false);
@@ -668,14 +674,14 @@ function DashboardContent() {
             <Sidebar
                 onOpenWidgetLibrary={() => setIsWidgetLibraryOpen(true)}
                 onOpenAppsLibrary={() => setIsAppsLibraryOpen(true)}
-                onOpenPromptsLibrary={() => setIsPromptsLibraryOpen(true)}
+                onOpenPromptsLibrary={handleOpenGlobalPrompts}
                 onOpenTemplateSelector={() => setIsTemplateSelectorOpen(true)}
             />
 
             <MobileNav
                 onOpenWidgetLibrary={() => setIsWidgetLibraryOpen(true)}
                 onOpenAppsLibrary={() => setIsAppsLibraryOpen(true)}
-                onOpenPromptsLibrary={() => setIsPromptsLibraryOpen(true)}
+                onOpenPromptsLibrary={handleOpenGlobalPrompts}
                 onOpenTemplateSelector={() => setIsTemplateSelectorOpen(true)}
             />
 
@@ -793,10 +799,13 @@ function DashboardContent() {
                                         const widgetType = widget.type;
                                         const WidgetComponent = widgetRegistry[widgetType];
                                         const widgetTitle = getWidgetDefinition(widgetType)?.name ?? widgetType.replace(/_/g, ' ');
-                                        const widgetSymbol =
-                                            (widgetType === 'tradingview_chart' || widgetType === 'tradingview_technical_analysis') && typeof widget.config?.symbol === 'string'
-                                                ? widget.config.symbol
-                                                : globalSymbol;
+                                        const widgetSymbol = isTradingViewWidget(widgetType)
+                                            ? usesTradingViewWidgetSymbol(widgetType)
+                                                ? (typeof widget.config?.symbol === 'string' && widget.config.symbol
+                                                    ? widget.config.symbol
+                                                    : globalSymbol)
+                                                : undefined
+                                            : globalSymbol;
                                         const parameters = getWidgetParameters(widget, (key, value) =>
                                             handleWidgetConfigChange(widget.id, key, value)
                                         );
@@ -920,6 +929,7 @@ function DashboardContent() {
                         widgetContext={copilotWidgetContext}
                         widgetContextData={copilotWidgetData}
                         activeTabName={activeTab?.name}
+                        promptLibraryRequestId={copilotPromptLibraryRequestId}
                     />
                 </RightSidebar>
             </main>
@@ -932,11 +942,6 @@ function DashboardContent() {
             <AppsLibrary
                 isOpen={isAppsLibraryOpen}
                 onClose={() => setIsAppsLibraryOpen(false)}
-            />
-
-            <PromptsLibrary
-                isOpen={isPromptsLibraryOpen}
-                onClose={() => setIsPromptsLibraryOpen(false)}
             />
 
             <TemplateSelector

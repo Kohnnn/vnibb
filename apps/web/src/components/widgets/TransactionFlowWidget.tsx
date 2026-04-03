@@ -261,7 +261,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                   : 'Flow strength becomes more useful when at least one participant bucket shows persistent expansion.'}
               </div>
 
-              <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-4">
                 {summaryCards.map((card) => (
                   <div
                     key={card.label}
@@ -277,7 +277,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                 ))}
               </div>
 
-              <div className="flex min-h-[220px] flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+              <div className="flex min-h-[180px] flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <div>
                     <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
@@ -292,7 +292,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                   <div className="text-[10px] text-[var(--text-muted)]">Last {rows.length} sessions</div>
                 </div>
 
-                <ChartMountGuard className="flex-1 min-h-[180px]" minHeight={180}>
+                <ChartMountGuard className="flex-1 min-h-[160px]" minHeight={160}>
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={chartRows}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.18)" vertical={false} />
@@ -363,7 +363,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                 <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
                   Latest Session Snapshot
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-[11px] xl:grid-cols-5">
+                <div className="grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2 xl:grid-cols-5">
                   <div>
                     <div className="text-[var(--text-muted)]">Date</div>
                     <div className="font-medium text-[var(--text-primary)]">{latest?.date ?? 'N/A'}</div>

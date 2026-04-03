@@ -89,7 +89,7 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
                 />
             </div>
 
-            <div className="flex-1 overflow-y-auto pt-2">
+            <div className="flex-1 overflow-auto pt-2">
                 {timedOut && isLoading && !hasData ? (
                     <WidgetError
                         title="Loading timed out"
@@ -118,12 +118,12 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
                         size="compact"
                     />
                 ) : (
-                    <table className="data-table w-full text-xs">
+                    <table className="data-table w-full table-fixed text-xs">
                         <thead className="text-[var(--text-muted)]">
                             <tr className="border-b border-[var(--border-color)]">
-                                <th className="text-left py-1.5 px-1 font-medium">Shareholder</th>
-                                <th className="text-right py-1.5 px-1 font-medium">Shares</th>
-                                <th className="text-right py-1.5 px-1 font-medium">%</th>
+                                <th className="w-[55%] py-1.5 px-1 text-left font-medium">Shareholder</th>
+                                <th className="w-[25%] py-1.5 px-1 text-right font-medium">Shares</th>
+                                <th className="w-[20%] py-1.5 px-1 text-right font-medium">%</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -156,10 +156,10 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
                                     Number.isNaN(Number(ownershipPct));
                                 return (
                                     <tr key={index} className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
-                                        <td className="py-1.5 px-1">
-                                            <div className="flex items-center gap-1.5">
+                                        <td className="py-1.5 px-1 align-top">
+                                            <div className="flex items-start gap-1.5">
                                                 <Icon size={12} className="text-blue-400 shrink-0" />
-                                                <span className="max-w-[150px] truncate text-[var(--text-primary)]" title={(sh.shareholder_name || row.name || row.share_holder || '') as string}>
+                                                <span className="break-words whitespace-normal text-[var(--text-primary)]" title={(sh.shareholder_name || row.name || row.share_holder || '') as string}>
                                                     {(sh.shareholder_name || row.name || row.share_holder || 'Unknown') as string}
                                                 </span>
                                             </div>
