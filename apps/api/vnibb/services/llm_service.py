@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+import uuid
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 import httpx
 
 from vnibb.core.config import settings
+from vnibb.services.ai_action_service import build_action_suggestions
 from vnibb.services.ai_artifact_service import build_artifacts
+from vnibb.services.ai_telemetry_service import ai_telemetry_service
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +211,21 @@ def _latest_user_message(messages: Sequence[dict[str, str]]) -> str:
         if _normalize_message_role(message.get("role") or "user") == "user":
             return str(message.get("content") or "")
     return ""
+
+
+def _response_current_symbol(context: dict[str, Any]) -> str | None:
+    client_context = context.get("client_context") if isinstance(context, dict) else None
+    if isinstance(client_context, dict):
+        symbol = str(client_context.get("symbol") or "").strip().upper()
+        if symbol:
+            return symbol
+
+    market_context = context.get("market_context") if isinstance(context, dict) else None
+    if isinstance(market_context, list) and market_context:
+        symbol = str((market_context[0] or {}).get("symbol") or "").strip().upper()
+        if symbol:
+            return symbol
+    return None
 
 
 def _reasoning_event(
@@ -436,6 +455,11 @@ class LlmService:
         rendered = _render_validated_markdown(raw_text, context)
         rendered["sources"] = _build_used_source_entries(context, rendered["used_source_ids"])
         rendered["artifacts"] = build_artifacts(_latest_user_message(messages), context)
+        rendered["actions"] = build_action_suggestions(
+            _latest_user_message(messages),
+            context,
+            rendered["artifacts"],
+        )
         rendered["config"] = {
             "provider": config["provider"],
             "model": config["model"],
@@ -443,15 +467,74 @@ class LlmService:
         }
         return rendered
 
+    def _record_response_telemetry(
+        self,
+        *,
+        rendered: dict[str, Any],
+        messages: Sequence[dict[str, str]],
+        context: dict[str, Any],
+        config: dict[str, str],
+        latency_ms: int,
+        reasoning_events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        response_meta = {
+            "responseId": str(uuid.uuid4()),
+            "provider": config["provider"],
+            "model": config["model"],
+            "mode": config["mode"],
+            "latencyMs": int(latency_ms),
+        }
+        rendered["response_meta"] = response_meta
+
+        ai_telemetry_service.record_response(
+            response_id=response_meta["responseId"],
+            provider=config["provider"],
+            model=config["model"],
+            mode=config["mode"],
+            latency_ms=int(latency_ms),
+            used_source_ids=list(rendered.get("used_source_ids") or []),
+            artifact_ids=[
+                str(artifact.get("id") or "")
+                for artifact in rendered.get("artifacts") or []
+                if str(artifact.get("id") or "").strip()
+            ],
+            action_ids=[
+                str(action.get("id") or "")
+                for action in rendered.get("actions") or []
+                if str(action.get("id") or "").strip()
+            ],
+            reasoning_events=reasoning_events,
+            current_symbol=_response_current_symbol(context),
+            prompt_preview=_truncate_text(_latest_user_message(messages), 240),
+        )
+        return response_meta
+
     async def generate_response_stream_events(
         self,
         messages: list[dict[str, str]],
         context: dict[str, Any],
         request_settings: dict[str, Any] | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
+        started_at = time.perf_counter()
+        reasoning_events: list[dict[str, Any]] = []
+
+        def make_reasoning_event(
+            event_type: str,
+            message: str,
+            details: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            payload = {
+                "eventType": str(event_type or "INFO").strip().upper(),
+                "message": str(message or "").strip(),
+            }
+            if details:
+                payload["details"] = details
+            reasoning_events.append(payload)
+            return {"reasoning": payload}
+
         try:
             config = self.resolve_request_config(request_settings)
-            yield _reasoning_event(
+            yield make_reasoning_event(
                 "INFO",
                 "Requesting structured model response",
                 {"provider": config["provider"], "model": config["model"]},
@@ -463,29 +546,44 @@ class LlmService:
                 resolved_config=config,
             )
         except RuntimeError as exc:
-            yield _reasoning_event("ERROR", str(exc))
+            yield make_reasoning_event("ERROR", str(exc))
             yield {"chunk": f"### AI Copilot\n\n{exc}"}
-            yield {"done": True, "usedSourceIds": [], "sources": [], "artifacts": []}
+            yield {"done": True, "usedSourceIds": [], "sources": [], "artifacts": [], "actions": []}
             return
         except Exception as exc:
             logger.error("llm structured stream failed: %s", exc)
-            yield _reasoning_event("ERROR", str(exc))
+            yield make_reasoning_event("ERROR", str(exc))
             yield {"chunk": f"\n\n**Error encountered:** {exc}"}
-            yield {"done": True, "usedSourceIds": [], "sources": [], "artifacts": []}
+            yield {"done": True, "usedSourceIds": [], "sources": [], "artifacts": [], "actions": []}
             return
 
         source_count = len(rendered["used_source_ids"])
-        yield _reasoning_event(
+        yield make_reasoning_event(
             "SUCCESS" if source_count else "WARNING",
             "Validated response sources",
             {"usedSourceCount": source_count},
         )
         if rendered["artifacts"]:
-            yield _reasoning_event(
+            yield make_reasoning_event(
                 "SUCCESS",
-                "Prepared table artifacts",
+                "Prepared artifacts",
                 {"artifactCount": len(rendered["artifacts"])},
             )
+        if rendered["actions"]:
+            yield make_reasoning_event(
+                "SUCCESS",
+                "Prepared dashboard actions",
+                {"actionCount": len(rendered["actions"])},
+            )
+
+        response_meta = self._record_response_telemetry(
+            rendered=rendered,
+            messages=messages,
+            context=context,
+            config=config,
+            latency_ms=int((time.perf_counter() - started_at) * 1000),
+            reasoning_events=reasoning_events,
+        )
 
         body_markdown = rendered["answer_markdown"] or rendered["final_markdown"]
         for chunk in _chunk_markdown(body_markdown):
@@ -496,6 +594,8 @@ class LlmService:
             "usedSourceIds": rendered["used_source_ids"],
             "sources": rendered["sources"],
             "artifacts": rendered["artifacts"],
+            "actions": rendered["actions"],
+            "responseMeta": response_meta,
         }
 
     async def generate_response_stream(
@@ -504,8 +604,12 @@ class LlmService:
         context: dict[str, Any],
         request_settings: dict[str, Any] | None = None,
     ) -> AsyncGenerator[str, None]:
+        started_at = time.perf_counter()
         try:
-            rendered = await self._generate_validated_response(messages, context, request_settings)
+            config = self.resolve_request_config(request_settings)
+            rendered = await self._generate_validated_response(
+                messages, context, request_settings, resolved_config=config
+            )
         except RuntimeError as exc:
             yield f"### AI Copilot\n\n{exc}"
             return
@@ -515,6 +619,14 @@ class LlmService:
             return
 
         try:
+            self._record_response_telemetry(
+                rendered=rendered,
+                messages=messages,
+                context=context,
+                config=config,
+                latency_ms=int((time.perf_counter() - started_at) * 1000),
+                reasoning_events=[],
+            )
             for chunk in _chunk_markdown(rendered["final_markdown"]):
                 yield chunk
         except Exception as exc:
@@ -527,10 +639,21 @@ class LlmService:
         context: dict[str, Any] | None = None,
         request_settings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        started_at = time.perf_counter()
+        config = self.resolve_request_config(request_settings)
         rendered = await self._generate_validated_response(
             [{"role": "user", "content": _truncate_text(message)}],
             context or {},
             request_settings,
+            resolved_config=config,
+        )
+        response_meta = self._record_response_telemetry(
+            rendered=rendered,
+            messages=[{"role": "user", "content": _truncate_text(message)}],
+            context=context or {},
+            config=config,
+            latency_ms=int((time.perf_counter() - started_at) * 1000),
+            reasoning_events=[],
         )
         return {
             "answer": rendered["final_markdown"],
@@ -541,6 +664,8 @@ class LlmService:
                 "used_source_ids": rendered["used_source_ids"],
                 "sources": rendered["sources"],
                 "artifacts": rendered["artifacts"],
+                "actions": rendered["actions"],
+                "response_meta": response_meta,
             },
         }
 

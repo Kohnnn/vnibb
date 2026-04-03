@@ -90,6 +90,10 @@ Patterns VNIBB now implements:
    - VNIBB now returns deterministic comparison and ranking tables derived from validated runtime context.
 5. **Chart artifact responses**
    - VNIBB now returns deterministic chart payloads for price trends, comparison metrics, sector breadth, and foreign flow views.
+6. **Allowlisted dashboard actions**
+   - VNIBB now suggests explicit symbol-switch and add-widget actions that require user confirmation before execution.
+7. **Feedback and telemetry loop**
+   - VNIBB now records response-level telemetry and user thumbs feedback tied to concrete response IDs.
 
 Patterns we have not implemented yet:
 

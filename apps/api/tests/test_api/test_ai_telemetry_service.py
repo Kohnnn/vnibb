@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+from vnibb.services.ai_telemetry_service import AITelemetryService
+
+
+def test_ai_telemetry_service_records_response_and_feedback():
+    service = AITelemetryService(max_records=5)
+
+    response_record = service.record_response(
+        response_id="resp-1",
+        provider="openrouter",
+        model="openai/gpt-4o-mini",
+        mode="app_default",
+        latency_ms=812,
+        used_source_ids=["VNM-PRICES"],
+        artifact_ids=["comparison_snapshot"],
+        action_ids=["add_widget_price_chart"],
+        reasoning_events=[{"eventType": "INFO", "message": "Requesting structured model response"}],
+        current_symbol="VNM",
+        prompt_preview="Compare VNM and FPT",
+    )
+
+    assert response_record["response_id"] == "resp-1"
+    assert response_record["feedback"] is None
+
+    feedback_payload = service.record_feedback(
+        response_id="resp-1",
+        vote="up",
+        surface="sidebar",
+        notes="Useful answer",
+    )
+
+    assert feedback_payload["matched"] is True
+    recent_records = service.get_recent_records(limit=1)
+    assert recent_records[0]["response_id"] == "resp-1"
+    assert recent_records[0]["feedback"]["vote"] == "up"
+    assert recent_records[0]["feedback"]["surface"] == "sidebar"
+
+
+def test_ai_telemetry_service_handles_unmatched_feedback():
+    service = AITelemetryService(max_records=2)
+
+    feedback_payload = service.record_feedback(
+        response_id="missing",
+        vote="down",
+        surface="analysis",
+        notes=None,
+    )
+
+    assert feedback_payload["matched"] is False
+    assert service.get_recent_records(limit=5) == []

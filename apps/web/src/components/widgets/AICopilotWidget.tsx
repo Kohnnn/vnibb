@@ -7,15 +7,19 @@ import { Send, Sparkles, Loader2, X, Download, Copy, Check } from 'lucide-react'
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
+    type CopilotActionSuggestion,
     consumeCopilotStream,
     openCopilotChatStream,
     type CopilotArtifact,
+    type CopilotResponseMeta,
     type CopilotReasoningStep,
     type CopilotSourceRef,
 } from '@/lib/api';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { readStoredAISettings } from '@/lib/aiSettings';
+import { CopilotFeedbackBar } from '@/components/ui/CopilotFeedbackBar';
+import { CopilotActionPanel } from '@/components/ui/CopilotActionPanel';
 import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
 
@@ -33,6 +37,9 @@ interface Message {
     context?: WidgetContext;
     sources?: CopilotSourceRef[];
     artifacts?: CopilotArtifact[];
+    actions?: CopilotActionSuggestion[];
+    responseMeta?: CopilotResponseMeta;
+    feedbackVote?: 'up' | 'down';
     isStreaming?: boolean;
     timestamp: Date;
 }
@@ -176,6 +183,8 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                                 isStreaming: false,
                                 sources: event.sources || [],
                                 artifacts: event.artifacts || [],
+                                actions: event.actions || [],
+                                responseMeta: event.responseMeta,
                             }
                             : m
                     ));
@@ -342,9 +351,28 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                                 <CopilotEvidencePanel sources={message.sources || []} />
                             </div>
                         )}
+                        {message.role === 'assistant' && message.responseMeta && (
+                            <div className="mt-2 w-full max-w-[90%]">
+                                <CopilotFeedbackBar
+                                    responseMeta={message.responseMeta}
+                                    surface="widget"
+                                    currentVote={message.feedbackVote}
+                                    onVoteChange={(vote) => {
+                                        setMessages((prev) => prev.map((item) =>
+                                            item.id === message.id ? { ...item, feedbackVote: vote } : item
+                                        ));
+                                    }}
+                                />
+                            </div>
+                        )}
                         {message.role === 'assistant' && Boolean(message.artifacts?.length) && (
                             <div className="mt-2 w-full max-w-[90%]">
                                 <CopilotArtifactPanel artifacts={message.artifacts || []} />
+                            </div>
+                        )}
+                        {message.role === 'assistant' && Boolean(message.actions?.length) && (
+                            <div className="mt-2 w-full max-w-[90%]">
+                                <CopilotActionPanel actions={message.actions || []} />
                             </div>
                         )}
                     </div>

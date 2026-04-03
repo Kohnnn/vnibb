@@ -40,6 +40,14 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
                     "sourceIds": ["VNM-PRICES"],
                 }
             ],
+            "actions": [
+                {
+                    "id": "add_widget_price_chart",
+                    "type": "add_widget",
+                    "label": "Add Price Chart",
+                    "payload": {"widgetType": "price_chart"},
+                }
+            ],
         }
 
     monkeypatch.setattr(
@@ -82,6 +90,7 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
     assert '"chunk": " world"' in response.text
     assert '"usedSourceIds": ["VNM-PRICES"]' in response.text
     assert '"artifacts": [{"id": "comparison_snapshot"' in response.text
+    assert '"actions": [{"id": "add_widget_price_chart"' in response.text
     assert '"done": true' in response.text.lower()
     assert captured["prefer_appwrite_data"] is True
     assert captured["runtime_context"] == {
@@ -118,3 +127,39 @@ async def test_chat_stream_returns_error_event_when_context_build_fails(client, 
 
     assert response.status_code == 200
     assert '"error": "context failure"' in response.text
+
+
+@pytest.mark.asyncio
+async def test_submit_feedback_records_telemetry(client, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_record_feedback(*, response_id, vote, surface, notes=None):
+        captured["response_id"] = response_id
+        captured["vote"] = vote
+        captured["surface"] = surface
+        captured["notes"] = notes
+        return {"matched": True}
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.ai_telemetry_service.record_feedback",
+        fake_record_feedback,
+    )
+
+    response = await client.post(
+        "/api/v1/copilot/feedback",
+        json={
+            "responseId": "resp-123",
+            "vote": "up",
+            "surface": "sidebar",
+            "notes": "Helpful answer",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"accepted": True, "matched": True}
+    assert captured == {
+        "response_id": "resp-123",
+        "vote": "up",
+        "surface": "sidebar",
+        "notes": "Helpful answer",
+    }

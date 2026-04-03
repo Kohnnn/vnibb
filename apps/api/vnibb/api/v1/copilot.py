@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from vnibb.services.ai_context_service import ai_context_service
+from vnibb.services.ai_telemetry_service import ai_telemetry_service
 from vnibb.services.copilot_service import PROMPT_TEMPLATES, copilot_service
 from vnibb.services.llm_service import llm_service
 
@@ -82,6 +83,18 @@ class PromptTemplate(BaseModel):
 
 class PromptsResponse(BaseModel):
     prompts: list[PromptTemplate]
+
+
+class FeedbackRequest(BaseModel):
+    responseId: str
+    vote: Literal["up", "down"]
+    surface: Literal["sidebar", "widget", "analysis"]
+    notes: str | None = None
+
+
+class FeedbackResponse(BaseModel):
+    accepted: bool
+    matched: bool
 
 
 # ============ Endpoints ============
@@ -174,6 +187,17 @@ async def ask_endpoint(request: AskRequest):
         CopilotQuery(query=request.query, context=request.context)
     )
     return result
+
+
+@router.post("/feedback", response_model=FeedbackResponse, summary="Record copilot feedback")
+async def submit_feedback(request: FeedbackRequest):
+    payload = ai_telemetry_service.record_feedback(
+        response_id=request.responseId,
+        vote=request.vote,
+        surface=request.surface,
+        notes=request.notes,
+    )
+    return FeedbackResponse(accepted=True, matched=bool(payload.get("matched")))
 
 
 @router.get("/prompts", response_model=PromptsResponse)
