@@ -31,6 +31,7 @@ export const queryKeys = {
             endDate?: string;
             interval?: string;
             source?: string;
+            adjustmentMode?: 'raw' | 'adjusted';
         }
     ) => ['historical', symbol, params] as const,
     profile: (symbol: string) => ['profile', symbol] as const,
@@ -128,6 +129,7 @@ export function useHistoricalPrices(
         endDate?: string;
         interval?: string;
         source?: string;
+        adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
 ) {
@@ -1377,4 +1379,3 @@ export function useMarketHeatmap(options?: {
         retry: 2,
     });
 }
-

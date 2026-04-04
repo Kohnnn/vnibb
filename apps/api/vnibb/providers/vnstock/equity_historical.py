@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 class EquityHistoricalQueryParams(BaseModel):
     """
     Query parameters for historical price data.
-    
+
     Matches OpenBB's EquityHistoricalQueryParams structure.
     """
-    
+
     symbol: str = Field(
         ...,
         min_length=1,
@@ -51,13 +51,12 @@ class EquityHistoricalQueryParams(BaseModel):
         description="Data source: KBS (default), VCI, or DNSE",
     )
 
-    
     @field_validator("symbol")
     @classmethod
     def uppercase_symbol(cls, v: str) -> str:
         """Ensure symbol is uppercase."""
         return v.upper().strip()
-    
+
     @field_validator("end_date")
     @classmethod
     def validate_date_range(cls, v: date, info) -> date:
@@ -66,7 +65,7 @@ class EquityHistoricalQueryParams(BaseModel):
         if start and v < start:
             raise ValueError("end_date must be >= start_date")
         return v
-    
+
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -83,10 +82,10 @@ class EquityHistoricalQueryParams(BaseModel):
 class EquityHistoricalData(BaseModel):
     """
     Standardized OHLCV data response.
-    
+
     Follows OpenBB's EquityHistoricalData structure.
     """
-    
+
     symbol: str = Field(..., description="Stock ticker symbol")
     time: date = Field(..., description="Trading date")
     open: float = Field(..., description="Opening price")
@@ -94,10 +93,21 @@ class EquityHistoricalData(BaseModel):
     low: float = Field(..., description="Lowest price")
     close: float = Field(..., description="Closing price")
     volume: int = Field(..., description="Trading volume")
-    
+
     # Optional extended fields from vnstock
     value: Optional[float] = Field(None, description="Trading value in VND")
-    
+    raw_close: Optional[float] = Field(None, description="Raw unadjusted closing price")
+    adjusted_close: Optional[float] = Field(
+        None, description="Adjusted closing price when available"
+    )
+    adjustment_factor: Optional[float] = Field(
+        None, description="Adjustment factor applied to OHLC values"
+    )
+    adjustment_mode: str = Field(default="raw", description="Requested adjustment mode")
+    adjustment_applied: bool = Field(
+        default=False, description="Whether adjusted OHLC values were applied"
+    )
+
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -109,6 +119,11 @@ class EquityHistoricalData(BaseModel):
                 "close": 76200.0,
                 "volume": 1234567,
                 "value": 93000000000.0,
+                "raw_close": 76200.0,
+                "adjusted_close": 75840.0,
+                "adjustment_factor": 0.9953,
+                "adjustment_mode": "adjusted",
+                "adjustment_applied": True,
             }
         }
     }
@@ -116,24 +131,25 @@ class EquityHistoricalData(BaseModel):
 
 from vnibb.core.retry import vnstock_cb, circuit_breaker
 
+
 class VnstockEquityHistoricalFetcher(
     BaseFetcher[EquityHistoricalQueryParams, EquityHistoricalData]
 ):
     """
     Fetcher for historical equity prices via vnstock library.
-    
+
     Primary data source for OHLCV data. Falls back to scraper
     if vnstock fails or returns empty data.
     """
-    
+
     provider_name = "vnstock"
     requires_credentials = False
-    
+
     @staticmethod
     def transform_query(params: EquityHistoricalQueryParams) -> dict[str, Any]:
         """
         Transform query params to vnstock-compatible format.
-        
+
         vnstock.stock().quote.history() expects:
         - start: str (YYYY-MM-DD)
         - end: str (YYYY-MM-DD)
@@ -146,26 +162,26 @@ class VnstockEquityHistoricalFetcher(
             "interval": params.interval,
             "source": params.source,
         }
-    
+
     @staticmethod
     @circuit_breaker(vnstock_cb)
     async def extract_data(
         query: dict[str, Any],
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
-
         """
         Fetch historical data from vnstock.
-        
+
         vnstock is synchronous, so we run it in a thread pool executor
         to avoid blocking the async event loop.
         """
         loop = asyncio.get_event_loop()
-        
+
         def _fetch_sync() -> List[dict[str, Any]]:
             """Synchronous fetch wrapped for executor."""
             try:
                 from vnstock import Vnstock
+
                 stock = Vnstock().stock(
                     symbol=query["symbol"],
                     source=query["source"],
@@ -175,14 +191,14 @@ class VnstockEquityHistoricalFetcher(
                     end=query["end"],
                     interval=query["interval"],
                 )
-                
+
                 if df is None or df.empty:
                     logger.warning(f"No data returned for {query['symbol']}")
                     return []
-                
+
                 # Convert DataFrame to list of dicts
                 return df.to_dict("records")
-                
+
             except Exception as e:
                 logger.error(f"vnstock fetch error for {query['symbol']}: {e}")
                 raise ProviderError(
@@ -190,7 +206,7 @@ class VnstockEquityHistoricalFetcher(
                     provider="vnstock",
                     details={"symbol": query["symbol"]},
                 )
-        
+
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(None, _fetch_sync),
@@ -201,7 +217,7 @@ class VnstockEquityHistoricalFetcher(
                 provider="vnstock",
                 timeout=settings.vnstock_timeout,
             )
-    
+
     @staticmethod
     def transform_data(
         params: EquityHistoricalQueryParams,
@@ -209,23 +225,23 @@ class VnstockEquityHistoricalFetcher(
     ) -> List[EquityHistoricalData]:
         """
         Transform raw vnstock response to standardized EquityHistoricalData.
-        
+
         vnstock returns columns: time, open, high, low, close, volume
         Some sources may also include: value, ticker
         """
         results: List[EquityHistoricalData] = []
-        
+
         for row in data:
             try:
                 # Handle different column names from different sources
                 time_value = row.get("time") or row.get("date") or row.get("trading_date")
-                
+
                 # Parse date if it's a string
                 if isinstance(time_value, str):
                     time_value = date.fromisoformat(time_value[:10])
                 elif hasattr(time_value, "date"):
                     time_value = time_value.date()
-                
+
                 results.append(
                     EquityHistoricalData(
                         symbol=params.symbol.upper(),
@@ -235,12 +251,13 @@ class VnstockEquityHistoricalFetcher(
                         low=float(row.get("low") or 0),
                         close=float(row.get("close") or row.get("price") or 0),
                         volume=int(row.get("volume") or 0),
-
                         value=float(row["value"]) if row.get("value") else None,
+                        raw_close=float(row.get("close") or row.get("price") or 0),
+                        adjusted_close=float(row["adj_close"]) if row.get("adj_close") else None,
                     )
                 )
             except (KeyError, ValueError, TypeError) as e:
                 logger.warning(f"Skipping invalid row: {row}, error: {e}")
                 continue
-        
+
         return results

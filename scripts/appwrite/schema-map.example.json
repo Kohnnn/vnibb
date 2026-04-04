@@ -403,19 +403,8 @@
         "extended_metrics": ["ev_ebitda", "roe", "roa", "roic", "gross_margin", "net_margin", "operating_margin", "revenue_growth", "earnings_growth", "dividend_yield", "debt_to_equity", "current_ratio", "quick_ratio", "eps", "bvps", "foreign_ownership", "rs_rating", "rs_rank"]
       },
       "precisionColumns": ["price", "volume", "market_cap", "pe", "pb", "ps", "ev_ebitda", "roe", "roa", "roic", "gross_margin", "net_margin", "operating_margin", "revenue_growth", "earnings_growth", "dividend_yield", "debt_to_equity", "current_ratio", "quick_ratio", "eps", "bvps", "foreign_ownership", "rs_rating"],
-      "queryAttributes": [
-        { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },
-        { "key": "snapshot_date_dt", "source": "snapshot_date", "type": "datetime" },
-        { "key": "exchange_q", "source": "exchange", "type": "string", "size": 16, "normalize": "upper" },
-        { "key": "industry_q", "source": "industry", "type": "string", "size": 128 },
-        { "key": "market_cap_f", "source": "market_cap", "type": "float" }
-      ],
-      "indexes": [
-        { "key": "idx_symbol_q", "type": "key", "attributes": ["symbol_q"], "orders": ["asc"] },
-        { "key": "idx_snapshot_dt", "type": "key", "attributes": ["snapshot_date_dt"], "orders": ["desc"] },
-        { "key": "idx_snap_ind_q", "type": "key", "attributes": ["snapshot_date_dt", "industry_q"], "orders": ["desc", "asc"] },
-        { "key": "idx_snap_mcap_f", "type": "key", "attributes": ["snapshot_date_dt", "market_cap_f"], "orders": ["desc", "desc"] }
-      ]
+      "queryAttributes": [],
+      "indexes": []
     },
     {
       "table": "market_sectors",

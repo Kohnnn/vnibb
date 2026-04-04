@@ -54,6 +54,19 @@ function getEventTypeKey(type: string | null | undefined): string {
     return 'DEFAULT';
 }
 
+function getEventTypeKeyFromEvent(event: {
+    action_category?: string | null;
+    action_subtype?: string | null;
+    event_type?: string | null;
+    description?: string | null;
+}): string {
+    const category = (event.action_category || '').toUpperCase();
+    if (category === 'DIVIDEND') return 'DIVIDEND';
+    if (category === 'SPLIT' || category === 'ISSUANCE') return 'SPLIT';
+    if (category === 'MEETING') return 'AGM';
+    return getEventTypeKey(event.event_type || event.description);
+}
+
 export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
     const {
         data,
@@ -141,7 +154,7 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
                     />
                 ) : (
                     events.map((event, index) => {
-                        const typeKey = getEventTypeKey(event.event_type);
+                        const typeKey = getEventTypeKeyFromEvent(event);
                         const Icon = eventTypeIcons[typeKey] || eventTypeIcons.DEFAULT;
                         const colorClass = eventTypeColors[typeKey] || eventTypeColors.DEFAULT;
                         const isExpanded = expandedIndex === index;
@@ -167,7 +180,7 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center justify-between">
                                             <span className={`text-[10px] font-medium uppercase ${colorClass.split(' ')[0]}`}>
-                                                {event.event_type || 'Event'}
+                                                {event.action_subtype || event.event_type || 'Event'}
                                             </span>
                                         </div>
                                         <p className={`text-sm text-[var(--text-primary)] mt-0.5 ${isExpanded ? '' : 'line-clamp-1'}`}>
@@ -177,16 +190,22 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
                                 </div>
 
                                 <div className="flex items-center gap-3 mt-2 text-[10px] text-[var(--text-muted)]">
-                                    {event.event_date && <span>📅 {formatDate(event.event_date)}</span>}
+                                    {(event.effective_date || event.event_date) && <span>📅 {formatDate(event.effective_date || event.event_date)}</span>}
                                     {event.ex_date && <span>Ex: {formatDate(event.ex_date)}</span>}
                                 </div>
 
                                 {isExpanded && (
                                     <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] space-y-1 text-xs">
-                                        {event.value && (
+                                        {(event.share_ratio || event.value) && (
                                             <div className="flex justify-between">
                                                 <span className="text-[var(--text-muted)]">Value</span>
-                                                <span className="text-[var(--text-primary)] font-medium">{event.value}</span>
+                                                <span className="text-[var(--text-primary)] font-medium">{event.share_ratio || event.value}</span>
+                                            </div>
+                                        )}
+                                        {event.cash_amount_per_share != null && (
+                                            <div className="flex justify-between">
+                                                <span className="text-[var(--text-muted)]">Cash / Share</span>
+                                                <span className="text-[var(--text-primary)] font-medium">{event.cash_amount_per_share.toLocaleString()}</span>
                                             </div>
                                         )}
                                         {event.record_date && event.record_date !== 'None' && (

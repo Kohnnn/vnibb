@@ -8,6 +8,7 @@ for Vietnam-listed companies via vnstock library.
 import asyncio
 import logging
 from datetime import datetime
+import re
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -17,6 +18,53 @@ from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 
 logger = logging.getLogger(__name__)
+RATIO_PATTERN = re.compile(r"(\d+(?:[\.,]\d+)?)\s*[:/]\s*(\d+(?:[\.,]\d+)?)")
+NUMBER_PATTERN = re.compile(r"(\d+(?:[\.,]\d+)*)")
+
+
+def _normalize_company_action_category(
+    event_type: Optional[str],
+    event_name: Optional[str],
+    description: Optional[str],
+) -> tuple[str, Optional[str]]:
+    haystack = " ".join(filter(None, [event_type, event_name, description])).upper()
+
+    if any(token in haystack for token in ["SPLIT", "TÁCH", "GỘP", "CHIA TÁCH"]):
+        return "split", "split"
+    if any(
+        token in haystack for token in ["RIGHT", "QUYỀN MUA", "PHÁT HÀNH THÊM", "ISSUANCE", "ISSUE"]
+    ):
+        return "issuance", "rights_issue"
+    if any(token in haystack for token in ["DIVIDEND", "CỔ TỨC", "THƯỞNG CỔ PHIẾU"]):
+        if any(token in haystack for token in ["CASH", "TIỀN", "VND/SHARE"]):
+            return "dividend", "cash_dividend"
+        if any(token in haystack for token in ["STOCK", "CỔ PHIẾU", "BONUS", "THƯỞNG"]):
+            return "dividend", "stock_dividend"
+        return "dividend", None
+    if any(token in haystack for token in ["AGM", "ĐẠI HỘI", "ĐHĐCĐ", "MEETING"]):
+        return "meeting", None
+    return "other", None
+
+
+def _parse_company_action_value(
+    value: Optional[str], description: Optional[str]
+) -> tuple[Optional[float], Optional[str]]:
+    primary = value or description or ""
+    ratio_match = RATIO_PATTERN.search(primary)
+    if ratio_match:
+        left = ratio_match.group(1).replace(",", "")
+        right = ratio_match.group(2).replace(",", "")
+        return None, f"{left}:{right}"
+
+    numeric_match = NUMBER_PATTERN.search(primary)
+    if numeric_match:
+        raw = numeric_match.group(1).replace(",", "")
+        try:
+            return float(raw), None
+        except ValueError:
+            return None, None
+
+    return None, None
 
 
 def _parse_sortable_event_date(value: Any) -> datetime | None:
@@ -91,6 +139,15 @@ class CompanyEventData(BaseModel):
     payment_date: Optional[str] = Field(None, description="Payment date")
     description: Optional[str] = Field(None, description="Event description")
     value: Optional[str] = Field(None, description="Event value (dividend amount, ratio, etc.)")
+    action_category: Optional[str] = Field(None, description="Normalized corporate action bucket")
+    action_subtype: Optional[str] = Field(None, description="Refined corporate action subtype")
+    effective_date: Optional[str] = Field(
+        None, description="Best actionable date for chart markers and adjustments"
+    )
+    cash_amount_per_share: Optional[float] = Field(
+        None, description="Parsed cash amount per share when available"
+    )
+    share_ratio: Optional[str] = Field(None, description="Parsed ratio text such as 2:1 or 10:3")
 
     model_config = {
         "json_schema_extra": {
@@ -296,6 +353,27 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                         row.get("description") or row.get("content") or row.get("ghiChu")
                     ),
                     value=_clean(row.get("value") or row.get("ratio") or row.get("tyLe")),
+                )
+                action_category, action_subtype = _normalize_company_action_category(
+                    event_item.event_type,
+                    event_item.event_name,
+                    event_item.description,
+                )
+                cash_amount_per_share, share_ratio = _parse_company_action_value(
+                    event_item.value,
+                    event_item.description,
+                )
+                event_item = event_item.model_copy(
+                    update={
+                        "action_category": action_category,
+                        "action_subtype": action_subtype,
+                        "effective_date": event_item.ex_date
+                        or event_item.event_date
+                        or event_item.record_date
+                        or event_item.payment_date,
+                        "cash_amount_per_share": cash_amount_per_share,
+                        "share_ratio": share_ratio,
+                    }
                 )
                 results.append(event_item)
 

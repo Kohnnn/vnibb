@@ -105,6 +105,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
   });
   const historyQuery = useHistoricalPrices(upperSymbol, {
     startDate: new Date(Date.now() - 8 * 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    adjustmentMode: 'adjusted',
     enabled: Boolean(upperSymbol),
   });
 
@@ -206,7 +207,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
           <WidgetMeta
             updatedAt={quantQuery.data?.data?.last_data_date ?? quantQuery.data?.data?.computed_at ?? historyQuery.dataUpdatedAt}
             isFetching={(quantQuery.isFetching || historyQuery.isFetching) && hasData}
-            note={`${period} composite view`}
+            note={`${period} composite view · adjusted history`}
             align="right"
           />
         </div>

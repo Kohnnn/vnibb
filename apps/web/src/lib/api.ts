@@ -280,6 +280,7 @@ export async function getHistoricalPrices(
         endDate?: string;
         interval?: string;
         source?: string;
+        adjustmentMode?: 'raw' | 'adjusted';
         signal?: AbortSignal;
     }
 ): Promise<EquityHistoricalResponse> {
@@ -290,6 +291,7 @@ export async function getHistoricalPrices(
             end_date: options?.endDate,
             interval: options?.interval,
             source: options?.source,
+            adjustment_mode: options?.adjustmentMode,
         },
         signal: options?.signal,
     });

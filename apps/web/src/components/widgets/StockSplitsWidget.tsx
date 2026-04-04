@@ -39,10 +39,12 @@ export function StockSplitsWidget({ symbol }: StockSplitsWidgetProps) {
 
     const splitRows =
         data?.data?.filter((event) => {
+            const category = (event.action_category || '').toUpperCase();
             const eventType = (event.event_type || '').toUpperCase();
             const eventName = (event.event_name || '').toUpperCase();
             const description = (event.description || '').toUpperCase();
             return (
+                category === 'SPLIT' ||
                 eventType.includes('SPLIT') ||
                 eventName.includes('SPLIT') ||
                 description.includes('SPLIT') ||
@@ -85,8 +87,8 @@ export function StockSplitsWidget({ symbol }: StockSplitsWidgetProps) {
                         </thead>
                         <tbody>
                             {splitRows.map((row, idx) => {
-                                const ratio = parseSplitRatio(row.value || row.description || row.event_name);
-                                const executionDate = row.event_date || row.record_date || row.ex_date;
+                                const ratio = parseSplitRatio(row.share_ratio || row.value || row.description || row.event_name);
+                                const executionDate = row.effective_date || row.event_date || row.record_date || row.ex_date;
                                 return (
                                     <tr key={`${executionDate || 'split'}-${idx}`} className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
                                         <td className="py-2 pr-4 text-[var(--text-secondary)]">{formatDate(executionDate || undefined)}</td>
