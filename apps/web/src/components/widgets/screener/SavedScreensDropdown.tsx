@@ -3,21 +3,73 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Star, Plus, Trash2, Bookmark } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { ActiveFilter } from './FilterBar';
+import type { FilterGroup } from './FilterBuilderPanel';
 
 export interface SavedScreen {
   id: string;
   name: string;
-  filters: any[];
+  quickFilters: ActiveFilter[];
+  advancedFilters?: FilterGroup | null;
   columns: string[];
+  sortField?: string;
+  sortOrder?: 'asc' | 'desc';
+  market?: string;
+  viewMode?: 'table' | 'chart' | 'performance';
   isBuiltIn?: boolean;
 }
 
 const BUILT_IN_SCREENS: SavedScreen[] = [
-  { id: 'all', name: 'All Stocks', filters: [], columns: [], isBuiltIn: true },
-  { id: 'gainers', name: 'Top Gainers', filters: [{ field: 'change', operator: 'gt', value: 5 }], columns: [], isBuiltIn: true },
-  { id: 'losers', name: 'Top Losers', filters: [{ field: 'change', operator: 'lt', value: -5 }], columns: [], isBuiltIn: true },
-  { id: 'active', name: 'Most Active', filters: [], columns: ['volume'], isBuiltIn: true },
-  { id: 'vn30', name: 'VN30', filters: [{ field: 'index', operator: 'eq', value: 'VN30' }], columns: [], isBuiltIn: true },
+  { id: 'all', name: 'All Stocks', quickFilters: [], columns: [], sortField: 'market_cap', sortOrder: 'desc', isBuiltIn: true },
+  {
+    id: 'gainers',
+    name: 'Top Gainers',
+    quickFilters: [{ id: 'change_1d', value: { gte: 5 }, displayValue: 'Gainers (+5%)' }],
+    columns: ['ticker', 'price', 'change_1d', 'volume', 'market_cap'],
+    sortField: 'change_1d',
+    sortOrder: 'desc',
+    isBuiltIn: true,
+  },
+  {
+    id: 'losers',
+    name: 'Top Losers',
+    quickFilters: [{ id: 'change_1d', value: { lt: -5 }, displayValue: 'Losers (-5%)' }],
+    columns: ['ticker', 'price', 'change_1d', 'volume', 'market_cap'],
+    sortField: 'change_1d',
+    sortOrder: 'asc',
+    isBuiltIn: true,
+  },
+  {
+    id: 'active',
+    name: 'Most Active',
+    quickFilters: [],
+    columns: ['ticker', 'price', 'change_1d', 'volume', 'market_cap'],
+    sortField: 'volume',
+    sortOrder: 'desc',
+    isBuiltIn: true,
+  },
+  {
+    id: 'rs-leaders',
+    name: 'RS Leaders',
+    quickFilters: [{ id: 'rs_rating', value: { gte: 80 }, displayValue: 'RS 80+' }],
+    columns: ['ticker', 'price', 'change_1d', 'rs_rating', 'perf_1m', 'perf_3m'],
+    sortField: 'rs_rating',
+    sortOrder: 'desc',
+    isBuiltIn: true,
+  },
+  {
+    id: 'value-hunters',
+    name: 'Value Hunters',
+    quickFilters: [
+      { id: 'pe', value: { lt: 12 }, displayValue: 'P/E < 12' },
+      { id: 'pb', value: { lt: 2 }, displayValue: 'P/B < 2' },
+      { id: 'roe', value: { gte: 15 }, displayValue: 'ROE > 15%' },
+    ],
+    columns: ['ticker', 'market_cap', 'pe', 'pb', 'roe', 'dividend_yield'],
+    sortField: 'pe',
+    sortOrder: 'asc',
+    isBuiltIn: true,
+  },
 ];
 
 interface SavedScreensDropdownProps {

@@ -156,7 +156,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
 
     const tableColumns = useMemo(
         () =>
-            orderedItems.slice(-visiblePeriodLimit).map((entry, index) => ({
+            orderedItems.slice(-visiblePeriodLimit).reverse().map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
@@ -278,6 +278,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             rows={tableRows}
             sortable
             showTrend={false}
+            latestFirst
             storageKey={`income:${id}:${symbol}:${period}`}
             footerNote={unitNote}
             valueFormatter={(value, row) => {

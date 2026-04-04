@@ -1,7 +1,7 @@
 import type { WidgetConfig, WidgetDefinition, WidgetType } from '@/types/dashboard';
 
 const IFRAME_BASE = 'https://s3.tradingview.com/external-embedding';
-const WEB_COMPONENT_BASE = 'https://www.tradingview-widget.com/w/en';
+const WEB_COMPONENT_BASE = 'https://widgets.tradingview-widget.com/w/en';
 
 const DEFAULT_LOCALE = 'en';
 const DEFAULT_INTERVAL = '1D';
@@ -283,9 +283,9 @@ const BASE_SYMBOL_FIELDS: TradingViewSettingField[] = [
 
 const LINKED_SYMBOL_FIELD: TradingViewSettingField = {
   key: 'useLinkedSymbol',
-  label: 'Sync With Dashboard Symbol',
+  label: 'Sync With Global Markets Symbol',
   type: 'boolean',
-  description: 'App-level behavior. When enabled, this widget follows the dashboard ticker selector and linked symbol changes.',
+  description: 'App-level behavior. When enabled, this widget follows the shared TradingView/global-markets symbol used across dashboards.',
 };
 
 function withSection(section: string, fields: TradingViewSettingField[]): TradingViewSettingField[] {
@@ -614,7 +614,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/charts/advanced-chart/',
     symbolMode: 'widget',
     defaultConfig: {
-      symbol: 'NASDAQ:QQQ',
+      symbol: 'NASDAQ:VFS',
       useLinkedSymbol: true,
       autosize: true,
       interval: 'D',
@@ -723,6 +723,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/charts/symbol-overview/',
     symbolMode: 'symbol_overview',
     defaultConfig: {
+      symbol: 'NASDAQ:VFS',
       useLinkedSymbol: true,
       autosize: true,
       chartOnly: false,
@@ -778,15 +779,16 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/charts/mini-chart/',
     symbolMode: 'widget',
     defaultConfig: {
-      symbol: 'NASDAQ:QQQ',
+      symbol: 'NASDAQ:VFS',
       useLinkedSymbol: true,
-      dateRange: '12M',
+      timeFrame: '1D',
+      lineChartType: 'Area',
+      showTimeScale: true,
+      showTimeRange: true,
       width: '100%',
       height: '100%',
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
-      isTransparent: true,
-      largeChartUrl: '',
     },
     defaultLayout: { w: 6, h: 4, minW: 4, minH: 3 },
     searchKeywords: ['mini chart', 'micro chart', 'sparkline'],
@@ -794,10 +796,19 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
       ...withSection('General', [
         LINKED_SYMBOL_FIELD,
         ...BASE_SYMBOL_FIELDS,
-        { key: 'dateRange', label: 'Date Range', type: 'select', options: DATE_RANGE_OPTIONS },
+        { key: 'timeFrame', label: 'Time Frame', type: 'select', options: DATE_RANGE_OPTIONS },
+        {
+          key: 'lineChartType',
+          label: 'Chart Type',
+          type: 'select',
+          options: [
+            { value: 'Area', label: 'Area' },
+            { value: 'Line', label: 'Line' },
+          ],
+        },
+        { key: 'showTimeScale', label: 'Show Time Scale', type: 'boolean' },
+        { key: 'showTimeRange', label: 'Show Time Range', type: 'boolean' },
         ...COMMON_WEB_THEME_FIELDS,
-        { key: 'isTransparent', label: 'Transparent', type: 'boolean' },
-        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
         ...AUTO_SIZE_FIELDS,
       ]),
     ],
@@ -812,6 +823,12 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/watchlists/market-summary/',
     symbolMode: 'none',
     defaultConfig: {
+      mode: 'market-movers',
+      assetsType: 'stocks',
+      exchange: 'US',
+      layoutMode: 'flow',
+      direction: 'horizontal',
+      itemSize: 'normal',
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
       width: '100%',
@@ -820,7 +837,58 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 12, h: 8, minW: 8, minH: 6 },
     searchKeywords: ['market summary', 'overview', 'watchlist', 'tabs'],
     settings: [
-      ...withSection('General', [...COMMON_WEB_THEME_FIELDS, ...AUTO_SIZE_FIELDS]),
+      ...withSection('Data', [
+        {
+          key: 'mode',
+          label: 'Mode',
+          type: 'select',
+          options: [
+            { value: 'market-movers', label: 'Market Movers' },
+            { value: 'custom', label: 'Custom' },
+          ],
+        },
+        {
+          key: 'assetsType',
+          label: 'Asset Type',
+          type: 'select',
+          options: [
+            { value: 'stocks', label: 'Stocks' },
+            { value: 'crypto', label: 'Crypto' },
+          ],
+        },
+        { key: 'exchange', label: 'Exchange', type: 'text', placeholder: 'US' },
+      ]),
+      ...withSection('General', [
+        {
+          key: 'layoutMode',
+          label: 'Layout Mode',
+          type: 'select',
+          options: [
+            { value: 'flow', label: 'Flow' },
+            { value: 'grid', label: 'Grid' },
+          ],
+        },
+        {
+          key: 'direction',
+          label: 'Direction',
+          type: 'select',
+          options: [
+            { value: 'horizontal', label: 'Horizontal' },
+            { value: 'vertical', label: 'Vertical' },
+          ],
+        },
+        {
+          key: 'itemSize',
+          label: 'Size',
+          type: 'select',
+          options: [
+            { value: 'normal', label: 'Normal' },
+            { value: 'compact', label: 'Compact' },
+          ],
+        },
+        ...COMMON_WEB_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -950,8 +1018,10 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultConfig: {
       symbols: [...DEFAULT_MARKET_SYMBOLS],
       direction: 'horizontal',
-      itemSize: 'regular',
+      itemSize: 'normal',
       showSymbolLogo: true,
+      showHover: false,
+      hideChart: false,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
     },
@@ -975,19 +1045,12 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
           label: 'Item Size',
           type: 'select',
           options: [
-            { value: 'regular', label: 'Regular' },
+            { value: 'normal', label: 'Normal' },
             { value: 'compact', label: 'Compact' },
           ],
         },
-        {
-          key: 'displayMode',
-          label: 'Display Mode',
-          type: 'select',
-          options: [
-            { value: 'adaptive', label: 'Adaptive' },
-            { value: 'regular', label: 'Regular' },
-          ],
-        },
+        { key: 'showHover', label: 'Show Hover', type: 'boolean' },
+        { key: 'hideChart', label: 'Hide Chart', type: 'boolean' },
         { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
         ...COMMON_WEB_THEME_FIELDS,
       ]),
@@ -1003,15 +1066,36 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/tickers/ticker-tag/',
     symbolMode: 'widget',
     defaultConfig: {
-      symbol: 'NASDAQ:AAPL',
+      symbol: 'NASDAQ:VFS',
       useLinkedSymbol: true,
+      size: 'small',
+      hideChange: false,
+      hideBackground: false,
+      preserveText: false,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
     },
     defaultLayout: { w: 4, h: 3, minW: 3, minH: 2 },
     searchKeywords: ['ticker tag', 'inline quote', 'pill'],
     settings: [
-      ...withSection('General', [LINKED_SYMBOL_FIELD, ...BASE_SYMBOL_FIELDS, ...COMMON_WEB_THEME_FIELDS]),
+      ...withSection('General', [
+        LINKED_SYMBOL_FIELD,
+        ...BASE_SYMBOL_FIELDS,
+        {
+          key: 'size',
+          label: 'Size',
+          type: 'select',
+          options: [
+            { value: 'small', label: 'Small' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'large', label: 'Large' },
+          ],
+        },
+        { key: 'hideChange', label: 'Hide Change', type: 'boolean' },
+        { key: 'hideBackground', label: 'Hide Background', type: 'boolean' },
+        { key: 'preserveText', label: 'Preserve Text', type: 'boolean' },
+        ...COMMON_WEB_THEME_FIELDS,
+      ]),
     ],
   },
   {
@@ -1023,7 +1107,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/tickers/single-ticker/',
     symbolMode: 'widget',
     defaultConfig: {
-      symbol: 'FX:EURUSD',
+      symbol: 'NASDAQ:VFS',
       useLinkedSymbol: true,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
@@ -1339,7 +1423,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/symbol-details/symbol-info/',
     symbolMode: 'widget',
     defaultConfig: {
-      symbol: 'NASDAQ:AAPL',
+      symbol: 'NASDAQ:VFS',
       useLinkedSymbol: true,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
@@ -1369,7 +1453,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/symbol-details/technical-analysis/',
     symbolMode: 'widget',
     defaultConfig: {
-      symbol: 'NASDAQ:QQQ',
+      symbol: 'NASDAQ:VFS',
       useLinkedSymbol: true,
       interval: DEFAULT_INTERVAL,
       width: '100%',
@@ -1404,7 +1488,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/symbol-details/fundamental-data/',
     symbolMode: 'widget',
     defaultConfig: {
-      symbol: 'NASDAQ:AAPL',
+      symbol: 'NASDAQ:VFS',
       useLinkedSymbol: true,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
@@ -1456,7 +1540,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/symbol-details/company-profile/',
     symbolMode: 'widget',
     defaultConfig: {
-      symbol: 'NASDAQ:AAPL',
+      symbol: 'NASDAQ:VFS',
       useLinkedSymbol: true,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
@@ -1550,6 +1634,10 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/economics/economic-map/',
     symbolMode: 'none',
     defaultConfig: {
+      region: 'global',
+      metric: 'gdp',
+      metrics: [],
+      hideLegend: false,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
       width: '100%',
@@ -1557,7 +1645,39 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     },
     defaultLayout: { w: 12, h: 9, minW: 8, minH: 6 },
     searchKeywords: ['economic map', 'macro map', 'world map'],
-    settings: [...COMMON_WEB_THEME_FIELDS, ...AUTO_SIZE_FIELDS],
+    settings: [
+      ...withSection('General', [
+        {
+          key: 'region',
+          label: 'Region',
+          type: 'select',
+          options: [
+            { value: 'global', label: 'Global' },
+            { value: 'asia', label: 'Asia' },
+            { value: 'europe', label: 'Europe' },
+            { value: 'north-america', label: 'North America' },
+            { value: 'south-america', label: 'South America' },
+            { value: 'africa', label: 'Africa' },
+            { value: 'oceania', label: 'Oceania' },
+          ],
+        },
+        {
+          key: 'metric',
+          label: 'Economic Metric',
+          type: 'select',
+          options: [
+            { value: 'gdp', label: 'GDP' },
+            { value: 'iryy', label: 'Inflation Rate' },
+            { value: 'intr', label: 'Interest Rate' },
+            { value: 'ur', label: 'Unemployment Rate' },
+            { value: 'gdg', label: 'Government Debt' },
+          ],
+        },
+        { key: 'hideLegend', label: 'Hide Legend', type: 'boolean' },
+        ...COMMON_WEB_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
+    ],
   },
 ] as const;
 
@@ -1645,7 +1765,7 @@ export function buildTradingViewRuntimeConfig(
 
   if (type === 'tradingview_symbol_overview') {
     const configuredSymbols = Array.isArray(merged.symbols) ? merged.symbols : [];
-    merged.symbols = configuredSymbols.length > 0 ? configuredSymbols : buildSymbolOverviewSymbols(symbol || 'NASDAQ:AAPL');
+    merged.symbols = configuredSymbols.length > 0 ? configuredSymbols : buildSymbolOverviewSymbols(symbol || 'NASDAQ:VFS');
     delete merged.symbol;
   }
 
@@ -1715,6 +1835,10 @@ export function buildTradingViewWebComponentAttributes(
 
   Object.entries(runtimeConfig).forEach(([key, value]) => {
     if (value === undefined || value === null || value === '') return;
+
+    if (Array.isArray(value) && value.length === 0) {
+      return;
+    }
 
     if (key === 'symbols') {
       const symbolList = normalizeSymbolList(value);

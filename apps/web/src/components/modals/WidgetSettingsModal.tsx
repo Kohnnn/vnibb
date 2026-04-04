@@ -5,11 +5,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { RotateCcw, Save, X } from 'lucide-react';
 
 import { useDashboard } from '@/contexts/DashboardContext';
+import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import {
     getTradingViewWidgetMetadata,
     getTradingViewDefaultConfig,
     getTradingViewSettingsFields,
     isTradingViewWidget,
+    usesTradingViewWidgetSymbol,
     type TradingViewSettingField,
 } from '@/lib/tradingViewWidgets';
 import type { WidgetConfig } from '@/types/dashboard';
@@ -88,6 +90,7 @@ export function WidgetSettingsModal({
     tabId
 }: WidgetSettingsModalProps) {
     const { state, updateWidget } = useDashboard();
+    const { setGlobalMarketsSymbol } = useGlobalMarketsSymbol();
     const [draftConfig, setDraftConfig] = useState<WidgetConfig>({});
     const [advancedConfig, setAdvancedConfig] = useState<string>('{}');
     const [refreshInterval, setRefreshInterval] = useState<number>(0);
@@ -161,6 +164,16 @@ export function WidgetSettingsModal({
                 ...draftConfig,
                 refreshInterval: refreshInterval > 0 ? refreshInterval : undefined,
             });
+
+            if (
+                tradingViewMode &&
+                usesTradingViewWidgetSymbol(widget.type) &&
+                nextConfig.useLinkedSymbol !== false &&
+                typeof nextConfig.symbol === 'string' &&
+                nextConfig.symbol.trim().length > 0
+            ) {
+                setGlobalMarketsSymbol(nextConfig.symbol);
+            }
 
             updateWidget(dashboardId, tabId, widgetId, { config: nextConfig });
             onClose();

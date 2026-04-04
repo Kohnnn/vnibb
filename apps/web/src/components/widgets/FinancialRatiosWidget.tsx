@@ -233,7 +233,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     }, [ratios, referencePeriodsQuery.data?.data]);
 
     const visiblePeriods = useMemo(
-        () => displayPeriods.slice(-visiblePeriodLimit),
+        () => displayPeriods.slice(-visiblePeriodLimit).reverse(),
         [displayPeriods, visiblePeriodLimit]
     );
 
@@ -348,6 +348,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                                 rows={tableRows}
                                 sortable
                                 showTrend={false}
+                                latestFirst
                                 storageKey={`ratios:${id}:${symbol}:${period}`}
                                 footerNote={`Note: Ratio history by ${period}. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
                                 valueFormatter={(value, row) => {

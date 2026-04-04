@@ -7,6 +7,7 @@ import { TickerProfileWidget } from './TickerProfileWidget';
 import { KeyMetricsWidget } from './KeyMetricsWidget';
 import { ShareStatisticsWidget } from './ShareStatisticsWidget';
 import { EarningsHistoryWidget } from './EarningsHistoryWidget';
+import { EarningsReleaseRecapWidget } from './EarningsReleaseRecapWidget';
 import { EarningsSeasonMonitorWidget } from './EarningsSeasonMonitorWidget';
 import { DividendPaymentWidget } from './DividendPaymentWidget';
 import { ValuationWidget } from './ValuationWidget';
@@ -21,6 +22,7 @@ import { MajorShareholdersWidget } from './MajorShareholdersWidget';
 import { OfficersManagementWidget } from './OfficersManagementWidget';
 import { IntradayTradesWidget } from './IntradayTradesWidget';
 import { FinancialRatiosWidget } from './FinancialRatiosWidget';
+import { FinancialSnapshotWidget } from './FinancialSnapshotWidget';
 import { BankMetricsWidget } from './BankMetricsWidget';
 import { TransactionFlowWidget } from './TransactionFlowWidget';
 import { MoneyFlowTrendWidget } from './MoneyFlowTrendWidget';
@@ -285,6 +287,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     share_statistics: ShareStatisticsWidget as ComponentType<WidgetProps>,
     screener: ScreenerWidget as ComponentType<WidgetProps>,
     earnings_history: EarningsHistoryWidget as ComponentType<WidgetProps>,
+    earnings_release_recap: EarningsReleaseRecapWidget as ComponentType<WidgetProps>,
     earnings_season_monitor: EarningsSeasonMonitorWidget as ComponentType<WidgetProps>,
     dividend_payment: DividendPaymentWidget as ComponentType<WidgetProps>,
     valuation_multiples: ValuationWidget as ComponentType<WidgetProps>,
@@ -294,6 +297,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
 
     // Financial widgets
     unified_financials: FinancialsWidget as ComponentType<WidgetProps>,
+    financial_snapshot: FinancialSnapshotWidget as ComponentType<WidgetProps>,
     income_statement: IncomeStatementWidget as ComponentType<WidgetProps>,
     balance_sheet: BalanceSheetWidget as ComponentType<WidgetProps>,
     cash_flow: CashFlowWidget as ComponentType<WidgetProps>,
@@ -419,6 +423,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     share_statistics: { w: 4, h: 7, minW: 3, minH: 5 },
     screener: { w: 12, h: 10, minW: 8, minH: 8 },
     earnings_history: { w: 7, h: 7, minW: 5, minH: 5 },
+    earnings_release_recap: { w: 10, h: 8, minW: 6, minH: 6 },
     earnings_season_monitor: { w: 10, h: 8, minW: 8, minH: 6 },
     dividend_payment: { w: 7, h: 7, minW: 5, minH: 5 },
     stock_splits: { w: 7, h: 5, minW: 4, minH: 4 },
@@ -431,6 +436,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     officers_management: { w: 5, h: 7, minW: 4, minH: 5 },
     intraday_trades: { w: 5, h: 7, minW: 4, minH: 5 },
     financial_ratios: { w: 10, h: 18, minW: 8, minH: 14 },
+    financial_snapshot: { w: 24, h: 16, minW: 12, minH: 10 },
     bank_metrics: { w: 7, h: 7, minW: 5, minH: 5 },
     transaction_flow: { w: 8, h: 7, minW: 6, minH: 5 },
     industry_bubble: { w: 10, h: 12, minW: 8, minH: 9 },
@@ -529,6 +535,7 @@ export const widgetNames: Record<WidgetType, string> = {
     share_statistics: 'Share Statistics',
     screener: 'Stock Screener',
     earnings_history: 'Earnings History',
+    earnings_release_recap: 'Earnings Release Recap',
     earnings_season_monitor: 'Earnings Season Monitor',
     dividend_payment: 'Dividend Payment',
     stock_splits: 'Stock Splits',
@@ -541,6 +548,7 @@ export const widgetNames: Record<WidgetType, string> = {
     officers_management: 'Officers & Management',
     intraday_trades: 'Intraday Trades',
     financial_ratios: 'Financial Ratios',
+    financial_snapshot: 'Financial Snapshot',
     bank_metrics: 'Bank Analytics',
     transaction_flow: 'Transaction Flow',
     industry_bubble: 'Industry Bubble',
@@ -635,7 +643,8 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     key_metrics: 'Summary of critical financial ratios',
     share_statistics: 'Share float and ownership data',
     screener: 'Filter stocks by 80+ criteria',
-    earnings_history: 'Historical earnings surprises',
+    earnings_history: 'Latest-first quarterly revenue, earnings, and margin history',
+    earnings_release_recap: 'Quarter bridge with YoY deltas, cash context, quality checks, and linked news',
     earnings_season_monitor: 'Latest quarterly releases with quick revenue, earnings, and margin cross-checks',
     dividend_payment: 'Dividend history and yields',
     stock_splits: 'History of corporate splits',
@@ -648,6 +657,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     officers_management: 'Management team biography',
     intraday_trades: 'Live tick-by-tick tape',
     financial_ratios: 'Deep dive ratio analysis',
+    financial_snapshot: 'Compact 4-panel snapshot covering P&L, balance sheet, cash flow, and ratios',
     bank_metrics: 'Bank-specific funding, profitability, and risk analytics',
     transaction_flow: 'Daily domestic, foreign, and proprietary flow with price overlay',
     industry_bubble: 'Sector-relative bubble chart for valuation and quality metrics',

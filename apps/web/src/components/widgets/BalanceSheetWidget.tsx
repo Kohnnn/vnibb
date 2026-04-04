@@ -154,7 +154,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
 
     const tableColumns = useMemo(
         () =>
-            orderedItems.slice(-visiblePeriodLimit).map((entry, index) => ({
+            orderedItems.slice(-visiblePeriodLimit).reverse().map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
@@ -226,6 +226,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
             rows={tableRows}
             sortable
             showTrend={false}
+            latestFirst
             storageKey={`balance:${id}:${symbol}:${period}`}
             footerNote={unitNote}
             valueFormatter={(value) =>

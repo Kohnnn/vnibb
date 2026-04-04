@@ -85,6 +85,7 @@ function TradingViewNativeWidget({
   const hostRef = useRef<HTMLDivElement>(null);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const allowsOverflow = widgetType === 'tradingview_ticker_tag';
 
   const resolvedSymbol = useMemo(() => {
     if (!symbol) return '';
@@ -200,7 +201,15 @@ function TradingViewNativeWidget({
   }
 
   return (
-    <WidgetContainer title={metadata.name} widgetId={id} onClose={onRemove} isLoading={isLoading} noPadding>
+    <WidgetContainer
+      title={metadata.name}
+      widgetId={id}
+      onClose={onRemove}
+      isLoading={isLoading}
+      noPadding
+      className={allowsOverflow ? 'overflow-visible' : undefined}
+      bodyClassName={allowsOverflow ? 'overflow-visible' : undefined}
+    >
       <div className="h-full min-h-[180px] bg-[var(--bg-primary)]">
         <div ref={hostRef} className="tradingview-widget-container h-full w-full" />
       </div>

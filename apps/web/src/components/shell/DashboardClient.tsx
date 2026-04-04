@@ -36,6 +36,7 @@ import {
 import { type WidgetMultiSelectParam } from '@/components/widgets/WidgetWrapper';
 import { WidgetSettingsModal, AppsLibrary, TemplateSelector } from '@/components/modals';
 import { AICopilot } from '@/components/ui/AICopilot';
+import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import { isTradingViewWidget, usesTradingViewWidgetSymbol } from '@/lib/tradingViewWidgets';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
@@ -72,7 +73,6 @@ const MAIN_FUNDAMENTAL_DASHBOARD_ID = 'default-fundamental';
 const TECHNICAL_DASHBOARD_ID = 'default-technical';
 const QUANT_DASHBOARD_ID = 'default-quant';
 const GLOBAL_MARKETS_DASHBOARD_ID = 'default-global-markets';
-const GLOBAL_MARKETS_DASHBOARD_NAME = 'Global Markets';
 const FUNDAMENTALS_TAB_NAME = 'Fundamentals';
 const FUNDAMENTALS_PERIOD_SYNC_GROUP = 'fundamental-core';
 const ADMIN_MANAGED_SYSTEM_IDS = new Set([
@@ -101,7 +101,8 @@ function DashboardContent() {
     } = useDashboard();
 
     const { setGlobalSymbol: setContextGlobalSymbol } = useWidgetGroups();
-    const { globalSymbol, setGlobalSymbol } = useSymbolLink();
+    const { globalSymbol: stockGlobalSymbol, setGlobalSymbol: setStockGlobalSymbol } = useSymbolLink();
+    const { globalMarketsSymbol } = useGlobalMarketsSymbol();
     const { config: unitConfig, setUnit } = useUnit();
 
     const [isEditing, setIsEditing] = useState(false);
@@ -124,7 +125,6 @@ function DashboardContent() {
         tabId: string;
     } | null>(null);
     const autoWalkthroughQueuedRef = useRef(false);
-    const lastGlobalMarketsSeedRef = useRef<string | null>(null);
 
     const starterTemplates = useMemo(() => {
         const preferredIds = ['getting-started', 'fundamental-analyst', 'global-markets', 'earnings-season'];
@@ -246,18 +246,18 @@ function DashboardContent() {
         const normalizedSymbol = rawSymbol.trim().toUpperCase();
         if (!normalizedSymbol) return;
 
-        setGlobalSymbol(normalizedSymbol);
+        setStockGlobalSymbol(normalizedSymbol);
         setContextGlobalSymbol(normalizedSymbol);
         if (activeDashboard) {
             updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
         }
-    }, [activeDashboard, setContextGlobalSymbol, setGlobalSymbol, updateSyncGroupSymbol]);
+    }, [activeDashboard, setContextGlobalSymbol, setStockGlobalSymbol, updateSyncGroupSymbol]);
 
     const isSystemFundamentalsTab =
         activeDashboard?.id === MAIN_FUNDAMENTAL_DASHBOARD_ID &&
         activeTab?.name === FUNDAMENTALS_TAB_NAME;
     const sharedFundamentalPeriodKey = isSystemFundamentalsTab
-        ? `${FUNDAMENTALS_PERIOD_SYNC_GROUP}:${globalSymbol.toUpperCase()}`
+        ? `${FUNDAMENTALS_PERIOD_SYNC_GROUP}:${stockGlobalSymbol.toUpperCase()}`
         : undefined;
     const { period: sharedFundamentalPeriod, setPeriod: setSharedFundamentalPeriod } = usePeriodState({
         widgetId: `dashboard-period-${activeDashboard?.id ?? 'none'}-${activeTab?.id ?? 'none'}`,
@@ -456,44 +456,6 @@ function DashboardContent() {
     const handleSymbolChange = useCallback((symbol: string) => {
         applySelectedSymbol(symbol);
     }, [applySelectedSymbol]);
-
-    useEffect(() => {
-        if (!activeDashboard || !activeTab) {
-            return;
-        }
-
-        const tabSeedKey = `${activeDashboard.id}:${activeTab.id}`;
-        if (lastGlobalMarketsSeedRef.current === tabSeedKey) {
-            return;
-        }
-        lastGlobalMarketsSeedRef.current = tabSeedKey;
-
-        if (
-            activeDashboard.id !== GLOBAL_MARKETS_DASHBOARD_ID &&
-            activeDashboard.name !== GLOBAL_MARKETS_DASHBOARD_NAME
-        ) {
-            return;
-        }
-
-        const seededTradingViewSymbol = activeTab.widgets.find((widget) => {
-            if (!isTradingViewWidget(widget.type) || !usesTradingViewWidgetSymbol(widget.type)) {
-                return false;
-            }
-
-            return widget.config?.useLinkedSymbol !== false && typeof widget.config?.symbol === 'string' && widget.config.symbol.trim().length > 0;
-        })?.config?.symbol;
-
-        if (!seededTradingViewSymbol) {
-            return;
-        }
-
-        const normalized = seededTradingViewSymbol.trim().toUpperCase();
-        if (!normalized || normalized === globalSymbol) {
-            return;
-        }
-
-        applySelectedSymbol(normalized);
-    }, [activeDashboard, activeTab, applySelectedSymbol, globalSymbol]);
 
     const canEditCurrentDashboard = (activeDashboard?.adminUnlocked === true) || activeDashboard?.isEditable !== false;
 
@@ -733,7 +695,7 @@ function DashboardContent() {
                 }}
             >
                 <Header
-                    currentSymbol={globalSymbol}
+                    currentSymbol={stockGlobalSymbol}
                     onSymbolChange={handleSymbolChange}
                     isEditing={isEditing}
                     onEditToggle={canEditCurrentDashboard ? handleEditToggle : undefined}
@@ -751,7 +713,7 @@ function DashboardContent() {
                     onUnitDisplayChange={setUnit}
                 />
 
-                <TabBar symbol={globalSymbol} />
+                <TabBar symbol={stockGlobalSymbol} />
 
                 <div className="relative flex-1 overflow-hidden bg-[var(--bg-primary)] p-3 sm:p-4">
                     {activeDashboard && activeTab ? (
@@ -816,7 +778,7 @@ function DashboardContent() {
                                                 Financial Period View
                                             </div>
                                             <div className="mt-1 text-xs text-[var(--text-secondary)]">
-                                                Syncs Financial Ratios, Income Statement, Balance Sheet, and Cash Flow for {globalSymbol}.
+                                                Syncs Financial Ratios, Income Statement, Balance Sheet, and Cash Flow for {stockGlobalSymbol}.
                                             </div>
                                         </div>
                                         <PeriodToggle
@@ -842,12 +804,12 @@ function DashboardContent() {
                                         const widgetSymbol = isTradingViewWidget(widgetType)
                                             ? usesTradingViewWidgetSymbol(widgetType)
                                                 ? (widget.config?.useLinkedSymbol !== false
-                                                    ? globalSymbol
+                                                    ? globalMarketsSymbol
                                                     : (typeof widget.config?.symbol === 'string' && widget.config.symbol
                                                         ? widget.config.symbol
-                                                        : globalSymbol))
+                                                        : globalMarketsSymbol))
                                                 : undefined
-                                            : globalSymbol;
+                                            : stockGlobalSymbol;
                                         const parameters = getWidgetParameters(widget, (key, value) =>
                                             handleWidgetConfigChange(widget.id, key, value)
                                         );
@@ -967,7 +929,7 @@ function DashboardContent() {
                     <AICopilot 
                         isOpen={showAICopilot} 
                         onClose={() => setShowAICopilot(false)} 
-                        currentSymbol={globalSymbol}
+                        currentSymbol={stockGlobalSymbol}
                         widgetContext={copilotWidgetContext}
                         widgetContextData={copilotWidgetData}
                         activeTabName={activeTab?.name}

@@ -25,7 +25,7 @@ const AVAILABLE_FILTERS = [
     ],
   },
   {
-    id: 'pe_ratio',
+    id: 'pe',
     label: 'P/E',
     presets: [
       { label: 'Under 10', value: { lt: 10 } },
@@ -34,7 +34,7 @@ const AVAILABLE_FILTERS = [
     ],
   },
   {
-    id: 'change',
+    id: 'change_1d',
     label: 'Change %',
     presets: [
       { label: 'Gainers (+5%)', value: { gte: 5 } },
@@ -43,13 +43,30 @@ const AVAILABLE_FILTERS = [
     ],
   },
   {
-    id: 'sector',
-    label: 'Sector',
+    id: 'rs_rating',
+    label: 'RS Rating',
     presets: [
-      { label: 'Banks', value: 'banks' },
-      { label: 'Real Estate', value: 'real_estate' },
-      { label: 'Technology', value: 'technology' },
-      { label: 'Consumer', value: 'consumer' },
+      { label: '80+', value: { gte: 80 } },
+      { label: '90+', value: { gte: 90 } },
+      { label: '50 - 80', value: { gte: 50, lt: 80 } },
+    ],
+  },
+  {
+    id: 'roe',
+    label: 'ROE',
+    presets: [
+      { label: 'Above 15%', value: { gte: 15 } },
+      { label: 'Above 20%', value: { gte: 20 } },
+      { label: 'Below 10%', value: { lt: 10 } },
+    ],
+  },
+  {
+    id: 'dividend_yield',
+    label: 'Dividend Yield',
+    presets: [
+      { label: 'Above 3%', value: { gte: 3 } },
+      { label: 'Above 5%', value: { gte: 5 } },
+      { label: 'Below 2%', value: { lt: 2 } },
     ],
   },
 ];

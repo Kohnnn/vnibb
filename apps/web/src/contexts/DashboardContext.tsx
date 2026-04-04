@@ -254,13 +254,13 @@ const GLOBAL_MARKETS_TEMPLATE: TemplateWidget[] = [
     {
         type: 'tradingview_chart',
         syncGroupId: 1,
-        config: { symbol: 'NASDAQ:QQQ' },
+        config: { symbol: 'NASDAQ:VFS' },
         layout: { x: 0, y: 4, w: 14, h: 10, minW: 10, minH: 8 }
     },
     {
         type: 'tradingview_technical_analysis',
         syncGroupId: 1,
-        config: { symbol: 'NASDAQ:QQQ' },
+        config: { symbol: 'NASDAQ:VFS' },
         layout: { x: 14, y: 4, w: 10, h: 10, minW: 8, minH: 8 }
     },
     {

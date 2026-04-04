@@ -20,6 +20,11 @@ Use these canonical IDs in templates, migrations, docs, and runtime logic:
 
 Legacy aliases such as `company_profile`, `financials`, `institutional_ownership`, and `database_browser` are migrated out of saved dashboards on load.
 
+## New Widgets
+
+- `financial_snapshot`: combined latest-first P&L, balance sheet, cash flow, and ratio snapshot rendered as four dense statement tables.
+- `earnings_release_recap`: quarter recap widget combining income statement deltas, cash-flow context, earnings-quality checks, company events, and company news.
+
 ## Persistence Rules
 
 Widget-owned state should persist through dashboard-backed widget config so it follows Appwrite-authenticated dashboard sync.
@@ -38,6 +43,11 @@ Current config-backed widget state includes:
 - Manual resizing should not be blocked by legacy saved `maxW` and `maxH` caps.
 - Existing dashboards are migrated to strip stale layout caps.
 - Dense table and list widgets should favor wrapping and scrolling over fixed truncation where practical.
+
+## Financial Widget Defaults
+
+- `unified_financials`, `income_statement`, `balance_sheet`, `cash_flow`, and `financial_ratios` now default to latest-first period ordering.
+- Growth badges still compare current values against the older comparable period even when columns are rendered latest-first.
 
 ## Template Rules
 

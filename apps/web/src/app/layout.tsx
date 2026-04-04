@@ -7,6 +7,7 @@ import { DataSourcesProvider } from "@/contexts/DataSourcesContext";
 import { UnitProvider } from "@/contexts/UnitContext";
 import { WidgetGroupProvider } from "@/contexts/WidgetGroupContext";
 import { SymbolLinkProvider } from "@/contexts/SymbolLinkContext";
+import { GlobalMarketsSymbolProvider } from "@/contexts/GlobalMarketsSymbolContext";
 import { ThemeProvider, ThemeScript } from "@/contexts/ThemeContext";
 import { CommandPaletteWrapper } from "@/components/CommandPaletteWrapper";
 import "./globals.css";
@@ -72,12 +73,14 @@ export default function RootLayout({
               <DashboardProvider>
                 <WidgetGroupProvider>
                   <SymbolLinkProvider>
-                    <DataSourcesProvider>
-                      <UnitProvider>
-                        <main id="main-content">{children}</main>
-                        <CommandPaletteWrapper />
-                      </UnitProvider>
-                    </DataSourcesProvider>
+                    <GlobalMarketsSymbolProvider>
+                      <DataSourcesProvider>
+                        <UnitProvider>
+                          <main id="main-content">{children}</main>
+                          <CommandPaletteWrapper />
+                        </UnitProvider>
+                      </DataSourcesProvider>
+                    </GlobalMarketsSymbolProvider>
                   </SymbolLinkProvider>
                 </WidgetGroupProvider>
               </DashboardProvider>
