@@ -3,6 +3,7 @@
 import React from 'react';
 import { Settings, Maximize2, Minimize2, Download, X, RefreshCw, Sparkles, Move, Users, Info } from 'lucide-react';
 import { WIDGET_DESCRIPTIONS } from '@/lib/widgetDescriptions';
+import { isTradingViewWidget } from '@/lib/tradingViewWidgets';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { WidgetType } from '@/types/dashboard';
 
@@ -30,6 +31,7 @@ interface WidgetToolbarProps {
   tickerSelector?: React.ReactNode;
   parameters?: React.ReactNode;
   actions?: React.ReactNode;
+  highlightSettings?: boolean;
 }
 
 export function WidgetToolbar({
@@ -51,8 +53,10 @@ export function WidgetToolbar({
   tickerSelector,
   parameters,
   actions,
+  highlightSettings = false,
 }: WidgetToolbarProps) {
   const description = widgetType ? WIDGET_DESCRIPTIONS[widgetType] : undefined;
+  const shouldHighlightSettings = Boolean(onSettings && (highlightSettings || isTradingViewWidget(widgetType)));
 
   return (
     <div className="flex h-8 items-center justify-between border-b border-[var(--border-default)] bg-[var(--bg-widget-header)]/80 px-2 select-none">
@@ -186,10 +190,15 @@ export function WidgetToolbar({
           <button
             onClick={onSettings}
             data-tour="widget-settings-trigger"
-            className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors"
-            title="Settings"
+            className={shouldHighlightSettings
+              ? 'relative rounded border border-blue-500/30 bg-blue-500/12 p-1 text-blue-300 shadow-[0_0_0_1px_rgba(59,130,246,0.08)] transition-colors hover:bg-blue-500/18 hover:text-blue-200'
+              : 'p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded transition-colors'}
+            title={shouldHighlightSettings ? 'TradingView settings' : 'Settings'}
             aria-label="Widget settings"
           >
+            {shouldHighlightSettings && (
+              <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-blue-400" />
+            )}
             <Settings size={12} />
           </button>
         )}

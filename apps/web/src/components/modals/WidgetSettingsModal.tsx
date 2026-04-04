@@ -6,6 +6,7 @@ import { RotateCcw, Save, X } from 'lucide-react';
 
 import { useDashboard } from '@/contexts/DashboardContext';
 import {
+    getTradingViewWidgetMetadata,
     getTradingViewDefaultConfig,
     getTradingViewSettingsFields,
     isTradingViewWidget,
@@ -21,7 +22,7 @@ interface WidgetSettingsModalProps {
     tabId: string | null;
 }
 
-function toSymbolListText(value: unknown): string {
+function toListText(value: unknown): string {
     if (!Array.isArray(value)) return '';
 
     return value
@@ -30,17 +31,33 @@ function toSymbolListText(value: unknown): string {
             if (entry && typeof entry === 'object' && 'proName' in entry) {
                 return String((entry as { proName?: unknown }).proName || '');
             }
+            if (entry && typeof entry === 'object' && 'symbol' in entry) {
+                return String((entry as { symbol?: unknown }).symbol || '');
+            }
             return '';
         })
         .filter(Boolean)
         .join('\n');
 }
 
-function parseSymbolListText(value: string): string[] {
+function parseListText(value: string): string[] {
     return value
         .split(/[,\n]/)
         .map((entry) => entry.trim())
         .filter(Boolean);
+}
+
+function groupFieldsBySection(fields: TradingViewSettingField[]): Array<{ section: string; fields: TradingViewSettingField[] }> {
+    const sections = new Map<string, TradingViewSettingField[]>();
+
+    fields.forEach((field) => {
+        const section = field.section || 'General';
+        const current = sections.get(section) || [];
+        current.push(field);
+        sections.set(section, current);
+    });
+
+    return Array.from(sections.entries()).map(([section, sectionFields]) => ({ section, fields: sectionFields }));
 }
 
 function buildAdvancedConfigDraft(config: WidgetConfig, fields: TradingViewSettingField[]): string {
@@ -85,6 +102,14 @@ export function WidgetSettingsModal({
     const tradingViewFields = useMemo(
         () => getTradingViewSettingsFields(widget?.type),
         [widget?.type]
+    );
+    const tradingViewMetadata = useMemo(
+        () => getTradingViewWidgetMetadata(widget?.type),
+        [widget?.type]
+    );
+    const tradingViewSections = useMemo(
+        () => groupFieldsBySection(tradingViewFields),
+        [tradingViewFields]
     );
     const tradingViewMode = isTradingViewWidget(widget?.type);
 
@@ -150,9 +175,16 @@ export function WidgetSettingsModal({
         <div data-tour="widget-settings-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="w-full max-w-2xl bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] flex flex-col overflow-hidden">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-modal)]">
-                    <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-                        Settings: <span className="text-blue-400">{widget.type}</span>
-                    </h2>
+                    <div>
+                        <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+                            Settings: <span className="text-blue-400">{tradingViewMetadata?.name || widget.type}</span>
+                        </h2>
+                        {tradingViewMode ? (
+                            <div className="mt-1 inline-flex items-center gap-2 rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-200">
+                                TradingView Native
+                            </div>
+                        ) : null}
+                    </div>
                     <button
                         onClick={onClose}
                         className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
@@ -188,86 +220,120 @@ export function WidgetSettingsModal({
                             <div>
                                 <div className="text-sm font-medium text-[var(--text-secondary)]">TradingView Settings</div>
                                 <p className="mt-1 text-xs text-[var(--text-muted)]">
-                                    Common TradingView options are mapped below. Use advanced JSON for nested properties like tabs, studies, or compare symbols.
+                                    These controls are mapped from the TradingView widget settings surface. Advanced JSON remains available for nested objects and edge-case options.
                                 </p>
                             </div>
-                            <div className="grid gap-4 md:grid-cols-2">
-                                {tradingViewFields.map((field) => {
-                                    const fieldId = `widget-config-${field.key}`;
+                            <div className="space-y-3">
+                                {tradingViewSections.map(({ section, fields }) => (
+                                    <details key={section} open className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/55">
+                                        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-[var(--text-primary)]">
+                                            {section}
+                                        </summary>
+                                        <div className="grid gap-4 border-t border-[var(--border-default)] px-4 py-4 md:grid-cols-2">
+                                            {fields.map((field) => {
+                                                const fieldId = `widget-config-${field.key}`;
 
-                                    if (field.type === 'boolean') {
-                                        return (
-                                            <label key={field.key} htmlFor={fieldId} className="flex items-center justify-between gap-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] md:col-span-2">
-                                                <div>
-                                                    <div>{field.label}</div>
-                                                    {field.description ? (
-                                                        <div className="mt-1 text-xs text-[var(--text-muted)]">{field.description}</div>
-                                                    ) : null}
-                                                </div>
-                                                <input
-                                                    id={fieldId}
-                                                    type="checkbox"
-                                                    checked={Boolean(draftConfig[field.key])}
-                                                    onChange={(event) => handleConfigValueChange(field.key, event.target.checked)}
-                                                    className="h-4 w-4 rounded border-[var(--border-default)] bg-[var(--bg-primary)] text-blue-500 focus:ring-blue-500"
-                                                />
-                                            </label>
-                                        );
-                                    }
+                                                if (field.type === 'boolean') {
+                                                    return (
+                                                        <label key={field.key} htmlFor={fieldId} className="flex items-center justify-between gap-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] md:col-span-2">
+                                                            <div>
+                                                                <div>{field.label}</div>
+                                                                {field.description ? (
+                                                                    <div className="mt-1 text-xs text-[var(--text-muted)]">{field.description}</div>
+                                                                ) : null}
+                                                            </div>
+                                                            <input
+                                                                id={fieldId}
+                                                                type="checkbox"
+                                                                checked={Boolean(draftConfig[field.key])}
+                                                                onChange={(event) => handleConfigValueChange(field.key, event.target.checked)}
+                                                                className="h-4 w-4 rounded border-[var(--border-default)] bg-[var(--bg-primary)] text-blue-500 focus:ring-blue-500"
+                                                            />
+                                                        </label>
+                                                    );
+                                                }
 
-                                    if (field.type === 'select') {
-                                        return (
-                                            <label key={field.key} htmlFor={fieldId} className="space-y-2">
-                                                <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
-                                                <select
-                                                    id={fieldId}
-                                                    value={String(draftConfig[field.key] ?? '')}
-                                                    onChange={(event) => handleConfigValueChange(field.key, event.target.value)}
-                                                    className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
-                                                >
-                                                    <option value="">Default</option>
-                                                    {(field.options || []).map((option) => (
-                                                        <option key={option.value} value={option.value}>{option.label}</option>
-                                                    ))}
-                                                </select>
-                                                {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
-                                            </label>
-                                        );
-                                    }
+                                                if (field.type === 'select') {
+                                                    return (
+                                                        <label key={field.key} htmlFor={fieldId} className="space-y-2">
+                                                            <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
+                                                            <select
+                                                                id={fieldId}
+                                                                value={String(draftConfig[field.key] ?? '')}
+                                                                onChange={(event) => handleConfigValueChange(field.key, event.target.value)}
+                                                                className="w-full bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                                                            >
+                                                                <option value="">Default</option>
+                                                                {(field.options || []).map((option) => (
+                                                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                                                ))}
+                                                            </select>
+                                                            {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                                        </label>
+                                                    );
+                                                }
 
-                                    if (field.type === 'symbol_list') {
-                                        return (
-                                            <label key={field.key} htmlFor={fieldId} className="space-y-2 md:col-span-2">
-                                                <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
-                                                <textarea
-                                                    id={fieldId}
-                                                    value={toSymbolListText(draftConfig[field.key])}
-                                                    onChange={(event) => handleConfigValueChange(field.key, parseSymbolListText(event.target.value))}
-                                                    className="w-full min-h-[96px] bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500 resize-y"
-                                                    placeholder={field.placeholder || 'One symbol per line'}
-                                                />
-                                                {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
-                                            </label>
-                                        );
-                                    }
+                                                if (field.type === 'symbol_list' || field.type === 'list') {
+                                                    return (
+                                                        <label key={field.key} htmlFor={fieldId} className="space-y-2 md:col-span-2">
+                                                            <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
+                                                            <textarea
+                                                                id={fieldId}
+                                                                value={toListText(draftConfig[field.key])}
+                                                                onChange={(event) => handleConfigValueChange(field.key, parseListText(event.target.value))}
+                                                                className="w-full bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500 resize-y"
+                                                                rows={field.rows || 4}
+                                                                placeholder={field.placeholder || 'One item per line'}
+                                                            />
+                                                            {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                                        </label>
+                                                    );
+                                                }
 
-                                    return (
-                                        <label key={field.key} htmlFor={fieldId} className="space-y-2">
-                                            <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
-                                            <input
-                                                id={fieldId}
-                                                type={field.type === 'number' ? 'number' : 'text'}
-                                                min={field.min}
-                                                step={field.step}
-                                                value={String(draftConfig[field.key] ?? '')}
-                                                onChange={(event) => handleConfigValueChange(field.key, field.type === 'number' ? Number(event.target.value) : event.target.value)}
-                                                className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
-                                                placeholder={field.placeholder}
-                                            />
-                                            {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
-                                        </label>
-                                    );
-                                })}
+                                                if (field.type === 'color') {
+                                                    const colorValue = String(draftConfig[field.key] ?? '');
+                                                    return (
+                                                        <label key={field.key} htmlFor={fieldId} className="space-y-2">
+                                                            <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
+                                                            <div className="flex items-center gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                                                                <span
+                                                                    className="h-8 w-8 rounded-md border border-[var(--border-default)]"
+                                                                    style={{ background: colorValue || 'transparent' }}
+                                                                />
+                                                                <input
+                                                                    id={fieldId}
+                                                                    type="text"
+                                                                    value={colorValue}
+                                                                    onChange={(event) => handleConfigValueChange(field.key, event.target.value)}
+                                                                    className="w-full bg-transparent text-[var(--text-primary)] focus:outline-none"
+                                                                    placeholder={field.placeholder}
+                                                                />
+                                                            </div>
+                                                            {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                                        </label>
+                                                    );
+                                                }
+
+                                                return (
+                                                    <label key={field.key} htmlFor={fieldId} className="space-y-2">
+                                                        <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
+                                                        <input
+                                                            id={fieldId}
+                                                            type={field.type === 'number' ? 'number' : 'text'}
+                                                            min={field.min}
+                                                            step={field.step}
+                                                            value={String(draftConfig[field.key] ?? '')}
+                                                            onChange={(event) => handleConfigValueChange(field.key, field.type === 'number' ? Number(event.target.value) : event.target.value)}
+                                                            className="w-full bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                                                            placeholder={field.placeholder}
+                                                        />
+                                                        {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                                    </label>
+                                                );
+                                            })}
+                                        </div>
+                                    </details>
+                                ))}
                             </div>
                         </div>
                     ) : null}
