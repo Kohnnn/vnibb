@@ -53,6 +53,8 @@ from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher, StockQ
 from vnibb.providers.vnstock.company_events import (
     VnstockCompanyEventsFetcher,
     CompanyEventsQueryParams,
+    _normalize_company_action_category,
+    _parse_company_action_value,
 )
 from vnibb.providers.vnstock.shareholders import (
     VnstockShareholdersFetcher,
@@ -1115,6 +1117,273 @@ def _to_historical_data_from_appwrite(
         adjustment_mode=str(adjustment_mode or "raw").strip().lower() or "raw",
         adjustment_applied=applied,
     )
+
+
+def _parse_share_ratio_parts(ratio_text: str | None) -> tuple[float, float] | None:
+    if not ratio_text:
+        return None
+
+    raw = str(ratio_text).strip().replace("-", ":").replace("/", ":")
+    match = re.match(r"^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$", raw)
+    if not match:
+        return None
+
+    left = float(match.group(1))
+    right = float(match.group(2))
+    if not math.isfinite(left) or not math.isfinite(right) or left <= 0 or right < 0:
+        return None
+
+    return left, right
+
+
+def _ratio_factor_for_action(
+    *,
+    action_category: str | None,
+    action_subtype: str | None,
+    share_ratio: str | None,
+    percent_ratio: float | None = None,
+) -> Optional[float]:
+    category = str(action_category or "").strip().lower()
+    subtype = str(action_subtype or "").strip().lower()
+    ratio_parts = _parse_share_ratio_parts(share_ratio)
+
+    if category == "split" and ratio_parts is not None:
+        new_shares, old_shares = ratio_parts
+        if new_shares > 0 and old_shares >= 0:
+            return old_shares / new_shares
+
+    if subtype in {"stock_dividend", "rights_issue"}:
+        if ratio_parts is not None:
+            existing_shares, new_shares = ratio_parts
+            total_shares = existing_shares + new_shares
+            if existing_shares > 0 and total_shares > 0:
+                return existing_shares / total_shares
+
+        if percent_ratio is not None and math.isfinite(percent_ratio) and percent_ratio > 0:
+            pct = percent_ratio / 100 if percent_ratio > 1 else percent_ratio
+            if pct > 0:
+                return 1 / (1 + pct)
+
+    return None
+
+
+def _cash_dividend_factor(
+    cash_amount_per_share: float | None, reference_close: float | None
+) -> Optional[float]:
+    if cash_amount_per_share in (None, 0) or reference_close in (None, 0):
+        return None
+
+    cash = float(cash_amount_per_share)
+    close = float(reference_close)
+    if (
+        not math.isfinite(cash)
+        or not math.isfinite(close)
+        or close <= 0
+        or cash <= 0
+        or cash >= close
+    ):
+        return None
+
+    return (close - cash) / close
+
+
+async def _load_corporate_actions_for_adjustment(
+    db: AsyncSession,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+
+    dividend_rows = (
+        (
+            await db.execute(
+                select(Dividend)
+                .where(
+                    Dividend.symbol == symbol,
+                    Dividend.exercise_date >= start_date,
+                    Dividend.exercise_date <= end_date,
+                )
+                .order_by(Dividend.exercise_date.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in dividend_rows:
+        effective_date = row.exercise_date or row.record_date or row.payment_date
+        if not effective_date:
+            continue
+        issue_method = str(row.issue_method or "").strip().lower()
+        raw_payload = row.raw_data if isinstance(row.raw_data, dict) else {}
+        share_ratio = raw_payload.get("ratio") or raw_payload.get("dividend_ratio")
+        stock_dividend_ratio = _coerce_optional_float(
+            raw_payload.get("stock_dividend") or row.dividend_rate
+        )
+
+        if issue_method == "cash" or row.dividend_value not in (None, 0):
+            actions.append(
+                {
+                    "effective_date": effective_date,
+                    "action_category": "dividend",
+                    "action_subtype": "cash_dividend",
+                    "cash_amount_per_share": _coerce_optional_float(row.dividend_value),
+                    "share_ratio": None,
+                    "percent_ratio": None,
+                }
+            )
+        elif issue_method == "stock" or share_ratio or stock_dividend_ratio not in (None, 0):
+            actions.append(
+                {
+                    "effective_date": effective_date,
+                    "action_category": "dividend",
+                    "action_subtype": "stock_dividend",
+                    "cash_amount_per_share": None,
+                    "share_ratio": str(share_ratio) if share_ratio not in (None, "") else None,
+                    "percent_ratio": stock_dividend_ratio,
+                }
+            )
+
+    event_rows = (
+        (
+            await db.execute(
+                select(CompanyEvent)
+                .where(CompanyEvent.symbol == symbol)
+                .order_by(desc(CompanyEvent.event_date), desc(CompanyEvent.ex_date))
+                .limit(400)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in event_rows:
+        action_category, action_subtype = _normalize_company_action_category(
+            row.event_type,
+            None,
+            row.description,
+        )
+        effective_date = row.ex_date or row.event_date or row.record_date or row.payment_date
+        if not effective_date or effective_date < start_date or effective_date > end_date:
+            continue
+        if action_category not in {"dividend", "split", "issuance"}:
+            continue
+
+        raw_payload = row.raw_data if isinstance(row.raw_data, dict) else {}
+        parsed_cash, parsed_ratio = _parse_company_action_value(
+            str(row.value) if row.value is not None else None,
+            row.description,
+        )
+
+        actions.append(
+            {
+                "effective_date": effective_date,
+                "action_category": action_category,
+                "action_subtype": action_subtype,
+                "cash_amount_per_share": parsed_cash,
+                "share_ratio": parsed_ratio,
+                "percent_ratio": _coerce_optional_float(
+                    raw_payload.get("stock_dividend") or raw_payload.get("dividend_ratio")
+                ),
+            }
+        )
+
+    actions.sort(key=lambda item: item["effective_date"])
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for action in actions:
+        key = (
+            action.get("effective_date"),
+            action.get("action_category"),
+            action.get("action_subtype"),
+            action.get("cash_amount_per_share"),
+            action.get("share_ratio"),
+            action.get("percent_ratio"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(action)
+
+    return deduped
+
+
+def _apply_corporate_action_adjustments(
+    rows: List[EquityHistoricalData],
+    actions: list[dict[str, Any]],
+    adjustment_mode: str,
+) -> List[EquityHistoricalData]:
+    normalized_mode = str(adjustment_mode or "raw").strip().lower() or "raw"
+    if normalized_mode != "adjusted" or not rows:
+        return [
+            row.model_copy(
+                update={
+                    "adjustment_mode": normalized_mode,
+                    "raw_close": row.raw_close if row.raw_close is not None else row.close,
+                }
+            )
+            for row in rows
+        ]
+
+    adjusted_rows = [row.model_copy() for row in rows]
+    actions_sorted = sorted(actions, key=lambda item: item["effective_date"])
+    action_index = len(actions_sorted) - 1
+    cumulative_factor = 1.0
+
+    for row in reversed(adjusted_rows):
+        row_date = (
+            row.time if isinstance(row.time, date) else date.fromisoformat(str(row.time)[:10])
+        )
+
+        while action_index >= 0 and actions_sorted[action_index]["effective_date"] > row_date:
+            action = actions_sorted[action_index]
+            factor: Optional[float] = None
+
+            if action.get("action_subtype") == "cash_dividend":
+                reference_row = next(
+                    (
+                        candidate
+                        for candidate in adjusted_rows
+                        if candidate.time < action["effective_date"]
+                        and (candidate.raw_close or candidate.close)
+                    ),
+                    None,
+                )
+                reference_close = (
+                    reference_row.raw_close
+                    if reference_row and reference_row.raw_close is not None
+                    else (reference_row.close if reference_row else None)
+                )
+                factor = _cash_dividend_factor(action.get("cash_amount_per_share"), reference_close)
+            else:
+                factor = _ratio_factor_for_action(
+                    action_category=action.get("action_category"),
+                    action_subtype=action.get("action_subtype"),
+                    share_ratio=action.get("share_ratio"),
+                    percent_ratio=action.get("percent_ratio"),
+                )
+
+            if factor is not None and math.isfinite(factor) and factor > 0:
+                cumulative_factor *= factor
+
+            action_index -= 1
+
+        raw_close = row.raw_close if row.raw_close is not None else row.close
+        if row.adjustment_applied or cumulative_factor == 1:
+            row.adjustment_mode = normalized_mode
+            row.raw_close = raw_close
+            continue
+
+        row.open = float(row.open) * cumulative_factor
+        row.high = float(row.high) * cumulative_factor
+        row.low = float(row.low) * cumulative_factor
+        row.close = float(raw_close) * cumulative_factor
+        row.adjusted_close = row.close
+        row.adjustment_factor = cumulative_factor
+        row.adjustment_mode = normalized_mode
+        row.adjustment_applied = True
+        row.raw_close = raw_close
+
+    return adjusted_rows
 
 
 async def _load_historical_from_appwrite(
@@ -3649,6 +3918,16 @@ async def get_historical_prices(
 ):
     symbol_upper = symbol.upper()
     cache_manager = CacheManager(db=db)
+    corporate_actions = (
+        await _load_corporate_actions_for_adjustment(
+            db,
+            symbol_upper,
+            start_date,
+            end_date,
+        )
+        if adjustment_mode == "adjusted"
+        else []
+    )
     use_appwrite_data = settings.is_appwrite_configured and settings.resolved_data_backend in {
         "appwrite",
         "hybrid",
@@ -3662,6 +3941,7 @@ async def get_historical_prices(
     )
     if cache_result.hit and cache_result.data:
         data = [_to_historical_data(r, adjustment_mode=adjustment_mode) for r in cache_result.data]
+        data = _apply_corporate_action_adjustments(data, corporate_actions, adjustment_mode)
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
 
     recent_cache_data = await _load_historical_from_recent_cache(
@@ -3672,6 +3952,9 @@ async def get_historical_prices(
         adjustment_mode=adjustment_mode,
     )
     if recent_cache_data:
+        recent_cache_data = _apply_corporate_action_adjustments(
+            recent_cache_data, corporate_actions, adjustment_mode
+        )
         return StandardResponse(data=recent_cache_data, meta=MetaData(count=len(recent_cache_data)))
 
     if settings.resolved_data_backend == "appwrite" and use_appwrite_data:
@@ -3683,6 +3966,9 @@ async def get_historical_prices(
             adjustment_mode=adjustment_mode,
         )
         if appwrite_data:
+            appwrite_data = _apply_corporate_action_adjustments(
+                appwrite_data, corporate_actions, adjustment_mode
+            )
             return StandardResponse(data=appwrite_data, meta=MetaData(count=len(appwrite_data)))
 
     try:
@@ -3708,6 +3994,9 @@ async def get_historical_prices(
                 )
                 for item in data
             ]
+            normalized_data = _apply_corporate_action_adjustments(
+                normalized_data, corporate_actions, adjustment_mode
+            )
             return StandardResponse(data=normalized_data, meta=MetaData(count=len(normalized_data)))
 
         if use_appwrite_data:
@@ -3719,6 +4008,9 @@ async def get_historical_prices(
                 adjustment_mode=adjustment_mode,
             )
             if appwrite_data:
+                appwrite_data = _apply_corporate_action_adjustments(
+                    appwrite_data, corporate_actions, adjustment_mode
+                )
                 logger.info(
                     "Historical endpoint served Appwrite fallback after empty provider payload (symbol=%s interval=%s)",
                     symbol_upper,
@@ -3735,6 +4027,9 @@ async def get_historical_prices(
             adjustment_mode=adjustment_mode,
         )
         if fallback_data:
+            fallback_data = _apply_corporate_action_adjustments(
+                fallback_data, corporate_actions, adjustment_mode
+            )
             logger.info(
                 "Historical endpoint served DB fallback after empty provider payload (symbol=%s interval=%s)",
                 symbol_upper,
@@ -3765,6 +4060,9 @@ async def get_historical_prices(
                 adjustment_mode=adjustment_mode,
             )
             if appwrite_data:
+                appwrite_data = _apply_corporate_action_adjustments(
+                    appwrite_data, corporate_actions, adjustment_mode
+                )
                 logger.info(
                     "Historical endpoint recovered via Appwrite fallback after provider error (symbol=%s interval=%s)",
                     symbol_upper,
@@ -3781,6 +4079,9 @@ async def get_historical_prices(
             adjustment_mode=adjustment_mode,
         )
         if fallback_data:
+            fallback_data = _apply_corporate_action_adjustments(
+                fallback_data, corporate_actions, adjustment_mode
+            )
             logger.info(
                 "Historical endpoint recovered via DB fallback after provider error (symbol=%s interval=%s)",
                 symbol_upper,
