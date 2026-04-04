@@ -441,10 +441,7 @@
       "permissionsMode": "publicRead",
       "batchSize": 500,
       "precisionColumns": ["change_pct", "avg_change_pct", "total_value", "total_market_cap", "top_gainer_change", "top_loser_change"],
-      "queryAttributes": [
-        { "key": "sector_code_q", "source": "sector_code", "type": "string", "size": 32, "normalize": "upper" },
-        { "key": "trade_date_dt", "source": "trade_date", "type": "datetime" }
-      ],
+      "queryAttributes": [],
       "indexes": [
         { "key": "idx_sector_code", "type": "key", "attributes": ["sector_code_q"], "orders": ["asc"] },
         { "key": "idx_sector_date", "type": "key", "attributes": ["sector_code_q", "trade_date_dt"], "orders": ["asc", "desc"] }

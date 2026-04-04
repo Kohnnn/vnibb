@@ -3,7 +3,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Sparkles, Loader2, X, Download, Copy, Check } from 'lucide-react';
+import { Send, Sparkles, Loader2, X, Download, Copy, Check, ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -85,6 +85,25 @@ function appendReasoningStep(existing: string | undefined, step: CopilotReasonin
     return existing ? `${existing}\n${line}` : line;
 }
 
+function hasMessageDetails(message: Message): boolean {
+    return Boolean(
+        message.reasoning ||
+        message.responseMeta ||
+        message.actions?.length ||
+        message.artifacts?.length ||
+        message.sources?.length
+    );
+}
+
+function getMessageDetailsLabel(message: Message): string {
+    const parts: string[] = [];
+    if (message.reasoning) parts.push('reasoning');
+    if (message.actions?.length) parts.push(`${message.actions.length} action${message.actions.length > 1 ? 's' : ''}`);
+    if (message.artifacts?.length) parts.push(`${message.artifacts.length} artifact${message.artifacts.length > 1 ? 's' : ''}`);
+    if (message.sources?.length) parts.push(`${message.sources.length} source${message.sources.length > 1 ? 's' : ''}`);
+    return parts.join(' · ') || 'details';
+}
+
 export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopilotWidgetProps) {
     const [messages, setMessages] = useState<Message[]>([
         {
@@ -99,6 +118,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
     const [context, setContext] = useState<WidgetContext | undefined>(initialContext);
     const [copiedId, setCopiedId] = useState<string | null>(null);
     const [currentStatus, setCurrentStatus] = useState<string | null>(null);
+    const [showDetails, setShowDetails] = useState<Record<string, boolean>>({});
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -330,12 +350,6 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                                 <span className="inline-block w-2 h-4 bg-cyan-400 animate-pulse ml-1" />
                             )}
 
-                            {message.reasoning && (
-                                <div className="mt-2 rounded border border-cyan-500/20 bg-cyan-500/5 p-2 text-[10px] leading-relaxed text-cyan-100/80 whitespace-pre-wrap">
-                                    {message.reasoning}
-                                </div>
-                            )}
-
                             {/* Copy button */}
                             {message.role === 'assistant' && !message.isStreaming && message.content && (
                                 <button
@@ -346,45 +360,56 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                                 </button>
                             )}
                         </div>
-                        {message.role === 'assistant' && Boolean(message.sources?.length) && (
-                            <div className="mt-2 w-full max-w-[90%]">
-                                <CopilotEvidencePanel
-                                    sources={message.sources || []}
-                                    responseMeta={message.responseMeta}
-                                    surface="widget"
-                                />
-                            </div>
+                        {message.role === 'assistant' && hasMessageDetails(message) && (
+                            <button
+                                type="button"
+                                onClick={() => setShowDetails((prev) => ({ ...prev, [message.id]: !prev[message.id] }))}
+                                className="mt-2 flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                            >
+                                {showDetails[message.id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                Details · {getMessageDetailsLabel(message)}
+                            </button>
                         )}
-                        {message.role === 'assistant' && message.responseMeta && (
-                            <div className="mt-2 w-full max-w-[90%]">
-                                <CopilotFeedbackBar
-                                    responseMeta={message.responseMeta}
-                                    surface="widget"
-                                    currentVote={message.feedbackVote}
-                                    onVoteChange={(vote) => {
-                                        setMessages((prev) => prev.map((item) =>
-                                            item.id === message.id ? { ...item, feedbackVote: vote } : item
-                                        ));
-                                    }}
-                                />
-                            </div>
-                        )}
-                        {message.role === 'assistant' && Boolean(message.artifacts?.length) && (
-                            <div className="mt-2 w-full max-w-[90%]">
-                                <CopilotArtifactPanel
-                                    artifacts={message.artifacts || []}
-                                    responseMeta={message.responseMeta}
-                                    surface="widget"
-                                />
-                            </div>
-                        )}
-                        {message.role === 'assistant' && Boolean(message.actions?.length) && (
-                            <div className="mt-2 w-full max-w-[90%]">
-                                <CopilotActionPanel
-                                    actions={message.actions || []}
-                                    responseMeta={message.responseMeta}
-                                    surface="widget"
-                                />
+                        {message.role === 'assistant' && showDetails[message.id] && (
+                            <div className="mt-2 w-full max-w-[90%] space-y-2">
+                                {message.reasoning && (
+                                    <div className="rounded border border-cyan-500/20 bg-cyan-500/5 p-2 text-[10px] leading-relaxed text-cyan-100/80 whitespace-pre-wrap">
+                                        {message.reasoning}
+                                    </div>
+                                )}
+                                {message.responseMeta && (
+                                    <CopilotFeedbackBar
+                                        responseMeta={message.responseMeta}
+                                        surface="widget"
+                                        currentVote={message.feedbackVote}
+                                        onVoteChange={(vote) => {
+                                            setMessages((prev) => prev.map((item) =>
+                                                item.id === message.id ? { ...item, feedbackVote: vote } : item
+                                            ));
+                                        }}
+                                    />
+                                )}
+                                {Boolean(message.artifacts?.length) && (
+                                    <CopilotArtifactPanel
+                                        artifacts={message.artifacts || []}
+                                        responseMeta={message.responseMeta}
+                                        surface="widget"
+                                    />
+                                )}
+                                {Boolean(message.actions?.length) && (
+                                    <CopilotActionPanel
+                                        actions={message.actions || []}
+                                        responseMeta={message.responseMeta}
+                                        surface="widget"
+                                    />
+                                )}
+                                {Boolean(message.sources?.length) && (
+                                    <CopilotEvidencePanel
+                                        sources={message.sources || []}
+                                        responseMeta={message.responseMeta}
+                                        surface="widget"
+                                    />
+                                )}
                             </div>
                         )}
                     </div>
