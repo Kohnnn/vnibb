@@ -12,7 +12,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { useBalanceSheet, useCashFlow, useFinancialRatios, useIncomeStatement, useProfile } from '@/lib/queries';
 import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
-import { formatNumber, formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import { convertFinancialValueForUnit, formatNumber, formatPercent, formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import type { BalanceSheetData, CashFlowData, FinancialRatioData, IncomeStatementData } from '@/types/equity';
 
 interface FinancialSnapshotWidgetProps {
@@ -178,6 +178,10 @@ function normalizeStatementPeriod(period: string | undefined, mode: FinancialPer
     const altQuarter = upper.match(/^Q([1-4])[-/](20\d{2})$/);
     if (altQuarter) {
         return `${altQuarter[2]}-Q${altQuarter[1]}`;
+    }
+
+    if (yearMatch) {
+        return null;
     }
 
     return quarterMatch ? `Q${quarterMatch[1]}` : label;
@@ -658,10 +662,16 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
             rows: section.rows.map<DenseTableRow>((row) => ({
                 id: row.id,
                 label: row.label,
-                values: Object.fromEntries(periods.map((periodKey) => [periodKey, row.getValue(periodKey, snapshotContext)])),
+                values: Object.fromEntries(periods.map((periodKey) => {
+                    const rawValue = row.getValue(periodKey, snapshotContext)
+                    const convertedValue = row.kind === 'statement' || row.kind === 'per_share'
+                        ? convertFinancialValueForUnit(rawValue, unitConfig, periodKey)
+                        : rawValue
+                    return [periodKey, convertedValue]
+                })),
             })),
         }));
-    }, [periods, snapshotContext]);
+    }, [periods, snapshotContext, unitConfig]);
 
     const statementValues = useMemo(
         () => sectionTables.flatMap((section) => section.rows.flatMap((row) => Object.values(row.values).filter((value): value is number | null | undefined => typeof value === 'number' || value === null || value === undefined))),

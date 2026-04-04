@@ -19,6 +19,14 @@ const CHART_BOTTOM = 310;
 const BAR_MAX_WIDTH = 96;
 const BAR_MIN_WIDTH = 52;
 
+function splitLabel(label: string): string[] {
+  if (label.length <= 12 || !label.includes(' ')) return [label];
+
+  const parts = label.split(' ')
+  const midpoint = Math.ceil(parts.length / 2)
+  return [parts.slice(0, midpoint).join(' '), parts.slice(midpoint).join(' ')].filter(Boolean)
+}
+
 function formatDelta(changePct: number | null | undefined): string {
   if (changePct === null || changePct === undefined) return '';
   const formatted = formatPercent(changePct, { decimals: 1, input: 'percent', clamp: 'yoy_change' });
@@ -72,6 +80,9 @@ export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfall
       </div>
 
       <div className="min-h-[340px] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+        <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+          Bridge from operating cash flow to net cash change
+        </div>
         <svg viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`} className="h-full w-full">
           <line x1={CHART_LEFT - 10} y1={laidOut.zeroY} x2={CHART_RIGHT + 30} y2={laidOut.zeroY} stroke="rgba(148,163,184,0.35)" strokeDasharray="4 4" />
 
@@ -123,9 +134,19 @@ export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfall
                     {delta}
                   </text>
                 ) : null}
-                <text x={bar.x + bar.width / 2} y={CHART_BOTTOM + 22} textAnchor="middle" fill="var(--text-muted)" fontSize="12" fontWeight="600">
-                  {bar.label}
-                </text>
+                {splitLabel(bar.label).map((line, lineIndex) => (
+                  <text
+                    key={`${bar.id}-label-${lineIndex}`}
+                    x={bar.x + bar.width / 2}
+                    y={CHART_BOTTOM + 22 + lineIndex * 13}
+                    textAnchor="middle"
+                    fill="var(--text-muted)"
+                    fontSize="11"
+                    fontWeight="600"
+                  >
+                    {line}
+                  </text>
+                ))}
               </g>
             );
           })}

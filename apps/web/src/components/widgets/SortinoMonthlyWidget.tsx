@@ -125,12 +125,12 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
             </div>
           </div>
 
-          <div className="mb-2 flex min-h-[210px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
+          <div className="mb-2 flex min-h-[170px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Monthly Risk-Adjusted Returns</div>
               <div className="text-[10px] text-[var(--text-secondary)]">Sortino and Sharpe</div>
             </div>
-            <ChartMountGuard className="flex-1 min-h-[150px]" minHeight={150}>
+            <ChartMountGuard className="flex-1 min-h-[115px]" minHeight={115}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={rows}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />

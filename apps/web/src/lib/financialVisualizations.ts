@@ -11,6 +11,14 @@ export interface FinancialFlowNode {
   changePct?: number | null;
 }
 
+export interface FinancialFlowBreakdownItem {
+  id: string;
+  label: string;
+  value: number;
+  tone: string;
+  changePct?: number | null;
+}
+
 export interface FinancialFlowLink {
   source: string;
   target: string;
@@ -23,6 +31,10 @@ export interface IncomeSankeyModel {
   nodes: FinancialFlowNode[];
   links: FinancialFlowLink[];
   maxValue: number;
+  breakdowns: {
+    operatingExpenses: FinancialFlowBreakdownItem[];
+    nonOperating: FinancialFlowBreakdownItem[];
+  };
   metrics: {
     revenue: number;
     grossProfit: number;
@@ -102,6 +114,71 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
   const preTaxProfit = reportedPreTaxProfit || Math.max(operatingIncome + otherIncome - interestExpense, 0);
   const taxExpense = asPositive(latest.tax_expense);
   const netIncome = asPositive(latest.net_income);
+  const nonOperatingAdjustment = preTaxProfit - operatingIncome;
+  const nonOperatingAbs = Math.abs(nonOperatingAdjustment);
+  const taxAdjustment = netIncome - preTaxProfit;
+  const taxAbs = Math.abs(taxAdjustment);
+  const previousOperatingExpenses = previous ? firstFinite(
+    asPositive(previous.operating_expense),
+    asPositive(previous.selling_general_admin) + asPositive(previous.research_development) + asPositive(previous.depreciation),
+  ) : null;
+  const previousPreTaxProfit = previous
+    ? firstFinite(previous.pre_tax_profit ?? previous.profit_before_tax, null)
+    : null;
+  const previousNonOperatingAdjustment = previousPreTaxProfit === null
+    ? null
+    : previousPreTaxProfit - asPositive(previous?.operating_income);
+  const previousTaxAdjustment = previousPreTaxProfit === null
+    ? null
+    : asPositive(previous?.net_income) - previousPreTaxProfit;
+
+  const operatingExpenseBreakdown: FinancialFlowBreakdownItem[] = [
+    {
+      id: 'selling_general_admin',
+      label: 'SG&A',
+      value: sellingGeneralAdmin,
+      tone: '#f97316',
+      changePct: calculatePercentChange(latest.selling_general_admin ?? null, previous?.selling_general_admin ?? null, { clamp: 'yoy_change' }),
+    },
+    {
+      id: 'research_development',
+      label: 'R&D',
+      value: researchDevelopment,
+      tone: '#fb923c',
+      changePct: calculatePercentChange(latest.research_development ?? null, previous?.research_development ?? null, { clamp: 'yoy_change' }),
+    },
+    {
+      id: 'depreciation',
+      label: 'Depreciation',
+      value: depreciation,
+      tone: '#fdba74',
+      changePct: calculatePercentChange(latest.depreciation ?? null, previous?.depreciation ?? null, { clamp: 'yoy_change' }),
+    },
+    {
+      id: 'other_operating_expenses',
+      label: 'Other OpEx',
+      value: otherOperatingExpenses,
+      tone: '#f59e0b',
+      changePct: null,
+    },
+  ].filter((item) => item.value > 0);
+
+  const nonOperatingBreakdown: FinancialFlowBreakdownItem[] = [
+    {
+      id: 'other_income',
+      label: 'Other Income',
+      value: otherIncome,
+      tone: '#38bdf8',
+      changePct: calculatePercentChange(latest.other_income ?? null, previous?.other_income ?? null, { clamp: 'yoy_change' }),
+    },
+    {
+      id: 'interest_expense',
+      label: 'Interest Expense',
+      value: interestExpense,
+      tone: '#fb7185',
+      changePct: calculatePercentChange(latest.interest_expense ?? null, previous?.interest_expense ?? null, { clamp: 'yoy_change' }),
+    },
+  ].filter((item) => item.value > 0);
 
   const nodes: FinancialFlowNode[] = [
     {
@@ -129,36 +206,12 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
       changePct: calculatePercentChange(latest.gross_profit ?? null, previous?.gross_profit ?? null, { clamp: 'yoy_change' }),
     },
     {
-      id: 'selling_general_admin',
-      label: 'SG&A',
-      value: sellingGeneralAdmin,
-      stage: 2,
-      tone: '#f97316',
-      changePct: calculatePercentChange(latest.selling_general_admin ?? null, previous?.selling_general_admin ?? null, { clamp: 'yoy_change' }),
-    },
-    {
-      id: 'research_development',
-      label: 'R&D',
-      value: researchDevelopment,
-      stage: 2,
-      tone: '#fb923c',
-      changePct: calculatePercentChange(latest.research_development ?? null, previous?.research_development ?? null, { clamp: 'yoy_change' }),
-    },
-    {
-      id: 'depreciation',
-      label: 'Depreciation',
-      value: depreciation,
-      stage: 2,
-      tone: '#fdba74',
-      changePct: calculatePercentChange(latest.depreciation ?? null, previous?.depreciation ?? null, { clamp: 'yoy_change' }),
-    },
-    {
-      id: 'other_operating_expenses',
-      label: 'Other OpEx',
-      value: otherOperatingExpenses,
+      id: 'operating_expenses',
+      label: 'Operating Expenses',
+      value: operatingExpenses,
       stage: 2,
       tone: '#f59e0b',
-      changePct: null,
+      changePct: calculatePercentChange(operatingExpenses, previousOperatingExpenses, { clamp: 'yoy_change' }),
     },
     {
       id: 'operating_income',
@@ -169,20 +222,12 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
       changePct: calculatePercentChange(latest.operating_income ?? null, previous?.operating_income ?? null, { clamp: 'yoy_change' }),
     },
     {
-      id: 'interest_expense',
-      label: 'Interest Expense',
-      value: interestExpense,
+      id: nonOperatingAdjustment >= 0 ? 'non_operating_gain' : 'non_operating_drag',
+      label: nonOperatingAdjustment >= 0 ? 'Net Non-Op Gain' : 'Net Non-Op Drag',
+      value: nonOperatingAbs,
       stage: 3,
-      tone: '#fb7185',
-      changePct: calculatePercentChange(latest.interest_expense ?? null, previous?.interest_expense ?? null, { clamp: 'yoy_change' }),
-    },
-    {
-      id: 'other_income',
-      label: 'Other Income',
-      value: otherIncome,
-      stage: 3,
-      tone: '#38bdf8',
-      changePct: calculatePercentChange(latest.other_income ?? null, previous?.other_income ?? null, { clamp: 'yoy_change' }),
+      tone: nonOperatingAdjustment >= 0 ? '#38bdf8' : '#fb7185',
+      changePct: calculatePercentChange(nonOperatingAdjustment, previousNonOperatingAdjustment, { clamp: 'yoy_change' }),
     },
     {
       id: 'pre_tax_profit',
@@ -193,12 +238,12 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
       changePct: calculatePercentChange((latest.pre_tax_profit ?? latest.profit_before_tax) ?? null, (previous?.pre_tax_profit ?? previous?.profit_before_tax) ?? null, { clamp: 'yoy_change' }),
     },
     {
-      id: 'tax_expense',
-      label: 'Tax Expense',
-      value: taxExpense,
+      id: taxAdjustment <= 0 ? 'tax_expense' : 'tax_benefit',
+      label: taxAdjustment <= 0 ? 'Tax Expense' : 'Tax Benefit',
+      value: taxAbs,
       stage: 4,
-      tone: '#f59e0b',
-      changePct: calculatePercentChange(latest.tax_expense ?? null, previous?.tax_expense ?? null, { clamp: 'yoy_change' }),
+      tone: taxAdjustment <= 0 ? '#f59e0b' : '#38bdf8',
+      changePct: calculatePercentChange(taxAdjustment, previousTaxAdjustment, { clamp: 'yoy_change' }),
     },
     {
       id: 'net_income',
@@ -213,16 +258,26 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
   const links: FinancialFlowLink[] = [
     { source: 'revenue', target: 'cost_of_revenue', value: costOfRevenue, tone: '#fca5a5' },
     { source: 'revenue', target: 'gross_profit', value: grossProfit, tone: '#93c5fd' },
-    { source: 'gross_profit', target: 'selling_general_admin', value: sellingGeneralAdmin, tone: '#fdba74' },
-    { source: 'gross_profit', target: 'research_development', value: researchDevelopment, tone: '#fb923c' },
-    { source: 'gross_profit', target: 'depreciation', value: depreciation, tone: '#fdba74' },
-    { source: 'gross_profit', target: 'other_operating_expenses', value: otherOperatingExpenses, tone: '#fcd34d' },
+    { source: 'gross_profit', target: 'operating_expenses', value: operatingExpenses, tone: '#fcd34d' },
     { source: 'gross_profit', target: 'operating_income', value: operatingIncome, tone: '#86efac' },
-    { source: 'operating_income', target: 'interest_expense', value: interestExpense, tone: '#fda4af' },
-    { source: 'operating_income', target: 'pre_tax_profit', value: Math.max(preTaxProfit - otherIncome, 0), tone: '#5eead4' },
-    { source: 'other_income', target: 'pre_tax_profit', value: Math.min(otherIncome, preTaxProfit), tone: '#7dd3fc' },
-    { source: 'pre_tax_profit', target: 'tax_expense', value: taxExpense, tone: '#fcd34d' },
-    { source: 'pre_tax_profit', target: 'net_income', value: netIncome, tone: '#6ee7b7' },
+    ...(nonOperatingAdjustment >= 0
+      ? [
+          { source: 'operating_income', target: 'pre_tax_profit', value: operatingIncome, tone: '#5eead4' },
+          { source: 'non_operating_gain', target: 'pre_tax_profit', value: nonOperatingAbs, tone: '#7dd3fc' },
+        ]
+      : [
+          { source: 'operating_income', target: 'non_operating_drag', value: nonOperatingAbs, tone: '#fda4af' },
+          { source: 'operating_income', target: 'pre_tax_profit', value: preTaxProfit, tone: '#5eead4' },
+        ]),
+    ...(taxAdjustment <= 0
+      ? [
+          { source: 'pre_tax_profit', target: 'tax_expense', value: taxAbs, tone: '#fcd34d' },
+          { source: 'pre_tax_profit', target: 'net_income', value: netIncome, tone: '#6ee7b7' },
+        ]
+      : [
+          { source: 'pre_tax_profit', target: 'net_income', value: preTaxProfit, tone: '#6ee7b7' },
+          { source: 'tax_benefit', target: 'net_income', value: taxAbs, tone: '#7dd3fc' },
+        ]),
   ].filter((link) => link.value > 0);
 
   const maxValue = Math.max(...nodes.map((node) => node.value), revenue);
@@ -232,6 +287,10 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
     nodes,
     links,
     maxValue,
+    breakdowns: {
+      operatingExpenses: operatingExpenseBreakdown,
+      nonOperating: nonOperatingBreakdown,
+    },
     metrics: {
       revenue,
       grossProfit,
@@ -299,18 +358,6 @@ export function buildCashFlowWaterfallModel(rows: CashFlowData[]): CashFlowWater
     });
     running += capex;
   }
-  if (freeCashFlow !== null) {
-    steps.push({
-      id: 'free_cash_flow',
-      label: 'Free Cash Flow',
-      value: freeCashFlow,
-      start: 0,
-      end: freeCashFlow,
-      tone: 'total',
-      changePct: calculatePercentChange(freeCashFlow, firstFinite(previous?.free_cash_flow, null), { clamp: 'yoy_change' }),
-    });
-    running = freeCashFlow;
-  }
   if (hasMeaningfulValue(otherInvesting)) {
     steps.push({
       id: 'other_investing_cash_flow',
@@ -362,7 +409,7 @@ export function buildCashFlowWaterfallModel(rows: CashFlowData[]): CashFlowWater
   if (hasMeaningfulValue(otherFinancing)) {
     steps.push({
       id: 'other_financing_cash_flow',
-      label: 'Other Financing',
+      label: otherFinancing >= 0 ? 'Financing Inflows' : 'Other Financing',
       value: otherFinancing,
       start: running,
       end: running + otherFinancing,

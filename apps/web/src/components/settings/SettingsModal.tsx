@@ -23,7 +23,7 @@ import {
   readStoredUserPreferences,
   writeStoredUserPreferences,
 } from '@/lib/userPreferences';
-import { formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
+import { formatNumber, formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
 import {
   clearAdminLayoutKey,
   readAdminLayoutControlsVisible,
@@ -36,11 +36,13 @@ import {
 import {
   getAdminAIPromptLibrary,
   getAdminAIRuntimeConfig,
+  getAdminUnitRuntimeConfig,
   getAdminProviderStatus,
   getCopilotRuntimeConfig,
   getCopilotModelCatalog,
   getAdminSystemDashboardTemplateBundle,
   saveAdminAIPromptLibrary,
+  saveAdminUnitRuntimeConfig,
   saveAdminAIRuntimeConfig,
   type ModelOption,
   type PromptTemplate,
@@ -76,6 +78,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [adminAiModelInput, setAdminAiModelInput] = useState('openai/gpt-4o-mini');
   const [isAdminAiRuntimeLoading, setIsAdminAiRuntimeLoading] = useState(false);
   const [isAdminAiRuntimeSaving, setIsAdminAiRuntimeSaving] = useState(false);
+  const [adminUsdVndDefaultRateInput, setAdminUsdVndDefaultRateInput] = useState('25000');
+  const [isAdminUnitRuntimeLoading, setIsAdminUnitRuntimeLoading] = useState(false);
+  const [isAdminUnitRuntimeSaving, setIsAdminUnitRuntimeSaving] = useState(false);
+  const [usdRateInputs, setUsdRateInputs] = useState<Record<string, string>>({});
   const [adminOpenRouterConfigured, setAdminOpenRouterConfigured] = useState<boolean | null>(null);
   const [adminOpenRouterReachable, setAdminOpenRouterReachable] = useState<boolean | null>(null);
   const [adminOpenRouterCatalogSource, setAdminOpenRouterCatalogSource] = useState<string | null>(null);
@@ -97,12 +103,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [aiBaseUrlInput, setAiBaseUrlInput] = useState(OPENROUTER_BASE_URL);
   const [aiWebSearch, setAiWebSearch] = useState(false);
   const [aiPreferAppwriteData, setAiPreferAppwriteData] = useState(true);
+  const [aiEnableSidebarWorkflowOutputs, setAiEnableSidebarWorkflowOutputs] = useState(false);
   const [openRouterModels, setOpenRouterModels] = useState<ModelOption[]>([]);
   const [isOpenRouterModelsLoading, setIsOpenRouterModelsLoading] = useState(false);
   const [publicRuntimeModel, setPublicRuntimeModel] = useState<string | null>(null);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const { resolvedTheme } = useTheme();
-  const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
+  const {
+    config: unitConfig,
+    globalUsdVndDefaultRate,
+    localUsdVndRatesByYear,
+    setUnit,
+    setDecimalPlaces,
+    setUsdVndRate,
+    clearUsdVndRates,
+  } = useUnit();
   const { globalSymbol, setGlobalSymbol } = useSymbolLink();
   const { setGlobalSymbol: setWidgetGroupGlobalSymbol } = useWidgetGroups();
   const { state, activeDashboard, setActiveDashboard, setActiveTab: setDashboardActiveTab } = useDashboard();
@@ -178,6 +193,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   }, [])
 
+  const loadAdminUnitRuntimeConfig = useCallback(async (adminKey: string) => {
+    const trimmedKey = adminKey.trim()
+    if (!trimmedKey) return
+
+    try {
+      setIsAdminUnitRuntimeLoading(true)
+      const config = await getAdminUnitRuntimeConfig(trimmedKey)
+      setAdminUsdVndDefaultRateInput(String(config.usd_vnd_default_rate || 25000))
+    } catch (error) {
+      setPreferenceStatus(error instanceof Error ? `Unit runtime load failed: ${error.message}` : 'Unit runtime load failed.')
+    } finally {
+      setIsAdminUnitRuntimeLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (isOpen) {
       const preferences = readStoredUserPreferences();
@@ -197,14 +227,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setAiBaseUrlInput(aiSettings.baseUrl);
       setAiWebSearch(aiSettings.webSearch);
       setAiPreferAppwriteData(aiSettings.preferAppwriteData);
+      setAiEnableSidebarWorkflowOutputs(aiSettings.enableSidebarWorkflowOutputs);
+      setUsdRateInputs(
+        Object.fromEntries(
+          Object.entries(localUsdVndRatesByYear).map(([year, rate]) => [year, String(rate)])
+        )
+      )
       void loadOpenRouterModels()
       void loadPublicRuntimeConfig()
       if (readAdminLayoutKeyValidated()) {
         void loadAdminAiRuntimeConfig(readAdminLayoutKey())
+        void loadAdminUnitRuntimeConfig(readAdminLayoutKey())
         void loadAdminPromptLibrary(readAdminLayoutKey())
       }
     }
-  }, [globalSymbol, isOpen, loadAdminAiRuntimeConfig, loadAdminPromptLibrary, loadOpenRouterModels, loadPublicRuntimeConfig]);
+  }, [globalSymbol, isOpen, loadAdminAiRuntimeConfig, loadAdminPromptLibrary, loadAdminUnitRuntimeConfig, loadOpenRouterModels, loadPublicRuntimeConfig, localUsdVndRatesByYear]);
 
   useEffect(() => {
     if (!preferenceStatus) return;
@@ -292,6 +329,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       baseUrl: normalizedBaseUrl,
       webSearch: aiWebSearch,
       preferAppwriteData: aiPreferAppwriteData,
+      enableSidebarWorkflowOutputs: aiEnableSidebarWorkflowOutputs,
     });
 
     setAiSettingsError(null);
@@ -302,6 +340,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setAiBaseUrlInput(nextSettings.baseUrl);
     setAiWebSearch(nextSettings.webSearch);
     setAiPreferAppwriteData(nextSettings.preferAppwriteData);
+    setAiEnableSidebarWorkflowOutputs(nextSettings.enableSidebarWorkflowOutputs);
     setPreferenceStatus(
       nextSettings.mode === 'browser_key'
         ? `VniAgent settings saved locally: ${nextSettings.provider} browser key + ${nextSettings.model}.`
@@ -367,10 +406,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     { value: 'K', label: 'K' },
     { value: 'M', label: 'M' },
     { value: 'B', label: 'B' },
+    { value: 'USD', label: 'USD' },
     { value: 'raw', label: 'Raw' },
   ];
 
   const decimalOptions = [0, 1, 2, 3];
+  const usdRateYears = useMemo(() => {
+    const startYear = 2016
+    const endYear = new Date().getFullYear() + 1
+    return Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index)
+  }, [])
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm animate-in fade-in duration-200">
@@ -807,6 +852,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         : 'Web search is currently available only through the OpenRouter path.'}</span>
                     </span>
                   </label>
+                  <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={aiEnableSidebarWorkflowOutputs}
+                      onChange={(event) => setAiEnableSidebarWorkflowOutputs(event.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded"
+                    />
+                    <span>
+                      <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Enable sidebar workflow outputs</span>
+                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Show artifact, action, and evidence workflow panels directly in the main VniAgent sidebar. Leave off for a cleaner answer-first experience.</span>
+                    </span>
+                  </label>
                 </div>
 
                 {aiSettingsError && (
@@ -835,6 +892,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       setAiBaseUrlInput(nextSettings.baseUrl)
                       setAiWebSearch(nextSettings.webSearch)
                       setAiPreferAppwriteData(nextSettings.preferAppwriteData)
+                      setAiEnableSidebarWorkflowOutputs(nextSettings.enableSidebarWorkflowOutputs)
                       setAiSettingsError(null)
                       setPreferenceStatus('VniAgent settings reset to defaults for this browser.')
                     }}
@@ -870,7 +928,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Display Units</h4>
-                  <div className="grid grid-cols-5 gap-2">
+                  <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
                     {unitOptions.map(option => (
                       <button
                         key={option.value}
@@ -888,6 +946,70 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                   <p className="text-[10px] text-[var(--text-muted)] mt-2">Applies to financial values across all widgets.</p>
                 </div>
+
+                {unitConfig.display === 'USD' && (
+                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 space-y-4">
+                    <div>
+                      <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-1 uppercase tracking-wider text-[10px]">USD/VND Yearly Overrides</h4>
+                      <p className="text-[10px] text-[var(--text-muted)]">
+                        Financial and fundamental widgets convert VND values to USD using the rate for each report year. Missing years fall back to the admin global default rate.
+                      </p>
+                      <p className="mt-1 text-[10px] text-cyan-300">Global default: {formatNumber(globalUsdVndDefaultRate, { decimals: 0 })} VND/USD</p>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {usdRateYears.map((year) => (
+                        <label key={year} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">{year}</div>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min="1"
+                            step="0.01"
+                            value={usdRateInputs[String(year)] ?? ''}
+                            onChange={(event) => {
+                              const nextValue = event.target.value
+                              setUsdRateInputs((prev) => ({ ...prev, [String(year)]: nextValue }))
+                              if (nextValue === '') {
+                                setUsdVndRate(year, null)
+                              }
+                            }}
+                            onBlur={() => {
+                              const rawValue = usdRateInputs[String(year)]
+                              if (!rawValue) {
+                                setUsdVndRate(year, null)
+                                return
+                              }
+                              const parsed = Number(rawValue)
+                              if (!Number.isFinite(parsed) || parsed <= 0) {
+                                setPreferenceStatus(`Invalid USD/VND rate for ${year}. Use a number greater than zero.`)
+                                return
+                              }
+                              setUsdVndRate(year, parsed)
+                            }}
+                            placeholder={String(globalUsdVndDefaultRate)}
+                            className="mt-2 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                          />
+                          <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                            {localUsdVndRatesByYear[String(year)] ? 'Local override' : 'Using global default'}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clearUsdVndRates()
+                          setUsdRateInputs({})
+                          setPreferenceStatus('Local USD/VND yearly overrides cleared.')
+                        }}
+                        className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      >
+                        Reset Local USD Overrides
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Decimal Places</h4>
@@ -971,6 +1093,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             setIsAdminLayoutKeyValidating(true)
                             await getAdminSystemDashboardTemplateBundle('default-fundamental', trimmedKey)
                             await loadAdminAiRuntimeConfig(trimmedKey)
+                            await loadAdminUnitRuntimeConfig(trimmedKey)
                             writeAdminLayoutKey(trimmedKey)
                             writeAdminLayoutKeyValidated(true)
                             setPreferenceStatus('Admin layout key validated and saved locally.')
@@ -1127,6 +1250,62 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminAiRuntimeLoading ? 'Loading…' : 'Reload'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {readAdminLayoutKeyValidated() && (
+                  <div>
+                    <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Global USD/VND Default</h4>
+                    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
+                      <div className="text-sm font-bold text-[var(--text-primary)]">Default VND per USD rate</div>
+                      <div className="mt-1 text-xs text-[var(--text-muted)]">
+                        Used by financial and fundamental widgets when a user has not supplied a year-specific USD/VND override in this browser.
+                      </div>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="1"
+                        step="0.01"
+                        value={adminUsdVndDefaultRateInput}
+                        onChange={(event) => setAdminUsdVndDefaultRateInput(event.target.value)}
+                        className="mt-4 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                      />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const trimmedKey = adminLayoutKeyInput.trim()
+                            const parsed = Number(adminUsdVndDefaultRateInput)
+                            if (!trimmedKey || !Number.isFinite(parsed) || parsed <= 0) {
+                              setPreferenceStatus('Provide a valid admin key and a USD/VND rate greater than zero.')
+                              return
+                            }
+                            try {
+                              setIsAdminUnitRuntimeSaving(true)
+                              const saved = await saveAdminUnitRuntimeConfig(trimmedKey, parsed)
+                              setAdminUsdVndDefaultRateInput(String(saved.usd_vnd_default_rate))
+                              setPreferenceStatus(`Global USD/VND default saved: ${formatNumber(saved.usd_vnd_default_rate, { decimals: 0 })}.`)
+                            } catch (error) {
+                              setPreferenceStatus(error instanceof Error ? `Unit runtime save failed: ${error.message}` : 'Unit runtime save failed.')
+                            } finally {
+                              setIsAdminUnitRuntimeSaving(false)
+                            }
+                          }}
+                          disabled={isAdminUnitRuntimeSaving || isAdminUnitRuntimeLoading}
+                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isAdminUnitRuntimeSaving ? 'Saving…' : 'Save USD Default'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void loadAdminUnitRuntimeConfig(adminLayoutKeyInput)}
+                          disabled={isAdminUnitRuntimeSaving || isAdminUnitRuntimeLoading}
+                          className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isAdminUnitRuntimeLoading ? 'Loading…' : 'Reload'}
                         </button>
                       </div>
                     </div>

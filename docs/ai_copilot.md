@@ -154,6 +154,9 @@ Current stability note:
 - VniAgent currently favors freer Markdown responses instead of forcing a rigid JSON answer contract
 - optional features remain available, but the current focus is answer quality and runtime reliability
 - low-value runtime toggles were moved out of the main sidebar to keep the chat surface cleaner
+- advanced message panels in sidebar, widget, and analysis views are collapsed behind `Details`
+- prompt starters are trimmed down to the strongest few per context
+- document attach is now behind a secondary tools menu in the sidebar composer
 
 ## What We Explicitly Did Not Copy
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { BarChart3 } from 'lucide-react';
 import {
   CartesianGrid,
@@ -17,6 +17,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
+import { formatFinancialPeriodLabel } from '@/lib/financialPeriods';
+import { cn } from '@/lib/utils';
 
 interface ValuationMultiplesChartWidgetProps {
   id: string;
@@ -33,6 +35,7 @@ const SERIES = [
 ];
 
 export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: ValuationMultiplesChartWidgetProps) {
+  const [visibleSeries, setVisibleSeries] = useState<Record<string, boolean>>({})
   const {
     data,
     isLoading,
@@ -43,7 +46,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
   } = useRatioHistory(symbol, {
     ratios: ['pe', 'pb', 'ps', 'ev_ebitda', 'ev_sales'],
     period: 'year',
-    limit: 20,
+    limit: 60,
     enabled: !!symbol,
   });
 
@@ -54,10 +57,8 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
   const chartData = useMemo(() => {
     if (!rows.length) return [];
     return [...rows]
-      .slice()
-      .reverse()
       .map((row) => ({
-        period: row.period || '-',
+        period: formatFinancialPeriodLabel(row.period || '-', { mode: 'year' }),
         pe: row.pe ?? null,
         pb: row.pb ?? null,
         ps: row.ps ?? null,
@@ -65,6 +66,15 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
         ev_sales: row.ev_sales ?? null,
       }));
   }, [rows]);
+
+  const activeSeries = SERIES.filter((series) => visibleSeries[series.key] !== false)
+
+  const toggleSeries = (key: string) => {
+    setVisibleSeries((current) => ({
+      ...current,
+      [key]: current[key] === false,
+    }))
+  }
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view valuation multiples" icon={<BarChart3 size={18} />} />;
@@ -84,13 +94,36 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
     >
       <div className="h-full flex flex-col bg-[var(--bg-primary)]">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
-          <WidgetMeta
-            updatedAt={dataUpdatedAt}
-            isFetching={isFetching && hasData}
-            isCached={isFallback}
-            note="Annual"
-            align="right"
-          />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1">
+              {SERIES.map((series) => {
+                const active = visibleSeries[series.key] !== false
+                return (
+                  <button
+                    key={series.key}
+                    type="button"
+                    onClick={() => toggleSeries(series.key)}
+                    className={cn(
+                      'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors border',
+                      active
+                        ? 'border-blue-500/30 bg-blue-500/12 text-[var(--text-primary)]'
+                        : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    )}
+                    style={active ? { boxShadow: `inset 0 0 0 1px ${series.color}33` } : undefined}
+                  >
+                    {series.label}
+                  </button>
+                )
+              })}
+            </div>
+            <WidgetMeta
+              updatedAt={dataUpdatedAt}
+              isFetching={isFetching && hasData}
+              isCached={isFallback}
+              note="Annual · oldest to newest"
+              align="right"
+            />
+          </div>
         </div>
         <div className="flex-1 px-2 py-2">
           {isLoading && !hasData ? (
@@ -122,7 +155,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
                     labelStyle={{ color: 'var(--text-muted)' }}
                   />
                   <Legend wrapperStyle={{ fontSize: '10px' }} />
-                  {SERIES.map((series) => (
+                  {activeSeries.map((series) => (
                     <Line
                       key={series.key}
                       type="monotone"

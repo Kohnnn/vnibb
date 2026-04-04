@@ -20,6 +20,7 @@ import {
     CartesianGrid,
 } from 'recharts';
 import {
+    convertFinancialValueForUnit,
     formatAxisValue,
     formatNumber,
     formatUnitValuePlain,
@@ -33,7 +34,7 @@ import { usePeriodState } from '@/hooks/usePeriodState';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
-import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { buildIncomeSankeyModel } from '@/lib/financialVisualizations';
 import { IncomeSankeyChart } from '@/components/widgets/charts/IncomeSankeyChart';
@@ -104,30 +105,36 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         () => [...items].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
         [items]
     );
-    const hasData = items.length > 0;
+    const displayItems = useMemo(
+        () => periodMode === 'quarter'
+            ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
+            : orderedItems,
+        [orderedItems, periodMode]
+    );
+    const hasData = displayItems.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
     const chartData = useMemo(() => {
-        if (!orderedItems.length) return [];
-        return orderedItems.map((d, index) => ({
+        if (!displayItems.length) return [];
+        return displayItems.map((d, index) => ({
             period: formatFinancialPeriodLabel(d.period, {
                 mode: periodMode,
                 index,
-                total: orderedItems.length,
+                total: displayItems.length,
             }),
-            revenue: d.revenue || 0,
-            grossProfit: d.gross_profit || 0,
-            operatingIncome: d.operating_income || 0,
-            netIncome: d.net_income || 0,
+            revenue: convertFinancialValueForUnit(d.revenue || 0, unitConfig, d.period) || 0,
+            grossProfit: convertFinancialValueForUnit(d.gross_profit || 0, unitConfig, d.period) || 0,
+            operatingIncome: convertFinancialValueForUnit(d.operating_income || 0, unitConfig, d.period) || 0,
+            netIncome: convertFinancialValueForUnit(d.net_income || 0, unitConfig, d.period) || 0,
             grossMargin: d.revenue && d.gross_profit ? (d.gross_profit / d.revenue) * 100 : 0,
             operatingMargin: d.revenue && d.operating_income ? (d.operating_income / d.revenue) * 100 : 0,
             netMargin: d.revenue && d.net_income ? (d.net_income / d.revenue) * 100 : 0,
         }));
-    }, [orderedItems, periodMode]);
+    }, [displayItems, periodMode, unitConfig]);
 
     const tableScale = useMemo(() => {
-        const values = orderedItems.flatMap((item) => [
+        const values = displayItems.flatMap((item) => [
             item.revenue,
             item.cost_of_revenue,
             item.gross_profit,
@@ -141,9 +148,9 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             item.tax_expense,
             item.other_income,
             item.net_income,
-        ]);
+        ].map((value) => convertFinancialValueForUnit(value, unitConfig, item.period)));
         return resolveUnitScale(values, unitConfig);
-    }, [orderedItems, unitConfig]);
+    }, [displayItems, unitConfig]);
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
@@ -153,16 +160,16 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
 
     const tableColumns = useMemo(
         () =>
-            orderedItems.slice(-visiblePeriodLimit).map((entry, index) => ({
+            displayItems.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
                     index,
-                    total: Math.min(orderedItems.length, visiblePeriodLimit),
+                    total: Math.min(displayItems.length, visiblePeriodLimit),
                 }),
                 align: 'right' as const,
             })),
-        [orderedItems, periodMode, visiblePeriodLimit]
+        [displayItems, periodMode, visiblePeriodLimit]
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
@@ -170,7 +177,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             if (metricKey === 'pre_tax_profit') return entry.pre_tax_profit ?? entry.profit_before_tax;
             return (entry as unknown as Record<string, number | null | undefined>)[metricKey];
         };
-        const recentItems = orderedItems.slice(-visiblePeriodLimit)
+        const recentItems = displayItems.slice(-visiblePeriodLimit)
         const hasAnyMetricData = (metricKey: string) =>
             recentItems.some((entry) => {
                 const value = rowValue(entry, metricKey)
@@ -210,7 +217,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 values: Object.fromEntries(
                     recentItems.map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
-                        rowValue(entry, metricKey),
+                        convertFinancialValueForUnit(rowValue(entry, metricKey), unitConfig, entry.period),
                     ])
                 ),
             })),
@@ -246,7 +253,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 values: Object.fromEntries(
                     recentItems.map((entry, index) => [
                         tableColumns[index]?.key ?? `period_${index}`,
-                        entry.eps,
+                        convertFinancialValueForUnit(entry.eps, unitConfig, entry.period),
                     ])
                 ),
             },
@@ -259,7 +266,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                     values: Object.fromEntries(
                         recentItems.map((entry, index) => [
                             tableColumns[index]?.key ?? `period_${index}`,
-                            entry.eps_diluted,
+                            convertFinancialValueForUnit(entry.eps_diluted, unitConfig, entry.period),
                         ])
                     ),
                 }]
@@ -267,7 +274,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         ];
 
         return rows;
-    }, [orderedItems, tableColumns, visiblePeriodLimit]);
+    }, [displayItems, tableColumns, unitConfig, visiblePeriodLimit]);
 
     const renderTable = () => (
         <DenseFinancialTable
@@ -287,7 +294,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         />
     );
 
-    const sankeyModel = useMemo(() => buildIncomeSankeyModel(orderedItems), [orderedItems]);
+    const sankeyModel = useMemo(() => buildIncomeSankeyModel(displayItems), [displayItems]);
     const [chartType, setChartType] = useState<'overview' | 'margins' | 'sankey'>('overview');
     const xAxisInterval = useMemo(
         () => (chartData.length > 12 ? Math.max(1, Math.ceil(chartData.length / 8)) - 1 : 0),
@@ -431,7 +438,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             noPadding
             widgetId={id}
             showLinkToggle
-            exportData={orderedItems}
+            exportData={displayItems}
         >
             <div className="h-full flex flex-col px-2 py-1.5">
                 <div className="pb-1 border-b border-[var(--border-subtle)]">

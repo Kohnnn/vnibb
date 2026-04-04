@@ -22,6 +22,7 @@ from vnibb.services.ai_model_catalog_service import ai_model_catalog_service
 from vnibb.services.ai_prompt_library_service import ai_prompt_library_service
 from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
+from vnibb.services.unit_runtime_config_service import unit_runtime_config_service
 from vnibb.services.system_layout_template_service import (
     SYSTEM_DASHBOARD_KEYS,
     SystemLayoutTemplateBundleResponse,
@@ -117,6 +118,38 @@ async def save_ai_runtime_config(data: Any = Body(...)) -> Dict[str, Any]:
     if not normalized:
         raise HTTPException(status_code=400, detail="Model is required")
     return await ai_runtime_config_service.save_runtime_config(model=normalized)
+
+
+@router.get("/unit-runtime/public")
+async def get_public_unit_runtime_config() -> Dict[str, Any]:
+    return await unit_runtime_config_service.get_runtime_config()
+
+
+@router.get("/unit-runtime", dependencies=[Depends(require_admin_access)])
+async def get_unit_runtime_config() -> Dict[str, Any]:
+    return await unit_runtime_config_service.get_runtime_config()
+
+
+@router.put("/unit-runtime", dependencies=[Depends(require_admin_access)])
+async def save_unit_runtime_config(data: Any = Body(...)) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+
+    rate = data.get("usd_vnd_default_rate")
+    if rate in (None, ""):
+        raise HTTPException(status_code=400, detail="usd_vnd_default_rate is required")
+
+    try:
+        numeric_rate = float(rate)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="usd_vnd_default_rate must be numeric") from exc
+
+    if numeric_rate <= 0:
+        raise HTTPException(
+            status_code=400, detail="usd_vnd_default_rate must be greater than zero"
+        )
+
+    return await unit_runtime_config_service.save_runtime_config(usd_vnd_default_rate=numeric_rate)
 
 
 @router.get("/ai-prompts", dependencies=[Depends(require_admin_access)])

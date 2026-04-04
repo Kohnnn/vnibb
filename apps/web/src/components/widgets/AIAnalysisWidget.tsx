@@ -80,7 +80,10 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         message: `Perform a deep fundamental and technical analysis for ${symbol}. Provide a summary, pros, cons, and a final rating (Bullish/Neutral/Bearish).`,
         context,
         history: [],
-        settings: readStoredAISettings(),
+        settings: {
+          ...readStoredAISettings(),
+          enableSidebarWorkflowOutputs: true,
+        },
       });
 
       let fullContent = '';

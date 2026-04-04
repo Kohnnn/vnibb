@@ -163,12 +163,12 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
           </div>
 
           <div className="flex-1 overflow-auto space-y-2 pr-1">
-            <div className="flex min-h-[180px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
+            <div className="flex min-h-[150px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
               <div className="mb-2 flex items-center justify-between">
                 <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Monthly Avg Delta</div>
                 <div className="text-[10px] text-[var(--text-secondary)]">Green buying / Red selling</div>
               </div>
-              <ChartMountGuard className="flex-1 min-h-[140px]" minHeight={140}>
+              <ChartMountGuard className="flex-1 min-h-[110px]" minHeight={110}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={monthRows}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />
@@ -198,7 +198,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
               </ChartMountGuard>
             </div>
 
-            <div className="flex min-h-[200px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
+            <div className="flex min-h-[170px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
               <div className="mb-2 flex items-center justify-between">
                 <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Cumulative Delta vs Price</div>
                 <div className="text-[10px] text-[var(--text-secondary)]">Last 252 sessions</div>
@@ -206,7 +206,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
               {cumulativeRows.length === 0 ? (
                 <div className="py-6 text-center text-[11px] text-[var(--text-muted)]">No cumulative delta series</div>
               ) : (
-                <ChartMountGuard className="flex-1 min-h-[150px]" minHeight={150}>
+                <ChartMountGuard className="flex-1 min-h-[120px]" minHeight={120}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={cumulativeRows}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />

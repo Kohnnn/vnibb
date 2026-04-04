@@ -159,11 +159,36 @@ def _build_document_data(
     precision_columns: set[str],
     coerce_all_to_string: bool,
     query_attributes: list[dict[str, Any]] | None = None,
+    included_columns: list[str] | None = None,
+    pack_columns_into_json: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
-    payload = {
-        key: _normalize_value(value, key, precision_columns, coerce_all_to_string)
-        for key, value in row.items()
+    included = set(included_columns or [])
+    packed_sources = {
+        str(source) for values in (pack_columns_into_json or {}).values() for source in values
     }
+    payload = {}
+    for key, value in row.items():
+        if included and key not in included:
+            continue
+        if key in packed_sources:
+            continue
+        payload[key] = _normalize_value(value, key, precision_columns, coerce_all_to_string)
+
+    for target_key, source_columns in (pack_columns_into_json or {}).items():
+        merged = _parse_json_object(row.get(target_key))
+        for source_key in source_columns or []:
+            if source_key == target_key:
+                continue
+            if source_key not in row:
+                continue
+            merged[source_key] = row[source_key]
+        payload[target_key] = _normalize_value(
+            merged,
+            target_key,
+            precision_columns,
+            coerce_all_to_string,
+        )
+
     for spec in query_attributes or []:
         attr_key = spec.get("key")
         if not attr_key:
@@ -171,6 +196,24 @@ def _build_document_data(
         source_key = spec.get("source") or attr_key
         payload[attr_key] = _normalize_query_value(row.get(source_key), spec)
     return payload
+
+
+def _parse_json_object(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
 
 
 def _normalize_query_value(value: Any, spec: dict[str, Any]) -> Any:
@@ -358,6 +401,18 @@ async def upsert_appwrite_documents(
                         normalized_precision,
                         True,
                         query_attributes,
+                        list(
+                            (
+                                (_collection_config_by_id().get(collection_id) or {}).get(
+                                    "includedColumns"
+                                )
+                                or []
+                            )
+                        ),
+                        (_collection_config_by_id().get(collection_id) or {}).get(
+                            "packColumnsIntoJson"
+                        )
+                        or {},
                     )
                     return await _upsert_document(
                         client,
@@ -450,6 +505,8 @@ async def _populate_via_http(
                 for item in (collection_config.get("queryAttributes") or [])
                 if isinstance(item, dict)
             ]
+            included_columns = list(collection_config.get("includedColumns") or [])
+            pack_columns_into_json = collection_config.get("packColumnsIntoJson") or {}
 
             table_state = state.setdefault("tables", {}).setdefault(table_name, {})
             last_cursor = None if full_refresh else table_state.get("lastCursor")
@@ -486,6 +543,8 @@ async def _populate_via_http(
                             precision_columns,
                             coerce_all_to_string,
                             query_attributes,
+                            included_columns,
+                            pack_columns_into_json,
                         )
                         permissions = _build_permissions(collection_config, row)
                         return await _upsert_document(

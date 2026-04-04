@@ -20,6 +20,7 @@ interface CopilotEvidencePanelProps {
   sources: CopilotSourceRef[];
   responseMeta?: CopilotResponseMeta;
   surface?: 'sidebar' | 'widget' | 'analysis';
+  showWorkflowActions?: boolean;
   className?: string;
 }
 
@@ -41,6 +42,7 @@ export function CopilotEvidencePanel({
   sources,
   responseMeta,
   surface = 'sidebar',
+  showWorkflowActions = true,
   className,
 }: CopilotEvidencePanelProps) {
   const { state, activeDashboard, activeTab, addWidget, setActiveDashboard, setActiveTab } = useDashboard();
@@ -170,7 +172,7 @@ export function CopilotEvidencePanel({
             {selectedSource.kind && (
               <div className="mt-2 text-[11px] text-[var(--text-muted)]">Type: {selectedSource.kind}</div>
             )}
-            {intent && (
+            {intent && showWorkflowActions && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {existingTarget && (
                   <button

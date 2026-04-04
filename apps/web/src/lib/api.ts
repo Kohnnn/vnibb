@@ -348,22 +348,39 @@ function buildCopilotRequestPayload(request: CopilotStreamRequest): CopilotStrea
         return request;
     }
 
+    const mappedSettings = {
+        mode: request.settings.mode,
+        provider: request.settings.provider,
+        model: request.settings.model,
+        apiKey: request.settings.apiKey,
+        baseUrl: request.settings.baseUrl,
+        webSearch: request.settings.webSearch,
+        preferAppwriteData: request.settings.preferAppwriteData,
+        enableWorkflowOutputs: request.settings.enableSidebarWorkflowOutputs,
+    }
+
     if (request.settings.mode === 'app_default' && request.settings.provider === 'openrouter') {
         return {
             ...request,
             settings: {
+                ...mappedSettings,
                 mode: 'app_default',
                 provider: 'openrouter',
                 model: '',
                 apiKey: '',
                 baseUrl: '',
-                webSearch: request.settings.webSearch,
-                preferAppwriteData: request.settings.preferAppwriteData,
-            },
+                enableSidebarWorkflowOutputs: request.settings.enableSidebarWorkflowOutputs,
+            } as CopilotTransportSettings,
         };
     }
 
-    return request;
+    return {
+        ...request,
+        settings: {
+            ...mappedSettings,
+            enableSidebarWorkflowOutputs: request.settings.enableSidebarWorkflowOutputs,
+        } as CopilotTransportSettings,
+    };
 }
 
 export async function getProfile(symbol: string, signal?: AbortSignal): Promise<EquityProfileResponse> {
@@ -1886,6 +1903,10 @@ export interface CopilotStreamRequest {
     settings?: AISettings;
 }
 
+type CopilotTransportSettings = AISettings & {
+    enableWorkflowOutputs?: boolean;
+}
+
 export interface CopilotSourceRef {
     id: string;
     scope?: string;
@@ -2080,6 +2101,11 @@ export interface AdminProviderStatusResponse {
     };
     appwrite: Record<string, unknown>;
     appwrite_runtime: Record<string, unknown>;
+}
+
+export interface UnitRuntimeConfigResponse {
+    usd_vnd_default_rate: number;
+    updated_at?: string | null;
 }
 
 export interface CopilotStreamEvent {
@@ -2414,6 +2440,21 @@ export async function getAdminAIRuntimeConfig(
     });
 }
 
+export async function getPublicUnitRuntimeConfig(): Promise<UnitRuntimeConfigResponse> {
+    return fetchAPI<UnitRuntimeConfigResponse>('/admin/unit-runtime/public', {
+        timeout: 10000,
+    });
+}
+
+export async function getAdminUnitRuntimeConfig(
+    adminKey: string,
+): Promise<UnitRuntimeConfigResponse> {
+    return fetchAPI<UnitRuntimeConfigResponse>('/admin/unit-runtime', {
+        headers: { 'X-Admin-Key': adminKey },
+        timeout: 15000,
+    });
+}
+
 export async function getAdminProviderStatus(
     adminKey: string,
 ): Promise<AdminProviderStatusResponse> {
@@ -2463,6 +2504,18 @@ export async function saveAdminAIRuntimeConfig(
         method: 'PUT',
         headers: { 'X-Admin-Key': adminKey },
         body: JSON.stringify({ model }),
+        timeout: 15000,
+    });
+}
+
+export async function saveAdminUnitRuntimeConfig(
+    adminKey: string,
+    usdVndDefaultRate: number,
+): Promise<UnitRuntimeConfigResponse> {
+    return fetchAPI<UnitRuntimeConfigResponse>('/admin/unit-runtime', {
+        method: 'PUT',
+        headers: { 'X-Admin-Key': adminKey },
+        body: JSON.stringify({ usd_vnd_default_rate: usdVndDefaultRate }),
         timeout: 15000,
     });
 }

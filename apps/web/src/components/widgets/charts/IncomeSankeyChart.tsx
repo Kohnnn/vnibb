@@ -49,7 +49,7 @@ function formatDelta(changePct: number | null | undefined): string {
 }
 
 export function IncomeSankeyChart({ model, formatValue }: IncomeSankeyChartProps) {
-  const { nodes, links, maxValue } = model;
+  const { nodes, links, maxValue, breakdowns } = model;
 
   const laidOut = useMemo(() => {
     const stageMap = new Map<number, typeof nodes>();
@@ -170,6 +170,19 @@ export function IncomeSankeyChart({ model, formatValue }: IncomeSankeyChartProps
           })}
         </svg>
       </div>
+
+      <div className="grid gap-2 xl:grid-cols-2">
+        <BreakdownPanel
+          title="Operating Expense Breakdown"
+          items={breakdowns.operatingExpenses}
+          formatValue={formatValue}
+        />
+        <BreakdownPanel
+          title="Non-Operating Items"
+          items={breakdowns.nonOperating}
+          formatValue={formatValue}
+        />
+      </div>
     </div>
   );
 }
@@ -181,6 +194,38 @@ function SummaryCard({ label, value, tone }: { label: string; value: string; ton
       <div className={`mt-1 text-sm font-semibold ${tone}`}>{value}</div>
     </div>
   );
+}
+
+function BreakdownPanel({
+  title,
+  items,
+  formatValue,
+}: {
+  title: string;
+  items: IncomeSankeyModel['breakdowns']['operatingExpenses'];
+  formatValue: (value: number) => string;
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+      <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]">{title}</div>
+      {items.length === 0 ? (
+        <div className="mt-2 text-xs text-[var(--text-muted)]">No material items</div>
+      ) : (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {items.map((item) => {
+            const delta = formatDelta(item.changePct)
+            return (
+              <div key={item.id} className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1.5">
+                <div className="text-[10px] font-semibold" style={{ color: item.tone }}>{item.label}</div>
+                <div className="mt-0.5 text-xs text-[var(--text-primary)]">{formatValue(item.value)}</div>
+                {delta ? <div className="text-[10px] text-[var(--text-muted)]">{delta}</div> : null}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default IncomeSankeyChart;

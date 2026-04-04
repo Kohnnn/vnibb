@@ -56,6 +56,12 @@ def test_to_ratio_data_uses_quarter_label_when_available():
     assert result.period == "Q2-2024"
 
 
+def test_to_ratio_data_prefers_quarter_metadata_over_bare_year():
+    row = make_ratio_row(period="2024", fiscal_year=2024, fiscal_quarter=1, period_type="quarter")
+    result = _to_ratio_data(row)
+    assert result.period == "Q1-2024"
+
+
 def test_ratio_has_metric_value_returns_false_for_empty_row():
     item = FinancialRatioData(symbol="VNM", period="2024")
     assert _ratio_has_metric_value(item) is False

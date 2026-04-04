@@ -104,6 +104,7 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
         "apiKey": "sk-or-test",
         "webSearch": False,
         "preferAppwriteData": True,
+        "enableWorkflowOutputs": True,
     }
 
 
@@ -222,6 +223,7 @@ async def test_chat_stream_uses_admin_runtime_model_for_app_default_mode(client,
         "model": "anthropic/claude-3.5-haiku",
         "webSearch": False,
         "preferAppwriteData": True,
+        "enableWorkflowOutputs": True,
     }
 
 
@@ -281,6 +283,7 @@ async def test_chat_stream_normalizes_unsupported_runtime_provider_to_openrouter
         "model": "openai/gpt-4o-mini",
         "webSearch": False,
         "preferAppwriteData": True,
+        "enableWorkflowOutputs": True,
     }
 
 

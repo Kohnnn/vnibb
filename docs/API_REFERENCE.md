@@ -140,6 +140,8 @@ Financial statement notes:
 - Specific-quarter requests such as `Q1`, `Q2`, `Q3`, and `Q4` are intended to return the matching quarter across years after canonical normalization rather than relying on raw provider text matching.
 - Frontend financial tables now render periods in ascending chronological order and auto-scroll horizontally to the newest visible periods on first open.
 - Current history caps remain intentionally in place for performance; wider default history windows are deferred to a later optimization pass.
+- Financial and statement-style widgets now support `USD` display mode with per-year local USD/VND overrides. Missing years fall back to the admin-defined global default USD/VND rate.
+- USD conversion is currently scoped to financial and fundamental statement-style surfaces first; quote and market-wide currency conversion remains a lower-priority roadmap item.
 
 Copilot notes:
 - The VniAgent prompt library is now expected to be opened from within the copilot sidebar. Global prompt actions route into the sidebar instead of a disconnected standalone modal.
@@ -148,6 +150,9 @@ Copilot notes:
 - Appwrite JWT mint failures are now cooled down client-side before retrying, so broken Appwrite platform/CORS setups do not spam repeated failing JWT requests on every action.
 - The frontend still uses browser-side Appwrite session flows for login and account operations, but copilot streaming no longer depends on that JWT mint path.
 - On tighter desktop viewports the VniAgent sidebar is expected to behave as an overlay instead of always shrinking the central workspace.
+
+UI notes:
+- Header density is now search-first. Branding and market-index chips are intentionally de-prioritized to preserve search and action controls on lower-resolution screens.
 
 ## Request/Response Examples
 

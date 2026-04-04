@@ -89,12 +89,14 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
         </div>
 
         {/* Category Filter */}
-        <div className="flex gap-2 p-4 border-b border-[var(--border-default)] bg-[var(--bg-surface)]/70">
+        <div className="flex gap-2 border-b border-[var(--border-default)] bg-[var(--bg-surface)]/70 p-4">
           <button
             onClick={() => setSelectedCategory(null)}
             className={cn(
-                "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                !selectedCategory ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-[var(--bg-secondary)]'
+                "rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all",
+                !selectedCategory
+                  ? 'border-blue-400/50 bg-blue-600 text-white shadow-[0_0_0_1px_rgba(96,165,250,0.24)]'
+                  : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-blue-500/30'
             )}
           >
             All Templates
@@ -106,8 +108,10 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
               key={category.id}
               onClick={() => setSelectedCategory(category.id)}
               className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
-                selectedCategory === category.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-[var(--bg-secondary)]'
+                "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all",
+                selectedCategory === category.id
+                  ? 'border-blue-400/50 bg-blue-600 text-white shadow-[0_0_0_1px_rgba(96,165,250,0.24)]'
+                  : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-blue-500/30'
               )}
             >
               <Icon className="w-3 h-3" />
@@ -128,10 +132,10 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
                   onSelectTemplate(template);
                   onClose();
                 }}
-                className="group flex flex-col text-left transition-all duration-300 focus:outline-none"
+                className="group flex flex-col rounded-xl border border-transparent bg-[var(--bg-surface)]/45 p-2 text-left transition-all duration-300 hover:border-blue-500/20 hover:bg-[var(--bg-surface)]/70 focus:outline-none"
               >
                 <div className={cn(
-                  "aspect-video w-full mb-3 rounded-xl border border-[var(--border-default)] relative overflow-hidden group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] transition-all",
+                  "relative mb-3 aspect-video w-full overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] transition-all",
                   "bg-gradient-to-br",
                   CATEGORY_PREVIEW_STYLES[template.category]
                 )}>
@@ -166,7 +170,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
                 </div>
                 
                 <div className="mb-2 flex items-center gap-2">
-                  <span className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  <span className="inline-flex items-center rounded-full border border-blue-500/15 bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-blue-200/90">
                     {DASHBOARD_TEMPLATE_CATEGORIES.find((category) => category.id === template.category)?.label || template.category}
                   </span>
                 </div>

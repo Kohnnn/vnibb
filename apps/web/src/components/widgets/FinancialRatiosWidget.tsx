@@ -10,7 +10,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
@@ -221,16 +221,20 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     const displayPeriods = useMemo(() => {
         const periodSet = new Set<string>();
         ratios.forEach((entry) => {
-            if (entry.period) periodSet.add(entry.period);
+            if (entry.period && (period !== 'Q' || isCanonicalQuarterPeriod(entry.period))) {
+                periodSet.add(entry.period);
+            }
         });
         (referencePeriodsQuery.data?.data || []).forEach((entry) => {
             if (entry.period) {
                 const normalizedPeriod = normalizeRatioPeriod(String(entry.period)) ?? String(entry.period);
-                periodSet.add(normalizedPeriod);
+                if (period !== 'Q' || isCanonicalQuarterPeriod(normalizedPeriod)) {
+                    periodSet.add(normalizedPeriod);
+                }
             }
         });
         return Array.from(periodSet).sort((left, right) => periodSortKey(left) - periodSortKey(right));
-    }, [ratios, referencePeriodsQuery.data?.data]);
+    }, [period, ratios, referencePeriodsQuery.data?.data]);
 
     const visiblePeriods = useMemo(
         () => displayPeriods.slice(-visiblePeriodLimit),

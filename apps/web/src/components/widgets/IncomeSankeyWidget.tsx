@@ -11,7 +11,7 @@ import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { useIncomeStatement } from '@/lib/queries';
-import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { buildIncomeSankeyModel } from '@/lib/financialVisualizations';
@@ -34,19 +34,26 @@ function IncomeSankeyWidgetComponent({ id, symbol, onRemove }: IncomeSankeyWidge
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useIncomeStatement(symbol, { period: apiPeriod });
   const orderedItems = useMemo(
-    () => [...(data?.data || [])].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
+    () => [...(data?.data || [])]
+      .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
     [data?.data],
   );
-  const hasData = orderedItems.length > 0;
+  const displayItems = useMemo(
+    () => periodMode === 'quarter'
+      ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
+      : orderedItems,
+    [orderedItems, periodMode],
+  );
+  const hasData = displayItems.length > 0;
 
   const scale = useMemo(
-    () => resolveUnitScale(orderedItems.flatMap((item) => [item.revenue, item.cost_of_revenue, item.gross_profit, item.operating_income, item.net_income]), unitConfig),
-    [orderedItems, unitConfig],
+    () => resolveUnitScale(displayItems.flatMap((item) => [item.revenue, item.cost_of_revenue, item.gross_profit, item.operating_income, item.net_income]), unitConfig),
+    [displayItems, unitConfig],
   );
-  const model = useMemo(() => buildIncomeSankeyModel(orderedItems), [orderedItems]);
+  const model = useMemo(() => buildIncomeSankeyModel(displayItems), [displayItems]);
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 10000 });
   const latestLabel = model
-    ? formatFinancialPeriodLabel(model.period, { mode: periodMode, index: orderedItems.length - 1, total: orderedItems.length })
+    ? formatFinancialPeriodLabel(model.period, { mode: periodMode, index: displayItems.length - 1, total: displayItems.length })
     : period === 'FY'
       ? 'Annual'
       : period;
@@ -62,7 +69,7 @@ function IncomeSankeyWidgetComponent({ id, symbol, onRemove }: IncomeSankeyWidge
       widgetId={id}
       showLinkToggle
       headerActions={<div className="mr-1"><PeriodToggle value={period} onChange={setPeriod} compact /></div>}
-      exportData={orderedItems}
+      exportData={displayItems}
       exportFilename={`income_sankey_${symbol}_${period.toLowerCase()}`}
     >
       <div className="flex h-full flex-col px-2 py-1.5">

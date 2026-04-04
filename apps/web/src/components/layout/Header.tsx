@@ -14,13 +14,10 @@ import {
   Lock,
   Sparkles,
   Unlock,
-  TrendingDown,
-  TrendingUp,
 } from 'lucide-react'
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel'
 import { useTheme } from '@/contexts/ThemeContext'
-import { useWebSocket } from '@/lib/hooks/useWebSocket'
-import { useHistoricalPrices, useMarketOverview, useStockQuote } from '@/lib/queries'
+import { useHistoricalPrices, useStockQuote } from '@/lib/queries'
 import { probeBackendReadiness } from '@/lib/backendHealth'
 import type { UnitDisplay } from '@/lib/units'
 import { cn } from '@/lib/utils'
@@ -37,14 +34,11 @@ const UNIT_OPTIONS: Array<{ value: UnitDisplay; label: string }> = [
   { value: 'K', label: 'K' },
   { value: 'M', label: 'M' },
   { value: 'B', label: 'B' },
+  { value: 'USD', label: 'USD' },
   { value: 'raw', label: 'Raw' },
 ]
 
 const MARKET_TIMEZONE = 'Asia/Ho_Chi_Minh'
-const HEADER_MARKET_INDICES = [
-  { key: 'VNINDEX', label: 'VN-INDEX' },
-  { key: 'VN30', label: 'VN30' },
-] as const
 
 type ConnectionState = 'checking' | 'online' | 'offline' | 'degraded'
 
@@ -57,22 +51,6 @@ function formatHeaderPercent(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
   const sign = value > 0 ? '+' : ''
   return `${sign}${value.toFixed(2)}%`
-}
-
-function formatHeaderDelta(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '--'
-  const sign = value > 0 ? '+' : ''
-  return `${sign}${value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`
-}
-
-function normalizeIndexName(value: string | null | undefined): string {
-  return String(value ?? '')
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '')
 }
 
 function getVietnamMarketStatus(reference = new Date()): { label: string; isOpen: boolean } {
@@ -141,10 +119,6 @@ export function Header({
   const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('checking')
 
   const quoteQuery = useStockQuote(currentSymbol, Boolean(currentSymbol))
-  const marketOverviewQuery = useMarketOverview(true)
-  const { prices: liveHeaderIndexPrices } = useWebSocket({
-    symbols: HEADER_MARKET_INDICES.map((index) => index.key),
-  })
   const historyQuery = useHistoricalPrices(currentSymbol, {
     interval: '1D',
     enabled: Boolean(currentSymbol),
@@ -181,50 +155,6 @@ export function Header({
           ? 'text-rose-700'
           : 'text-rose-400'
   const marketStatus = useMemo(() => getVietnamMarketStatus(new Date(marketClock)), [marketClock])
-  const headerMarketIndices = useMemo(() => {
-    const marketIndexLookup = new Map(
-      (marketOverviewQuery.data?.data ?? []).map((item) => [
-        normalizeIndexName(item.index_name),
-        item,
-      ])
-    )
-
-    return HEADER_MARKET_INDICES.map((index) => {
-      const item = marketIndexLookup.get(index.key)
-      const liveItem = liveHeaderIndexPrices.get(index.key)
-      const liveValue =
-        liveItem && Number.isFinite(liveItem.price) && liveItem.price > 0
-          ? liveItem.price
-          : null
-      const baseValue = item?.current_value ?? null
-      const baseChange = item?.change ?? null
-      const liveChangeValue = liveItem?.change ?? null
-      const liveChangePctValue = liveItem?.change_pct ?? null
-      const previousClose =
-        baseValue !== null && baseChange !== null ? baseValue - baseChange : null
-      const hasLiveDelta =
-        liveItem != null
-        && ((liveChangeValue !== null && Math.abs(liveChangeValue) > 1e-9)
-          || (liveChangePctValue !== null && Math.abs(liveChangePctValue) > 1e-9))
-      const derivedLiveChange =
-        liveValue !== null && previousClose !== null ? liveValue - previousClose : null
-      const change = hasLiveDelta
-        ? liveChangeValue
-        : derivedLiveChange ?? item?.change ?? null
-      const changePct = hasLiveDelta
-        ? liveChangePctValue
-        : change !== null && previousClose !== null && previousClose !== 0
-          ? (change / previousClose) * 100
-          : item?.change_pct ?? null
-
-      return {
-        ...index,
-        value: liveValue ?? baseValue,
-        change,
-        changePct,
-      }
-    }).filter((index) => index.value !== null)
-  }, [liveHeaderIndexPrices, marketOverviewQuery.data?.data])
 
   const healthBadge = useMemo(() => {
     if (connectionStatus === 'online') {
@@ -326,25 +256,10 @@ export function Header({
   )
 
   return (
-    <header className="sticky top-0 z-40 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85">
+    <header className="relative z-30 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85">
       <div className="px-4 py-2">
-        <div data-tour="header-bar" className="grid min-h-[2.75rem] grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 md:grid-cols-[minmax(0,1fr)_minmax(180px,300px)_auto] md:gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(220px,380px)_auto] xl:gap-3">
-          <div className="flex min-w-0 items-center gap-1.5 overflow-hidden sm:gap-2">
-          <div className="inline-flex shrink-0 items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-secondary)]">
-            <span className="h-2 w-2 rounded-full bg-sky-500" />
-            <span>VNIBB</span>
-          </div>
-
-          <div className="inline-flex min-w-0 shrink-0 items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1">
-            <span className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
-              Symbol
-            </span>
-            <span className="truncate text-xs font-semibold text-[var(--text-primary)]">
-              {currentSymbol}
-            </span>
-          </div>
-
-            <div className="hidden min-w-0 items-center gap-2 xl:flex">
+        <div data-tour="header-bar" className="flex min-h-[2.75rem] flex-wrap items-center gap-2">
+          <div className="hidden min-w-0 shrink-0 items-center gap-2 xl:flex">
             <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
               <div className="min-w-0">
                 <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
@@ -360,61 +275,9 @@ export function Header({
                 </div>
               </div>
             </div>
-
-            <div className="hidden min-w-0 items-center gap-2 2xl:flex">
-              {headerMarketIndices.map((index) => {
-                const positive = (index.changePct ?? 0) >= 0
-                const toneClass = positive
-                  ? resolvedTheme === 'light'
-                    ? 'border-emerald-500/20 bg-emerald-500/8 text-emerald-700'
-                    : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-                  : resolvedTheme === 'light'
-                    ? 'border-rose-500/20 bg-rose-500/8 text-rose-700'
-                    : 'border-rose-500/20 bg-rose-500/10 text-rose-300'
-
-                return (
-                  <div
-                    key={index.key}
-                    className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5"
-                  >
-                    <div>
-                      <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
-                        {index.label}
-                      </div>
-                      <div className="text-xs font-semibold text-[var(--text-primary)]">
-                        {formatHeaderPrice(index.value)}
-                      </div>
-                    </div>
-                    <div className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold', toneClass)}>
-                      {positive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                      <span>{formatHeaderPercent(index.changePct)}</span>
-                    </div>
-                  </div>
-                )
-              })}
-
-              <div
-                className={cn(
-                  'inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold',
-                  healthBadge.className
-                )}
-                title={healthTitle}
-                aria-label={healthTitle}
-              >
-                <span
-                  className={cn(
-                    'h-2 w-2 rounded-full',
-                    healthBadge.dotClassName,
-                    marketStatus.isOpen && connectionStatus === 'online' ? 'animate-pulse' : ''
-                  )}
-                />
-                <span>{marketStatus.isOpen ? 'HOSE Open' : 'HOSE Closed'}</span>
-              </div>
-            </div>
-          </div>
           </div>
 
-          <div data-tour="header-search" className="relative col-span-2 row-start-2 w-full max-w-none md:col-span-1 md:row-start-auto md:max-w-md md:justify-self-center">
+          <div data-tour="header-search" className="relative min-w-[220px] flex-1">
           <Search
             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
             size={14}
@@ -464,7 +327,7 @@ export function Header({
           )}
           </div>
 
-          <div data-tour="header-tools" className="flex flex-wrap items-center justify-end gap-1.5 justify-self-end sm:gap-2">
+          <div data-tour="header-tools" className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={() => window.dispatchEvent(new Event('vnibb:open-command-palette'))}
@@ -602,47 +465,9 @@ export function Header({
             <AlertNotificationPanel />
           </div>
 
-          <button className="hidden rounded-md p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:block">
-            <User size={16} />
-          </button>
-          </div>
-        </div>
-
-        <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-1 xl:hidden scrollbar-hide">
-          {headerMarketIndices.map((index) => {
-            const positive = (index.changePct ?? 0) >= 0
-            const accentClass = positive
-              ? resolvedTheme === 'light'
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700'
-                : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
-              : resolvedTheme === 'light'
-                ? 'border-rose-500/30 bg-rose-500/10 text-rose-700'
-                : 'border-rose-500/25 bg-rose-500/10 text-rose-300'
-
-            return (
-              <div
-                key={`${index.key}-compact`}
-                className="inline-flex shrink-0 items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5"
-              >
-                <div>
-                  <div className="text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                    {index.label}
-                  </div>
-                  <div className="text-xs font-semibold text-[var(--text-primary)]">
-                    {formatHeaderPrice(index.value)}
-                  </div>
-                </div>
-                <div className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold', accentClass)}>
-                  {positive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                  <span>{formatHeaderPercent(index.changePct)}</span>
-                </div>
-              </div>
-            )
-          })}
-
           <div
             className={cn(
-              'inline-flex shrink-0 items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold',
+              'hidden items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold 2xl:inline-flex',
               healthBadge.className,
             )}
             title={healthTitle}
@@ -656,6 +481,11 @@ export function Header({
               )}
             />
             <span>{marketStatus.isOpen ? 'HOSE Open' : 'HOSE Closed'}</span>
+          </div>
+
+          <button className="hidden rounded-md p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:block">
+            <User size={16} />
+          </button>
           </div>
         </div>
       </div>

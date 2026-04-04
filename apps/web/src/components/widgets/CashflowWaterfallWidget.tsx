@@ -11,7 +11,7 @@ import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { useCashFlow } from '@/lib/queries';
-import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { formatUnitValuePlain, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { buildCashFlowWaterfallModel } from '@/lib/financialVisualizations';
@@ -37,16 +37,22 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove }: CashflowWate
     () => [...(data?.data || [])].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
     [data?.data],
   );
-  const hasData = orderedItems.length > 0;
+  const displayItems = useMemo(
+    () => periodMode === 'quarter'
+      ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
+      : orderedItems,
+    [orderedItems, periodMode],
+  );
+  const hasData = displayItems.length > 0;
 
   const scale = useMemo(
-    () => resolveUnitScale(orderedItems.flatMap((item) => [item.operating_cash_flow, item.investing_cash_flow, item.financing_cash_flow, item.net_change_in_cash, item.free_cash_flow]), unitConfig),
-    [orderedItems, unitConfig],
+    () => resolveUnitScale(displayItems.flatMap((item) => [item.operating_cash_flow, item.investing_cash_flow, item.financing_cash_flow, item.net_change_in_cash, item.free_cash_flow]), unitConfig),
+    [displayItems, unitConfig],
   );
-  const model = useMemo(() => buildCashFlowWaterfallModel(orderedItems), [orderedItems]);
+  const model = useMemo(() => buildCashFlowWaterfallModel(displayItems), [displayItems]);
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 10000 });
   const latestLabel = model
-    ? formatFinancialPeriodLabel(model.period, { mode: periodMode, index: orderedItems.length - 1, total: orderedItems.length })
+    ? formatFinancialPeriodLabel(model.period, { mode: periodMode, index: displayItems.length - 1, total: displayItems.length })
     : period === 'FY'
       ? 'Annual'
       : period;
@@ -62,7 +68,7 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove }: CashflowWate
       widgetId={id}
       showLinkToggle
       headerActions={<div className="mr-1"><PeriodToggle value={period} onChange={setPeriod} compact /></div>}
-      exportData={orderedItems}
+      exportData={displayItems}
       exportFilename={`cashflow_waterfall_${symbol}_${period.toLowerCase()}`}
     >
       <div className="flex h-full flex-col px-2 py-1.5">

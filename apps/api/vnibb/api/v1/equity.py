@@ -1679,6 +1679,7 @@ def _normalize_ratio_period(
     year_int = int(year) if year is not None else None
     quarter_int = int(quarter) if quarter is not None else None
     normalized_period_type = str(period_type or "").strip().lower()
+    prefers_quarter = normalized_period_type == "quarter" or quarter_int is not None
 
     if year_int is not None and not (1900 <= year_int <= 2100):
         year_int = None
@@ -1687,6 +1688,9 @@ def _normalize_ratio_period(
 
     if text:
         if re.match(r"^\d{4}$", text):
+            year_from_text = int(text)
+            if prefers_quarter and quarter_int is not None:
+                return f"Q{quarter_int}-{year_from_text}"
             return text
         q_year = re.match(r"^Q([1-4])-(20\d{2})$", text)
         if q_year:
@@ -1707,6 +1711,8 @@ def _normalize_ratio_period(
         if text.isdigit():
             numeric = int(text)
             if 1900 <= numeric <= 2100:
+                if prefers_quarter and quarter_int is not None:
+                    return f"Q{quarter_int}-{numeric}"
                 return str(numeric)
             if 1 <= numeric <= 4 and year_int is not None:
                 return f"Q{numeric}-{year_int}"
@@ -1714,10 +1720,7 @@ def _normalize_ratio_period(
     if year_int is None:
         return None
 
-    if normalized_period_type == "quarter" and quarter_int is not None:
-        return f"Q{quarter_int}-{year_int}"
-
-    if quarter_int is not None and normalized_period_type != "year":
+    if prefers_quarter and quarter_int is not None:
         return f"Q{quarter_int}-{year_int}"
 
     return str(year_int)
@@ -1793,13 +1796,29 @@ def _merge_ratio_row_collections(
     merged: dict[str, FinancialRatioData] = {}
 
     for row in fallback_rows:
-        period_value = _normalize_ratio_period(row.period) or str(row.period or "").strip()
+        period_value = (
+            _normalize_ratio_period(
+                row.period,
+                fiscal_year=getattr(row, "fiscal_year", None),
+                fiscal_quarter=getattr(row, "fiscal_quarter", None),
+                period_type=getattr(row, "period_type", None),
+            )
+            or str(row.period or "").strip()
+        )
         if not period_value:
             continue
         merged[period_value] = row.model_copy(update={"period": period_value})
 
     for row in preferred_rows:
-        period_value = _normalize_ratio_period(row.period) or str(row.period or "").strip()
+        period_value = (
+            _normalize_ratio_period(
+                row.period,
+                fiscal_year=getattr(row, "fiscal_year", None),
+                fiscal_quarter=getattr(row, "fiscal_quarter", None),
+                period_type=getattr(row, "period_type", None),
+            )
+            or str(row.period or "").strip()
+        )
         if not period_value:
             continue
         normalized_row = row.model_copy(update={"period": period_value})
