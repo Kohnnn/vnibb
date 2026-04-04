@@ -470,7 +470,7 @@ Appwrite Collections (26 total):
 Redis Cache: Session, rate limits, API response cache (TTL: 30s - 24h)
 ```
 
-## Database Schema (Appwrite)
+## Database Schema
 
 VNIBB uses **Appwrite** as its primary data store with 26 collections.
 
