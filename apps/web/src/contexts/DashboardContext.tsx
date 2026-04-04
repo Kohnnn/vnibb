@@ -25,6 +25,7 @@ import type {
 } from '@/types/dashboard';
 import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
+import { DEFAULT_GLOBAL_MARKETS_SYMBOL } from '@/lib/globalMarketsSymbol';
 import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync } from '@/lib/useDashboardSync';
 import { normalizeWidgetType } from '@/data/widgetDefinitions';
@@ -1544,6 +1545,7 @@ const createGlobalMarketsDashboard = (): Dashboard => {
         id: GLOBAL_MARKETS_DASHBOARD_ID,
         name: GLOBAL_MARKETS_DASHBOARD_NAME,
         description: 'Editable TradingView-first workspace for international indices, FX, commodities, and crypto.',
+        globalMarketsSymbol: DEFAULT_GLOBAL_MARKETS_SYMBOL,
         folderId: INITIAL_FOLDER_ID,
         order: 3,
         isDefault: false,
@@ -1552,7 +1554,7 @@ const createGlobalMarketsDashboard = (): Dashboard => {
         showGroupLabels: true,
         tabs: [createSystemDashboardTab(GLOBAL_MARKETS_DASHBOARD_ID, tabSpec, 0)],
         syncGroups: [
-            { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: DEFAULT_TICKER },
+            { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: DEFAULT_GLOBAL_MARKETS_SYMBOL },
         ],
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -1662,7 +1664,7 @@ const ensureMainDashboardPresent = (dashboards: Dashboard[]): Dashboard[] => {
             dashboard.name === GLOBAL_MARKETS_DASHBOARD_NAME
     );
 
-    const buildSystemDashboard = (existing: Dashboard | undefined, fallback: Dashboard, order: number): Dashboard => ({
+const buildSystemDashboard = (existing: Dashboard | undefined, fallback: Dashboard, order: number): Dashboard => ({
         ...(existing || fallback),
         id: fallback.id,
         name: fallback.name,
@@ -1692,6 +1694,7 @@ const ensureMainDashboardPresent = (dashboards: Dashboard[]): Dashboard[] => {
         id: fallbackGlobalMarkets.id,
         name: fallbackGlobalMarkets.name,
         description: fallbackGlobalMarkets.description,
+        globalMarketsSymbol: existingGlobalMarkets?.globalMarketsSymbol || fallbackGlobalMarkets.globalMarketsSymbol,
         folderId: INITIAL_FOLDER_ID,
         order: systemDashboards.length,
         isDefault: false,
@@ -1754,6 +1757,7 @@ const applyPublishedSystemTemplates = (
             ...dashboard,
             name: template.name,
             description: template.description,
+            globalMarketsSymbol: template.globalMarketsSymbol ?? dashboard.globalMarketsSymbol,
             folderId: template.folderId ?? dashboard.folderId,
             order: template.order,
             isDefault: template.isDefault,
@@ -1773,6 +1777,7 @@ type DashboardAction =
     | { type: 'SET_ACTIVE_TAB'; payload: string }
     | { type: 'ADD_DASHBOARD'; payload: Dashboard }
     | { type: 'UPDATE_DASHBOARD'; payload: { id: string; updates: Partial<Dashboard> } }
+    | { type: 'UPDATE_DASHBOARD_RUNTIME'; payload: { id: string; updates: Partial<Dashboard> } }
     | { type: 'DELETE_DASHBOARD'; payload: string }
     | { type: 'ADD_FOLDER'; payload: DashboardFolder }
     | { type: 'UPDATE_FOLDER'; payload: { id: string; updates: Partial<DashboardFolder> } }
@@ -1886,6 +1891,17 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
                 dashboards: state.dashboards.map((d) =>
                     d.id === action.payload.id
                         ? { ...d, ...safeUpdates, updatedAt: new Date().toISOString() }
+                        : d
+                ),
+            };
+        }
+
+        case 'UPDATE_DASHBOARD_RUNTIME': {
+            return {
+                ...state,
+                dashboards: state.dashboards.map((d) =>
+                    d.id === action.payload.id
+                        ? { ...d, ...action.payload.updates, updatedAt: new Date().toISOString() }
                         : d
                 ),
             };
@@ -2320,6 +2336,7 @@ interface DashboardContextValue {
     setActiveDashboard: (id: string) => void;
     createDashboard: (data: DashboardCreate) => Dashboard;
     updateDashboard: (id: string, updates: Partial<Dashboard>) => void;
+    updateDashboardRuntime: (id: string, updates: Partial<Dashboard>) => void;
     deleteDashboard: (id: string) => void;
     // Folder actions
     createFolder: (name: string) => DashboardFolder;
@@ -2630,6 +2647,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         dispatch({ type: 'UPDATE_DASHBOARD', payload: { id, updates } });
     }, []);
 
+    const updateDashboardRuntime = useCallback((id: string, updates: Partial<Dashboard>) => {
+        dispatch({ type: 'UPDATE_DASHBOARD_RUNTIME', payload: { id, updates } });
+    }, []);
+
     const deleteDashboard = useCallback((id: string) => {
         dispatch({ type: 'DELETE_DASHBOARD', payload: id });
     }, []);
@@ -2889,6 +2910,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         setActiveDashboard,
         createDashboard,
         updateDashboard,
+        updateDashboardRuntime,
         deleteDashboard,
         createFolder,
         updateFolder,

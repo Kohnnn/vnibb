@@ -96,9 +96,11 @@ export function WidgetSettingsModal({
     const [refreshInterval, setRefreshInterval] = useState<number>(0);
     const [error, setError] = useState<string | null>(null);
 
-    const widget = (dashboardId && tabId && widgetId)
-        ? state.dashboards.find(d => d.id === dashboardId)
-            ?.tabs.find(t => t.id === tabId)
+    const targetDashboard = dashboardId
+        ? state.dashboards.find((dashboard) => dashboard.id === dashboardId) || null
+        : null;
+    const widget = (targetDashboard && tabId && widgetId)
+        ? targetDashboard.tabs.find(t => t.id === tabId)
             ?.widgets.find(w => w.id === widgetId)
         : null;
 
@@ -115,6 +117,10 @@ export function WidgetSettingsModal({
         [tradingViewFields]
     );
     const tradingViewMode = isTradingViewWidget(widget?.type);
+    const isAdminManagedGlobalMarketsDashboard = targetDashboard?.id === 'default-global-markets';
+    const isWidgetSettingsReadOnly = Boolean(
+        isAdminManagedGlobalMarketsDashboard && targetDashboard?.adminUnlocked !== true
+    );
 
     useEffect(() => {
         if (!isOpen || !widget) {
@@ -153,6 +159,11 @@ export function WidgetSettingsModal({
 
     const handleSave = () => {
         if (!widget || !dashboardId || !tabId || !widgetId) return;
+
+        if (isWidgetSettingsReadOnly) {
+            setError('Enable Admin Mode in Global Layout Controls before editing Global Markets widget settings.');
+            return;
+        }
 
         try {
             const parsedAdvancedConfig = advancedConfig.trim().length > 0
@@ -208,6 +219,14 @@ export function WidgetSettingsModal({
                 </div>
 
                 <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh]">
+                    {isAdminManagedGlobalMarketsDashboard ? (
+                        <div className={`rounded-lg border px-4 py-3 text-xs ${isWidgetSettingsReadOnly ? 'border-amber-500/20 bg-amber-500/8 text-amber-100/85' : 'border-blue-500/20 bg-blue-500/8 text-blue-100/85'}`}>
+                            {isWidgetSettingsReadOnly
+                                ? 'This Global Markets widget is part of an admin-managed system dashboard. Enable Admin Mode to edit settings, then use Save Draft or Publish Global in the floating admin controls.'
+                                : 'You are editing an admin-managed Global Markets widget. Save changes here, then use Save Draft or Publish Global in the floating admin controls to ship them.'}
+                        </div>
+                    ) : null}
+                    <fieldset disabled={isWidgetSettingsReadOnly} className={isWidgetSettingsReadOnly ? 'space-y-6 opacity-60' : 'space-y-6'}>
                     <div className="space-y-4">
                         <label
                             htmlFor="widget-refresh-interval"
@@ -383,6 +402,7 @@ export function WidgetSettingsModal({
                                 : 'Edit widget-specific properties directly.'}
                         </p>
                     </div>
+                    </fieldset>
                 </div>
 
                 <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border-default)] bg-[var(--bg-modal)]">
@@ -394,7 +414,8 @@ export function WidgetSettingsModal({
                     </button>
                     <button
                         onClick={handleSave}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-900/20 flex items-center gap-2"
+                        disabled={isWidgetSettingsReadOnly}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900/30 disabled:text-white/60 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-900/20 flex items-center gap-2"
                     >
                         <Save size={16} />
                         Save Changes

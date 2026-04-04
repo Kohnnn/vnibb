@@ -228,6 +228,7 @@ export interface Dashboard {
     id: string;
     name: string;
     description?: string;
+    globalMarketsSymbol?: string;
     folderId?: string;      // Optional folder membership
     order: number;
     isDefault: boolean;

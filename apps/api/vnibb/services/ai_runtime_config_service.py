@@ -12,7 +12,7 @@ from vnibb.models.app_kv import AppKeyValue
 logger = logging.getLogger(__name__)
 
 AI_RUNTIME_CONFIG_KEY = "ai_runtime_config"
-SUPPORTED_AI_PROVIDERS = {"openrouter", "openai_compatible"}
+DEFAULT_OPENROUTER_MODEL = "openrouter/free"
 
 
 class AIRuntimeConfigService:
@@ -20,21 +20,28 @@ class AIRuntimeConfigService:
         self._memory_override: dict[str, str] | None = None
 
     def _normalize_provider(self, provider: str | None) -> str:
-        normalized = str(provider or "openrouter").strip().lower()
-        return normalized if normalized in SUPPORTED_AI_PROVIDERS else "openrouter"
+        return "openrouter"
+
+    def _is_valid_openrouter_model(self, value: str | None) -> bool:
+        normalized = str(value or "").strip()
+        if not normalized:
+            return False
+        if normalized == DEFAULT_OPENROUTER_MODEL:
+            return True
+        return "/" in normalized
 
     def _default_config(self) -> dict[str, str | None]:
         return {
-            "provider": self._normalize_provider(settings.llm_provider),
-            "model": str(settings.llm_model or "openai/gpt-4o-mini").strip(),
+            "provider": "openrouter",
+            "model": self._normalize_model(settings.llm_model),
             "updated_at": None,
         }
 
     def _normalize_model(self, model: str | None) -> str:
         normalized = str(model or "").strip()
-        if not normalized:
-            return str(self._default_config()["model"])
-        return normalized
+        if self._is_valid_openrouter_model(normalized):
+            return normalized
+        return DEFAULT_OPENROUTER_MODEL
 
     async def get_runtime_config(self) -> dict[str, str | None]:
         if self._memory_override is not None:
@@ -48,7 +55,7 @@ class AIRuntimeConfigService:
                 record = await session.get(AppKeyValue, AI_RUNTIME_CONFIG_KEY)
                 if record and isinstance(record.value, dict):
                     self._memory_override = {
-                        "provider": self._normalize_provider(record.value.get("provider")),
+                        "provider": "openrouter",
                         "model": self._normalize_model(record.value.get("model")),
                         "updated_at": str(record.value.get("updated_at") or "") or None,
                     }

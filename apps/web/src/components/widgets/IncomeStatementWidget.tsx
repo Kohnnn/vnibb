@@ -68,7 +68,6 @@ const labels: Record<string, string> = {
 
 const TABLE_YEAR_LIMIT = 10;
 const QUARTER_PERIOD_LIMIT = 28;
-const QUARTER_CHART_POINTS = 16;
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
 function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemove }: IncomeStatementWidgetProps) {
@@ -90,7 +89,6 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
     const apiPeriod = period === 'FY' ? 'year' : period === 'Q' ? 'quarter' : period;
     const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
     const visiblePeriodLimit = period === 'Q' ? QUARTER_PERIOD_LIMIT : TABLE_YEAR_LIMIT;
-    const chartPointLimit = period === 'Q' ? QUARTER_CHART_POINTS : 5;
 
     const {
         data,
@@ -112,12 +110,11 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
 
     const chartData = useMemo(() => {
         if (!orderedItems.length) return [];
-        const recentItems = orderedItems.slice(-chartPointLimit);
-        return recentItems.map((d, index) => ({
+        return orderedItems.map((d, index) => ({
             period: formatFinancialPeriodLabel(d.period, {
                 mode: periodMode,
                 index,
-                total: recentItems.length,
+                total: orderedItems.length,
             }),
             revenue: d.revenue || 0,
             grossProfit: d.gross_profit || 0,
@@ -127,7 +124,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             operatingMargin: d.revenue && d.operating_income ? (d.operating_income / d.revenue) * 100 : 0,
             netMargin: d.revenue && d.net_income ? (d.net_income / d.revenue) * 100 : 0,
         }));
-    }, [chartPointLimit, orderedItems, periodMode]);
+    }, [orderedItems, periodMode]);
 
     const tableScale = useMemo(() => {
         const values = orderedItems.flatMap((item) => [
@@ -156,7 +153,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
 
     const tableColumns = useMemo(
         () =>
-            orderedItems.slice(-visiblePeriodLimit).reverse().map((entry, index) => ({
+            orderedItems.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
@@ -278,7 +275,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
             rows={tableRows}
             sortable
             showTrend={false}
-            latestFirst
+            initialScrollPosition="end"
             storageKey={`income:${id}:${symbol}:${period}`}
             footerNote={unitNote}
             valueFormatter={(value, row) => {
@@ -292,6 +289,10 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
 
     const sankeyModel = useMemo(() => buildIncomeSankeyModel(orderedItems), [orderedItems]);
     const [chartType, setChartType] = useState<'overview' | 'margins' | 'sankey'>('overview');
+    const xAxisInterval = useMemo(
+        () => (chartData.length > 12 ? Math.max(1, Math.ceil(chartData.length / 8)) - 1 : 0),
+        [chartData.length]
+    );
 
     const renderChart = () => {
         if (!chartData.length) {
@@ -334,7 +335,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                             {chartType === 'overview' ? (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
                                     <YAxis
                                         tickFormatter={(value) => formatAxisValue(value, unitConfig)}
                                         tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
@@ -358,7 +359,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                             ) : (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
                                     <YAxis
                                         tickFormatter={(val) => `${val}%`}
                                         tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
@@ -438,7 +439,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : 'Quarterly'}
+                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right'}
                         sourceLabel="Income statement"
                         align="right"
                     />

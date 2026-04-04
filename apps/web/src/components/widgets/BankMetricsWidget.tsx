@@ -214,6 +214,7 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove }: BankMetricsWidgetP
                 rows={tableRows}
                 sortable
                 showTrend={false}
+                initialScrollPosition="end"
                 storageKey={`bank-metrics:${id}:${symbol}`}
                 valueFormatter={(value, row) =>
                   formatMetricValue(row.id, typeof value === 'number' ? value : Number(value))

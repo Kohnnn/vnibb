@@ -22,6 +22,7 @@ MAX_MESSAGE_LENGTH = 2000
 MAX_CONTEXT_CHARS = 16000
 STREAM_CHUNK_SIZE = 600
 SOURCE_SECTION_FALLBACK = "No validated sources cited."
+DEFAULT_OPENROUTER_MODEL = "openrouter/free"
 SUPPORTED_LLM_PROVIDERS = {"openrouter", "openai_compatible"}
 
 
@@ -303,6 +304,16 @@ class LlmService:
         normalized = str(provider or "openrouter").strip().lower()
         return normalized if normalized in SUPPORTED_LLM_PROVIDERS else "openrouter"
 
+    def _normalize_openrouter_model(self, model: str | None) -> str:
+        normalized = str(model or "").strip()
+        if not normalized:
+            return DEFAULT_OPENROUTER_MODEL
+        if normalized == DEFAULT_OPENROUTER_MODEL:
+            return normalized
+        if "/" in normalized:
+            return normalized
+        return DEFAULT_OPENROUTER_MODEL
+
     @property
     def is_available(self) -> bool:
         return bool(settings.openrouter_api_key)
@@ -327,6 +338,7 @@ class LlmService:
             raise RuntimeError("No AI model is configured.")
 
         if provider == "openrouter":
+            model = self._normalize_openrouter_model(model)
             api_key = override_key or str(settings.openrouter_api_key or "").strip()
             base_url = override_base_url or self.default_openrouter_base_url
             if not api_key:
