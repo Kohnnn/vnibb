@@ -507,6 +507,7 @@ export function WidgetWrapper({
                     onMaximize={handleMaximize}
                     onRefresh={onRefresh}
                     onSettings={onSettingsClick}
+                    highlightSettings={isTradingViewWidget(widgetType)}
                     onCopilot={() => onCopilotClick?.(buildCopilotContext())}
                     onClose={onRemove}
                     actions={

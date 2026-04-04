@@ -58,12 +58,14 @@ export interface TradingViewSettingOption {
 export interface TradingViewSettingField {
   key: string;
   label: string;
-  type: 'text' | 'number' | 'select' | 'boolean' | 'symbol_list';
+  type: 'text' | 'number' | 'select' | 'boolean' | 'symbol_list' | 'list' | 'color';
+  section?: string;
   description?: string;
   placeholder?: string;
   options?: TradingViewSettingOption[];
   min?: number;
   step?: number;
+  rows?: number;
 }
 
 interface TradingViewNativeWidgetMetadata {
@@ -93,6 +95,14 @@ const THEME_OPTIONS: TradingViewSettingOption[] = [
   { value: 'light', label: 'Light' },
 ];
 
+const TIMEZONE_OPTIONS: TradingViewSettingOption[] = [
+  { value: 'Etc/UTC', label: 'UTC' },
+  { value: 'America/New_York', label: 'New York' },
+  { value: 'Europe/London', label: 'London' },
+  { value: 'Asia/Ho_Chi_Minh', label: 'Ho Chi Minh' },
+  { value: 'Asia/Tokyo', label: 'Tokyo' },
+];
+
 const INTERVAL_OPTIONS: TradingViewSettingOption[] = [
   { value: '1m', label: '1m' },
   { value: '5m', label: '5m' },
@@ -102,6 +112,17 @@ const INTERVAL_OPTIONS: TradingViewSettingOption[] = [
   { value: '1D', label: '1D' },
   { value: '1W', label: '1W' },
   { value: '1M', label: '1M' },
+];
+
+const ADVANCED_CHART_INTERVAL_OPTIONS: TradingViewSettingOption[] = [
+  { value: '1', label: '1m' },
+  { value: '5', label: '5m' },
+  { value: '15', label: '15m' },
+  { value: '60', label: '1h' },
+  { value: '240', label: '4h' },
+  { value: 'D', label: '1D' },
+  { value: 'W', label: '1W' },
+  { value: 'M', label: '1M' },
 ];
 
 const DISPLAY_MODE_OPTIONS: TradingViewSettingOption[] = [
@@ -115,6 +136,18 @@ const ADVANCED_CHART_STYLE_OPTIONS: TradingViewSettingOption[] = [
   { value: '2', label: 'Bars' },
   { value: '3', label: 'Line' },
   { value: '9', label: 'Area' },
+];
+
+const RANGE_OPTIONS: TradingViewSettingOption[] = [
+  { value: '', label: 'Auto' },
+  { value: '1D', label: '1D' },
+  { value: '5D', label: '5D' },
+  { value: '1M', label: '1M' },
+  { value: '3M', label: '3M' },
+  { value: '6M', label: '6M' },
+  { value: '12M', label: '12M' },
+  { value: '60M', label: '5Y' },
+  { value: 'ALL', label: 'All' },
 ];
 
 const SCALE_POSITION_OPTIONS: TradingViewSettingOption[] = [
@@ -137,6 +170,23 @@ const HEATMAP_BLOCK_COLOR_OPTIONS: TradingViewSettingOption[] = [
 const FEED_MODE_OPTIONS: TradingViewSettingOption[] = [
   { value: 'all_symbols', label: 'All Symbols' },
   { value: 'symbol', label: 'Symbol' },
+];
+
+const SYMBOL_OVERVIEW_CHART_TYPE_OPTIONS: TradingViewSettingOption[] = [
+  { value: 'area', label: 'Area' },
+  { value: 'line', label: 'Line' },
+  { value: 'candlesticks', label: 'Candles' },
+];
+
+const VALUES_TRACKING_OPTIONS: TradingViewSettingOption[] = [
+  { value: '0', label: 'Hover' },
+  { value: '1', label: 'Last Value' },
+];
+
+const CHANGE_MODE_OPTIONS: TradingViewSettingOption[] = [
+  { value: 'price-and-percent', label: 'Price + %' },
+  { value: 'price', label: 'Price' },
+  { value: 'percent-only', label: '% Only' },
 ];
 
 const IMPORTANCE_OPTIONS: TradingViewSettingOption[] = [
@@ -167,6 +217,10 @@ const BASE_SYMBOL_FIELDS: TradingViewSettingField[] = [
   { key: 'symbol', label: 'Symbol', type: 'text', placeholder: 'NASDAQ:AAPL' },
 ];
 
+function withSection(section: string, fields: TradingViewSettingField[]): TradingViewSettingField[] {
+  return fields.map((field) => ({ ...field, section }));
+}
+
 const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
   {
     type: 'tradingview_chart',
@@ -185,36 +239,94 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
       style: '1',
       locale: DEFAULT_LOCALE,
       allow_symbol_change: true,
+      backgroundColor: '#0f172a',
+      gridColor: 'rgba(148, 163, 184, 0.08)',
       hide_top_toolbar: false,
       hide_side_toolbar: false,
+      hide_volume: false,
       hide_legend: false,
       withdateranges: true,
+      range: '',
+      extended_hours: false,
       details: false,
       hotlist: false,
       calendar: false,
+      hideideasbutton: false,
       save_image: true,
+      studies: [],
+      compareSymbols: [],
+      watchlist: [],
+      show_popup_button: false,
+      popup_width: '1000',
+      popup_height: '650',
       support_host: 'https://www.tradingview.com',
     },
     defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
     recommended: true,
     searchKeywords: ['advanced', 'chart', 'tv', 'tradingview', 'macro', 'forex', 'crypto'],
     settings: [
-      ...BASE_SYMBOL_FIELDS,
-      { key: 'interval', label: 'Interval', type: 'select', options: INTERVAL_OPTIONS },
-      { key: 'timezone', label: 'Timezone', type: 'text', placeholder: 'Etc/UTC' },
-      { key: 'theme', label: 'Theme', type: 'select', options: THEME_OPTIONS },
-      { key: 'locale', label: 'Locale', type: 'select', options: LOCALE_OPTIONS },
-      { key: 'style', label: 'Style', type: 'select', options: ADVANCED_CHART_STYLE_OPTIONS },
-      { key: 'autosize', label: 'Auto Size', type: 'boolean' },
-      { key: 'allow_symbol_change', label: 'Allow Symbol Change', type: 'boolean' },
-      { key: 'hide_top_toolbar', label: 'Hide Top Toolbar', type: 'boolean' },
-      { key: 'hide_side_toolbar', label: 'Hide Side Toolbar', type: 'boolean' },
-      { key: 'hide_legend', label: 'Hide Legend', type: 'boolean' },
-      { key: 'withdateranges', label: 'Show Date Ranges', type: 'boolean' },
-      { key: 'details', label: 'Show Details', type: 'boolean' },
-      { key: 'calendar', label: 'Show Calendar', type: 'boolean' },
-      { key: 'hotlist', label: 'Show Hotlist', type: 'boolean' },
-      { key: 'save_image', label: 'Allow Save Image', type: 'boolean' },
+      ...withSection('General', [
+        ...BASE_SYMBOL_FIELDS,
+        { key: 'interval', label: 'Default Interval', type: 'select', options: ADVANCED_CHART_INTERVAL_OPTIONS },
+        { key: 'timezone', label: 'Timezone', type: 'select', options: TIMEZONE_OPTIONS },
+        { key: 'theme', label: 'Theme', type: 'select', options: THEME_OPTIONS },
+        { key: 'locale', label: 'Locale', type: 'select', options: LOCALE_OPTIONS },
+      ]),
+      ...withSection('Chart', [
+        { key: 'style', label: "Bar's Style", type: 'select', options: ADVANCED_CHART_STYLE_OPTIONS },
+        { key: 'backgroundColor', label: 'Chart Background', type: 'color', placeholder: '#0f172a' },
+        { key: 'gridColor', label: 'Grid', type: 'color', placeholder: 'rgba(148, 163, 184, 0.08)' },
+        { key: 'range', label: 'Default Range', type: 'select', options: RANGE_OPTIONS },
+        { key: 'autosize', label: 'Auto Size', type: 'boolean' },
+        { key: 'width', label: 'Width', type: 'text', placeholder: '100%' },
+        { key: 'height', label: 'Height', type: 'text', placeholder: '100%' },
+        { key: 'hide_volume', label: 'Hide Volume', type: 'boolean' },
+        { key: 'withdateranges', label: 'Show Date Ranges', type: 'boolean' },
+        { key: 'extended_hours', label: 'Extended Hours', type: 'boolean' },
+      ]),
+      ...withSection('Add Indicators', [
+        {
+          key: 'studies',
+          label: 'Indicators',
+          type: 'list',
+          rows: 4,
+          placeholder: 'One TradingView study ID per line',
+          description: 'Use one indicator ID per line. Advanced JSON still supports full TradingView study payloads.',
+        },
+      ]),
+      ...withSection('Add Symbols To Compare', [
+        {
+          key: 'compareSymbols',
+          label: 'Compare Symbols',
+          type: 'list',
+          rows: 4,
+          placeholder: 'NASDAQ:QQQ\nAMEX:SPY',
+          description: 'Add one symbol per line. Advanced JSON can be used if you need richer compare payloads.',
+        },
+      ]),
+      ...withSection('Add Watchlist', [
+        {
+          key: 'watchlist',
+          label: 'Watchlist Symbols',
+          type: 'list',
+          rows: 5,
+          placeholder: 'NASDAQ:AAPL\nNASDAQ:NVDA',
+        },
+      ]),
+      ...withSection('Additional Options', [
+        { key: 'allow_symbol_change', label: 'Allow Symbol Change', type: 'boolean' },
+        { key: 'hide_top_toolbar', label: 'Hide Top Toolbar', type: 'boolean' },
+        { key: 'hide_side_toolbar', label: 'Hide Side Toolbar', type: 'boolean' },
+        { key: 'hide_legend', label: 'Hide Legend', type: 'boolean' },
+        { key: 'details', label: 'Show Details', type: 'boolean' },
+        { key: 'calendar', label: 'Show Calendar', type: 'boolean' },
+        { key: 'hotlist', label: 'Show Hotlist', type: 'boolean' },
+        { key: 'hideideasbutton', label: 'Hide Ideas Button', type: 'boolean' },
+        { key: 'save_image', label: 'Allow Save Image', type: 'boolean' },
+        { key: 'show_popup_button', label: 'Show Popup Button', type: 'boolean' },
+        { key: 'popup_width', label: 'Popup Width', type: 'number', min: 300, step: 10 },
+        { key: 'popup_height', label: 'Popup Height', type: 'number', min: 300, step: 10 },
+      ]),
     ],
   },
   {
@@ -245,14 +357,28 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 10, h: 7, minW: 7, minH: 5 },
     searchKeywords: ['symbol overview', 'quote', 'snapshot', 'overview'],
     settings: [
-      { key: 'chartOnly', label: 'Chart Only', type: 'boolean' },
-      { key: 'hideDateRanges', label: 'Hide Date Ranges', type: 'boolean' },
-      { key: 'hideMarketStatus', label: 'Hide Market Status', type: 'boolean' },
-      { key: 'hideSymbolLogo', label: 'Hide Symbol Logo', type: 'boolean' },
-      { key: 'scalePosition', label: 'Scale Position', type: 'select', options: SCALE_POSITION_OPTIONS },
-      { key: 'chartType', label: 'Chart Type', type: 'text', placeholder: 'area' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        { key: 'chartOnly', label: 'Chart Only', type: 'boolean' },
+        { key: 'hideDateRanges', label: 'Hide Date Ranges', type: 'boolean' },
+        { key: 'hideMarketStatus', label: 'Hide Market Status', type: 'boolean' },
+        { key: 'hideSymbolLogo', label: 'Hide Symbol Logo', type: 'boolean' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
+      ...withSection('Chart', [
+        { key: 'scalePosition', label: 'Scale Position', type: 'select', options: SCALE_POSITION_OPTIONS },
+        { key: 'scaleMode', label: 'Scale Mode', type: 'text', placeholder: 'Normal' },
+        { key: 'chartType', label: 'Chart Type', type: 'select', options: SYMBOL_OVERVIEW_CHART_TYPE_OPTIONS },
+        { key: 'valuesTracking', label: 'Values Tracking', type: 'select', options: VALUES_TRACKING_OPTIONS },
+        { key: 'changeMode', label: 'Change Mode', type: 'select', options: CHANGE_MODE_OPTIONS },
+        { key: 'fontSize', label: 'Font Size', type: 'number', min: 8, step: 1 },
+        { key: 'fontFamily', label: 'Font Family', type: 'text' },
+        { key: 'noTimeScale', label: 'Hide Time Scale', type: 'boolean' },
+        { key: 'backgroundColor', label: 'Background', type: 'color' },
+        { key: 'gridLineColor', label: 'Grid', type: 'color' },
+        { key: 'fontColor', label: 'Font Color', type: 'color' },
+        { key: 'widgetFontColor', label: 'Widget Font Color', type: 'color' },
+      ]),
     ],
   },
   {
@@ -328,13 +454,15 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     recommended: true,
     searchKeywords: ['market overview', 'indices', 'macro', 'tabs'],
     settings: [
-      { key: 'dateRange', label: 'Date Range', type: 'text', placeholder: '12M' },
-      { key: 'showChart', label: 'Show Chart', type: 'boolean' },
-      { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
-      { key: 'showFloatingTooltip', label: 'Show Floating Tooltip', type: 'boolean' },
-      { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        { key: 'dateRange', label: 'Date Range', type: 'text', placeholder: '12M' },
+        { key: 'showChart', label: 'Show Chart', type: 'boolean' },
+        { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
+        { key: 'showFloatingTooltip', label: 'Show Floating Tooltip', type: 'boolean' },
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -361,13 +489,16 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 10, h: 9, minW: 8, minH: 6 },
     searchKeywords: ['stock market', 'hotlists', 'top gainers', 'top losers'],
     settings: [
-      { key: 'exchange', label: 'Exchange', type: 'text', placeholder: 'US' },
-      { key: 'dateRange', label: 'Date Range', type: 'text', placeholder: '12M' },
-      { key: 'showChart', label: 'Show Chart', type: 'boolean' },
-      { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
-      { key: 'showFloatingTooltip', label: 'Show Floating Tooltip', type: 'boolean' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        { key: 'exchange', label: 'Exchange', type: 'text', placeholder: 'US' },
+        { key: 'dateRange', label: 'Date Range', type: 'text', placeholder: '12M' },
+        { key: 'showChart', label: 'Show Chart', type: 'boolean' },
+        { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
+        { key: 'showFloatingTooltip', label: 'Show Floating Tooltip', type: 'boolean' },
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -389,9 +520,11 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 10, h: 8, minW: 7, minH: 5 },
     searchKeywords: ['market data', 'market quotes', 'quotes table'],
     settings: [
-      { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -749,7 +882,16 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     },
     defaultLayout: { w: 8, h: 4, minW: 5, minH: 3 },
     searchKeywords: ['symbol info', 'quote info', 'symbol snapshot'],
-    settings: [...BASE_SYMBOL_FIELDS, ...COMMON_IFRAME_THEME_FIELDS, { key: 'width', label: 'Width', type: 'text', placeholder: '100%' }],
+    settings: [
+      ...withSection('General', [
+        ...BASE_SYMBOL_FIELDS,
+        { key: 'autosize', label: 'Auto Size', type: 'boolean' },
+        { key: 'width', label: 'Width', type: 'text', placeholder: '100%' },
+        { key: 'height', label: 'Height', type: 'text', placeholder: '203' },
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+      ]),
+    ],
   },
   {
     type: 'tradingview_technical_analysis',
@@ -774,12 +916,14 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     recommended: true,
     searchKeywords: ['technical analysis', 'gauge', 'signals'],
     settings: [
-      ...BASE_SYMBOL_FIELDS,
-      { key: 'interval', label: 'Interval', type: 'select', options: INTERVAL_OPTIONS },
-      { key: 'displayMode', label: 'Display Mode', type: 'select', options: DISPLAY_MODE_OPTIONS },
-      { key: 'showIntervalTabs', label: 'Show Interval Tabs', type: 'boolean' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        ...BASE_SYMBOL_FIELDS,
+        { key: 'interval', label: 'Interval', type: 'select', options: INTERVAL_OPTIONS },
+        { key: 'displayMode', label: 'Display Mode', type: 'select', options: DISPLAY_MODE_OPTIONS },
+        { key: 'showIntervalTabs', label: 'Show Interval Tabs', type: 'boolean' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -804,11 +948,30 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 10, h: 9, minW: 8, minH: 6 },
     searchKeywords: ['fundamental data', 'financials', 'company fundamentals'],
     settings: [
-      ...BASE_SYMBOL_FIELDS,
-      { key: 'displayMode', label: 'Display Mode', type: 'select', options: DISPLAY_MODE_OPTIONS },
-      { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        ...BASE_SYMBOL_FIELDS,
+        { key: 'displayMode', label: 'Display Mode', type: 'select', options: DISPLAY_MODE_OPTIONS },
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
+      ...withSection('Data Fields', [
+        {
+          key: 'columns',
+          label: 'Columns',
+          type: 'list',
+          rows: 4,
+          placeholder: 'One column key per line',
+          description: 'Optional TradingView financial column keys. Leave blank to use the default field set.',
+        },
+        {
+          key: 'fieldGroups',
+          label: 'Field Groups',
+          type: 'list',
+          rows: 3,
+          placeholder: 'One field group key per line',
+        },
+      ]),
     ],
   },
   {
@@ -829,7 +992,14 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     },
     defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 },
     searchKeywords: ['company profile', 'business description', 'industry'],
-    settings: [...BASE_SYMBOL_FIELDS, ...COMMON_IFRAME_THEME_FIELDS, ...AUTO_SIZE_FIELDS],
+    settings: [
+      ...withSection('General', [
+        ...BASE_SYMBOL_FIELDS,
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
+    ],
   },
   {
     type: 'tradingview_top_stories',
@@ -852,11 +1022,15 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
     searchKeywords: ['top stories', 'news', 'timeline'],
     settings: [
-      { key: 'feedMode', label: 'Feed Mode', type: 'select', options: FEED_MODE_OPTIONS },
-      ...BASE_SYMBOL_FIELDS,
-      { key: 'displayMode', label: 'Display Mode', type: 'select', options: DISPLAY_MODE_OPTIONS },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        { key: 'feedMode', label: 'Feed Mode', type: 'select', options: FEED_MODE_OPTIONS },
+        ...BASE_SYMBOL_FIELDS,
+        { key: 'market', label: 'Market', type: 'text', placeholder: 'stock' },
+        { key: 'displayMode', label: 'Display Mode', type: 'select', options: DISPLAY_MODE_OPTIONS },
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -879,12 +1053,14 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 10, h: 9, minW: 8, minH: 6 },
     searchKeywords: ['economic calendar', 'macro events', 'calendar'],
     settings: [
-      { key: 'countryFilter', label: 'Country Filter', type: 'text', placeholder: 'US,VN,EU' },
-      { key: 'currencyFilter', label: 'Currency Filter', type: 'text', placeholder: 'USD,EUR,JPY' },
-      { key: 'importanceFilter', label: 'Importance', type: 'select', options: IMPORTANCE_OPTIONS },
-      { key: 'hideImportanceIndicator', label: 'Hide Importance Indicator', type: 'boolean' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        { key: 'countryFilter', label: 'Country Filter', type: 'text', placeholder: 'US,VN,EU' },
+        { key: 'currencyFilter', label: 'Currency Filter', type: 'text', placeholder: 'USD,EUR,JPY' },
+        { key: 'importanceFilter', label: 'Importance', type: 'select', options: IMPORTANCE_OPTIONS },
+        { key: 'hideImportanceIndicator', label: 'Hide Importance Indicator', type: 'boolean' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
