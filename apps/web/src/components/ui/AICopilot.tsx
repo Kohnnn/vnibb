@@ -6,6 +6,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import {
     X,
     Send,
+    Plus,
     ChevronDown,
     ChevronRight,
     Bot,
@@ -100,7 +101,6 @@ type DetailsState = Record<string, boolean>;
 const DEFAULT_PROMPTS: PromptSuggestion[] = [
     { label: "Analyze", icon: Sparkles, prompt: "Analyze the financial health of this company" },
     { label: "Compare", icon: Bot, prompt: "Compare with industry peers" },
-    { label: "Financials", icon: Terminal, prompt: "Summarize recent earnings performance" },
     { label: "Technical", icon: SearchIcon, prompt: "What is the technical outlook for this stock?" },
 ];
 
@@ -109,24 +109,20 @@ const TAB_PROMPTS: Record<string, PromptSuggestion[]> = {
         { label: 'Revenue', icon: Terminal, prompt: 'Analyze revenue growth trend and margin sustainability over the last periods' },
         { label: 'Quality', icon: Sparkles, prompt: 'Assess earnings quality, cash conversion, and balance sheet risk' },
         { label: 'Valuation', icon: Bot, prompt: 'Evaluate whether valuation multiples are justified by fundamentals' },
-        { label: 'Risks', icon: SearchIcon, prompt: 'List top fundamental downside risks for this company' },
     ],
     comparison: [
         { label: 'Valuation', icon: Bot, prompt: 'Compare valuations of selected tickers and identify the outlier' },
         { label: 'Profitability', icon: Sparkles, prompt: 'Rank selected tickers by profitability and explain key drivers' },
-        { label: 'Quality', icon: Terminal, prompt: 'Which compared ticker has the best quality of earnings and why?' },
         { label: 'Best Pick', icon: SearchIcon, prompt: 'Recommend one ticker from this comparison with clear thesis and risks' },
     ],
     overview: [
         { label: 'Key Risks', icon: SearchIcon, prompt: 'What are the key risks for this stock over the next 6-12 months?' },
         { label: 'Catalysts', icon: Sparkles, prompt: 'What near-term catalysts could move this stock materially?' },
         { label: 'Positioning', icon: Bot, prompt: 'How should I position this stock in a balanced portfolio?' },
-        { label: 'Checklist', icon: Terminal, prompt: 'Create a due-diligence checklist before buying this stock' },
     ],
     technical: [
         { label: 'Trend', icon: SearchIcon, prompt: 'Summarize trend, momentum, and volatility context from current setup' },
         { label: 'Levels', icon: Terminal, prompt: 'Identify key support/resistance levels and invalidation points' },
-        { label: 'Signals', icon: Sparkles, prompt: 'Explain which technical signals are strongest right now' },
         { label: 'Plan', icon: Bot, prompt: 'Draft a risk-managed trade plan with entry, stop, and target' },
     ],
 };
@@ -135,31 +131,26 @@ const WIDGET_PROMPTS: Record<string, PromptSuggestion[]> = {
     comparison: [
         { label: 'Best vs Worst', icon: Bot, prompt: 'From this comparison widget, identify the strongest and weakest name and justify both with evidence' },
         { label: 'Valuation Gap', icon: Sparkles, prompt: 'Explain the biggest valuation gap shown in this widget and whether it looks justified' },
-        { label: 'Quality Rank', icon: Terminal, prompt: 'Rank the compared names by quality and explain what is driving the ranking' },
         { label: 'One Pick', icon: SearchIcon, prompt: 'Choose one ticker from this comparison and give the cleanest investment case plus key risks' },
     ],
     price_chart: [
         { label: 'Trend Read', icon: SearchIcon, prompt: 'Read this chart like a market technician: trend, momentum, and what matters most now' },
         { label: 'Levels', icon: Terminal, prompt: 'Use this chart context to map support, resistance, invalidation, and key breakout levels' },
         { label: 'Trade Setup', icon: Bot, prompt: 'Draft a risk-managed trade setup from this chart with entry, stop, and target logic' },
-        { label: 'Context', icon: Sparkles, prompt: 'Explain what this price action says about sentiment and positioning' },
     ],
     foreign_trading: [
         { label: 'Flow Signal', icon: Sparkles, prompt: 'Explain what this foreign trading widget is signaling about conviction and accumulation' },
         { label: 'Persistence', icon: Terminal, prompt: 'Is the foreign flow persistent or noisy? Summarize the key evidence from this widget' },
         { label: 'Implication', icon: Bot, prompt: 'What does this foreign trading pattern imply for the stock over the next few sessions?' },
-        { label: 'Risks', icon: SearchIcon, prompt: 'What would invalidate the bullish or bearish read from this foreign trading widget?' },
     ],
     market_breadth: [
         { label: 'Breadth Read', icon: Sparkles, prompt: 'Summarize what this market breadth widget says about the real health of the market' },
         { label: 'Leaders', icon: Bot, prompt: 'Identify sector leaders and laggards from this widget and explain the rotation' },
         { label: 'Risk-On?', icon: SearchIcon, prompt: 'Does this breadth setup look risk-on, risk-off, or mixed? Explain clearly' },
-        { label: 'Next Step', icon: Terminal, prompt: 'Translate this market breadth setup into a practical next-step watchlist or positioning plan' },
     ],
     financials: [
         { label: 'Explain Widget', icon: Terminal, prompt: 'Explain the key takeaways from this financial widget and what matters most for the thesis' },
         { label: 'Quality', icon: Sparkles, prompt: 'Assess earnings quality, cash conversion, and balance-sheet strength from this widget context' },
-        { label: 'Weak Points', icon: SearchIcon, prompt: 'Point out the weakest fundamental signals visible in this widget and why they matter' },
         { label: 'Decision', icon: Bot, prompt: 'Using this widget only as the starting point, tell me whether the fundamentals are investable and why' },
     ],
 };
@@ -339,6 +330,7 @@ export function AICopilot({
     const [isPromptLibraryOpen, setIsPromptLibraryOpen] = useState(false);
     const [attachedDocuments, setAttachedDocuments] = useState<CopilotDocumentContext[]>([]);
     const [runtimeConfig, setRuntimeConfig] = useState<{ provider: string; model: string } | null>(null);
+    const [isComposerToolsOpen, setIsComposerToolsOpen] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -838,12 +830,12 @@ export function AICopilot({
                     />
                     <button
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => setIsComposerToolsOpen((current) => !current)}
                         className="p-1 text-cyan-300 hover:text-cyan-200"
-                        aria-label="Attach document context"
-                        title="Attach PDF or text context"
+                        aria-label="Open VniAgent tools"
+                        title="Open VniAgent tools"
                     >
-                        <Paperclip size={16} />
+                        <Plus size={16} />
                     </button>
                     <div className="hidden md:flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
                         <Globe size={11} />
@@ -869,6 +861,23 @@ export function AICopilot({
                         <Send size={18} />
                     </button>
                 </div>
+                {isComposerToolsOpen && (
+                    <div className="mt-2 flex justify-start">
+                        <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 shadow-lg">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsComposerToolsOpen(false);
+                                    fileInputRef.current?.click();
+                                }}
+                                className="flex items-center gap-2 rounded-md px-2 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                            >
+                                <Paperclip size={13} />
+                                Attach document context
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <PromptsLibrary

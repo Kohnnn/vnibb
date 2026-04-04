@@ -449,29 +449,87 @@ Request
 6. Raise DataNotFoundError
 ```
 
-## External Data Providers
+## Data Storage Architecture
 
-| Provider | Type | Purpose |
-|----------|------|---------|
-| **VNStock** | Primary API | Prices, financials, ratios, screener, news, derivatives |
-| **VNStock Scrapers** | Fallback | Historical data when API unavailable |
-| **Appwrite** | Storage | Price archival, dashboard templates |
-| **Redis** | Cache | Session, rate limits, API cache |
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        External Sources                           │
+│   VNStock API ──batch sync──> Appwrite ──serve──> FastAPI ──> UI │
+└──────────────────────────────────────────────────────────────────┘
 
-## Database Schema (PostgreSQL via SQLAlchemy)
+Appwrite Collections (26 total):
+├── stocks, stock_prices, stock_indices
+├── income_statements, balance_sheets, cash_flows, financial_ratios
+├── foreign_trading, order_flow_daily, orderbook_snapshots
+├── dividends, company_events, insider_deals
+├── company_news, shareholders, officers, subsidiaries
+├── market_sectors, sector_performance, screener_snapshots
+├── user_dashboards, dashboard_widgets, system_dashboard_templates
+└── intraday_trades, derivative_prices
 
-| Table | Purpose |
-|-------|---------|
-| `stocks` | Stock metadata |
-| `stock_prices` | Historical OHLCV data |
-| `income_statements` | Annual/quarterly income |
-| `balance_sheets` | Balance sheet data |
-| `cash_flows` | Cash flow data |
-| `financial_ratios` | Pre-calculated ratios |
-| `screener_snapshots` | Daily screener data |
-| `foreign_trading` | Foreign buy/sell data |
-| `company_news` | News articles |
-| `dashboards` | User dashboards |
+Redis Cache: Session, rate limits, API response cache (TTL: 30s - 24h)
+```
+
+## Database Schema (Appwrite)
+
+VNIBB uses **Appwrite** as its primary data store with 26 collections.
+
+For detailed schema with all attributes and relationships, see:
+- [Appwrite Schema Reference](../../docs/APPWRITE_SCHEMA.md)
+
+### Core Collections
+
+| Collection | Purpose | Key Attributes |
+|------------|---------|----------------|
+| `stocks` | Stock master data | symbol, exchange, industry, sector |
+| `stock_prices` | Historical OHLCV | symbol, time, interval, open, high, low, close, volume |
+| `income_statements` | Income data | symbol, period, revenue, net_income, eps |
+| `balance_sheets` | Balance sheet | symbol, period, total_assets, total_liabilities, total_equity |
+| `cash_flows` | Cash flow | symbol, period, operating_cash_flow, free_cash_flow |
+| `financial_ratios` | Ratios | symbol, period, pe_ratio, pb_ratio, roe, roa |
+| `foreign_trading` | Foreign trades | symbol, trade_date, buy_value, sell_value, net_value |
+| `screener_snapshots` | Daily screener | symbol, snapshot_date, price, volume, market_cap, pe, pb |
+| `orderbook_snapshots` | Price depth | symbol, snapshot_time, bid1-3, ask1-3 |
+| `company_news` | News | symbol, title, source, published_date |
+| `user_dashboards` | User layouts | user_id, name, layout_config |
+| `dashboard_widgets` | Widget configs | dashboard_id, widget_type, layout, widget_config |
+
+### Key Relationships
+
+```
+stocks (1) ──┬── (*) stock_prices       # Historical prices
+             ├── (*) financial_ratios    # Ratio history
+             ├── (*) income_statements  # Quarterly/annual income
+             ├── (*) balance_sheets     # Balance sheet data
+             ├── (*) cash_flows         # Cash flow data
+             ├── (*) dividends          # Dividend history
+             ├── (*) foreign_trading    # Daily foreign trades
+             ├── (*) company_news       # News articles
+             ├── (*) insider_deals      # Insider transactions
+             └── (*) screener_snapshots # Daily snapshots
+
+companies (1) ──┬── (*) shareholders    # Major shareholders
+                 ├── (*) officers        # Company officers
+                 └── (*) subsidiaries    # Subsidiary companies
+
+user_dashboards (1) ── (*) dashboard_widgets
+```
+
+### Data Sync Flow
+
+```
+VNStock API ──batch sync──> Appwrite Collections
+                              │
+                              ├── stocks
+                              ├── stock_prices
+                              ├── financial_ratios
+                              ├── income_statements
+                              ├── balance_sheets
+                              ├── cash_flows
+                              ├── foreign_trading
+                              ├── dividends
+                              └── company_news
+```
 
 ## API Routes Reference
 
