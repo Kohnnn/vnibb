@@ -490,9 +490,9 @@ function buildMarketDataGroupsPreset(preset: string) {
         {
           name: 'US Indices',
           symbols: [
-            { name: 'FOREXCOM:SPXUSD', displayName: 'S&P 500 Index' },
-            { name: 'FOREXCOM:NSXUSD', displayName: 'US 100 Cash CFD' },
-            { name: 'FOREXCOM:DJI', displayName: 'Dow Jones Industrial Average Index' },
+            { name: 'FOREXCOM:SPXUSD', displayName: 'S&P 500' },
+            { name: 'FOREXCOM:NSXUSD', displayName: 'US 100' },
+            { name: 'FOREXCOM:DJI', displayName: 'Dow 30' },
           ],
         },
         {
@@ -529,9 +529,9 @@ function buildMarketDataGroupsPreset(preset: string) {
         {
           name: 'Crypto Majors',
           symbols: [
-            { name: 'BINANCE:BTCUSDT', displayName: 'BTC' },
-            { name: 'BINANCE:ETHUSDT', displayName: 'ETH' },
-            { name: 'BINANCE:SOLUSDT', displayName: 'SOL' },
+            { name: 'BINANCE:BTCUSDT', displayName: 'Bitcoin' },
+            { name: 'BINANCE:ETHUSDT', displayName: 'Ethereum' },
+            { name: 'BINANCE:SOLUSDT', displayName: 'Solana' },
             { name: 'BINANCE:XRPUSDT', displayName: 'XRP' },
           ],
         },
@@ -542,21 +542,21 @@ function buildMarketDataGroupsPreset(preset: string) {
         {
           name: 'Risk Assets',
           symbols: [
-            { name: 'FOREXCOM:SPXUSD', displayName: 'S&P 500 Index' },
-            { name: 'FOREXCOM:NSXUSD', displayName: 'US 100 Cash CFD' },
-            { name: 'AMEX:IWM', displayName: 'Russell 2000 ETF' },
-            { name: 'AMEX:EEM', displayName: 'Emerging Markets ETF' },
-            { name: 'AMEX:ARKK', displayName: 'ARK Innovation ETF' },
+            { name: 'FOREXCOM:SPXUSD', displayName: 'S&P 500' },
+            { name: 'FOREXCOM:NSXUSD', displayName: 'US 100' },
+            { name: 'AMEX:IWM', displayName: 'Russell 2000' },
+            { name: 'AMEX:EEM', displayName: 'EM ETF' },
+            { name: 'AMEX:ARKK', displayName: 'ARKK' },
             { name: 'CBOE:VIX', displayName: 'VIX' },
           ],
         },
         {
           name: 'Rates & Dollar',
           symbols: [
-            { name: 'TVC:US02Y', displayName: 'US 2Y Yield' },
-            { name: 'TVC:US10Y', displayName: 'US 10Y Yield' },
-            { name: 'TVC:US30Y', displayName: 'US 30Y Yield' },
-            { name: 'TVC:DXY', displayName: 'US Dollar Index' },
+            { name: 'TVC:US02Y', displayName: 'US 2Y' },
+            { name: 'TVC:US10Y', displayName: 'US 10Y' },
+            { name: 'TVC:US30Y', displayName: 'US 30Y' },
+            { name: 'TVC:DXY', displayName: 'DXY' },
             { name: 'FX:USDJPY', displayName: 'USD/JPY' },
             { name: 'FX:USDCHF', displayName: 'USD/CHF' },
           ],
@@ -566,8 +566,8 @@ function buildMarketDataGroupsPreset(preset: string) {
           symbols: [
             { name: 'TVC:GOLD', displayName: 'Gold' },
             { name: 'TVC:SILVER', displayName: 'Silver' },
-            { name: 'TVC:USOIL', displayName: 'WTI Crude Oil' },
-            { name: 'TVC:UKOIL', displayName: 'Brent Crude Oil' },
+            { name: 'TVC:USOIL', displayName: 'WTI Oil' },
+            { name: 'TVC:UKOIL', displayName: 'Brent Oil' },
           ],
         },
         {

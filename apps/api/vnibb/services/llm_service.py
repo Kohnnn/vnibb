@@ -245,6 +245,7 @@ def _derive_prompt_focus(context: dict[str, Any]) -> dict[str, str]:
             "mode": "comparison",
             "instructions": "Prefer direct relative judgments. Start with the winner/loser, then explain the spread using valuation, quality, momentum, and risk evidence from context.",
             "answer_shape": "Answer shape: Verdict, winner vs laggard, the 2-4 strongest pieces of evidence, key risk, and one practical next step.",
+            "example": "Example opener: `FPT looks stronger than VNM right now because growth and profitability are both meaningfully better, even though valuation is richer.`",
         }
     if any(
         keyword in normalized for keyword in ("technical", "price chart", "chart", "tradingview")
@@ -253,12 +254,14 @@ def _derive_prompt_focus(context: dict[str, Any]) -> dict[str, str]:
             "mode": "technical",
             "instructions": "Focus on trend, levels, momentum, invalidation, and trade structure. Be concrete about what would confirm or break the setup.",
             "answer_shape": "Answer shape: Trend, key levels, what confirms the setup, what invalidates it, and a simple trade or watch plan.",
+            "example": "Example opener: `The chart still looks constructive, but the setup only stays bullish while price holds above the nearest support zone.`",
         }
     if any(keyword in normalized for keyword in ("news", "event")):
         return {
             "mode": "news_events",
             "instructions": "Focus on catalysts, event risk, narrative shifts, and which items matter most for the thesis over the next few sessions and quarters.",
             "answer_shape": "Answer shape: What changed, why it matters now, medium-term implication, key risk, and what to monitor next.",
+            "example": "Example opener: `The biggest development is not the headline itself, but how it changes earnings expectations and execution risk over the next quarter.`",
         }
     if any(
         keyword in normalized
@@ -268,23 +271,27 @@ def _derive_prompt_focus(context: dict[str, Any]) -> dict[str, str]:
             "mode": "fundamentals",
             "instructions": "Focus on earnings quality, growth durability, margins, leverage, and balance-sheet strength. Call out what truly matters for the business quality read.",
             "answer_shape": "Answer shape: Core thesis, quality of business, balance-sheet or cash-flow risk, valuation implication, and what to watch next.",
+            "example": "Example opener: `The business still looks fundamentally sound, but the real question is whether current margins and growth are durable enough to justify the valuation.`",
         }
     if any(keyword in normalized for keyword in ("breadth", "sector", "market")):
         return {
             "mode": "market_regime",
             "instructions": "Focus on breadth, rotation, leadership, and whether the market backdrop is supportive or deteriorating.",
             "answer_shape": "Answer shape: Market regime, leadership/laggards, what the breadth says, and how that should affect positioning.",
+            "example": "Example opener: `The market backdrop looks mixed-to-constructive because leadership is narrow but breadth has not fully broken down.`",
         }
     if any(keyword in normalized for keyword in ("foreign", "flow", "order")):
         return {
             "mode": "flow",
             "instructions": "Focus on participation, persistence, and whether capital flow is confirming or contradicting the broader thesis.",
             "answer_shape": "Answer shape: Signal, persistence, contradiction or confirmation, implication for conviction, and next watch item.",
+            "example": "Example opener: `The flow signal is helpful, but it only strengthens the thesis if it stays persistent over the next few sessions.`",
         }
     return {
         "mode": "general",
         "instructions": "Start with the clearest thesis, then support it with the most decision-useful evidence from the current context.",
         "answer_shape": "Answer shape: Direct takeaway first, then evidence, risks, and the clearest next action or watch item.",
+        "example": "Example opener: `The clearest takeaway is that the stock still looks investable, but only if you are comfortable with the current valuation and execution risks.`",
     }
 
 
@@ -454,10 +461,11 @@ class LlmService:
             f"8. Current focus mode: {prompt_focus['mode']}. Widget: {(widget_type_key or widget_type or 'dashboard')}. Active tab: {active_tab or 'unknown'}.\n"
             f"9. Focus instructions: {prompt_focus['instructions']}\n"
             f"10. Preferred answer shape: {prompt_focus['answer_shape']}\n"
-            "11. Answer naturally in Markdown. Use short sections only when they make the answer clearer. If the user asks a direct question, answer it in the first sentence.\n"
-            "12. If you rely on server context for factual claims, add inline source IDs like [VNM-PRICES] when helpful, but do not force citations into every sentence. The server will normalize the final Sources block.\n"
-            "13. Keep the answer decision-useful, avoid filler, and do not restate obvious context unless it helps the conclusion.\n"
-            "14. Do not cite browser client context as authoritative evidence unless the user explicitly asks about it, and label it clearly if you do."
+            f"11. Example answer tone: {prompt_focus['example']}\n"
+            "12. Answer naturally in Markdown. Use short sections only when they make the answer clearer. If the user asks a direct question, answer it in the first sentence.\n"
+            "13. If you rely on server context for factual claims, add inline source IDs like [VNM-PRICES] when helpful, but do not force citations into every sentence. The server will normalize the final Sources block.\n"
+            "14. Keep the answer decision-useful, avoid filler, and do not restate obvious context unless it helps the conclusion.\n"
+            "15. Do not cite browser client context as authoritative evidence unless the user explicitly asks about it, and label it clearly if you do."
         )
         document_note = _document_context_note(context)
         if document_note:
