@@ -72,6 +72,7 @@ const MAIN_FUNDAMENTAL_DASHBOARD_ID = 'default-fundamental';
 const TECHNICAL_DASHBOARD_ID = 'default-technical';
 const QUANT_DASHBOARD_ID = 'default-quant';
 const GLOBAL_MARKETS_DASHBOARD_ID = 'default-global-markets';
+const GLOBAL_MARKETS_DASHBOARD_NAME = 'Global Markets';
 const FUNDAMENTALS_TAB_NAME = 'Fundamentals';
 const FUNDAMENTALS_PERIOD_SYNC_GROUP = 'fundamental-core';
 const ADMIN_MANAGED_SYSTEM_IDS = new Set([
@@ -123,6 +124,7 @@ function DashboardContent() {
         tabId: string;
     } | null>(null);
     const autoWalkthroughQueuedRef = useRef(false);
+    const lastGlobalMarketsSeedRef = useRef<string | null>(null);
 
     const starterTemplates = useMemo(() => {
         const preferredIds = ['getting-started', 'fundamental-analyst', 'global-markets', 'earnings-season'];
@@ -454,6 +456,44 @@ function DashboardContent() {
     const handleSymbolChange = useCallback((symbol: string) => {
         applySelectedSymbol(symbol);
     }, [applySelectedSymbol]);
+
+    useEffect(() => {
+        if (!activeDashboard || !activeTab) {
+            return;
+        }
+
+        const tabSeedKey = `${activeDashboard.id}:${activeTab.id}`;
+        if (lastGlobalMarketsSeedRef.current === tabSeedKey) {
+            return;
+        }
+        lastGlobalMarketsSeedRef.current = tabSeedKey;
+
+        if (
+            activeDashboard.id !== GLOBAL_MARKETS_DASHBOARD_ID &&
+            activeDashboard.name !== GLOBAL_MARKETS_DASHBOARD_NAME
+        ) {
+            return;
+        }
+
+        const seededTradingViewSymbol = activeTab.widgets.find((widget) => {
+            if (!isTradingViewWidget(widget.type) || !usesTradingViewWidgetSymbol(widget.type)) {
+                return false;
+            }
+
+            return widget.config?.useLinkedSymbol !== false && typeof widget.config?.symbol === 'string' && widget.config.symbol.trim().length > 0;
+        })?.config?.symbol;
+
+        if (!seededTradingViewSymbol) {
+            return;
+        }
+
+        const normalized = seededTradingViewSymbol.trim().toUpperCase();
+        if (!normalized || normalized === globalSymbol) {
+            return;
+        }
+
+        applySelectedSymbol(normalized);
+    }, [activeDashboard, activeTab, applySelectedSymbol, globalSymbol]);
 
     const canEditCurrentDashboard = (activeDashboard?.adminUnlocked === true) || activeDashboard?.isEditable !== false;
 
@@ -801,9 +841,11 @@ function DashboardContent() {
                                         const widgetTitle = getWidgetDefinition(widgetType)?.name ?? widgetType.replace(/_/g, ' ');
                                         const widgetSymbol = isTradingViewWidget(widgetType)
                                             ? usesTradingViewWidgetSymbol(widgetType)
-                                                ? (typeof widget.config?.symbol === 'string' && widget.config.symbol
-                                                    ? widget.config.symbol
-                                                    : globalSymbol)
+                                                ? (widget.config?.useLinkedSymbol !== false
+                                                    ? globalSymbol
+                                                    : (typeof widget.config?.symbol === 'string' && widget.config.symbol
+                                                        ? widget.config.symbol
+                                                        : globalSymbol))
                                                 : undefined
                                             : globalSymbol;
                                         const parameters = getWidgetParameters(widget, (key, value) =>
