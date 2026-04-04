@@ -210,7 +210,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
 
     const tableColumns = useMemo(
         () =>
-            orderedItems.slice(-visiblePeriodLimit).map((entry, index) => ({
+            orderedItems.slice(-visiblePeriodLimit).reverse().map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
@@ -295,6 +295,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
             rows={tableRows}
             sortable
             showTrend={false}
+            latestFirst
             storageKey={`cash-flow:${id}:${symbol}:${period}`}
             footerNote={unitNote}
             valueFormatter={(value) =>

@@ -47,7 +47,8 @@ Source of truth:
 - `Advanced Chart` now includes grouped controls for chart visuals, indicators, compare symbols, watchlist symbols, and additional toolbar/popup options.
 - `Market Overview` and `Market Data` now support TradingView-compatible preset builders for tabs and symbol groups, including cross-asset macro and Vietnam/regional risk presets, while advanced JSON still supports fully custom payloads.
 - `Fundamental Data` now exposes a friendlier `Financial Panel` preset selector such as `Overview`, `Valuation`, `Profitability`, `Growth`, `Balance Sheet`, and `Cash Flow`, with manual `fieldGroups` and `columns` editors still available.
-- Symbol-bearing TradingView widgets now support an app-level `Sync With Dashboard Symbol` option so linked chart and company-detail widgets can follow the same ticker.
+- Symbol-bearing TradingView widgets now support an app-level `Sync With Global Markets Symbol` option so linked chart and company-detail widgets can follow the same TradingView/global-market ticker across dashboards without changing the VNIBB stock-symbol flow.
+- The shared TradingView/global-market default symbol is `NASDAQ:VFS`.
 - Dark mode is the default across TradingView widgets today. Light mode is still available per widget, and a future app-level theme pass can promote that into a global TradingView theme preference.
-- Symbol-bearing TradingView widgets store their symbol in widget-local config so dashboards can keep different TradingView symbols and layouts.
+- Symbol-bearing TradingView widgets still keep a widget-local symbol in config, but linked TradingView widgets now resolve from the dedicated shared Global Markets symbol channel.
 - The default Global Markets starter layout was updated to use a TradingView-native mix instead of the earlier mixed native/TradingView setup.

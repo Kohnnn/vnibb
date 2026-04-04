@@ -13,6 +13,8 @@ The widget system now reflects these completed changes:
 - template surfaces consolidated onto one canonical template catalog
 - component modal recategorized into clearer presentation groups
 - VniAgent prompt routing unified through the sidebar-owned prompt library
+- `financial_snapshot` added for multi-section latest-first financial review
+- `earnings_release_recap` added for quarter follow-up workflow using existing data
 
 ## Canonical References
 
@@ -37,6 +39,12 @@ Presentation groups in the component modal are now:
 - Screeners & Tools
 
 These are UI groupings and do not require changing the stored widget category enum.
+
+## Screener Upgrade
+
+- Screener Pro now serializes quick filters plus advanced filter-builder state into backend `filters` JSON.
+- Primary sorting is now sent to the backend via `sort`.
+- Saved screens now persist in widget config and restore filters, advanced logic, sort, market, view mode, and column sets.
 
 ## Final Resize Notes
 

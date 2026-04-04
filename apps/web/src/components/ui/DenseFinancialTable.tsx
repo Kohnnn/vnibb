@@ -29,6 +29,7 @@ interface DenseFinancialTableProps {
   maxYears?: number
   showTrend?: boolean
   showGrowth?: boolean
+  latestFirst?: boolean
   className?: string
   storageKey?: string
   footerNote?: string
@@ -91,6 +92,7 @@ export function DenseFinancialTable({
   maxYears = 10,
   showTrend = true,
   showGrowth = true,
+  latestFirst = false,
   className,
   storageKey,
   footerNote,
@@ -365,9 +367,13 @@ export function DenseFinancialTable({
                         : defaultFormatter(rawValue)
 
                     const currentNumber = asNumber(rawValue)
+                    const comparisonColumnKey = latestFirst
+                      ? visibleColumns[index + 1]?.key
+                      : visibleColumns[index - 1]?.key
+
                     const previousNumber =
-                      showGrowth && !row.isGroup && index > 0
-                        ? asNumber(row.values[visibleColumns[index - 1].key])
+                      showGrowth && !row.isGroup && comparisonColumnKey
+                        ? asNumber(row.values[comparisonColumnKey])
                         : null
 
                     const growthPct = showGrowth

@@ -1,26 +1,27 @@
-// Screener Widget - Sprint V11 Enhancement
+// Screener Widget - backend-wired screening workspace
 'use client';
 
 import { useState, useMemo, useCallback, useEffect, memo } from 'react';
 import { Search, Table, LayoutGrid, ListFilter, LineChart } from 'lucide-react';
-import type { ScreenerData } from '@/types/screener';
+
 import { useScreenerData, useVnstockSource } from '@/lib/queries';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/VirtualizedTable';
+import { VirtualizedTable } from '@/components/ui/VirtualizedTable';
 import { useColumnPresets } from '@/hooks/useColumnPresets';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import type { WidgetGroupId } from '@/types/widget';
-import { ALL_COLUMNS, type ScreenerColumn } from '@/types/screener';
+import { ALL_COLUMNS } from '@/types/screener';
 import { formatScreenerValue } from '@/utils/formatters';
 import { MarketToggle, type Market } from './screener/MarketToggle';
 import { cn } from '@/lib/utils';
-
 import { FilterBar, type ActiveFilter } from './screener/FilterBar';
-import { FilterBuilderPanel, type FilterGroup } from './screener/FilterBuilderPanel';
+import { FilterBuilderPanel, type FilterCondition, type FilterGroup } from './screener/FilterBuilderPanel';
 import { ColumnCustomizer } from './screener/ColumnCustomizer';
 import { SavedScreensDropdown, type SavedScreen } from './screener/SavedScreensDropdown';
 import { PerformanceTable } from './screener/PerformanceTable';
@@ -35,9 +36,145 @@ interface ScreenerWidgetProps {
     onRemove?: () => void;
     onSymbolClick?: (symbol: string) => void;
     widgetGroup?: WidgetGroupId;
+    config?: Record<string, unknown>;
 }
 
 type ViewMode = 'table' | 'chart' | 'performance';
+
+interface SerializedFilterGroup {
+    logic: 'AND' | 'OR';
+    conditions: Array<FilterCondition | SerializedFilterGroup>;
+}
+
+const DEFAULT_SORT_FIELD = 'market_cap';
+const DEFAULT_SORT_ORDER: 'asc' | 'desc' = 'desc';
+const DEFAULT_VIEW_MODE: ViewMode = 'table';
+
+function createEmptyFilterGroup(): FilterGroup {
+    return { logic: 'AND', conditions: [] };
+}
+
+function hasOwnConfigKey(config: Record<string, unknown> | undefined, key: string): boolean {
+    return Boolean(config) && Object.prototype.hasOwnProperty.call(config, key);
+}
+
+function parseActiveFilters(value: unknown): ActiveFilter[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is ActiveFilter => {
+        return Boolean(item)
+            && typeof item === 'object'
+            && typeof (item as ActiveFilter).id === 'string';
+    });
+}
+
+function parseFilterGroup(value: unknown): FilterGroup {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return createEmptyFilterGroup();
+    }
+    const candidate = value as Partial<FilterGroup>;
+    return {
+        logic: candidate.logic === 'OR' ? 'OR' : 'AND',
+        conditions: Array.isArray(candidate.conditions)
+            ? candidate.conditions.filter((item): item is FilterCondition => Boolean(item) && typeof item === 'object' && 'field' in item)
+            : [],
+    };
+}
+
+function parseSavedScreens(value: unknown): SavedScreen[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is SavedScreen => Boolean(item) && typeof item === 'object' && typeof (item as SavedScreen).id === 'string' && typeof (item as SavedScreen).name === 'string');
+}
+
+function parseColumnIds(value: unknown): string[] | null {
+    if (!Array.isArray(value)) return null;
+    const ids = value.filter((item): item is string => typeof item === 'string');
+    return ids.length > 0 ? ids : null;
+}
+
+function parseMarket(value: unknown, fallback: Market): Market {
+    return value === 'HOSE' || value === 'HNX' || value === 'UPCOM' || value === 'ALL'
+        ? value
+        : fallback;
+}
+
+function parseViewMode(value: unknown): ViewMode {
+    return value === 'chart' || value === 'performance' ? value : 'table';
+}
+
+function quickFilterConditions(filters: ActiveFilter[]): FilterCondition[] {
+    return filters.flatMap((filter) => {
+        if (filter.value === null || filter.value === undefined || filter.value === '') {
+            return [];
+        }
+
+        const normalizeConditionValue = (value: unknown): FilterCondition['value'] => {
+            if (Array.isArray(value)) {
+                return value.filter((item): item is number | string => typeof item === 'number' || typeof item === 'string') as number[] | string[];
+            }
+            if (typeof value === 'number') {
+                return value;
+            }
+            if (typeof value === 'string') {
+                return [value];
+            }
+            return 0;
+        };
+
+        if (typeof filter.value === 'object' && filter.value !== null && !Array.isArray(filter.value)) {
+            return Object.entries(filter.value as Record<string, unknown>)
+                .filter((entry): entry is [FilterCondition['operator'], unknown] => entry[1] !== undefined)
+                .map(([operator, value]) => ({
+                    field: filter.id,
+                    operator,
+                    value: normalizeConditionValue(value),
+                    enabled: true,
+                    id: `${filter.id}:${operator}`,
+                }));
+        }
+
+        return [{
+            id: `${filter.id}:eq`,
+            field: filter.id,
+            operator: Array.isArray(filter.value) ? 'in' : 'eq',
+            value: normalizeConditionValue(filter.value),
+            enabled: true,
+        }];
+    });
+}
+
+function buildSerializedFilters(quickFilters: ActiveFilter[], advancedGroup: FilterGroup): string | undefined {
+    const quickConditions = quickFilterConditions(quickFilters);
+    const hasAdvancedConditions = advancedGroup.conditions.length > 0;
+
+    if (!quickConditions.length && !hasAdvancedConditions) {
+        return undefined;
+    }
+
+    const merged: SerializedFilterGroup = {
+        logic: 'AND',
+        conditions: [],
+    };
+
+    if (quickConditions.length) {
+        merged.conditions.push(...quickConditions);
+    }
+
+    if (hasAdvancedConditions) {
+        merged.conditions.push({
+            logic: advancedGroup.logic,
+            conditions: advancedGroup.conditions.map((condition) => ({ ...condition })),
+        });
+    }
+
+    return JSON.stringify(merged);
+}
+
+function safeRandomId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 export function ScreenerWidget({
     id,
@@ -47,31 +184,125 @@ export function ScreenerWidget({
     onRemove,
     onSymbolClick,
     widgetGroup,
+    config,
 }: ScreenerWidgetProps) {
-    // UI State
-    const [viewMode, setViewMode] = useState<ViewMode>('table');
-    const [search, setSearch] = useState('');
-    const [market, setMarket] = useState<Market>(initialExchange as Market);
-    const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-    const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
-    const [advancedFilterGroup, setAdvancedFilterGroup] = useState<FilterGroup | null>(null);
-    const [activeScreenId, setActiveScreenId] = useState('all');
-    const [customScreens, setCustomScreens] = useState<SavedScreen[]>([]);
-    const [sortField, setSortField] = useState<string>('market_cap');
-    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+    const { updateWidget } = useDashboard();
+    const widgetLocation = useDashboardWidget(id);
 
-    // Column state
+    const persistedQuickFilters = useMemo(() => parseActiveFilters(config?.quickFilters), [config]);
+    const persistedAdvancedFilters = useMemo(() => parseFilterGroup(config?.advancedFilters), [config]);
+    const persistedCustomScreens = useMemo(() => parseSavedScreens(config?.savedScreens), [config]);
+    const persistedColumns = useMemo(() => parseColumnIds(config?.activeColumns), [config]);
+    const persistedSortField = typeof config?.sortField === 'string' ? config.sortField : DEFAULT_SORT_FIELD;
+    const persistedSortOrder = config?.sortOrder === 'asc' ? 'asc' : DEFAULT_SORT_ORDER;
+    const persistedActiveScreenId = typeof config?.activeScreenId === 'string' ? config.activeScreenId : 'all';
+    const persistedSearch = typeof config?.search === 'string' ? config.search : '';
+    const persistedMarket = parseMarket(config?.market, initialExchange as Market);
+    const persistedViewMode = parseViewMode(config?.viewMode);
+
+    const [viewMode, setViewMode] = useState<ViewMode>(persistedViewMode);
+    const [search, setSearch] = useState(persistedSearch);
+    const [market, setMarket] = useState<Market>(persistedMarket);
+    const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+    const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>(persistedQuickFilters);
+    const [advancedFilterGroup, setAdvancedFilterGroup] = useState<FilterGroup>(persistedAdvancedFilters);
+    const [activeScreenId, setActiveScreenId] = useState(persistedActiveScreenId);
+    const [customScreens, setCustomScreens] = useState<SavedScreen[]>(persistedCustomScreens);
+    const [sortField, setSortField] = useState<string>(persistedSortField);
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(persistedSortOrder);
+
     const { getActiveColumns, setColumns } = useColumnPresets();
+
+    useEffect(() => {
+        setActiveFilters((current) => JSON.stringify(current) === JSON.stringify(persistedQuickFilters) ? current : persistedQuickFilters);
+    }, [persistedQuickFilters]);
+
+    useEffect(() => {
+        setAdvancedFilterGroup((current) => JSON.stringify(current) === JSON.stringify(persistedAdvancedFilters) ? current : persistedAdvancedFilters);
+    }, [persistedAdvancedFilters]);
+
+    useEffect(() => {
+        setCustomScreens((current) => JSON.stringify(current) === JSON.stringify(persistedCustomScreens) ? current : persistedCustomScreens);
+    }, [persistedCustomScreens]);
+
+    useEffect(() => {
+        setActiveScreenId((current) => current === persistedActiveScreenId ? current : persistedActiveScreenId);
+    }, [persistedActiveScreenId]);
+
+    useEffect(() => {
+        setSearch((current) => current === persistedSearch ? current : persistedSearch);
+    }, [persistedSearch]);
+
+    useEffect(() => {
+        setMarket((current) => current === persistedMarket ? current : persistedMarket);
+    }, [persistedMarket]);
+
+    useEffect(() => {
+        setViewMode((current) => current === persistedViewMode ? current : persistedViewMode);
+    }, [persistedViewMode]);
+
+    useEffect(() => {
+        setSortField((current) => current === persistedSortField ? current : persistedSortField);
+    }, [persistedSortField]);
+
+    useEffect(() => {
+        setSortOrder((current) => current === persistedSortOrder ? current : persistedSortOrder);
+    }, [persistedSortOrder]);
+
+    useEffect(() => {
+        if (!persistedColumns) return;
+        if (JSON.stringify(getActiveColumns()) === JSON.stringify(persistedColumns)) return;
+        setColumns(persistedColumns);
+    }, [getActiveColumns, persistedColumns, setColumns]);
+
     const activeColumnIds = getActiveColumns();
-    const visibleColumns = useMemo(() =>
-        ALL_COLUMNS.filter(c => activeColumnIds.includes(c.id)),
-        [activeColumnIds]
-    );
+    const visibleColumns = useMemo(() => ALL_COLUMNS.filter((column) => activeColumnIds.includes(column.id)), [activeColumnIds]);
 
     const source = useVnstockSource();
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
 
-    // Data fetching
+    const serializedFilters = useMemo(
+        () => buildSerializedFilters(activeFilters, advancedFilterGroup),
+        [activeFilters, advancedFilterGroup]
+    );
+    const sort = useMemo(() => `${sortField}:${sortOrder}`, [sortField, sortOrder]);
+
+    useEffect(() => {
+        if (!widgetLocation) return;
+
+        const currentConfig = widgetLocation.widget.config || {};
+        const nextConfig = {
+            ...currentConfig,
+            quickFilters: activeFilters,
+            advancedFilters: advancedFilterGroup,
+            savedScreens: customScreens,
+            activeScreenId,
+            activeColumns: activeColumnIds,
+            sortField,
+            sortOrder,
+            search,
+            market,
+            viewMode,
+        };
+
+        if (
+            JSON.stringify(currentConfig.quickFilters ?? []) === JSON.stringify(activeFilters)
+            && JSON.stringify(currentConfig.advancedFilters ?? createEmptyFilterGroup()) === JSON.stringify(advancedFilterGroup)
+            && JSON.stringify(currentConfig.savedScreens ?? []) === JSON.stringify(customScreens)
+            && JSON.stringify(currentConfig.activeColumns ?? []) === JSON.stringify(activeColumnIds)
+            && currentConfig.activeScreenId === activeScreenId
+            && currentConfig.sortField === sortField
+            && currentConfig.sortOrder === sortOrder
+            && currentConfig.search === search
+            && currentConfig.market === market
+            && currentConfig.viewMode === viewMode
+        ) {
+            return;
+        }
+
+        updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, { config: nextConfig });
+    }, [activeColumnIds, activeFilters, activeScreenId, advancedFilterGroup, customScreens, id, market, search, sortField, sortOrder, updateWidget, viewMode, widgetLocation]);
+
     const {
         data: screenerData,
         isLoading,
@@ -81,45 +312,26 @@ export function ScreenerWidget({
         refetch,
     } = useScreenerData({
         limit,
-        exchange: market === 'ALL' ? undefined : market
+        exchange: market === 'ALL' ? undefined : market,
+        filters: serializedFilters,
+        sort,
     });
 
     const filteredData = useMemo(() => {
         if (!screenerData?.data) return [];
-        let result = [...screenerData.data];
 
-        // Apply search filter
-        if (search) {
-            const searchLower = search.toLowerCase();
-            result = result.filter((s: any) =>
-                (s.ticker ?? s.symbol)?.toLowerCase().includes(searchLower) ||
-                s.organ_name?.toLowerCase().includes(searchLower)
-            );
-        }
+        if (!search.trim()) return screenerData.data;
 
-        // Apply active filters
-        activeFilters.forEach(filter => {
-            if (filter.value) {
-                result = result.filter((s: any) => {
-                    const val = s[filter.id];
-                    if (filter.value.gte !== undefined && val < filter.value.gte) return false;
-                    if (filter.value.lt !== undefined && val >= filter.value.lt) return false;
-                    if (filter.value.gt !== undefined && val <= filter.value.gt) return false;
-                    if (filter.value.eq !== undefined && val !== filter.value.eq) return false;
-                    return true;
-                });
-            }
+        const normalizedQuery = search.trim().toLowerCase();
+        return screenerData.data.filter((stock: Record<string, unknown>) => {
+            const symbolValue = String(stock.ticker ?? stock.symbol ?? '').toLowerCase();
+            const nameValue = String(stock.organ_name ?? stock.company_name ?? '').toLowerCase();
+            const industryValue = String(stock.industry_name ?? stock.industry ?? '').toLowerCase();
+            return symbolValue.includes(normalizedQuery)
+                || nameValue.includes(normalizedQuery)
+                || industryValue.includes(normalizedQuery);
         });
-
-        // Apply sorting
-        result.sort((a: any, b: any) => {
-            const aVal = a[sortField] ?? 0;
-            const bVal = b[sortField] ?? 0;
-            return sortOrder === 'desc' ? bVal - aVal : aVal - bVal;
-        });
-
-        return result;
-    }, [screenerData, search, activeFilters, sortField, sortOrder]);
+    }, [screenerData?.data, search]);
 
     const hasData = filteredData.length > 0;
     const isFallback = Boolean(error && hasData);
@@ -130,14 +342,13 @@ export function ScreenerWidget({
             ...(screenerData?.data ?? []).map((row) => row.updated_at),
         ]) ?? dataUpdatedAt;
 
-    // Handlers
     const handleSort = useCallback((field: string) => {
         if (sortField === field) {
-            setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-        } else {
-            setSortField(field);
-            setSortOrder('desc');
+            setSortOrder((previous) => (previous === 'asc' ? 'desc' : 'asc'));
+            return;
         }
+        setSortField(field);
+        setSortOrder('desc');
     }, [sortField]);
 
     const handleSymbolSelect = useCallback((symbol: string) => {
@@ -148,37 +359,55 @@ export function ScreenerWidget({
 
     const handleSelectScreen = useCallback((screen: SavedScreen) => {
         setActiveScreenId(screen.id);
-        if (screen.filters) {
-            setActiveFilters(screen.filters);
+        setActiveFilters(screen.quickFilters || []);
+        setAdvancedFilterGroup(screen.advancedFilters || createEmptyFilterGroup());
+        setSortField(screen.sortField || DEFAULT_SORT_FIELD);
+        setSortOrder(screen.sortOrder || DEFAULT_SORT_ORDER);
+        setMarket(parseMarket(screen.market, 'ALL'));
+        setViewMode(screen.viewMode || DEFAULT_VIEW_MODE);
+        if (screen.columns.length > 0) {
+            setColumns(screen.columns);
         }
-    }, []);
+    }, [setColumns]);
 
     const handleSaveScreen = useCallback((name: string) => {
         const newScreen: SavedScreen = {
-            id: crypto.randomUUID(),
+            id: safeRandomId(),
             name,
-            filters: activeFilters,
+            quickFilters: activeFilters,
+            advancedFilters: advancedFilterGroup.conditions.length > 0 ? advancedFilterGroup : null,
             columns: activeColumnIds,
+            sortField,
+            sortOrder,
+            market,
+            viewMode,
         };
-        setCustomScreens(prev => [...prev, newScreen]);
-    }, [activeFilters, activeColumnIds]);
+        setCustomScreens((previous) => [...previous, newScreen]);
+        setActiveScreenId(newScreen.id);
+    }, [activeColumnIds, activeFilters, advancedFilterGroup, market, sortField, sortOrder, viewMode]);
 
-    const handleDeleteScreen = useCallback((id: string) => {
-        setCustomScreens(prev => prev.filter(s => s.id !== id));
-    }, []);
+    const handleDeleteScreen = useCallback((screenId: string) => {
+        setCustomScreens((previous) => previous.filter((screen) => screen.id !== screenId));
+        if (activeScreenId === screenId) {
+            setActiveScreenId('all');
+        }
+    }, [activeScreenId]);
 
     const handleResetFilters = useCallback(() => {
         setActiveFilters([]);
+        setAdvancedFilterGroup(createEmptyFilterGroup());
         setSearch('');
+        setActiveScreenId('all');
+        setSortField(DEFAULT_SORT_FIELD);
+        setSortOrder(DEFAULT_SORT_ORDER);
     }, []);
 
-    // Table columns configuration
     const tableColumns = useMemo(() => {
-        return visibleColumns.map(col => ({
-            id: col.id,
-            header: col.label,
-            width: col.width || 100,
-            accessor: (row: any) => formatScreenerValue(row[col.id], col.format),
+        return visibleColumns.map((column) => ({
+            id: column.id,
+            header: column.label,
+            width: column.width || 100,
+            accessor: (row: Record<string, unknown>) => formatScreenerValue(row[column.id], column.format),
             sortable: true,
         }));
     }, [visibleColumns]);
@@ -194,9 +423,8 @@ export function ScreenerWidget({
             exportData={filteredData}
             hideHeader={hideHeader}
         >
-            <div className="flex flex-col h-full overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)] font-sans">
-                {/* Primary Toolbar */}
-                <div className="flex flex-wrap items-center gap-2 p-2 border-b border-[var(--border-color)] bg-[var(--bg-primary)]">
+            <div className="flex h-full flex-col overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)] font-sans">
+                <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-color)] bg-[var(--bg-primary)] p-2">
                     <SavedScreensDropdown
                         activeScreenId={activeScreenId}
                         customScreens={customScreens}
@@ -205,28 +433,28 @@ export function ScreenerWidget({
                         onDelete={handleDeleteScreen}
                     />
 
-                    <div className="h-4 w-[1px] bg-[var(--border-color)] mx-1" />
+                    <div className="mx-1 h-4 w-[1px] bg-[var(--border-color)]" />
 
-                    <div className="relative flex-1 max-w-[200px]">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--text-muted)]" />
+                    <div className="relative flex-1 max-w-[220px]">
+                        <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-muted)]" />
                         <input
                             value={search}
-                            onChange={(e) => setSearch(e.target.value)}
+                            onChange={(event) => setSearch(event.target.value)}
                             placeholder="Quick search..."
-                            className="w-full pl-8 pr-3 h-8 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[11px] text-[var(--text-primary)] focus:border-blue-500/50 focus:bg-[var(--bg-secondary)] outline-none transition-all placeholder:text-[var(--text-muted)]"
+                            className="h-8 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] pl-8 pr-3 text-[11px] text-[var(--text-primary)] outline-none transition-all placeholder:text-[var(--text-muted)] focus:border-blue-500/50"
                         />
                     </div>
 
                     <MarketToggle value={market} onChange={setMarket} />
 
-                    <div className="flex bg-[var(--bg-secondary)] rounded-lg p-0.5 border border-[var(--border-color)]">
+                    <div className="flex rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
                         <button
                             onClick={() => setViewMode('table')}
                             className={cn(
-                                "p-1.5 rounded-md transition-all",
+                                'rounded-md p-1.5 transition-all',
                                 viewMode === 'table'
-                                    ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-inner"
-                                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                    ? 'bg-[var(--bg-tertiary)] text-blue-400 shadow-inner'
+                                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                             )}
                             title="Table View"
                         >
@@ -235,10 +463,10 @@ export function ScreenerWidget({
                         <button
                             onClick={() => setViewMode('performance')}
                             className={cn(
-                                "p-1.5 rounded-md transition-all",
+                                'rounded-md p-1.5 transition-all',
                                 viewMode === 'performance'
-                                    ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-inner"
-                                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                    ? 'bg-[var(--bg-tertiary)] text-blue-400 shadow-inner'
+                                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                             )}
                             title="Performance View"
                         >
@@ -247,10 +475,10 @@ export function ScreenerWidget({
                         <button
                             onClick={() => setViewMode('chart')}
                             className={cn(
-                                "p-1.5 rounded-md transition-all",
+                                'rounded-md p-1.5 transition-all',
                                 viewMode === 'chart'
-                                    ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-inner"
-                                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                                    ? 'bg-[var(--bg-tertiary)] text-blue-400 shadow-inner'
+                                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                             )}
                             title="Chart Grid"
                         >
@@ -260,12 +488,12 @@ export function ScreenerWidget({
 
                     <div className="ml-auto flex items-center gap-1">
                         <button
-                            onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                            onClick={() => setShowAdvancedFilters((current) => !current)}
                             className={cn(
-                                "flex items-center gap-1.5 h-8 px-3 rounded-lg text-[10px] font-bold uppercase transition-all border",
+                                'flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase transition-all',
                                 showAdvancedFilters
-                                    ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-900/20"
-                                    : "bg-[var(--bg-secondary)] border-[var(--border-color)] text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]"
+                                    ? 'border-blue-500 bg-blue-600 text-white shadow-lg shadow-blue-900/20'
+                                    : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]'
                             )}
                         >
                             <ListFilter size={12} />
@@ -273,18 +501,16 @@ export function ScreenerWidget({
                         </button>
 
                         <ColumnCustomizer
-                            columns={ALL_COLUMNS.map(c => ({ id: c.id, label: c.label, visible: activeColumnIds.includes(c.id) }))}
-                            onChange={(cols) => setColumns(cols.filter(c => c.visible).map(c => c.id))}
+                            columns={ALL_COLUMNS.map((column) => ({ id: column.id, label: column.label, visible: activeColumnIds.includes(column.id) }))}
+                            onChange={(columns) => setColumns(columns.filter((column) => column.visible).map((column) => column.id))}
                         />
                     </div>
                 </div>
 
-                {/* Filter Pills Bar */}
                 <FilterBar filters={activeFilters} onChange={setActiveFilters} />
 
-                {/* Advanced Filter Builder (Overlay/Panel) */}
-                {showAdvancedFilters && advancedFilterGroup && (
-                    <div className="px-3 py-2 bg-[var(--bg-secondary)]/30 border-b border-[var(--border-color)]">
+                {showAdvancedFilters && (
+                    <div className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/30 px-3 py-2">
                         <FilterBuilderPanel
                             filterGroup={advancedFilterGroup}
                             onFilterChange={setAdvancedFilterGroup}
@@ -293,8 +519,7 @@ export function ScreenerWidget({
                     </div>
                 )}
 
-                {/* Main Content Area */}
-                <div className="flex-1 overflow-hidden relative">
+                <div className="relative flex-1 overflow-hidden">
                     {timedOut && isLoading && !hasData ? (
                         <WidgetError
                             title="Loading timed out"
@@ -318,26 +543,26 @@ export function ScreenerWidget({
                             data={filteredData}
                             columns={tableColumns}
                             rowHeight={38}
-                            onRowClick={(row) => handleSymbolSelect(row.ticker ?? row.symbol)}
+                            onRowClick={(row) => handleSymbolSelect((row.ticker ?? row.symbol) as string)}
                             sortField={sortField}
                             sortOrder={sortOrder}
                             onSort={handleSort}
                         />
                     ) : viewMode === 'performance' ? (
-                        <PerformanceTable data={filteredData as any} />
+                        <PerformanceTable data={filteredData as never[]} />
                     ) : (
                         <div className="h-full overflow-y-auto p-4 scrollbar-hide">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-                                {filteredData.map((stock: any) => (
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                                {filteredData.map((stock: Record<string, unknown>) => (
                                     <ChartGridCard
-                                        key={stock.ticker ?? stock.symbol}
-                                        symbol={stock.ticker ?? stock.symbol}
-                                        exchange={stock.exchange}
-                                        name={stock.organ_name}
-                                        price={stock.price}
-                                        change={stock.change_1d}
-                                        changePercent={stock.change_1d}
-                                        onClick={() => handleSymbolSelect(stock.ticker ?? stock.symbol)}
+                                        key={String(stock.ticker ?? stock.symbol)}
+                                        symbol={String(stock.ticker ?? stock.symbol ?? '')}
+                                        exchange={typeof stock.exchange === 'string' ? stock.exchange : undefined}
+                                        name={typeof stock.organ_name === 'string' ? stock.organ_name : String(stock.company_name ?? stock.ticker ?? stock.symbol ?? 'Unknown')}
+                                        price={typeof stock.price === 'number' ? stock.price : 0}
+                                        change={typeof stock.change_1d === 'number' ? stock.change_1d : 0}
+                                        changePercent={typeof stock.change_1d === 'number' ? stock.change_1d : 0}
+                                        onClick={() => handleSymbolSelect(String(stock.ticker ?? stock.symbol ?? ''))}
                                     />
                                 ))}
                             </div>
@@ -345,16 +570,15 @@ export function ScreenerWidget({
                     )}
                 </div>
 
-                {/* Status Bar Footer */}
-                <div className="px-3 py-2 border-t border-[var(--border-color)] bg-[var(--bg-primary)] flex items-center justify-between text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest shadow-[0_-5px_15px_rgba(0,0,0,0.2)] z-20">
+                <div className="z-20 flex items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] shadow-[0_-5px_15px_rgba(0,0,0,0.2)]">
                     <div className="flex items-center gap-6">
                         <div className="flex items-center gap-2">
-                            <span className="text-blue-400 font-black text-xs drop-shadow-md">{filteredData.length.toLocaleString()}</span>
-                            <span className="opacity-40 font-semibold tracking-tight">Matches</span>
+                            <span className="text-xs font-black text-blue-400 drop-shadow-md">{filteredData.length.toLocaleString()}</span>
+                            <span className="font-semibold tracking-tight opacity-40">Matches</span>
                         </div>
                         {market !== 'ALL' && (
-                            <div className="hidden sm:flex items-center gap-2">
-                                <span className="w-1 h-1 rounded-full bg-[var(--text-muted)]" />
+                            <div className="hidden items-center gap-2 sm:flex">
+                                <span className="h-1 w-1 rounded-full bg-[var(--text-muted)]" />
                                 <span className="text-[var(--text-muted)]">{market}</span>
                             </div>
                         )}
@@ -364,7 +588,7 @@ export function ScreenerWidget({
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         sourceLabel={source}
-                        note="Snapshot"
+                        note="Backend screening"
                         align="right"
                         className="text-[9px]"
                     />
@@ -374,4 +598,4 @@ export function ScreenerWidget({
     );
 }
 
-export default ScreenerWidget;
+export default memo(ScreenerWidget);

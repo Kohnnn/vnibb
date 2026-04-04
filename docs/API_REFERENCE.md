@@ -131,6 +131,8 @@ Dashboard persistence notes:
 - This now covers widget-owned state such as notes, watchlists, price alerts, peer-comparison saved sets, and research-browser saved sources.
 - Legacy widget aliases are normalized on load before dashboards are re-saved. Current canonical widget IDs include `ticker_profile`, `unified_financials`, `major_shareholders`, and `database_inspector`.
 - Legacy layout caps are also normalized on load, removing stale `maxW`/`maxH` values that used to block manual widget resizing.
+- Existing statement, ratio, events, news, and earnings-quality endpoints now also power the new `financial_snapshot` and `earnings_release_recap` widgets; no separate snapshot endpoint is required in the shipped version.
+- Screener Pro now sends backend `filters` JSON and `sort` parameters for primary screening and ranking instead of only filtering a prefetched subset in the browser.
 
 Copilot notes:
 - The VniAgent prompt library is now expected to be opened from within the copilot sidebar. Global prompt actions route into the sidebar instead of a disconnected standalone modal.

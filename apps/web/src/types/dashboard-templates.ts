@@ -68,8 +68,8 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     category: 'global',
     widgets: [
       { type: 'tradingview_ticker_tape', layout: { x: 0, y: 0, w: 24, h: 4 } },
-      { type: 'tradingview_chart', layout: { x: 0, y: 4, w: 14, h: 10 }, config: { symbol: 'NASDAQ:QQQ' } },
-      { type: 'tradingview_technical_analysis', layout: { x: 14, y: 4, w: 10, h: 10 }, config: { symbol: 'NASDAQ:QQQ' } },
+      { type: 'tradingview_chart', layout: { x: 0, y: 4, w: 14, h: 10 }, config: { symbol: 'NASDAQ:VFS' } },
+      { type: 'tradingview_technical_analysis', layout: { x: 14, y: 4, w: 10, h: 10 }, config: { symbol: 'NASDAQ:VFS' } },
       { type: 'tradingview_market_overview', layout: { x: 0, y: 14, w: 12, h: 8 } },
       { type: 'tradingview_market_data', layout: { x: 12, y: 14, w: 12, h: 8 } },
       { type: 'tradingview_forex_cross_rates', layout: { x: 0, y: 22, w: 8, h: 7 } },
@@ -83,11 +83,11 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Monitor fresh quarterly releases and jump quickly into statement and ratio follow-up work.',
     category: 'research',
     widgets: [
-      { type: 'earnings_season_monitor', layout: { x: 0, y: 0, w: 14, h: 8 } },
-      { type: 'events_calendar', layout: { x: 14, y: 0, w: 10, h: 8 } },
+      { type: 'earnings_season_monitor', layout: { x: 0, y: 0, w: 12, h: 8 } },
+      { type: 'earnings_release_recap', layout: { x: 12, y: 0, w: 12, h: 8 } },
       { type: 'financial_ratios', layout: { x: 0, y: 8, w: 8, h: 6 } },
       { type: 'income_statement', layout: { x: 8, y: 8, w: 8, h: 6 } },
-      { type: 'cash_flow', layout: { x: 16, y: 8, w: 8, h: 6 } },
+      { type: 'company_filings', layout: { x: 16, y: 8, w: 8, h: 6 } },
     ],
   },
   {
@@ -122,11 +122,10 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Financial statements, ratios, and peer context for long-horizon research.',
     category: 'fundamentals',
     widgets: [
-      { type: 'income_statement', layout: { x: 0, y: 0, w: 12, h: 7 } },
-      { type: 'balance_sheet', layout: { x: 12, y: 0, w: 12, h: 7 } },
-      { type: 'financial_ratios', layout: { x: 0, y: 7, w: 8, h: 6 } },
-      { type: 'peer_comparison', layout: { x: 8, y: 7, w: 8, h: 6 } },
-      { type: 'cash_flow', layout: { x: 16, y: 7, w: 8, h: 6 } },
+      { type: 'financial_snapshot', layout: { x: 0, y: 0, w: 24, h: 10 } },
+      { type: 'financial_ratios', layout: { x: 0, y: 10, w: 8, h: 6 } },
+      { type: 'peer_comparison', layout: { x: 8, y: 10, w: 8, h: 6 } },
+      { type: 'earnings_release_recap', layout: { x: 16, y: 10, w: 8, h: 6 } },
     ],
   },
   {

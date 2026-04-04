@@ -101,3 +101,8 @@ For current TradingView-native coverage, use:
 - Dashboard template surfaces should consume `apps/web/src/types/dashboard-templates.ts` as the canonical template dataset. Category presentation is now aligned around `market`, `fundamentals`, `technical`, `quant`, `research`, and `global`.
 - `AppsLibrary` and `TemplateSelector` now read from the same template catalog instead of maintaining separate template inventories.
 - The final resize sweep also reduced fixed inner chart heights and aggressive text truncation across additional quant, comparison, research, and market widgets so manual resize produces meaningfully usable content.
+- New widgets now available:
+  - `financial_snapshot`: a latest-first 4-panel financial table covering P&L, balance sheet, cash flow, and ratios.
+  - `earnings_release_recap`: a latest-quarter recap that combines statement deltas, cash-flow context, quality checks, and linked news/events.
+- Financial statement widgets now default to latest-first period ordering while preserving growth comparison against the older adjacent period.
+- Screener Pro now uses backend filter JSON plus backend sort and persists saved screens in widget config.

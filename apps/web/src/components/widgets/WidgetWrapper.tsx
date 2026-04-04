@@ -21,6 +21,7 @@ import {
     RefreshCw
 } from 'lucide-react';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { WidgetGroupId } from '@/types/widget';
 import type { WidgetType } from '@/types/dashboard';
@@ -124,6 +125,7 @@ export function WidgetWrapper({
     isCollapsed: initialCollapsed = false,
 }: WidgetWrapperProps) {
     const { state, addWidget, cloneWidget, updateWidget, updateWidgetRuntime } = useDashboard();
+    const { setGlobalMarketsSymbol } = useGlobalMarketsSymbol();
     const { getColorForGroup, getSymbolForGroup, groups, setGroupSymbol } = useWidgetGroups();
     const [isMaximized, setIsMaximized] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(initialCollapsed);
@@ -248,13 +250,21 @@ export function WidgetWrapper({
 
     // Get current group details if assigned
     const effectiveSymbol = getSymbolForGroup(widgetGroup);
+    const isTradingViewLinkedWidget = Boolean(
+        currentWidget &&
+        isTradingViewWidget(widgetType) &&
+        usesTradingViewWidgetSymbol(widgetType) &&
+        currentWidget.config?.useLinkedSymbol !== false
+    );
     // Priority: 
     // 1. Specific group symbol (A, B, C, D) if not global
     // 2. Legacy sync symbol (if provided via prop)
     // 3. Global group symbol
-    const displaySymbol = (widgetGroup !== 'global')
-        ? effectiveSymbol
-        : (symbol || effectiveSymbol);
+    const displaySymbol = isTradingViewWidget(widgetType)
+        ? (symbol || effectiveSymbol)
+        : (widgetGroup !== 'global')
+            ? effectiveSymbol
+            : (symbol || effectiveSymbol);
     const usesExternalTradingViewSymbol =
         isTradingViewWidget(widgetType) &&
         usesTradingViewWidgetSymbol(widgetType) &&
@@ -343,23 +353,27 @@ export function WidgetWrapper({
 
         // If joining a new group, update local symbol if needed
         const newSymbol = getSymbolForGroup(newGroup);
-        if (newSymbol && onSymbolChange) onSymbolChange(newSymbol);
+        if (!newSymbol) return;
+
+        if (isTradingViewLinkedWidget) {
+            return;
+        }
+
+        if (onSymbolChange) onSymbolChange(newSymbol);
     };
 
     const handleTickerSelect = (newSymbol: string) => {
         if (newSymbol && newSymbol !== displaySymbol) {
-            if (
-                currentWidget &&
-                isTradingViewWidget(widgetType) &&
-                usesTradingViewWidgetSymbol(widgetType) &&
-                currentWidget.config?.useLinkedSymbol !== false
-            ) {
+            if (isTradingViewLinkedWidget && currentWidget) {
                 updateWidget(dashboardId, tabId, id, {
                     config: {
                         ...currentWidget.config,
                         symbol: newSymbol,
                     },
                 });
+
+                setGlobalMarketsSymbol(newSymbol);
+                return;
             }
 
             onSymbolChange?.(newSymbol);
@@ -421,7 +435,8 @@ export function WidgetWrapper({
             {/* Normal widget - dim when maximized */}
             <div
                 className={cn(
-                    "widget-card-premium h-full flex flex-col overflow-hidden",
+                    "widget-card-premium h-full flex flex-col",
+                    widgetType === 'tradingview_ticker_tag' ? 'overflow-visible' : 'overflow-hidden',
                     isEditing ? 'ring-2 ring-blue-500/40' : '',
                     isMaximized ? 'opacity-0 pointer-events-none' : ''
                 )}

@@ -173,7 +173,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
 
         const columns = Array.from(
             new Set(displayRows.map((row: any) => row.__period).filter((p: any): p is string => Boolean(p)))
-        ).sort((a: string, b: string) => periodSortKey(a) - periodSortKey(b));
+        ).sort((a: string, b: string) => periodSortKey(b) - periodSortKey(a));
 
         let metrics: any[] = [];
         if (activeTab === 'ratios') {
@@ -369,6 +369,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                 rows={denseRows}
                                 maxYears={denseColumns.length || 1}
                                 showTrend={false}
+                                latestFirst
                                 storageKey={`financials:${symbol}:${activeTab}:${period}`}
                                 footerNote={activeTab !== 'ratios' ? `Note: ${unitLegend} except Per Share Values • Reporting Standard: VAS` : undefined}
                                 valueFormatter={(value, row) => {

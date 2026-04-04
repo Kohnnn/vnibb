@@ -58,6 +58,7 @@ export type WidgetType =
     | 'share_statistics'
     | 'screener'
     | 'earnings_history'
+    | 'earnings_release_recap'
     | 'earnings_season_monitor'
     | 'dividend_payment'
     | 'stock_splits'
@@ -150,7 +151,8 @@ export type WidgetType =
     | 'news_corporate_actions'
     | 'dividend_ladder'
     | 'ai_analysis'
-    | 'unified_financials';
+    | 'unified_financials'
+    | 'financial_snapshot';
 
 
 
