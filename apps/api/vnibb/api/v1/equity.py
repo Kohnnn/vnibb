@@ -47,7 +47,7 @@ from vnibb.providers.vnstock.financials import (
     FinancialStatementData,
     StatementType,
 )
-from vnibb.services.financial_service import get_financials_with_ttm
+from vnibb.services.financial_service import get_financials_with_ttm, normalize_statement_period
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher, StockQuoteData
 from vnibb.providers.vnstock.company_events import (
     VnstockCompanyEventsFetcher,
@@ -285,7 +285,15 @@ async def _load_financial_statement_fallback(
     fallback_rows = [
         FinancialStatementData(
             symbol=row.symbol,
-            period=row.period,
+            period=(
+                normalize_statement_period(
+                    row.period,
+                    fiscal_year=row.fiscal_year,
+                    fiscal_quarter=row.fiscal_quarter,
+                    period_type=row.period_type,
+                )
+                or row.period
+            ),
             statement_type=statement_type,
             fiscal_year=row.fiscal_year,
             fiscal_quarter=row.fiscal_quarter,
@@ -438,7 +446,9 @@ def _build_ratio_ttm_rows(rows: List[FinancialRatioData]) -> List[FinancialRatio
 
 
 def _financial_statement_identity(item: FinancialStatementData) -> tuple[str, int, int]:
-    period_text = str(getattr(item, "period", "") or "")
+    period_text = normalize_statement_period(getattr(item, "period", "")) or str(
+        getattr(item, "period", "") or ""
+    )
     year_match = re.search(r"(20\d{2})", period_text.upper())
     quarter_match = re.search(r"Q([1-4])", period_text.upper())
     fiscal_year = getattr(item, "fiscal_year", None)
@@ -605,7 +615,9 @@ def _apply_bank_ratio_normalization(item: FinancialRatioData) -> FinancialRatioD
 
 
 def _statement_period_sort_key(period_value: Any) -> int:
-    period_text = str(period_value or "").strip().upper()
+    period_text = (
+        str(normalize_statement_period(period_value) or period_value or "").strip().upper()
+    )
     if not period_text:
         return 0
 
@@ -1793,9 +1805,7 @@ def _merge_ratio_row_collections(
         normalized_row = row.model_copy(update={"period": period_value})
         existing = merged.get(period_value)
         merged[period_value] = (
-            _merge_ratio_rows(normalized_row, existing)
-            if existing is not None
-            else normalized_row
+            _merge_ratio_rows(normalized_row, existing) if existing is not None else normalized_row
         )
 
     return sorted(merged.values(), key=lambda item: _ratio_period_sort_key(item.period))
@@ -2266,7 +2276,9 @@ def _ratio_has_metric_value(item: FinancialRatioData) -> bool:
 
 
 def _extract_year_quarter(period_value: str) -> tuple[Optional[int], Optional[int]]:
-    period_text = str(period_value or "").strip().upper()
+    period_text = (
+        str(normalize_statement_period(period_value) or period_value or "").strip().upper()
+    )
     if not period_text:
         return None, None
 
@@ -2654,13 +2666,19 @@ async def _enrich_missing_ratio_metrics(
         for year, quarter, *_rest in [*income_rows, *balance_rows, *cashflow_rows]
     }
     derived_periods.update(
-        filter(None, (_support_period(statement_row) for statement_row in income_support_rows or []))
+        filter(
+            None, (_support_period(statement_row) for statement_row in income_support_rows or [])
+        )
     )
     derived_periods.update(
-        filter(None, (_support_period(statement_row) for statement_row in balance_support_rows or []))
+        filter(
+            None, (_support_period(statement_row) for statement_row in balance_support_rows or [])
+        )
     )
     derived_periods.update(
-        filter(None, (_support_period(statement_row) for statement_row in cashflow_support_rows or []))
+        filter(
+            None, (_support_period(statement_row) for statement_row in cashflow_support_rows or [])
+        )
     )
 
     missing_periods = [
@@ -2896,25 +2914,48 @@ async def _enrich_missing_ratio_metrics(
                 _coerce_optional_float(statement_row.total_equity),
                 _coerce_optional_float(statement_row.equity),
             ),
-            "book_value_per_share": _coerce_optional_float(statement_row.raw_data.get("book_value_per_share")) if isinstance(statement_row.raw_data, dict) else None,
+            "book_value_per_share": _coerce_optional_float(
+                statement_row.raw_data.get("book_value_per_share")
+            )
+            if isinstance(statement_row.raw_data, dict)
+            else None,
             "inventory": _coerce_optional_float(statement_row.inventory),
             "accounts_receivable": _coerce_optional_float(statement_row.accounts_receivable),
             "customer_deposits": _coerce_optional_float(statement_row.customer_deposits),
             "current_account_deposits": _pick_optional_float(
-                _lookup_financial_metric(statement_row.raw_data or {}, "current_account_deposits", "current_accounts", "demand_deposits", "non_term_deposits", "casa")
+                _lookup_financial_metric(
+                    statement_row.raw_data or {},
+                    "current_account_deposits",
+                    "current_accounts",
+                    "demand_deposits",
+                    "non_term_deposits",
+                    "casa",
+                )
             ),
             "gross_loans": _pick_optional_float(
-                _lookup_financial_metric(statement_row.raw_data or {}, "gross_loans", "loans_and_advances_to_customers"),
+                _lookup_financial_metric(
+                    statement_row.raw_data or {}, "gross_loans", "loans_and_advances_to_customers"
+                ),
                 _coerce_optional_float(statement_row.accounts_receivable),
             ),
             "loan_loss_reserve": _pick_optional_float(
-                _lookup_financial_metric(statement_row.raw_data or {}, "loan_loss_reserve", "provision_for_loan_losses")
+                _lookup_financial_metric(
+                    statement_row.raw_data or {}, "loan_loss_reserve", "provision_for_loan_losses"
+                )
             ),
             "placements_with_banks": _pick_optional_float(
-                _lookup_financial_metric(statement_row.raw_data or {}, "placements_with_banks", "placements_at_other_credit_institutions")
+                _lookup_financial_metric(
+                    statement_row.raw_data or {},
+                    "placements_with_banks",
+                    "placements_at_other_credit_institutions",
+                )
             ),
             "investment_securities_total": _pick_optional_float(
-                _lookup_financial_metric(statement_row.raw_data or {}, "investment_securities_total", "investment_securities")
+                _lookup_financial_metric(
+                    statement_row.raw_data or {},
+                    "investment_securities_total",
+                    "investment_securities",
+                )
             ),
             "short_term_debt": _coerce_optional_float(statement_row.short_term_debt),
             "long_term_debt": _coerce_optional_float(statement_row.long_term_debt),

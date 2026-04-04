@@ -37,6 +37,7 @@ import {
   getAdminAIPromptLibrary,
   getAdminAIRuntimeConfig,
   getAdminProviderStatus,
+  getCopilotRuntimeConfig,
   getCopilotModelCatalog,
   getAdminSystemDashboardTemplateBundle,
   saveAdminAIPromptLibrary,
@@ -98,6 +99,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [aiPreferAppwriteData, setAiPreferAppwriteData] = useState(true);
   const [openRouterModels, setOpenRouterModels] = useState<ModelOption[]>([]);
   const [isOpenRouterModelsLoading, setIsOpenRouterModelsLoading] = useState(false);
+  const [publicRuntimeModel, setPublicRuntimeModel] = useState<string | null>(null);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const { resolvedTheme } = useTheme();
   const { config: unitConfig, setUnit, setDecimalPlaces } = useUnit();
@@ -125,6 +127,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       // Keep the UI usable with the existing input even if catalog fetch fails.
     } finally {
       setIsOpenRouterModelsLoading(false)
+    }
+  }, [])
+
+  const loadPublicRuntimeConfig = useCallback(async () => {
+    try {
+      const config = await getCopilotRuntimeConfig()
+      setPublicRuntimeModel(config.model)
+    } catch {
+      setPublicRuntimeModel(null)
     }
   }, [])
 
@@ -187,12 +198,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setAiWebSearch(aiSettings.webSearch);
       setAiPreferAppwriteData(aiSettings.preferAppwriteData);
       void loadOpenRouterModels()
+      void loadPublicRuntimeConfig()
       if (readAdminLayoutKeyValidated()) {
         void loadAdminAiRuntimeConfig(readAdminLayoutKey())
         void loadAdminPromptLibrary(readAdminLayoutKey())
       }
     }
-  }, [globalSymbol, isOpen, loadAdminAiRuntimeConfig, loadAdminPromptLibrary, loadOpenRouterModels]);
+  }, [globalSymbol, isOpen, loadAdminAiRuntimeConfig, loadAdminPromptLibrary, loadOpenRouterModels, loadPublicRuntimeConfig]);
 
   useEffect(() => {
     if (!preferenceStatus) return;
@@ -547,7 +559,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <div>
                       <h4 className="text-sm font-bold text-[var(--text-primary)]">VniAgent Providers</h4>
                       <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                        VNIBB uses an Appwrite-first AI flow. Market data from your runtime Appwrite database is preferred over internet sources.
+                        VniAgent uses a VNIBB database-first workflow. Market data from your runtime VNIBB database is preferred over internet sources.
                       </p>
                     </div>
                     <div className="rounded-full border border-blue-500/30 bg-blue-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-300">
@@ -661,7 +673,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   />
                   <p className="mt-2 text-[10px] text-[var(--text-muted)]">
                     {aiProvider === 'openrouter' && aiMode === 'app_default'
-                      ? 'App Default mode uses the admin-managed OpenRouter model from the Admin tab.'
+                      ? `App Default mode uses the global VniAgent model${publicRuntimeModel ? `: ${publicRuntimeModel}` : ''}.`
                       : aiProvider === 'openrouter'
                       ? 'Any OpenRouter model slug is allowed. Start with `openai/gpt-4o-mini` for a low-cost default.'
                       : 'Enter the model ID supported by your OpenAI-compatible provider.'}
@@ -776,8 +788,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       className="mt-0.5 h-4 w-4 rounded"
                     />
                     <span>
-                      <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Prefer Appwrite data</span>
-                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use runtime Appwrite market data first and only fall back when that data is missing.</span>
+                      <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Prefer VNIBB database</span>
+                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use runtime VNIBB database market data first and only fall back when that data is missing.</span>
                     </span>
                   </label>
                   <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
@@ -791,7 +803,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <span>
                       <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Allow web search</span>
                       <span className="mt-1 block text-[11px] text-[var(--text-muted)]">{aiProvider === 'openrouter'
-                        ? 'Keep this off unless you want the model to supplement Appwrite data with external web context.'
+                        ? 'Keep this off unless you want the model to supplement VNIBB database context with external web context.'
                         : 'Web search is currently available only through the OpenRouter path.'}</span>
                     </span>
                   </label>

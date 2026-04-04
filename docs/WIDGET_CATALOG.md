@@ -108,3 +108,5 @@ For current TradingView-native coverage, use:
 - Screener Pro now uses backend filter JSON plus backend sort and persists saved screens in widget config.
 - Financial tables now render in chronological ascending order from oldest to newest, but they auto-scroll to the newest periods on first open so history remains easy to inspect by scrolling back.
 - History caps are intentionally retained for performance: current plan is capped annual and quarterly windows first, with broader 10Y normalization and heavier optimization deferred to a future roadmap.
+- Statement and unified financial widgets now depend on canonical quarter identities instead of raw mixed provider period strings, which reduces duplicate/out-of-order quarter columns and quarter-specific blank states.
+- Dashboard shell behavior now preserves the last active dashboard and the last active tab per dashboard locally, and low-resolution layouts treat VniAgent as an overlay sooner to protect workspace width.

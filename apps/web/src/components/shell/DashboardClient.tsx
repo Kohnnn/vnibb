@@ -114,6 +114,8 @@ function DashboardContent() {
     const [copilotWidgetData, setCopilotWidgetData] = useState<Record<string, unknown> | undefined>(undefined);
     const [copilotPromptLibraryRequestId, setCopilotPromptLibraryRequestId] = useState(0);
     const [sidebarWidth, setSidebarWidth] = useState(208);
+    const [viewportWidth, setViewportWidth] = useState(0);
+    const [viewportHeight, setViewportHeight] = useState(0);
     const [mounted, setMounted] = useState(false);
     const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
     const [adminLayoutKey, setAdminLayoutKey] = useState('');
@@ -135,6 +137,8 @@ function DashboardContent() {
 
     const updateSidebarWidth = useCallback(() => {
         if (typeof window !== 'undefined') {
+            setViewportWidth(window.innerWidth);
+            setViewportHeight(window.innerHeight);
             if (window.innerWidth < 1024) {
                 setSidebarWidth(0);
                 return;
@@ -145,6 +149,11 @@ function DashboardContent() {
             setSidebarWidth(sidebarW);
         }
     }, []);
+
+    const overlayAICopilot = viewportWidth > 0 && (viewportWidth < 1480 || viewportHeight < 840);
+    const effectiveRightSidebarWidth = overlayAICopilot
+        ? Math.min(RIGHT_SIDEBAR_WIDTH, Math.max(280, viewportWidth - 24))
+        : RIGHT_SIDEBAR_WIDTH;
 
     useEffect(() => {
         setMounted(true);
@@ -692,7 +701,7 @@ function DashboardContent() {
                 className="flex-1 flex flex-col relative transition-all duration-300"
                 style={{
                     marginLeft: sidebarWidth,
-                    marginRight: showAICopilot ? RIGHT_SIDEBAR_WIDTH : 0
+                    marginRight: showAICopilot && !overlayAICopilot ? effectiveRightSidebarWidth : 0
                 }}
             >
                 <Header
@@ -716,12 +725,12 @@ function DashboardContent() {
 
                 <TabBar symbol={stockGlobalSymbol} />
 
-                <div className="relative flex-1 overflow-hidden bg-[var(--bg-primary)] p-3 sm:p-4">
+                <div className="relative flex-1 overflow-hidden bg-[var(--bg-primary)] p-2 sm:p-3 lg:p-4">
                     {activeDashboard && activeTab ? (
                         <>
                             {showAdminSystemLayoutControls ? (
                                 <div className="pointer-events-none absolute right-4 top-4 z-20">
-                                    <div className="pointer-events-auto flex min-w-[320px] max-w-[520px] flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.18),rgba(30,41,59,0.96))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.25)] backdrop-blur-sm">
+                                    <div className="pointer-events-auto flex min-w-[260px] max-w-[min(520px,calc(100vw-2rem))] flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.18),rgba(30,41,59,0.96))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.25)] backdrop-blur-sm">
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="flex min-w-0 items-start gap-2">
                                                 <Shield className="mt-0.5 h-4 w-4 text-amber-300" />
@@ -772,7 +781,7 @@ function DashboardContent() {
                             ) : null}
                             <div className="h-full w-full overflow-y-auto scrollbar-hide">
                             {isSystemFundamentalsTab ? (
-                                <div className="mb-3 flex flex-col gap-2 rounded-2xl border border-blue-500/20 bg-[linear-gradient(135deg,rgba(30,41,59,0.92),rgba(15,23,42,0.92))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.22)]">
+                                <div className="mb-2 flex flex-col gap-2 rounded-2xl border border-blue-500/20 bg-[linear-gradient(135deg,rgba(30,41,59,0.92),rgba(15,23,42,0.92))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.22)]">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div>
                                             <div className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300/80">
@@ -925,7 +934,8 @@ function DashboardContent() {
                 <RightSidebar 
                     isOpen={showAICopilot} 
                     onToggle={() => setShowAICopilot(false)}
-                    width={RIGHT_SIDEBAR_WIDTH}
+                    width={effectiveRightSidebarWidth}
+                    overlay={overlayAICopilot}
                 >
                     <AICopilot 
                         isOpen={showAICopilot} 

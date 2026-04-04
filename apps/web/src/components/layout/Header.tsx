@@ -328,8 +328,8 @@ export function Header({
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85">
       <div className="px-4 py-2">
-        <div data-tour="header-bar" className="grid min-h-[2.75rem] grid-cols-[minmax(0,1fr)_minmax(160px,240px)_auto] items-center gap-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,380px)_auto] md:gap-3">
-          <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+        <div data-tour="header-bar" className="grid min-h-[2.75rem] grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 md:grid-cols-[minmax(0,1fr)_minmax(180px,300px)_auto] md:gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(220px,380px)_auto] xl:gap-3">
+          <div className="flex min-w-0 items-center gap-1.5 overflow-hidden sm:gap-2">
           <div className="inline-flex shrink-0 items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-secondary)]">
             <span className="h-2 w-2 rounded-full bg-sky-500" />
             <span>VNIBB</span>
@@ -344,7 +344,7 @@ export function Header({
             </span>
           </div>
 
-            <div className="hidden min-w-0 items-center gap-2 lg:flex">
+            <div className="hidden min-w-0 items-center gap-2 xl:flex">
             <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
               <div className="min-w-0">
                 <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
@@ -361,7 +361,7 @@ export function Header({
               </div>
             </div>
 
-            <div className="hidden min-w-0 items-center gap-2 xl:flex">
+            <div className="hidden min-w-0 items-center gap-2 2xl:flex">
               {headerMarketIndices.map((index) => {
                 const positive = (index.changePct ?? 0) >= 0
                 const toneClass = positive
@@ -414,7 +414,7 @@ export function Header({
           </div>
           </div>
 
-          <div data-tour="header-search" className="relative w-full max-w-md justify-self-center">
+          <div data-tour="header-search" className="relative col-span-2 row-start-2 w-full max-w-none md:col-span-1 md:row-start-auto md:max-w-md md:justify-self-center">
           <Search
             className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
             size={14}
@@ -464,7 +464,7 @@ export function Header({
           )}
           </div>
 
-          <div data-tour="header-tools" className="flex items-center gap-2 justify-self-end">
+          <div data-tour="header-tools" className="flex flex-wrap items-center justify-end gap-1.5 justify-self-end sm:gap-2">
           <button
             type="button"
             onClick={() => window.dispatchEvent(new Event('vnibb:open-command-palette'))}
@@ -543,7 +543,7 @@ export function Header({
                   aria-label="Auto-fit layout"
                 >
                   <LayoutGrid size={13} />
-                  <span className="hidden sm:inline">Auto-Fit</span>
+                  <span className="hidden lg:inline">Auto-Fit</span>
                 </button>
               )}
 
@@ -561,7 +561,7 @@ export function Header({
                   aria-label={isEditing ? 'Editing enabled' : 'Layout locked'}
                 >
                   {isEditing ? <Unlock size={13} className="animate-pulse" /> : <Lock size={13} />}
-                  <span className="hidden sm:inline">{isEditing ? 'Editing' : 'Layout Locked'}</span>
+                  <span className="hidden lg:inline">{isEditing ? 'Editing' : 'Layout Locked'}</span>
                 </button>
               )}
             </div>

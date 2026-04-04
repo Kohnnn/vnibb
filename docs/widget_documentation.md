@@ -17,6 +17,8 @@ The widget system now reflects these completed changes:
 - `earnings_release_recap` added for quarter follow-up workflow using existing data
 - financial tables switched back to chronological ascending order with default auto-scroll to the newest visible periods
 - time-series financial charts now use the full capped history while staying inside widget width via tick thinning instead of widening for scroll
+- last active dashboard and per-dashboard last tab now persist locally across sessions
+- low-resolution shell handling now overlays VniAgent sooner to protect workspace width
 
 ## Canonical References
 
@@ -56,6 +58,8 @@ These are UI groupings and do not require changing the stored widget category en
   - reduce per-widget payload size before expanding default history windows
   - consider virtualized or chunked financial-column rendering for very wide histories
   - evaluate a dedicated backend snapshot payload only if multi-endpoint composition becomes a bottleneck
+  - continue compact-shell work for low-resolution layouts, especially header tool density and tab-bar controls
+  - add deeper regression coverage for quarter-specific statement requests (`Q1`/`Q2`/`Q3`/`Q4`) and unified financial tabs
 
 ## Final Resize Notes
 

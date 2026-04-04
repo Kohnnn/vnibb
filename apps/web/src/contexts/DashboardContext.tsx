@@ -42,6 +42,7 @@ const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
 const CURRENT_MIGRATION_VERSION = 17;
+const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
@@ -63,6 +64,44 @@ const GLOBAL_SYSTEM_TEMPLATE_IDS = new Set([
     QUANT_DASHBOARD_ID,
     GLOBAL_MARKETS_DASHBOARD_ID,
 ]);
+
+interface StoredDashboardViewState {
+    activeDashboardId: string | null;
+    lastActiveTabIdByDashboard: Record<string, string>;
+}
+
+function readStoredDashboardViewState(): StoredDashboardViewState {
+    if (typeof window === 'undefined') {
+        return { activeDashboardId: null, lastActiveTabIdByDashboard: {} };
+    }
+
+    try {
+        const raw = window.localStorage.getItem(LAST_VIEW_STATE_KEY);
+        if (!raw) {
+            return { activeDashboardId: null, lastActiveTabIdByDashboard: {} };
+        }
+
+        const parsed = JSON.parse(raw) as Partial<StoredDashboardViewState>;
+        return {
+            activeDashboardId: typeof parsed.activeDashboardId === 'string' ? parsed.activeDashboardId : null,
+            lastActiveTabIdByDashboard:
+                parsed.lastActiveTabIdByDashboard && typeof parsed.lastActiveTabIdByDashboard === 'object'
+                    ? Object.fromEntries(
+                        Object.entries(parsed.lastActiveTabIdByDashboard).filter(
+                            (entry): entry is [string, string] => typeof entry[1] === 'string'
+                        )
+                    )
+                    : {},
+        };
+    } catch {
+        return { activeDashboardId: null, lastActiveTabIdByDashboard: {} };
+    }
+}
+
+function writeStoredDashboardViewState(next: StoredDashboardViewState): void {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(LAST_VIEW_STATE_KEY, JSON.stringify(next));
+}
 
 // ============================================================================
 // Default Data & Templates
@@ -2395,6 +2434,23 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         return findPreferredTabId(dashboard.tabs) || dashboard.tabs[0]?.id || null;
     }, []);
 
+    const getRestoredActiveTabId = useCallback(
+        (
+            dashboard: Dashboard | null | undefined,
+            storedViewState: StoredDashboardViewState | null | undefined,
+        ) => {
+            if (!dashboard) return null;
+
+            const storedTabId = storedViewState?.lastActiveTabIdByDashboard?.[dashboard.id];
+            if (storedTabId && dashboard.tabs.some((tab) => tab.id === storedTabId)) {
+                return storedTabId;
+            }
+
+            return getPreferredActiveTabId(dashboard);
+        },
+        [getPreferredActiveTabId]
+    );
+
     // Load from localStorage on mount
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -2549,10 +2605,18 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             }
 
             const preferredView = readStoredUserPreferences().defaultTab;
+            const storedViewState = readStoredDashboardViewState();
+            const restoredDashboardId = storedViewState.activeDashboardId
+                && dashboards.some((dashboard) => dashboard.id === storedViewState.activeDashboardId)
+                ? storedViewState.activeDashboardId
+                : null;
             const activeDashboardId =
-                findPreferredDashboardId(dashboards, preferredView) || dashboards[0]?.id || null;
+                restoredDashboardId
+                || findPreferredDashboardId(dashboards, preferredView)
+                || dashboards[0]?.id
+                || null;
             const activeDashboard = dashboards.find((dashboard) => dashboard.id === activeDashboardId) || dashboards[0];
-            const activeTabId = getPreferredActiveTabId(activeDashboard);
+            const activeTabId = getRestoredActiveTabId(activeDashboard, storedViewState);
 
             dispatch({
                 type: 'SET_STATE',
@@ -2577,7 +2641,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         return () => {
             cancelled = true;
         };
-    }, [getPreferredActiveTabId]);
+    }, [getPreferredActiveTabId, getRestoredActiveTabId]);
 
     // Save to localStorage on state change
     useEffect(() => {
@@ -2598,6 +2662,44 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         }
     }, [state.dashboards, state.folders]);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        if (state.dashboards.length === 0) return;
+
+        try {
+            const current = readStoredDashboardViewState();
+            const validDashboards = new Set(state.dashboards.map((dashboard) => dashboard.id));
+            const nextTabsByDashboard = Object.fromEntries(
+                Object.entries(current.lastActiveTabIdByDashboard).filter(([dashboardId, tabId]) => {
+                    const dashboard = state.dashboards.find((item) => item.id === dashboardId);
+                    return Boolean(dashboard && dashboard.tabs.some((tab) => tab.id === tabId));
+                })
+            );
+
+            if (state.activeDashboardId) {
+                const activeDashboard = state.dashboards.find((dashboard) => dashboard.id === state.activeDashboardId);
+                const resolvedActiveTabId =
+                    activeDashboard && state.activeTabId && activeDashboard.tabs.some((tab) => tab.id === state.activeTabId)
+                        ? state.activeTabId
+                        : activeDashboard?.tabs[0]?.id;
+
+                if (resolvedActiveTabId) {
+                    nextTabsByDashboard[state.activeDashboardId] = resolvedActiveTabId;
+                }
+            }
+
+            writeStoredDashboardViewState({
+                activeDashboardId:
+                    state.activeDashboardId && validDashboards.has(state.activeDashboardId)
+                        ? state.activeDashboardId
+                        : state.dashboards[0]?.id || null,
+                lastActiveTabIdByDashboard: nextTabsByDashboard,
+            });
+        } catch (error) {
+            console.error('Failed to save dashboard view state:', error);
+        }
+    }, [state.activeDashboardId, state.activeTabId, state.dashboards]);
+
     // Sync to backend (debounced)
     const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
 
@@ -2614,11 +2716,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const setActiveDashboard = useCallback((id: string) => {
         dispatch({ type: 'SET_ACTIVE_DASHBOARD', payload: id });
         const dashboard = state.dashboards.find((d) => d.id === id);
-        const preferredTabId = getPreferredActiveTabId(dashboard);
+        const preferredTabId = getRestoredActiveTabId(dashboard, readStoredDashboardViewState());
         if (preferredTabId) {
             dispatch({ type: 'SET_ACTIVE_TAB', payload: preferredTabId });
         }
-    }, [getPreferredActiveTabId, state.dashboards]);
+    }, [getRestoredActiveTabId, state.dashboards]);
 
     const createDashboard = useCallback((data: DashboardCreate): Dashboard => {
         const now = new Date().toISOString();

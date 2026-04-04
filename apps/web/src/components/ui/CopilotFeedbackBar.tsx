@@ -18,6 +18,15 @@ interface CopilotFeedbackBarProps {
   className?: string;
 }
 
+const FEEDBACK_REASONS = [
+  { id: 'wrong_data', label: 'Wrong data' },
+  { id: 'weak_reasoning', label: 'Weak reasoning' },
+  { id: 'poor_citation', label: 'Poor citation' },
+  { id: 'generic_answer', label: 'Too generic' },
+  { id: 'bad_actionability', label: 'Bad actionability' },
+  { id: 'bad_artifact', label: 'Bad artifact' },
+]
+
 export function CopilotFeedbackBar({
   responseMeta,
   surface,
@@ -29,6 +38,7 @@ export function CopilotFeedbackBar({
     const [statusText, setStatusText] = useState<string | null>(null);
     const [notes, setNotes] = useState('');
     const [showNotes, setShowNotes] = useState(false);
+    const [selectedReasons, setSelectedReasons] = useState<string[]>([]);
 
   if (!responseMeta?.responseId) {
     return null;
@@ -38,11 +48,12 @@ export function CopilotFeedbackBar({
     setPendingVote(vote);
     setStatusText(null);
     try {
-      const response = await submitCopilotFeedback({
+        const response = await submitCopilotFeedback({
         responseId: responseMeta.responseId,
         vote,
         surface,
         notes: notes.trim() || undefined,
+        reasons: vote === 'down' ? selectedReasons : undefined,
       });
       onVoteChange?.(vote);
       setStatusText(response.matched ? 'Saved' : 'Saved locally for review');
@@ -70,13 +81,35 @@ export function CopilotFeedbackBar({
           )}
         </div>
         {showNotes && (
-          <textarea
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            placeholder="Optional review note"
-            className="mt-2 w-full rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-[10px] text-[var(--text-primary)] outline-none focus:border-cyan-500"
-            rows={2}
-          />
+          <div className="mt-2 space-y-2">
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Optional review note"
+              className="w-full rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-[10px] text-[var(--text-primary)] outline-none focus:border-cyan-500"
+              rows={2}
+            />
+            <div className="flex flex-wrap gap-2">
+              {FEEDBACK_REASONS.map((reason) => {
+                const selected = selectedReasons.includes(reason.id)
+                return (
+                  <button
+                    key={reason.id}
+                    type="button"
+                    onClick={() => setSelectedReasons((prev) => selected ? prev.filter((item) => item !== reason.id) : [...prev, reason.id])}
+                    className={cn(
+                      'rounded-full border px-2 py-1 text-[10px] transition-colors',
+                      selected
+                        ? 'border-rose-500 bg-rose-500/15 text-rose-300'
+                        : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                    )}
+                  >
+                    {reason.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         )}
       </div>
 

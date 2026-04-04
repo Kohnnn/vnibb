@@ -63,6 +63,8 @@ dependencies = [
     # HTTP Client
     "httpx>=0.26.0",
     "aiohttp>=3.9.0",
+    "python-multipart>=0.0.9",
+    "pypdf>=5.9.0",
     
     # Scraping (fallback providers)
     "playwright>=1.41.0",

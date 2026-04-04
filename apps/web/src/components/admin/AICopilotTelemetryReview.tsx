@@ -13,8 +13,25 @@ interface AICopilotTelemetryReviewProps {
 
 export function AICopilotTelemetryReview({ adminKey, enabled }: AICopilotTelemetryReviewProps) {
   const [records, setRecords] = useState<AdminAITelemetryRecord[]>([]);
+  const [summary, setSummary] = useState<{
+    total: number;
+    feedback_total: number;
+    positive_feedback: number;
+    negative_feedback: number;
+    acceptance_rate?: number | null;
+    average_latency_ms?: number | null;
+    artifact_ratings?: { liked: number; disliked: number };
+    providers?: string[];
+    models?: string[];
+    symbols?: string[];
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [providerFilter, setProviderFilter] = useState('');
+  const [modelFilter, setModelFilter] = useState('');
+  const [symbolFilter, setSymbolFilter] = useState('');
+  const [voteFilter, setVoteFilter] = useState('');
+  const [searchFilter, setSearchFilter] = useState('');
 
   const fetchTelemetry = async () => {
     if (!enabled || !adminKey.trim()) {
@@ -22,8 +39,15 @@ export function AICopilotTelemetryReview({ adminKey, enabled }: AICopilotTelemet
     }
     setLoading(true);
     try {
-      const response = await getAdminAITelemetry(adminKey.trim(), 25);
+      const response = await getAdminAITelemetry(adminKey.trim(), 25, {
+        provider: providerFilter || undefined,
+        model: modelFilter || undefined,
+        symbol: symbolFilter || undefined,
+        vote: voteFilter || undefined,
+        search: searchFilter || undefined,
+      });
       setRecords(response.data || []);
+      setSummary(response.summary || null);
       setError(null);
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : 'Failed to load AI telemetry');
@@ -34,7 +58,7 @@ export function AICopilotTelemetryReview({ adminKey, enabled }: AICopilotTelemet
 
   useEffect(() => {
     void fetchTelemetry();
-  }, [adminKey, enabled]);
+  }, [adminKey, enabled, modelFilter, providerFilter, searchFilter, symbolFilter, voteFilter]);
 
   if (!enabled) {
     return null;
@@ -67,6 +91,67 @@ export function AICopilotTelemetryReview({ adminKey, enabled }: AICopilotTelemet
           {error}
         </div>
       )}
+
+      {summary && (
+        <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Responses</div>
+            <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.total}</div>
+          </div>
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Feedback</div>
+            <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.feedback_total}</div>
+          </div>
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Acceptance</div>
+            <div className="mt-1 text-lg font-semibold text-emerald-300">{summary.acceptance_rate ?? '—'}{summary.acceptance_rate !== null && summary.acceptance_rate !== undefined ? '%' : ''}</div>
+          </div>
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Avg latency</div>
+            <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.average_latency_ms ?? '—'}</div>
+          </div>
+          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+            <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Artifact ratings</div>
+            <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">👍 {summary.artifact_ratings?.liked || 0} / 👎 {summary.artifact_ratings?.disliked || 0}</div>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
+        <input
+          value={providerFilter}
+          onChange={(event) => setProviderFilter(event.target.value)}
+          placeholder="Provider"
+          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-cyan-500"
+        />
+        <input
+          value={modelFilter}
+          onChange={(event) => setModelFilter(event.target.value)}
+          placeholder="Model"
+          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-cyan-500"
+        />
+        <input
+          value={symbolFilter}
+          onChange={(event) => setSymbolFilter(event.target.value.toUpperCase())}
+          placeholder="Symbol"
+          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-cyan-500"
+        />
+        <select
+          value={voteFilter}
+          onChange={(event) => setVoteFilter(event.target.value)}
+          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-cyan-500"
+        >
+          <option value="">All votes</option>
+          <option value="up">Helpful</option>
+          <option value="down">Needs work</option>
+        </select>
+        <input
+          value={searchFilter}
+          onChange={(event) => setSearchFilter(event.target.value)}
+          placeholder="Search prompt or notes"
+          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-cyan-500"
+        />
+      </div>
 
       {!loading && !error && records.length === 0 && (
         <div className="mt-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3 text-xs text-[var(--text-muted)]">
@@ -119,6 +204,15 @@ export function AICopilotTelemetryReview({ adminKey, enabled }: AICopilotTelemet
                 {record.feedback.notes && (
                   <div className="mt-2 text-[11px] text-[var(--text-secondary)]">{record.feedback.notes}</div>
                 )}
+                {record.feedback.reasons?.length ? (
+                  <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
+                    {record.feedback.reasons.map((reason) => (
+                      <span key={`${record.response_id}-${reason}`} className="rounded-full border border-rose-500/20 bg-rose-500/10 px-2 py-0.5 text-rose-200">
+                        {reason}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             )}
 

@@ -1844,6 +1844,16 @@ export interface PromptTemplate {
     source?: string;
 }
 
+export interface CopilotDocumentContext {
+    id: string;
+    filename: string;
+    contentType?: string | null;
+    documentType: string;
+    text: string;
+    preview: string;
+    charCount: number;
+}
+
 export interface ModelOption {
     id: string;
     name: string;
@@ -1857,6 +1867,11 @@ export interface ModelOption {
         prompt?: string | null;
         completion?: string | null;
     } | null;
+}
+
+export interface CopilotRuntimeConfig {
+    provider: string;
+    model: string;
 }
 
 export interface CopilotHistoryMessage {
@@ -1960,6 +1975,7 @@ export interface CopilotFeedbackRequest {
     vote: 'up' | 'down';
     surface: 'sidebar' | 'widget' | 'analysis';
     notes?: string;
+    reasons?: string[];
 }
 
 export interface CopilotFeedbackResponse {
@@ -1977,7 +1993,7 @@ export interface CopilotOutcomeRequest {
     responseId: string;
     kind: 'artifact' | 'action';
     itemId: string;
-    status: 'shown' | 'executed' | 'failed';
+    status: 'shown' | 'executed' | 'failed' | 'liked' | 'disliked';
     surface: 'sidebar' | 'widget' | 'analysis';
     notes?: string;
 }
@@ -2013,6 +2029,7 @@ export interface AdminAITelemetryRecord {
         vote: string;
         surface: string;
         notes?: string | null;
+        reasons?: string[];
         received_at: string;
     } | null;
     outcomes?: AdminAITelemetryOutcome[];
@@ -2021,6 +2038,18 @@ export interface AdminAITelemetryRecord {
 export interface AdminAITelemetryResponse {
     count: number;
     data: AdminAITelemetryRecord[];
+    summary?: {
+        total: number;
+        feedback_total: number;
+        positive_feedback: number;
+        negative_feedback: number;
+        acceptance_rate?: number | null;
+        average_latency_ms?: number | null;
+        artifact_ratings?: { liked: number; disliked: number };
+        providers?: string[];
+        models?: string[];
+        symbols?: string[];
+    };
 }
 
 export interface AdminAIPromptLibraryResponse {
@@ -2339,10 +2368,18 @@ export async function submitCopilotOutcome(
 export async function getAdminAITelemetry(
     adminKey: string,
     limit = 25,
+    filters: {
+        provider?: string;
+        model?: string;
+        symbol?: string;
+        vote?: string;
+        surface?: string;
+        search?: string;
+    } = {},
 ): Promise<AdminAITelemetryResponse> {
     return fetchAPI<AdminAITelemetryResponse>('/admin/ai-telemetry', {
         headers: { 'X-Admin-Key': adminKey },
-        params: { limit },
+        params: { limit, ...filters },
         timeout: 20000,
     });
 }
@@ -2391,6 +2428,31 @@ export async function getCopilotModelCatalog(provider: 'openrouter' = 'openroute
         params: { provider },
         timeout: 15000,
     });
+}
+
+export async function getCopilotRuntimeConfig(): Promise<CopilotRuntimeConfig> {
+    return fetchAPI<CopilotRuntimeConfig>('/copilot/runtime', {
+        timeout: 10000,
+    });
+}
+
+export async function createCopilotDocumentContext(file: File): Promise<{ document: CopilotDocumentContext }> {
+    const formData = new FormData()
+    formData.append('file', file)
+    const headers = new Headers()
+    const token = await getAuthorizationTokenForCopilot()
+    if (token) {
+        headers.set('Authorization', `Bearer ${token}`)
+    }
+    const response = await fetch(`${API_BASE_URL}/copilot/document-context`, {
+        method: 'POST',
+        headers,
+        body: formData,
+    })
+    if (!response.ok) {
+        throw new APIError(await response.text(), response.status, response.statusText)
+    }
+    return await response.json() as { document: CopilotDocumentContext }
 }
 
 export async function saveAdminAIRuntimeConfig(

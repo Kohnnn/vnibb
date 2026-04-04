@@ -127,12 +127,16 @@ class AITelemetryService:
         vote: str,
         surface: str,
         notes: str | None = None,
+        reasons: list[str] | None = None,
     ) -> dict[str, Any]:
         await self._ensure_loaded()
         feedback = {
             "vote": str(vote or "").strip().lower(),
             "surface": str(surface or "unknown").strip().lower(),
             "notes": str(notes or "").strip()[:500] or None,
+            "reasons": [
+                str(reason).strip().lower() for reason in (reasons or []) if str(reason).strip()
+            ],
             "received_at": _utc_now_iso(),
         }
 
@@ -208,6 +212,138 @@ class AITelemetryService:
         safe_limit = max(1, min(int(limit), self.max_records))
         with self._lock:
             return [dict(record) for record in list(self._records.values())[-safe_limit:]][::-1]
+
+    async def get_review_payload(
+        self,
+        *,
+        limit: int = 50,
+        provider: str | None = None,
+        model: str | None = None,
+        symbol: str | None = None,
+        vote: str | None = None,
+        surface: str | None = None,
+        search: str | None = None,
+    ) -> dict[str, Any]:
+        records = await self.get_recent_records(limit=self.max_records)
+
+        provider_filter = str(provider or "").strip().lower()
+        model_filter = str(model or "").strip().lower()
+        symbol_filter = str(symbol or "").strip().upper()
+        vote_filter = str(vote or "").strip().lower()
+        surface_filter = str(surface or "").strip().lower()
+        search_filter = str(search or "").strip().lower()
+
+        filtered: list[dict[str, Any]] = []
+        for record in records:
+            if (
+                provider_filter
+                and str(record.get("provider") or "").strip().lower() != provider_filter
+            ):
+                continue
+            if model_filter and model_filter not in str(record.get("model") or "").strip().lower():
+                continue
+            if (
+                symbol_filter
+                and str(record.get("current_symbol") or "").strip().upper() != symbol_filter
+            ):
+                continue
+            feedback = record.get("feedback") or {}
+            if vote_filter and str(feedback.get("vote") or "").strip().lower() != vote_filter:
+                continue
+            if surface_filter:
+                outcome_surfaces = {
+                    str(outcome.get("surface") or "").strip().lower()
+                    for outcome in (record.get("outcomes") or [])
+                    if isinstance(outcome, dict)
+                }
+                feedback_surface = str(feedback.get("surface") or "").strip().lower()
+                if feedback_surface != surface_filter and surface_filter not in outcome_surfaces:
+                    continue
+            if search_filter:
+                haystack = " ".join(
+                    [
+                        str(record.get("prompt_preview") or ""),
+                        str(record.get("current_symbol") or ""),
+                        str(record.get("model") or ""),
+                        str(feedback.get("notes") or ""),
+                        " ".join(str(reason) for reason in (feedback.get("reasons") or [])),
+                    ]
+                ).lower()
+                if search_filter not in haystack:
+                    continue
+            filtered.append(record)
+
+        limited = filtered[: max(1, min(int(limit), self.max_records))]
+        feedback_records = [record for record in filtered if record.get("feedback")]
+        positive = sum(
+            1 for record in feedback_records if (record.get("feedback") or {}).get("vote") == "up"
+        )
+        negative = sum(
+            1 for record in feedback_records if (record.get("feedback") or {}).get("vote") == "down"
+        )
+        latencies = [
+            int(record.get("latency_ms") or 0)
+            for record in filtered
+            if int(record.get("latency_ms") or 0) > 0
+        ]
+        outcomes = [
+            outcome
+            for record in filtered
+            for outcome in (record.get("outcomes") or [])
+            if isinstance(outcome, dict)
+        ]
+        liked_artifacts = sum(
+            1
+            for outcome in outcomes
+            if outcome.get("kind") == "artifact" and outcome.get("status") == "liked"
+        )
+        disliked_artifacts = sum(
+            1
+            for outcome in outcomes
+            if outcome.get("kind") == "artifact" and outcome.get("status") == "disliked"
+        )
+
+        summary = {
+            "total": len(filtered),
+            "feedback_total": len(feedback_records),
+            "positive_feedback": positive,
+            "negative_feedback": negative,
+            "acceptance_rate": round((positive / len(feedback_records)) * 100, 1)
+            if feedback_records
+            else None,
+            "average_latency_ms": round(sum(latencies) / len(latencies), 1) if latencies else None,
+            "artifact_ratings": {
+                "liked": liked_artifacts,
+                "disliked": disliked_artifacts,
+            },
+            "providers": sorted(
+                {
+                    str(record.get("provider") or "")
+                    for record in filtered
+                    if str(record.get("provider") or "").strip()
+                }
+            ),
+            "models": sorted(
+                {
+                    str(record.get("model") or "")
+                    for record in filtered
+                    if str(record.get("model") or "").strip()
+                }
+            ),
+            "symbols": sorted(
+                {
+                    str(record.get("current_symbol") or "")
+                    for record in filtered
+                    if str(record.get("current_symbol") or "").strip()
+                }
+            ),
+        }
+
+        return {
+            "count": len(limited),
+            "data": limited,
+            "summary": summary,
+        }
 
 
 ai_telemetry_service = AITelemetryService()

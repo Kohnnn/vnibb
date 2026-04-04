@@ -82,12 +82,24 @@ def require_admin_access(
 
 
 @router.get("/ai-telemetry", dependencies=[Depends(require_admin_access)])
-async def get_ai_telemetry(limit: int = Query(default=25, ge=1, le=200)) -> Dict[str, Any]:
-    records = await ai_telemetry_service.get_recent_records(limit=limit)
-    return {
-        "count": len(records),
-        "data": records,
-    }
+async def get_ai_telemetry(
+    limit: int = Query(default=25, ge=1, le=200),
+    provider: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+    symbol: str | None = Query(default=None),
+    vote: str | None = Query(default=None),
+    surface: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+) -> Dict[str, Any]:
+    return await ai_telemetry_service.get_review_payload(
+        limit=limit,
+        provider=provider,
+        model=model,
+        symbol=symbol,
+        vote=vote,
+        surface=surface,
+        search=search,
+    )
 
 
 @router.get("/ai-runtime", dependencies=[Depends(require_admin_access)])

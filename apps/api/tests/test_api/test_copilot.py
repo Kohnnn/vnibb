@@ -83,7 +83,7 @@ async def test_chat_stream_passes_runtime_context_and_request_settings(client, m
     )
 
     assert response.status_code == 200
-    assert '"message": "Building Appwrite-first runtime context"' in response.text
+    assert '"message": "Building VNIBB database runtime context"' in response.text
     assert '"message": "Runtime context ready"' in response.text
     assert '"message": "Requesting structured model response"' in response.text
     assert '"chunk": "Hello"' in response.text
@@ -133,11 +133,12 @@ async def test_chat_stream_returns_error_event_when_context_build_fails(client, 
 async def test_submit_feedback_records_telemetry(client, monkeypatch):
     captured: dict[str, object] = {}
 
-    async def fake_record_feedback(*, response_id, vote, surface, notes=None):
+    async def fake_record_feedback(*, response_id, vote, surface, notes=None, reasons=None):
         captured["response_id"] = response_id
         captured["vote"] = vote
         captured["surface"] = surface
         captured["notes"] = notes
+        captured["reasons"] = reasons
         return {"matched": True}
 
     monkeypatch.setattr(
@@ -152,6 +153,7 @@ async def test_submit_feedback_records_telemetry(client, monkeypatch):
             "vote": "up",
             "surface": "sidebar",
             "notes": "Helpful answer",
+            "reasons": ["wrong_data"],
         },
     )
 
@@ -162,6 +164,7 @@ async def test_submit_feedback_records_telemetry(client, monkeypatch):
         "vote": "up",
         "surface": "sidebar",
         "notes": "Helpful answer",
+        "reasons": ["wrong_data"],
     }
 
 
@@ -387,6 +390,33 @@ async def test_admin_ai_telemetry_returns_recent_records(client, monkeypatch):
     assert response.status_code == 200
     assert response.json()["count"] == 1
     assert response.json()["data"][0]["response_id"] == "resp-1"
+
+
+@pytest.mark.asyncio
+async def test_create_document_context_returns_document_payload(client, monkeypatch):
+    async def fake_ingest_document(*, filename, content_type, content):
+        return {
+            "id": "doc-123",
+            "filename": filename,
+            "contentType": content_type,
+            "documentType": "text",
+            "text": "Summary about VCI",
+            "preview": "Summary about VCI",
+            "charCount": 17,
+        }
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.copilot.ai_document_service.ingest_document",
+        fake_ingest_document,
+    )
+
+    response = await client.post(
+        "/api/v1/copilot/document-context",
+        files={"file": ("note.txt", b"Summary about VCI", "text/plain")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["document"]["id"] == "doc-123"
 
 
 @pytest.mark.asyncio
