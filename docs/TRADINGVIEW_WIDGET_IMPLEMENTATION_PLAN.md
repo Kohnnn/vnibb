@@ -1,6 +1,6 @@
 # TradingView Native Widget Implementation Plan
 
-Date: 2026-04-04
+Date: 2026-04-05
 
 ## Goal
 
@@ -20,12 +20,27 @@ Target widget set:
 - Calendars: Economic Calendar
 - Economics: Economic Map
 
-## Current State
+## Current Status
 
-- Dashboard widget config already persists through dashboard state and backend sync.
-- The app already ships three TradingView embeds: chart, technical analysis, ticker tape.
-- Existing TradingView widgets are hard-coded and do not use the generic widget settings modal.
-- The Global Markets starter layout is TradingView-first, but it mixes native VNIBB widgets with only a small subset of TradingView-native widgets.
+### Implemented
+
+- central TradingView metadata source in `apps/web/src/lib/tradingViewWidgets.ts`
+- shared TradingView runtime renderer for iframe and web-component widgets
+- expanded widget catalog registration and registry wiring
+- grouped TradingView settings UI with advanced JSON fallback
+- TradingView/global-markets symbol support via dedicated shared symbol channel
+- Global Markets starter layouts updated to TradingView-native defaults with `NASDAQ:VFS`
+- admin-managed Global Markets widget settings using existing draft/publish controls
+
+### Partially Implemented / Follow-up
+
+- TradingView web-component runtime was corrected and several widget configs were aligned with current docs/runtime
+- additional widget-specific preset quality can still be refined over time
+
+### Replaced assumptions
+
+- TradingView widgets are no longer treated as a small hard-coded subset
+- Global Markets no longer piggybacks on the VNIBB stock symbol flow
 
 ## Architecture
 
@@ -86,16 +101,16 @@ The dashboard shell should ask TradingView metadata whether a widget uses:
 
 This keeps symbol-bearing TradingView widgets independent per dashboard instance.
 
-## Implementation Steps
+## Delivery Summary
 
-1. Add the plan and TradingView catalog metadata.
-2. Add new TradingView widget types to dashboard typings.
-3. Build shared TradingView renderer and wrappers.
-4. Migrate existing TradingView chart, technical analysis, and ticker tape widgets onto the shared renderer.
-5. Register the remaining TradingView widgets in the widget registry and widget library.
-6. Upgrade widget settings modal to render TradingView-specific controls plus advanced JSON.
-7. Update Global Markets documentation to reflect TradingView native coverage.
-8. Run frontend validation and fix any regressions.
+1. Added plan and TradingView catalog metadata.
+2. Added new TradingView widget types to dashboard typings.
+3. Built shared TradingView renderer and wrappers.
+4. Migrated existing TradingView chart, technical analysis, and ticker tape widgets onto the shared renderer.
+5. Registered the remaining TradingView widgets in the widget registry and widget library.
+6. Upgraded widget settings modal to render TradingView-specific controls plus advanced JSON.
+7. Added scoped Global Markets symbol handling and admin-managed publish flow.
+8. Updated documentation and verified frontend builds.
 
 ## Non-Goals
 
@@ -116,6 +131,12 @@ Manual spot checks after build:
 - edit settings through the modal
 - confirm the widget re-renders from saved config
 - duplicate the widget into another dashboard and verify settings stay instance-local
+
+## Remaining Follow-up
+
+- keep refining TradingView widget presets for better macro defaults
+- continue browser/runtime verification for less commonly used TradingView widgets
+- optionally add app-level light-mode preference propagation for TradingView defaults
 
 ## Theme Roadmap
 

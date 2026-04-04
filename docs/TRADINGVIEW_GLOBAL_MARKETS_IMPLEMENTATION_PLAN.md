@@ -1,6 +1,6 @@
 # TradingView Global Markets Implementation Plan
 
-Date: 2026-04-04
+Date: 2026-04-05
 
 ## Goal
 
@@ -14,6 +14,23 @@ Separate TradingView/global-market symbol sync from the VNIBB stock symbol flow 
 - Only TradingView/global-market widget interactions can change that symbol.
 - Changing a VNIBB stock symbol must not affect TradingView widgets.
 - The default TradingView/global-market symbol is `NASDAQ:VFS`.
+
+## Status
+
+### Implemented
+
+- dedicated shared Global Markets symbol channel separated from VNIBB stock-symbol flow
+- TradingView symbol-bearing widgets read that channel when `useLinkedSymbol !== false`
+- only TradingView/global-market interactions update that symbol channel
+- shared default Global Markets symbol set to `NASDAQ:VFS`
+- Global Markets widget settings integrated with the existing admin-managed system dashboard publish flow
+- dashboard-level `globalMarketsSymbol` persisted so draft/publish captures linked TradingView symbol state
+- TradingView web-component loader host corrected and key widget defaults updated
+
+### Remaining Follow-up
+
+- continue runtime QA on less frequently used TradingView widgets
+- keep refining widget presets and popover/overflow behavior where needed
 
 ## Scope
 
@@ -81,6 +98,11 @@ Global Markets widget settings should continue to flow through the existing admi
 - Manual checks:
   - Change VNIBB stock symbol and confirm TradingView/global-market widgets do not change.
   - Change a linked TradingView widget symbol and confirm other linked TradingView widgets update.
-  - Confirm the shared TradingView/global-market symbol persists across dashboards.
-  - Confirm `NASDAQ:VFS` is the default linked symbol for Global Markets.
-  - Confirm the previously failing Web Component widgets render.
+- Confirm the shared TradingView/global-market symbol persists across dashboards.
+- Confirm `NASDAQ:VFS` is the default linked symbol for Global Markets.
+- Confirm the previously failing Web Component widgets render.
+
+## Notes
+
+- Global Markets symbol sync is intentionally cross-dashboard, but isolated from VNIBB stock-symbol changes.
+- Admin edits still ship through `Save Draft` / `Publish Global`; no TradingView-specific publish backend was introduced.

@@ -1,6 +1,6 @@
 # TradingView Native Widget Catalog
 
-Date: 2026-04-04
+Date: 2026-04-05
 
 This document lists the TradingView-native widgets now registered in the frontend widget library.
 
@@ -53,3 +53,18 @@ Source of truth:
 - Dark mode is the default across TradingView widgets today. Light mode is still available per widget, and a future app-level theme pass can promote that into a global TradingView theme preference.
 - Symbol-bearing TradingView widgets still keep a widget-local symbol in config, but linked TradingView widgets now resolve from the dedicated shared Global Markets symbol channel.
 - The default Global Markets starter layout was updated to use a TradingView-native mix instead of the earlier mixed native/TradingView setup.
+
+## Delivery Status
+
+Implemented alongside this catalog:
+
+- grouped TradingView settings UI
+- TradingView/global-markets shared symbol channel with `NASDAQ:VFS` default
+- admin-managed Global Markets widget settings and publish flow
+- corrected web-component loader host and key config fixes for previously failing widgets
+
+Related docs:
+
+- `docs/WIDGET_SYSTEM_REFERENCE.md`
+- `docs/TRADINGVIEW_WIDGET_IMPLEMENTATION_PLAN.md`
+- `docs/TRADINGVIEW_GLOBAL_MARKETS_IMPLEMENTATION_PLAN.md`
