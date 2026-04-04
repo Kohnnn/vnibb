@@ -1,14 +1,51 @@
 # Widget Improvement Roadmap
 
-Date: 2026-04-04
+Date: 2026-04-05
 
 ## Goal
 
-Improve data correctness, readability, resize behavior, and analytical depth across the highest-friction widgets without layering visual polish on top of inconsistent data.
+Improve data correctness, chart semantics, resize behavior, analytical depth, and adjustment-aware price workflows across the widget surface without layering visual polish on top of inconsistent data.
 
-## Phase 1: Quarterly Data Integrity
+## Canonical References
 
-Priority widgets:
+- `docs/WIDGET_SYSTEM_REFERENCE.md`: canonical non-TradingView widget rules and behavior
+- `docs/TRADINGVIEW_WIDGET_CATALOG.md`: TradingView widget coverage and status
+- `apps/web/src/data/widgetDefinitions.ts`: widget metadata source of truth
+- `apps/web/src/components/widgets/WidgetRegistry.ts`: runtime registry and default layouts
+
+## Status Snapshot
+
+### Shipped
+
+- Phase 1: quarterly data integrity for shared financial period handling
+- Phase 2: income sankey and cash flow waterfall model cleanup
+- Phase 3: resize/runtime layout reliability improvements for rigid widgets
+- Phase 4: sector breakdown and money flow trend decluttering
+- Phase 5: valuation history expansion, chronology fixes, and statistical bands
+- Phase 6: risk dashboard explanation and warning improvements
+- Phase 7A: historical price `adjustment_mode`, adjusted chart toggles, and structured corporate-event classification
+- Phase 7B: best-effort corporate-action adjustment factor engine for historical prices
+
+### In Progress / Partial
+
+- Corporate-action support is best-effort, not yet a full institutional total-return engine
+- Adjusted-price history is available, but not every backend quant/stat endpoint is adjustment-aware yet
+
+### Not Started
+
+- Full corporate-action propagation through all quant endpoints
+- Event markers and action-aware annotations across all chart widgets
+- Deeper risk model upgrade with benchmark-relative and downside distribution measures
+
+## Priority Structure
+
+### P0: Data Correctness
+
+#### P0.1 Quarterly Data Integrity
+
+Status: Shipped
+
+Affected widgets:
 
 - Financial Ratios
 - Income Statement
@@ -16,39 +53,81 @@ Priority widgets:
 - Cash Flow
 - Financial Snapshot
 - Earnings History
+- Unified financial views that reuse shared period helpers
 
-Problems to solve:
-
-- quarterly views can mix annual rows and quarterly rows
-- some quarter labels are inferred incorrectly from bare year values
-- duplicate year and quarter rows can leak into the same table
-
-Implementation focus:
+Delivered:
 
 - backend period normalization for statement and ratio rows
 - frontend quarter-only filtering for quarter views
 - shared period-label safety so annual rows are not shown as fake quarters
-- regression tests for backend normalization and frontend rendering
+- backend and frontend regression tests
 
-## Phase 2: Financial Visualization Models
+Remaining follow-up:
 
-Priority widgets:
+- runtime QA on more real symbols with sparse/dirty provider payloads
 
-- Income Sankey
-- Cash Flow Waterfall
+#### P0.2 Price Adjustments And Corporate Actions
 
-Problems to solve:
+Status: Partially shipped
 
-- current Sankey layout is visually cluttered and semantically weak
-- current waterfall mixes subtotal bars and bridge bars in a confusing way
+Cross-cutting scope:
 
-Implementation focus:
+- historical prices
+- quant metrics
+- valuation views
+- event-aware charting
 
-- rebuild chart models first
-- then simplify chart layout, labels, and grouping
-- validate sign conventions and subtotal logic
+Delivered:
 
-## Phase 3: Resize And Layout Reliability
+- `adjustment_mode` support on historical prices (`raw` or `adjusted`)
+- adjusted OHLC derivation from stored `adj_close` when available
+- best-effort backward adjustment factors from splits, stock dividends, rights/new issuance, and cash dividends
+- frontend raw/adjusted toggle in key chart consumers
+- adjusted-history default for risk-oriented consumers
+- normalized company-event classification fields for dividends, splits, issuance, and meetings
+
+Remaining follow-up:
+
+- push adjusted-price logic deeper into backend quant/stat endpoints
+- add total-return or richer action-aware modes when data quality is good enough
+- add event markers and adjustment explanations in chart UIs
+
+### P1: Financial Visualization Quality
+
+#### P1.1 Income Sankey
+
+Status: Shipped first pass
+
+Delivered:
+
+- simplified main flow into clearer major nodes
+- moved detailed operating and non-operating pieces into breakdown cards
+- reduced node and label clutter
+
+Remaining follow-up:
+
+- fine-tune spacing and label density on very wide or very small layouts
+- add optional expanded drill-down mode if needed
+
+#### P1.2 Cash Flow Waterfall
+
+Status: Shipped first pass
+
+Delivered:
+
+- removed confusing mid-chart free-cash-flow subtotal bar
+- rebuilt the chart as a cleaner bridge from operating cash flow to net cash change
+- improved long-label wrapping
+
+Remaining follow-up:
+
+- add optional alternate bridge mode if users want a pure FCF bridge view
+
+### P1: Resize And Layout Reliability
+
+#### P1.3 Runtime Resize Behavior
+
+Status: Shipped first pass
 
 Priority widgets:
 
@@ -64,115 +143,132 @@ Priority widgets:
 - Intraday Trades
 - Order Book
 
-Problems to solve:
+Delivered:
 
-- widget size can snap back after data/runtime updates
-- several widgets have overly rigid minimum content heights
-- list-heavy widgets waste space when expanded and feel cramped when shrunk
+- fixed `layoutHint` handling in `WidgetWrapper` so manual resize is preserved better
+- lowered several default/min heights in the widget registry
+- reduced rigid min-height pressure in transaction/volume/sortino chart sections
 
-Implementation focus:
+Remaining follow-up:
 
-- fix `layoutHint` handling in `WidgetWrapper`
-- reduce overly aggressive default/min heights where appropriate
-- prefer one clear scroll region per widget
+- add explicit resize regression coverage if this area changes again
+- review remaining list-heavy widgets for unnecessary fixed internal sections
 
-## Phase 4: Market Structure And Flow Readability
+### P2: Market Structure And Flow Readability
 
-Priority widgets:
+#### P2.1 Sector Breakdown
 
-- Sector Breakdown
-- Money Flow Trend
+Status: Shipped first pass
 
-Problems to solve:
+Delivered:
 
-- sector breakdown chart is cramped and legend-heavy
-- money flow trend is too dense and lacks useful universe controls
+- ranked bar view instead of cramped donut-first layout
+- top 5 / 10 / 20 / all controls
+- metric modes for market-cap share, average change, and stock count
+- ranked side summary panel
 
-Implementation focus:
+Remaining follow-up:
 
-- ranked/treemap sector views with top-N plus Other
-- top 5/10/20/all controls for money flow trend
-- sort universe by metric such as market cap, trading value, trading volume, or flow score
-- reduce label clutter and improve focus controls
+- add treemap mode if needed
+- consider trading-value and trading-volume metrics if backend data is ready
 
-## Phase 5: Valuation History And Statistical Context
+#### P2.2 Money Flow Trend
 
-Priority widgets:
+Status: Shipped first pass
 
-- Valuation Band
-- Valuation Multiples Chart
+Delivered:
 
-Problems to solve:
+- top 5 / 10 / 20 / all controls
+- ranking modes for composite, trend, strength, and change percentage
+- dynamic chart axes instead of fixed `80-120`
+- label density reduction and better ranked side panel
 
-- valuation band only supports a small metric set
-- chronology is not aligned with the newer financial widgets
-- history can be truncated and statistical overlays are limited
+Remaining follow-up:
 
-Implementation focus:
+- add universe metric choices requested by the user when backend response includes them cleanly
+- consider trail toggle and quadrant filters if needed
 
-- add EV/EBITDA, EV/Sales, and other useful metrics
-- add mean and plus/minus 1 and 2 standard deviation overlays
-- preserve oldest-to-newest full history while auto-focusing the newest range
-- improve ratio-history backend semantics if needed
+### P2: Valuation History And Statistical Context
 
-## Phase 6: Risk Dashboard Redesign
+#### P2.3 Valuation Band
 
-Priority widget:
+Status: Shipped first pass
 
-- Risk Dashboard
+Delivered:
 
-Problems to solve:
+- added `P/S`, `EV/EBITDA`, and `EV/Sales`
+- added mean and `±1σ`, `±2σ` reference context
+- fixed oldest-to-newest chronology and deeper history
 
-- current risk score is hard to interpret
-- composition is not benchmark-aware enough
-- warning/data quality context is limited
+Remaining follow-up:
 
-Implementation focus:
+- add optional percentile or z-score annotations directly on chart points
 
-- clearer score breakdown
-- stronger downside and benchmark-relative context
-- better drawdown, volatility, and regime presentation
+#### P2.4 Valuation Multiples Chart
 
-## Phase 7: Price Adjustment And Corporate Actions
+Status: Shipped first pass
 
-Cross-cutting scope:
+Delivered:
 
-- historical prices
-- quant metrics
-- valuation views
-- event-aware charting
+- fixed oldest-to-newest chronology
+- increased history depth
+- added series toggles for readability
 
-Problems to solve:
+Remaining follow-up:
 
-- current analytics largely use raw prices
-- dividends, new issuance, splits, and related actions are not modeled as structured adjustment factors
+- optionally auto-focus newest viewport while preserving full history context
 
-Implementation focus:
+### P2: Risk UX
 
-- normalized corporate action model
-- adjusted price modes and adjustment factors
-- event markers and adjustment-aware analytics
+#### P2.5 Risk Dashboard
 
-Current shipped slice:
+Status: Shipped first pass
 
-- `adjustment_mode` support on historical prices (`raw` or `adjusted`)
-- adjusted OHLC derivation from stored `adj_close` when available
-- frontend raw/adjusted toggle in key chart consumers
-- adjusted-history default for risk-oriented consumers
-- normalized company event classification fields for dividends, splits, issuance, and meetings
+Delivered:
 
-## Delivery Order
+- warning banner support for quant-data quality notes
+- clearer score explanation and explicit score-driver cards
+- responsive underwater chart panel
+- better Hurst/latest-data context
 
-Recommended execution order:
+Remaining follow-up:
 
-1. Phase 1
-2. Phase 2
-3. Phase 3
-4. Phase 4
-5. Phase 5
-6. Phase 6
-7. Phase 7
+- deeper benchmark-relative risk model
+- distribution-aware downside metrics like VaR/CVaR if needed
 
-## Current Turn
+## TradingView / Global Markets Progress
 
-This implementation pass starts with Phase 1 because quarterly period errors contaminate multiple widgets and can mislead every later visualization layer.
+TradingView work completed in parallel with the widget-improvement roadmap:
+
+- full TradingView native widget catalog registration
+- grouped widget settings UI and advanced JSON fallback
+- dedicated Global Markets symbol channel isolated from VNIBB stock symbol flow
+- admin-managed Global Markets widget settings with existing draft/publish flow
+- Global Markets default symbol set to `NASDAQ:VFS`
+
+See also:
+
+- `docs/TRADINGVIEW_WIDGET_CATALOG.md`
+- `docs/TRADINGVIEW_WIDGET_IMPLEMENTATION_PLAN.md`
+- `docs/TRADINGVIEW_GLOBAL_MARKETS_IMPLEMENTATION_PLAN.md`
+
+## Suggested Next Priorities
+
+1. Finish Phase 7 deeper propagation:
+   backend quant endpoints that still assume raw history
+2. Add chart/event integration:
+   event markers for dividends, splits, issuance
+3. Add more money-flow universe metrics if the backend can supply them cleanly
+4. Add valuation viewport focus/pinning around the newest range
+
+## Validation Reference
+
+Core validations already exercised during this roadmap execution included combinations of:
+
+- `python -m pytest apps/api/tests/test_api/test_financial_service.py -q`
+- `python -m pytest apps/api/tests/test_api/test_equity_ratio_helpers.py -q`
+- `python -m pytest apps/api/tests/test_api/test_price_adjustments_and_events.py -q`
+- `pnpm --filter frontend test -- --runTestsByPath src/lib/financialPeriods.test.ts src/components/widgets/FinancialRatiosWidget.test.tsx --runInBand`
+- `pnpm --filter frontend test -- --runTestsByPath src/lib/financialVisualizations.test.ts --runInBand`
+- `python -m py_compile apps/api/vnibb/api/v1/equity.py apps/api/vnibb/services/financial_service.py apps/api/vnibb/providers/vnstock/equity_historical.py apps/api/vnibb/providers/vnstock/company_events.py`
+- `pnpm --filter frontend build`
