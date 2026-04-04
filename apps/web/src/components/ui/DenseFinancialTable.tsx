@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
 import { Sparkline } from '@/components/ui/Sparkline'
 import { calculatePercentChange, EMPTY_VALUE } from '@/lib/units'
@@ -29,7 +29,7 @@ interface DenseFinancialTableProps {
   maxYears?: number
   showTrend?: boolean
   showGrowth?: boolean
-  latestFirst?: boolean
+  initialScrollPosition?: 'start' | 'end'
   className?: string
   storageKey?: string
   footerNote?: string
@@ -92,13 +92,14 @@ export function DenseFinancialTable({
   maxYears = 10,
   showTrend = true,
   showGrowth = true,
-  latestFirst = false,
+  initialScrollPosition = 'start',
   className,
   storageKey,
   footerNote,
   valueFormatter,
 }: DenseFinancialTableProps) {
   const visibleColumns = useMemo(() => columns.slice(0, Math.max(1, maxYears)), [columns, maxYears])
+  const scrollRef = useRef<HTMLDivElement | null>(null)
   const metricColumnWidth = 168
   const yearColumnWidth = 104
   const trendColumnWidth = 88
@@ -163,6 +164,19 @@ export function DenseFinancialTable({
       // Ignore session storage failures.
     }
   }, [expandedGroups, storageKey])
+
+  useEffect(() => {
+    if (initialScrollPosition !== 'end') return
+
+    const scrollElement = scrollRef.current
+    if (!scrollElement) return
+
+    const frame = window.requestAnimationFrame(() => {
+      scrollElement.scrollLeft = scrollElement.scrollWidth - scrollElement.clientWidth
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [initialScrollPosition, storageKey, visibleColumns])
 
   const displayedRows = useMemo(() => {
     if (!hasGroups) {
@@ -257,7 +271,7 @@ export function DenseFinancialTable({
 
   return (
     <div className={cn('w-full', className)}>
-      <div className="overflow-auto">
+      <div ref={scrollRef} className="overflow-auto">
       <table className="data-table financial-dense freeze-first-col min-w-max w-full border-separate border-spacing-0 text-[10px] text-left leading-4" style={{ minWidth: `${tableMinWidth}px` }}>
         <thead className="sticky top-0 z-10 bg-[var(--bg-primary)] text-[var(--text-muted)]">
           <tr className="border-b border-[var(--border-color)]">
@@ -367,9 +381,7 @@ export function DenseFinancialTable({
                         : defaultFormatter(rawValue)
 
                     const currentNumber = asNumber(rawValue)
-                    const comparisonColumnKey = latestFirst
-                      ? visibleColumns[index + 1]?.key
-                      : visibleColumns[index - 1]?.key
+                    const comparisonColumnKey = visibleColumns[index - 1]?.key
 
                     const previousNumber =
                       showGrowth && !row.isGroup && comparisonColumnKey
@@ -439,7 +451,14 @@ export function DenseFinancialTable({
                         <div className="h-[120px] w-full">
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={inlineChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                              <XAxis dataKey="period" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
+                              <XAxis
+                                dataKey="period"
+                                tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
+                                axisLine={false}
+                                tickLine={false}
+                                interval={inlineChartData.length > 12 ? Math.max(1, Math.ceil(inlineChartData.length / 8)) - 1 : 0}
+                                minTickGap={12}
+                              />
                               <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} width={48} />
                               <RechartsTooltip
                                 contentStyle={{

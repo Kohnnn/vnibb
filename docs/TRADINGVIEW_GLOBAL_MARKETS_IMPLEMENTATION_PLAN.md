@@ -66,6 +66,15 @@ Priority widgets:
 
 Review overflow and sizing behavior for popover-driven widgets like `Ticker Tag` so hover content is not clipped by dashboard card containers.
 
+### 7. Admin-managed widget settings
+
+Global Markets widget settings should continue to flow through the existing admin-managed system dashboard publish path instead of a separate TradingView-only settings backend.
+
+- Widget settings are edited through `WidgetSettingsModal`.
+- System-dashboard admin mode controls whether Global Markets widget settings are editable or read-only.
+- `Save Draft` and `Publish Global` remain the only publishing actions.
+- The shared Global Markets symbol is persisted on the Global Markets dashboard payload so publishing captures both widget config and linked TradingView symbol state.
+
 ## Verification
 
 - `pnpm --filter frontend build`

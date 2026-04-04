@@ -96,7 +96,11 @@ async def get_ai_runtime_config() -> Dict[str, Any]:
 
 
 @router.put("/ai-runtime", dependencies=[Depends(require_admin_access)])
-async def save_ai_runtime_config(model: str = Body(..., embed=True)) -> Dict[str, Any]:
+async def save_ai_runtime_config(data: Any = Body(...)) -> Dict[str, Any]:
+    if isinstance(data, dict):
+        model = data.get("model")
+    else:
+        model = data
     normalized = str(model or "").strip()
     if not normalized:
         raise HTTPException(status_code=400, detail="Model is required")

@@ -49,6 +49,7 @@ Source of truth:
 - `Fundamental Data` now exposes a friendlier `Financial Panel` preset selector such as `Overview`, `Valuation`, `Profitability`, `Growth`, `Balance Sheet`, and `Cash Flow`, with manual `fieldGroups` and `columns` editors still available.
 - Symbol-bearing TradingView widgets now support an app-level `Sync With Global Markets Symbol` option so linked chart and company-detail widgets can follow the same TradingView/global-market ticker across dashboards without changing the VNIBB stock-symbol flow.
 - The shared TradingView/global-market default symbol is `NASDAQ:VFS`.
+- On the admin-managed `Global Markets` system dashboard, widget settings are read-only until Admin Mode is enabled. After edits, use `Save Draft` or `Publish Global` from the floating admin controls to ship them.
 - Dark mode is the default across TradingView widgets today. Light mode is still available per widget, and a future app-level theme pass can promote that into a global TradingView theme preference.
 - Symbol-bearing TradingView widgets still keep a widget-local symbol in config, but linked TradingView widgets now resolve from the dedicated shared Global Markets symbol channel.
 - The default Global Markets starter layout was updated to use a TradingView-native mix instead of the earlier mixed native/TradingView setup.

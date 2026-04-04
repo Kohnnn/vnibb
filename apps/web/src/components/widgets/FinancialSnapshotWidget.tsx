@@ -631,7 +631,7 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
         [incomeByPeriod, balanceByPeriod, cashByPeriod, ratiosByPeriod].forEach((map) => {
             map.forEach((_value, key) => values.add(key));
         });
-        return Array.from(values).sort((left, right) => periodSortKey(right) - periodSortKey(left));
+        return Array.from(values).sort((left, right) => periodSortKey(left) - periodSortKey(right));
     }, [balanceByPeriod, cashByPeriod, incomeByPeriod, ratiosByPeriod]);
 
     const tableColumns = useMemo<DenseTableColumn[]>(
@@ -712,7 +712,7 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
                         <WidgetMeta
                             updatedAt={updatedAt}
                             isFetching={isFetching && hasPeriods}
-                            note={period === 'FY' ? 'Annual · latest first' : period === 'Q' ? 'Quarterly · latest first' : 'TTM · latest first'}
+                            note={period === 'FY' ? 'Annual · newest on right' : period === 'Q' ? 'Quarterly · newest on right' : 'TTM · newest on right'}
                             align="right"
                         />
                     </div>
@@ -743,7 +743,7 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
                                         rows={section.rows}
                                         sortable={false}
                                         showTrend={false}
-                                        latestFirst
+                                        initialScrollPosition="end"
                                         maxYears={tableColumns.length || 1}
                                         storageKey={`financial-snapshot:${section.id}:${id}:${symbol}:${period}`}
                                         footerNote={section.id === 'ratios' ? undefined : `Note: ${unitLegend} except per-share and ratio rows.`}

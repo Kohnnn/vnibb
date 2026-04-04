@@ -13,8 +13,10 @@ The widget system now reflects these completed changes:
 - template surfaces consolidated onto one canonical template catalog
 - component modal recategorized into clearer presentation groups
 - VniAgent prompt routing unified through the sidebar-owned prompt library
-- `financial_snapshot` added for multi-section latest-first financial review
+- `financial_snapshot` added for multi-section financial review
 - `earnings_release_recap` added for quarter follow-up workflow using existing data
+- financial tables switched back to chronological ascending order with default auto-scroll to the newest visible periods
+- time-series financial charts now use the full capped history while staying inside widget width via tick thinning instead of widening for scroll
 
 ## Canonical References
 
@@ -45,6 +47,15 @@ These are UI groupings and do not require changing the stored widget category en
 - Screener Pro now serializes quick filters plus advanced filter-builder state into backend `filters` JSON.
 - Primary sorting is now sent to the backend via `sort`.
 - Saved screens now persist in widget config and restore filters, advanced logic, sort, market, view mode, and column sets.
+
+## Future Optimization Roadmap
+
+- Keep current capped annual and quarterly windows until the next optimization pass; this avoids the first-load performance drop seen with larger histories.
+- Planned next-step optimization work:
+  - normalize 10Y history coverage across all financial fields
+  - reduce per-widget payload size before expanding default history windows
+  - consider virtualized or chunked financial-column rendering for very wide histories
+  - evaluate a dedicated backend snapshot payload only if multi-endpoint composition becomes a bottleneck
 
 ## Final Resize Notes
 

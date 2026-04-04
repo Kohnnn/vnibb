@@ -60,7 +60,6 @@ const labels: Record<string, string> = {
 
 const TABLE_YEAR_LIMIT = 10;
 const QUARTER_PERIOD_LIMIT = 28;
-const QUARTER_CHART_POINTS = 16;
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
 function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }: BalanceSheetWidgetProps) {
@@ -82,7 +81,6 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
     const apiPeriod = period === 'FY' ? 'year' : period === 'Q' ? 'quarter' : period;
     const periodMode: FinancialPeriodMode = period === 'FY' ? 'year' : period === 'TTM' ? 'ttm' : 'quarter';
     const visiblePeriodLimit = period === 'Q' ? QUARTER_PERIOD_LIMIT : TABLE_YEAR_LIMIT;
-    const chartPointLimit = period === 'Q' ? QUARTER_CHART_POINTS : 5;
 
     const {
         data,
@@ -104,8 +102,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
 
     const chartData = useMemo(() => {
         if (!orderedItems.length) return [];
-        const recentItems = orderedItems.slice(-chartPointLimit);
-        return recentItems.map((d, index) => {
+        return orderedItems.map((d, index) => {
             const equityValue = d.total_equity ?? d.equity ?? 0
             const liabilities = d.total_liabilities ?? 0
             return {
@@ -113,7 +110,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
                 period: formatFinancialPeriodLabel(d.period, {
                     mode: periodMode,
                     index,
-                    total: recentItems.length,
+                    total: orderedItems.length,
                 }),
                 totalAssets: d.total_assets || 0,
                 totalLiabilities: liabilities,
@@ -122,7 +119,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
                 debtToEquity: liabilities > 0 && equityValue !== 0 ? liabilities / equityValue : 0,
             }
         });
-    }, [chartPointLimit, orderedItems, periodMode]);
+    }, [orderedItems, periodMode]);
 
     const tableScale = useMemo(() => {
         const values = orderedItems.flatMap((item) => [
@@ -154,7 +151,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
 
     const tableColumns = useMemo(
         () =>
-            orderedItems.slice(-visiblePeriodLimit).reverse().map((entry, index) => ({
+            orderedItems.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
@@ -226,7 +223,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
             rows={tableRows}
             sortable
             showTrend={false}
-            latestFirst
+            initialScrollPosition="end"
             storageKey={`balance:${id}:${symbol}:${period}`}
             footerNote={unitNote}
             valueFormatter={(value) =>
@@ -236,6 +233,10 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
     );
 
     const [chartType, setChartType] = useState<'overview' | 'debt'>('overview');
+    const xAxisInterval = useMemo(
+        () => (chartData.length > 12 ? Math.max(1, Math.ceil(chartData.length / 8)) - 1 : 0),
+        [chartData.length]
+    );
 
     const renderChart = () => {
         if (!chartData.length) {
@@ -267,7 +268,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
                             {chartType === 'overview' ? (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
                                     <YAxis
                                         tickFormatter={(value) => formatAxisValue(value, unitConfig)}
                                         tick={{ fill: 'var(--text-muted)', fontSize: 9 }}
@@ -291,7 +292,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
                             ) : (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} />
+                                    <XAxis dataKey="period" tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} interval={xAxisInterval} minTickGap={12} />
                                     <YAxis
                                         yAxisId="left"
                                         tickFormatter={(value) => formatAxisValue(value, unitConfig)}
@@ -380,7 +381,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : 'Quarterly'}
+                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right'}
                         sourceLabel="Balance sheet"
                         align="right"
                     />

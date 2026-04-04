@@ -22,7 +22,7 @@ Legacy aliases such as `company_profile`, `financials`, `institutional_ownership
 
 ## New Widgets
 
-- `financial_snapshot`: combined latest-first P&L, balance sheet, cash flow, and ratio snapshot rendered as four dense statement tables.
+- `financial_snapshot`: combined P&L, balance sheet, cash flow, and ratio snapshot rendered as four dense statement tables.
 - `earnings_release_recap`: quarter recap widget combining income statement deltas, cash-flow context, earnings-quality checks, company events, and company news.
 
 ## Persistence Rules
@@ -46,8 +46,14 @@ Current config-backed widget state includes:
 
 ## Financial Widget Defaults
 
-- `unified_financials`, `income_statement`, `balance_sheet`, `cash_flow`, and `financial_ratios` now default to latest-first period ordering.
-- Growth badges still compare current values against the older comparable period even when columns are rendered latest-first.
+- `unified_financials`, `income_statement`, `balance_sheet`, `cash_flow`, `financial_ratios`, and `financial_snapshot` now render periods in chronological ascending order.
+- These tables auto-scroll to the newest periods on first render so the latest data is visible by default while older history remains accessible to the left.
+- Growth badges still compare current values against the older adjacent period.
+
+## History Caps
+
+- Current annual and quarterly caps are intentionally retained to avoid first-load regressions and oversized financial payloads.
+- Broader 10Y normalization is a planned future optimization, not part of the current default history window.
 
 ## Template Rules
 

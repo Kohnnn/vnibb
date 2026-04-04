@@ -279,6 +279,7 @@ function DashboardContent() {
             id: dashboard.id,
             name: dashboard.name,
             description: dashboard.description,
+            globalMarketsSymbol: dashboard.globalMarketsSymbol,
             folderId: dashboard.folderId,
             order: dashboard.order,
             isDefault: dashboard.isDefault,
