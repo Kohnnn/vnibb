@@ -3,7 +3,7 @@
 import { useState, memo, useCallback } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { useProfile, useStockQuote, useFinancialRatios } from '@/lib/queries';
-import { Sparkles, RefreshCw, BrainCircuit, AlertTriangle } from 'lucide-react';
+import { Sparkles, RefreshCw, BrainCircuit, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
@@ -42,6 +42,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
   const [responseMeta, setResponseMeta] = useState<CopilotResponseMeta | null>(null);
   const [feedbackVote, setFeedbackVote] = useState<'up' | 'down' | undefined>(undefined);
   const [reasoningLog, setReasoningLog] = useState<string[]>([]);
+  const [showDetails, setShowDetails] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,6 +63,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
     setResponseMeta(null);
     setFeedbackVote(undefined);
     setReasoningLog([]);
+    setShowDetails(false);
 
     try {
       const context = {
@@ -169,36 +171,50 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
             </div>
           ) : analysis ? (
             <div className="space-y-3">
-              {Boolean(reasoningLog.length) && (
-                <div className="rounded border border-cyan-500/20 bg-cyan-500/5 p-3 text-[10px] leading-relaxed text-cyan-100/80 whitespace-pre-wrap">
-                  {reasoningLog.join('\n')}
-                </div>
-              )}
               <div className="prose prose-sm max-w-none text-[var(--text-secondary)] prose-headings:text-[var(--text-primary)] prose-strong:text-[var(--text-primary)] prose-p:leading-relaxed prose-headings:mb-2 prose-headings:mt-4 first:prose-headings:mt-0">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {analysis}
                   </ReactMarkdown>
               </div>
-              {responseMeta && (
-                <CopilotFeedbackBar
-                  responseMeta={responseMeta}
-                  surface="analysis"
-                  currentVote={feedbackVote}
-                  onVoteChange={(vote) => setFeedbackVote(vote)}
-                />
+              {(Boolean(reasoningLog.length) || responseMeta || actions.length || artifacts.length || sources.length) && (
+                <button
+                  type="button"
+                  onClick={() => setShowDetails((current) => !current)}
+                  className="flex items-center gap-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                >
+                  {showDetails ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  Details
+                </button>
               )}
-              {Boolean(actions.length) && (
-                <CopilotActionPanel actions={actions} responseMeta={responseMeta || undefined} surface="analysis" />
-              )}
-              {Boolean(artifacts.length) && (
-                <CopilotArtifactPanel artifacts={artifacts} responseMeta={responseMeta || undefined} surface="analysis" />
-              )}
-              {Boolean(sources.length) && (
-                <CopilotEvidencePanel
-                  sources={sources}
-                  responseMeta={responseMeta || undefined}
-                  surface="analysis"
-                />
+              {showDetails && (
+                <div className="space-y-3">
+                  {Boolean(reasoningLog.length) && (
+                    <div className="rounded border border-cyan-500/20 bg-cyan-500/5 p-3 text-[10px] leading-relaxed text-cyan-100/80 whitespace-pre-wrap">
+                      {reasoningLog.join('\n')}
+                    </div>
+                  )}
+                  {responseMeta && (
+                    <CopilotFeedbackBar
+                      responseMeta={responseMeta}
+                      surface="analysis"
+                      currentVote={feedbackVote}
+                      onVoteChange={(vote) => setFeedbackVote(vote)}
+                    />
+                  )}
+                  {Boolean(actions.length) && (
+                    <CopilotActionPanel actions={actions} responseMeta={responseMeta || undefined} surface="analysis" />
+                  )}
+                  {Boolean(artifacts.length) && (
+                    <CopilotArtifactPanel artifacts={artifacts} responseMeta={responseMeta || undefined} surface="analysis" />
+                  )}
+                  {Boolean(sources.length) && (
+                    <CopilotEvidencePanel
+                      sources={sources}
+                      responseMeta={responseMeta || undefined}
+                      surface="analysis"
+                    />
+                  )}
+                </div>
               )}
             </div>
           ) : (
