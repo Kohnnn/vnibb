@@ -116,3 +116,9 @@ Manual spot checks after build:
 - edit settings through the modal
 - confirm the widget re-renders from saved config
 - duplicate the widget into another dashboard and verify settings stay instance-local
+
+## Theme Roadmap
+
+- Current default: all TradingView widget defaults are dark-first to match the app's existing dashboard visual language.
+- Near-term roadmap: add a top-level app preference that can switch TradingView defaults and preset color tokens between dark and light without requiring per-widget manual edits.
+- Existing support: individual TradingView widgets already expose `theme` or `colorTheme` controls in the widget settings modal for manual light-mode testing.

@@ -348,6 +348,20 @@ export function WidgetWrapper({
 
     const handleTickerSelect = (newSymbol: string) => {
         if (newSymbol && newSymbol !== displaySymbol) {
+            if (
+                currentWidget &&
+                isTradingViewWidget(widgetType) &&
+                usesTradingViewWidgetSymbol(widgetType) &&
+                currentWidget.config?.useLinkedSymbol !== false
+            ) {
+                updateWidget(dashboardId, tabId, id, {
+                    config: {
+                        ...currentWidget.config,
+                        symbol: newSymbol,
+                    },
+                });
+            }
+
             onSymbolChange?.(newSymbol);
             // Update the group symbol so other widgets in same group sync
             setGroupSymbol(widgetGroup, newSymbol);

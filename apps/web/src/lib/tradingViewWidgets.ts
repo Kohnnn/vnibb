@@ -95,6 +95,15 @@ const THEME_OPTIONS: TradingViewSettingOption[] = [
   { value: 'light', label: 'Light' },
 ];
 
+const DATE_RANGE_OPTIONS: TradingViewSettingOption[] = [
+  { value: '1D', label: '1D' },
+  { value: '1M', label: '1M' },
+  { value: '3M', label: '3M' },
+  { value: '12M', label: '12M' },
+  { value: '60M', label: '5Y' },
+  { value: 'ALL', label: 'All' },
+];
+
 const TIMEZONE_OPTIONS: TradingViewSettingOption[] = [
   { value: 'Etc/UTC', label: 'UTC' },
   { value: 'America/New_York', label: 'New York' },
@@ -172,6 +181,61 @@ const FEED_MODE_OPTIONS: TradingViewSettingOption[] = [
   { value: 'symbol', label: 'Symbol' },
 ];
 
+const MARKET_OVERVIEW_PRESET_OPTIONS: TradingViewSettingOption[] = [
+  { value: 'global_macro', label: 'Cross-Asset Macro' },
+  { value: 'vietnam_regional_risk', label: 'Vietnam and Regional Risk' },
+  { value: 'us_equities', label: 'US Equities' },
+  { value: 'fx_and_rates', label: 'FX and Rates' },
+  { value: 'crypto_risk', label: 'Crypto Risk' },
+];
+
+const MARKET_DATA_PRESET_OPTIONS: TradingViewSettingOption[] = [
+  { value: 'global_macro', label: 'Cross-Asset Macro' },
+  { value: 'vietnam_regional_risk', label: 'Vietnam and Regional Risk' },
+  { value: 'us_indices', label: 'US Indices' },
+  { value: 'fx_pairs', label: 'FX Pairs' },
+  { value: 'crypto_majors', label: 'Crypto Majors' },
+];
+
+const STOCK_MARKET_EXCHANGE_OPTIONS: TradingViewSettingOption[] = [
+  { value: 'US', label: 'United States' },
+  { value: 'VN', label: 'Vietnam' },
+  { value: 'UK', label: 'United Kingdom' },
+  { value: 'JP', label: 'Japan' },
+  { value: 'DE', label: 'Germany' },
+];
+
+const HEATMAP_GROUPING_OPTIONS: TradingViewSettingOption[] = [
+  { value: 'sector', label: 'Sector' },
+  { value: 'asset_class', label: 'Asset Class' },
+  { value: 'country', label: 'Country' },
+];
+
+const TOP_STORIES_MARKET_OPTIONS: TradingViewSettingOption[] = [
+  { value: '', label: 'Auto / All' },
+  { value: 'stock', label: 'Stocks' },
+  { value: 'crypto', label: 'Crypto' },
+  { value: 'forex', label: 'Forex' },
+  { value: 'index', label: 'Indices' },
+  { value: 'futures', label: 'Futures' },
+];
+
+const FINANCIAL_PANEL_PRESET_OPTIONS: TradingViewSettingOption[] = [
+  { value: '', label: 'Default' },
+  { value: 'overview', label: 'Overview' },
+  { value: 'valuation', label: 'Valuation' },
+  { value: 'profitability', label: 'Profitability' },
+  { value: 'growth', label: 'Growth' },
+  { value: 'balance_sheet', label: 'Balance Sheet' },
+  { value: 'cash_flow', label: 'Cash Flow' },
+];
+
+const SCREENER_MARKET_OPTIONS: TradingViewSettingOption[] = [
+  { value: 'stock', label: 'Stocks' },
+  { value: 'forex', label: 'Forex' },
+  { value: 'crypto', label: 'Crypto Pairs' },
+];
+
 const SYMBOL_OVERVIEW_CHART_TYPE_OPTIONS: TradingViewSettingOption[] = [
   { value: 'area', label: 'Area' },
   { value: 'line', label: 'Line' },
@@ -217,8 +281,327 @@ const BASE_SYMBOL_FIELDS: TradingViewSettingField[] = [
   { key: 'symbol', label: 'Symbol', type: 'text', placeholder: 'NASDAQ:AAPL' },
 ];
 
+const LINKED_SYMBOL_FIELD: TradingViewSettingField = {
+  key: 'useLinkedSymbol',
+  label: 'Sync With Dashboard Symbol',
+  type: 'boolean',
+  description: 'App-level behavior. When enabled, this widget follows the dashboard ticker selector and linked symbol changes.',
+};
+
 function withSection(section: string, fields: TradingViewSettingField[]): TradingViewSettingField[] {
   return fields.map((field) => ({ ...field, section }));
+}
+
+function buildMarketOverviewTabsPreset(preset: string) {
+  switch (preset) {
+    case 'vietnam_regional_risk':
+      return [
+        {
+          title: 'Vietnam Proxies',
+          originalTitle: 'Vietnam Proxies',
+          symbols: [
+            { s: 'NASDAQ:VFS', d: 'VinFast Auto' },
+            { s: 'CBOE:VNM', d: 'VanEck Vietnam ETF' },
+            { s: 'FX:USDVND', d: 'USD/VND' },
+            { s: 'AMEX:EEM', d: 'Emerging Markets ETF' },
+          ],
+        },
+        {
+          title: 'North Asia',
+          originalTitle: 'North Asia',
+          symbols: [
+            { s: 'AMEX:EWT', d: 'Taiwan ETF' },
+            { s: 'AMEX:EWH', d: 'Hong Kong ETF' },
+            { s: 'AMEX:EWJ', d: 'Japan ETF' },
+            { s: 'AMEX:EWS', d: 'Singapore ETF' },
+          ],
+        },
+        {
+          title: 'Risk Pulse',
+          originalTitle: 'Risk Pulse',
+          symbols: [
+            { s: 'TVC:DXY', d: 'US Dollar Index' },
+            { s: 'CBOE:VIX', d: 'VIX' },
+            { s: 'BINANCE:BTCUSDT', d: 'Bitcoin' },
+            { s: 'TVC:US10Y', d: 'US 10Y Yield' },
+          ],
+        },
+      ];
+    case 'us_equities':
+      return [
+        {
+          title: 'US Indices',
+          originalTitle: 'US Indices',
+          symbols: [
+            { s: 'FOREXCOM:SPXUSD', d: 'S&P 500' },
+            { s: 'FOREXCOM:NSXUSD', d: 'Nasdaq 100' },
+            { s: 'FOREXCOM:DJI', d: 'Dow 30' },
+            { s: 'AMEX:SPY', d: 'SPY ETF' },
+            { s: 'NASDAQ:QQQ', d: 'QQQ ETF' },
+          ],
+        },
+        {
+          title: 'US Sectors',
+          originalTitle: 'US Sectors',
+          symbols: [
+            { s: 'AMEX:XLF', d: 'Financials' },
+            { s: 'AMEX:XLK', d: 'Technology' },
+            { s: 'AMEX:XLE', d: 'Energy' },
+            { s: 'AMEX:XLV', d: 'Healthcare' },
+            { s: 'AMEX:XLY', d: 'Consumer Disc.' },
+          ],
+        },
+      ];
+    case 'fx_and_rates':
+      return [
+        {
+          title: 'Forex',
+          originalTitle: 'Forex',
+          symbols: [
+            { s: 'FX:EURUSD', d: 'EUR/USD' },
+            { s: 'FX:GBPUSD', d: 'GBP/USD' },
+            { s: 'FX:USDJPY', d: 'USD/JPY' },
+            { s: 'FX:USDCHF', d: 'USD/CHF' },
+            { s: 'FX:USDVND', d: 'USD/VND' },
+          ],
+        },
+        {
+          title: 'Rates',
+          originalTitle: 'Rates',
+          symbols: [
+            { s: 'TVC:US02Y', d: 'US 2Y' },
+            { s: 'TVC:US10Y', d: 'US 10Y' },
+            { s: 'TVC:US30Y', d: 'US 30Y' },
+            { s: 'TVC:DE10Y', d: 'DE 10Y' },
+          ],
+        },
+      ];
+    case 'crypto_risk':
+      return [
+        {
+          title: 'Crypto',
+          originalTitle: 'Crypto',
+          symbols: [
+            { s: 'BINANCE:BTCUSDT', d: 'Bitcoin' },
+            { s: 'BINANCE:ETHUSDT', d: 'Ethereum' },
+            { s: 'BINANCE:SOLUSDT', d: 'Solana' },
+            { s: 'BINANCE:XRPUSDT', d: 'XRP' },
+          ],
+        },
+        {
+          title: 'Risk',
+          originalTitle: 'Risk',
+          symbols: [
+            { s: 'NASDAQ:QQQ', d: 'QQQ' },
+            { s: 'AMEX:ARKK', d: 'ARKK' },
+            { s: 'CBOE:VIX', d: 'VIX' },
+            { s: 'TVC:DXY', d: 'DXY' },
+          ],
+        },
+      ];
+    case 'global_macro':
+    default:
+      return [
+        {
+          title: 'Risk Assets',
+          originalTitle: 'Risk Assets',
+          symbols: [
+            { s: 'FOREXCOM:SPXUSD', d: 'S&P 500 Index' },
+            { s: 'FOREXCOM:NSXUSD', d: 'US 100 Cash CFD' },
+            { s: 'AMEX:IWM', d: 'Russell 2000 ETF' },
+            { s: 'AMEX:EEM', d: 'Emerging Markets ETF' },
+            { s: 'AMEX:ARKK', d: 'ARK Innovation ETF' },
+            { s: 'CBOE:VIX', d: 'VIX' },
+          ],
+        },
+        {
+          title: 'Rates & Dollar',
+          originalTitle: 'Rates & Dollar',
+          symbols: [
+            { s: 'TVC:US02Y', d: 'US 2Y Yield' },
+            { s: 'TVC:US10Y', d: 'US 10Y Yield' },
+            { s: 'TVC:US30Y', d: 'US 30Y Yield' },
+            { s: 'TVC:DXY', d: 'US Dollar Index' },
+            { s: 'FX:USDJPY', d: 'USD/JPY' },
+            { s: 'FX:USDCHF', d: 'USD/CHF' },
+          ],
+        },
+        {
+          title: 'Commodities',
+          originalTitle: 'Commodities',
+          symbols: [
+            { s: 'TVC:GOLD', d: 'Gold' },
+            { s: 'TVC:SILVER', d: 'Silver' },
+            { s: 'TVC:USOIL', d: 'WTI Crude Oil' },
+            { s: 'TVC:UKOIL', d: 'Brent Crude Oil' },
+            { s: 'CBOT:ZW1!', d: 'Wheat Futures' },
+            { s: 'CBOT:ZC1!', d: 'Corn Futures' },
+          ],
+        },
+        {
+          title: 'FX & Crypto',
+          originalTitle: 'FX & Crypto',
+          symbols: [
+            { s: 'FX:EURUSD', d: 'EUR to USD' },
+            { s: 'FX:GBPUSD', d: 'GBP to USD' },
+            { s: 'FX:USDVND', d: 'USD to VND' },
+            { s: 'BINANCE:BTCUSDT', d: 'Bitcoin' },
+            { s: 'BINANCE:ETHUSDT', d: 'Ethereum' },
+            { s: 'BINANCE:SOLUSDT', d: 'Solana' },
+          ],
+        },
+      ];
+  }
+}
+
+function buildMarketDataGroupsPreset(preset: string) {
+  switch (preset) {
+    case 'vietnam_regional_risk':
+      return [
+        {
+          name: 'Vietnam Proxies',
+          symbols: [
+            { name: 'NASDAQ:VFS', displayName: 'VinFast Auto' },
+            { name: 'CBOE:VNM', displayName: 'VanEck Vietnam ETF' },
+            { name: 'FX:USDVND', displayName: 'USD/VND' },
+          ],
+        },
+        {
+          name: 'Regional ETFs',
+          symbols: [
+            { name: 'AMEX:EWT', displayName: 'Taiwan ETF' },
+            { name: 'AMEX:EWH', displayName: 'Hong Kong ETF' },
+            { name: 'AMEX:EWJ', displayName: 'Japan ETF' },
+            { name: 'AMEX:EWS', displayName: 'Singapore ETF' },
+          ],
+        },
+        {
+          name: 'Risk Pulse',
+          symbols: [
+            { name: 'TVC:DXY', displayName: 'US Dollar Index' },
+            { name: 'CBOE:VIX', displayName: 'VIX' },
+            { name: 'BINANCE:BTCUSDT', displayName: 'Bitcoin' },
+            { name: 'TVC:US10Y', displayName: 'US 10Y Yield' },
+          ],
+        },
+      ];
+    case 'us_indices':
+      return [
+        {
+          name: 'US Indices',
+          symbols: [
+            { name: 'FOREXCOM:SPXUSD', displayName: 'S&P 500 Index' },
+            { name: 'FOREXCOM:NSXUSD', displayName: 'US 100 Cash CFD' },
+            { name: 'FOREXCOM:DJI', displayName: 'Dow Jones Industrial Average Index' },
+          ],
+        },
+        {
+          name: 'US ETFs',
+          symbols: [
+            { name: 'AMEX:SPY', displayName: 'SPY' },
+            { name: 'NASDAQ:QQQ', displayName: 'QQQ' },
+            { name: 'AMEX:IWM', displayName: 'IWM' },
+          ],
+        },
+      ];
+    case 'fx_pairs':
+      return [
+        {
+          name: 'Majors',
+          symbols: [
+            { name: 'FX:EURUSD', displayName: 'EUR/USD' },
+            { name: 'FX:GBPUSD', displayName: 'GBP/USD' },
+            { name: 'FX:USDJPY', displayName: 'USD/JPY' },
+            { name: 'FX:USDCHF', displayName: 'USD/CHF' },
+          ],
+        },
+        {
+          name: 'Asia FX',
+          symbols: [
+            { name: 'FX:USDVND', displayName: 'USD/VND' },
+            { name: 'FX:USDCNH', displayName: 'USD/CNH' },
+            { name: 'FX:AUDUSD', displayName: 'AUD/USD' },
+          ],
+        },
+      ];
+    case 'crypto_majors':
+      return [
+        {
+          name: 'Crypto Majors',
+          symbols: [
+            { name: 'BINANCE:BTCUSDT', displayName: 'BTC' },
+            { name: 'BINANCE:ETHUSDT', displayName: 'ETH' },
+            { name: 'BINANCE:SOLUSDT', displayName: 'SOL' },
+            { name: 'BINANCE:XRPUSDT', displayName: 'XRP' },
+          ],
+        },
+      ];
+    case 'global_macro':
+    default:
+      return [
+        {
+          name: 'Risk Assets',
+          symbols: [
+            { name: 'FOREXCOM:SPXUSD', displayName: 'S&P 500 Index' },
+            { name: 'FOREXCOM:NSXUSD', displayName: 'US 100 Cash CFD' },
+            { name: 'AMEX:IWM', displayName: 'Russell 2000 ETF' },
+            { name: 'AMEX:EEM', displayName: 'Emerging Markets ETF' },
+            { name: 'AMEX:ARKK', displayName: 'ARK Innovation ETF' },
+            { name: 'CBOE:VIX', displayName: 'VIX' },
+          ],
+        },
+        {
+          name: 'Rates & Dollar',
+          symbols: [
+            { name: 'TVC:US02Y', displayName: 'US 2Y Yield' },
+            { name: 'TVC:US10Y', displayName: 'US 10Y Yield' },
+            { name: 'TVC:US30Y', displayName: 'US 30Y Yield' },
+            { name: 'TVC:DXY', displayName: 'US Dollar Index' },
+            { name: 'FX:USDJPY', displayName: 'USD/JPY' },
+            { name: 'FX:USDCHF', displayName: 'USD/CHF' },
+          ],
+        },
+        {
+          name: 'Commodities',
+          symbols: [
+            { name: 'TVC:GOLD', displayName: 'Gold' },
+            { name: 'TVC:SILVER', displayName: 'Silver' },
+            { name: 'TVC:USOIL', displayName: 'WTI Crude Oil' },
+            { name: 'TVC:UKOIL', displayName: 'Brent Crude Oil' },
+          ],
+        },
+        {
+          name: 'FX & Crypto',
+          symbols: [
+            { name: 'FX:EURUSD', displayName: 'EUR/USD' },
+            { name: 'FX:GBPUSD', displayName: 'GBP/USD' },
+            { name: 'FX:USDVND', displayName: 'USD/VND' },
+            { name: 'BINANCE:BTCUSDT', displayName: 'Bitcoin' },
+            { name: 'BINANCE:ETHUSDT', displayName: 'Ethereum' },
+            { name: 'BINANCE:SOLUSDT', displayName: 'Solana' },
+          ],
+        },
+      ];
+  }
+}
+
+function buildFinancialPanelPreset(preset: string): { fieldGroups?: string[]; columns?: string[] } {
+  switch (preset) {
+    case 'overview':
+      return { fieldGroups: ['overview'], columns: ['overview'] };
+    case 'valuation':
+      return { fieldGroups: ['valuation'], columns: ['valuation'] };
+    case 'profitability':
+      return { fieldGroups: ['income_statement'], columns: ['profitability'] };
+    case 'growth':
+      return { fieldGroups: ['income_statement'], columns: ['growth'] };
+    case 'balance_sheet':
+      return { fieldGroups: ['balance_sheet'], columns: ['balance_sheet'] };
+    case 'cash_flow':
+      return { fieldGroups: ['cash_flow'], columns: ['cash_flow'] };
+    default:
+      return {};
+  }
 }
 
 const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
@@ -232,6 +615,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     symbolMode: 'widget',
     defaultConfig: {
       symbol: 'NASDAQ:QQQ',
+      useLinkedSymbol: true,
       autosize: true,
       interval: 'D',
       timezone: 'Etc/UTC',
@@ -266,6 +650,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     searchKeywords: ['advanced', 'chart', 'tv', 'tradingview', 'macro', 'forex', 'crypto'],
     settings: [
       ...withSection('General', [
+        LINKED_SYMBOL_FIELD,
         ...BASE_SYMBOL_FIELDS,
         { key: 'interval', label: 'Default Interval', type: 'select', options: ADVANCED_CHART_INTERVAL_OPTIONS },
         { key: 'timezone', label: 'Timezone', type: 'select', options: TIMEZONE_OPTIONS },
@@ -338,6 +723,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/charts/symbol-overview/',
     symbolMode: 'symbol_overview',
     defaultConfig: {
+      useLinkedSymbol: true,
       autosize: true,
       chartOnly: false,
       hideDateRanges: false,
@@ -358,6 +744,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     searchKeywords: ['symbol overview', 'quote', 'snapshot', 'overview'],
     settings: [
       ...withSection('General', [
+        LINKED_SYMBOL_FIELD,
         { key: 'chartOnly', label: 'Chart Only', type: 'boolean' },
         { key: 'hideDateRanges', label: 'Hide Date Ranges', type: 'boolean' },
         { key: 'hideMarketStatus', label: 'Hide Market Status', type: 'boolean' },
@@ -392,6 +779,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     symbolMode: 'widget',
     defaultConfig: {
       symbol: 'NASDAQ:QQQ',
+      useLinkedSymbol: true,
       dateRange: '12M',
       width: '100%',
       height: '100%',
@@ -403,12 +791,15 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 6, h: 4, minW: 4, minH: 3 },
     searchKeywords: ['mini chart', 'micro chart', 'sparkline'],
     settings: [
-      ...BASE_SYMBOL_FIELDS,
-      { key: 'dateRange', label: 'Date Range', type: 'text', placeholder: '12M' },
-      ...COMMON_WEB_THEME_FIELDS,
-      { key: 'isTransparent', label: 'Transparent', type: 'boolean' },
-      { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        LINKED_SYMBOL_FIELD,
+        ...BASE_SYMBOL_FIELDS,
+        { key: 'dateRange', label: 'Date Range', type: 'select', options: DATE_RANGE_OPTIONS },
+        ...COMMON_WEB_THEME_FIELDS,
+        { key: 'isTransparent', label: 'Transparent', type: 'boolean' },
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -428,7 +819,9 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     },
     defaultLayout: { w: 12, h: 8, minW: 8, minH: 6 },
     searchKeywords: ['market summary', 'overview', 'watchlist', 'tabs'],
-    settings: [...COMMON_WEB_THEME_FIELDS, ...AUTO_SIZE_FIELDS],
+    settings: [
+      ...withSection('General', [...COMMON_WEB_THEME_FIELDS, ...AUTO_SIZE_FIELDS]),
+    ],
   },
   {
     type: 'tradingview_market_overview',
@@ -442,6 +835,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
       dateRange: '12M',
+      tabsPreset: 'global_macro',
       showChart: true,
       showSymbolLogo: true,
       showFloatingTooltip: false,
@@ -455,13 +849,21 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     searchKeywords: ['market overview', 'indices', 'macro', 'tabs'],
     settings: [
       ...withSection('General', [
-        { key: 'dateRange', label: 'Date Range', type: 'text', placeholder: '12M' },
+        { key: 'tabsPreset', label: 'Tabs Preset', type: 'select', options: MARKET_OVERVIEW_PRESET_OPTIONS, description: 'Applies a TradingView-compatible macro tab set.' },
+        { key: 'dateRange', label: 'Date Range', type: 'select', options: DATE_RANGE_OPTIONS },
         { key: 'showChart', label: 'Show Chart', type: 'boolean' },
         { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
         { key: 'showFloatingTooltip', label: 'Show Floating Tooltip', type: 'boolean' },
         { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
         ...COMMON_IFRAME_THEME_FIELDS,
         ...AUTO_SIZE_FIELDS,
+      ]),
+      ...withSection('Chart', [
+        { key: 'plotLineColorGrowing', label: 'Up Trend Line', type: 'color' },
+        { key: 'plotLineColorFalling', label: 'Down Trend Line', type: 'color' },
+        { key: 'gridLineColor', label: 'Grid', type: 'color' },
+        { key: 'scaleFontColor', label: 'Scale Font', type: 'color' },
+        { key: 'symbolActiveColor', label: 'Active Symbol Highlight', type: 'color' },
       ]),
     ],
   },
@@ -490,14 +892,19 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     searchKeywords: ['stock market', 'hotlists', 'top gainers', 'top losers'],
     settings: [
       ...withSection('General', [
-        { key: 'exchange', label: 'Exchange', type: 'text', placeholder: 'US' },
-        { key: 'dateRange', label: 'Date Range', type: 'text', placeholder: '12M' },
+        { key: 'exchange', label: 'Exchange', type: 'select', options: STOCK_MARKET_EXCHANGE_OPTIONS },
+        { key: 'dateRange', label: 'Date Range', type: 'select', options: DATE_RANGE_OPTIONS },
         { key: 'showChart', label: 'Show Chart', type: 'boolean' },
         { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
         { key: 'showFloatingTooltip', label: 'Show Floating Tooltip', type: 'boolean' },
         { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
         ...COMMON_IFRAME_THEME_FIELDS,
         ...AUTO_SIZE_FIELDS,
+      ]),
+      ...withSection('Chart', [
+        { key: 'gridLineColor', label: 'Grid', type: 'color' },
+        { key: 'plotLineColorGrowing', label: 'Up Trend Line', type: 'color' },
+        { key: 'plotLineColorFalling', label: 'Down Trend Line', type: 'color' },
       ]),
     ],
   },
@@ -512,6 +919,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultConfig: {
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
+      symbolsGroupsPreset: 'global_macro',
       showSymbolLogo: false,
       width: '100%',
       height: '100%',
@@ -521,7 +929,10 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     searchKeywords: ['market data', 'market quotes', 'quotes table'],
     settings: [
       ...withSection('General', [
+        { key: 'symbolsGroupsPreset', label: 'Symbols Preset', type: 'select', options: MARKET_DATA_PRESET_OPTIONS, description: 'Applies a TradingView-compatible grouped quote table.' },
         { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
+        { key: 'backgroundColor', label: 'Background', type: 'color' },
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
         ...COMMON_IFRAME_THEME_FIELDS,
         ...AUTO_SIZE_FIELDS,
       ]),
@@ -548,27 +959,38 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     recommended: true,
     searchKeywords: ['ticker tape', 'tape', 'ticker'],
     settings: [
-      { key: 'symbols', label: 'Symbols', type: 'symbol_list', description: 'One symbol per line.' },
-      {
-        key: 'direction',
-        label: 'Direction',
-        type: 'select',
-        options: [
-          { value: 'horizontal', label: 'Horizontal' },
-          { value: 'vertical', label: 'Vertical' },
-        ],
-      },
-      {
-        key: 'itemSize',
-        label: 'Item Size',
-        type: 'select',
-        options: [
-          { value: 'regular', label: 'Regular' },
-          { value: 'compact', label: 'Compact' },
-        ],
-      },
-      { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
-      ...COMMON_WEB_THEME_FIELDS,
+      ...withSection('General', [
+        { key: 'symbols', label: 'Symbols', type: 'symbol_list', description: 'One symbol per line.' },
+        {
+          key: 'direction',
+          label: 'Direction',
+          type: 'select',
+          options: [
+            { value: 'horizontal', label: 'Horizontal' },
+            { value: 'vertical', label: 'Vertical' },
+          ],
+        },
+        {
+          key: 'itemSize',
+          label: 'Item Size',
+          type: 'select',
+          options: [
+            { value: 'regular', label: 'Regular' },
+            { value: 'compact', label: 'Compact' },
+          ],
+        },
+        {
+          key: 'displayMode',
+          label: 'Display Mode',
+          type: 'select',
+          options: [
+            { value: 'adaptive', label: 'Adaptive' },
+            { value: 'regular', label: 'Regular' },
+          ],
+        },
+        { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
+        ...COMMON_WEB_THEME_FIELDS,
+      ]),
     ],
   },
   {
@@ -582,12 +1004,15 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     symbolMode: 'widget',
     defaultConfig: {
       symbol: 'NASDAQ:AAPL',
+      useLinkedSymbol: true,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
     },
     defaultLayout: { w: 4, h: 3, minW: 3, minH: 2 },
     searchKeywords: ['ticker tag', 'inline quote', 'pill'],
-    settings: [...BASE_SYMBOL_FIELDS, ...COMMON_WEB_THEME_FIELDS],
+    settings: [
+      ...withSection('General', [LINKED_SYMBOL_FIELD, ...BASE_SYMBOL_FIELDS, ...COMMON_WEB_THEME_FIELDS]),
+    ],
   },
   {
     type: 'tradingview_single_ticker',
@@ -599,6 +1024,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     symbolMode: 'widget',
     defaultConfig: {
       symbol: 'FX:EURUSD',
+      useLinkedSymbol: true,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
       width: '100%',
@@ -607,7 +1033,16 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     },
     defaultLayout: { w: 4, h: 4, minW: 3, minH: 3 },
     searchKeywords: ['single ticker', 'single quote'],
-    settings: [...BASE_SYMBOL_FIELDS, { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' }, ...COMMON_IFRAME_THEME_FIELDS],
+    settings: [
+      ...withSection('General', [
+        LINKED_SYMBOL_FIELD,
+        ...BASE_SYMBOL_FIELDS,
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        { key: 'width', label: 'Width', type: 'text', placeholder: '100%' },
+        { key: 'height', label: 'Height', type: 'text', placeholder: '126' },
+      ]),
+    ],
   },
   {
     type: 'tradingview_ticker',
@@ -629,11 +1064,14 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 12, h: 4, minW: 8, minH: 3 },
     searchKeywords: ['ticker strip', 'quotes strip', 'multi ticker'],
     settings: [
-      { key: 'symbols', label: 'Symbols', type: 'symbol_list' },
-      { key: 'timeframe', label: 'Timeframe', type: 'text', placeholder: '12M' },
-      { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
-      { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' },
-      ...COMMON_IFRAME_THEME_FIELDS,
+      ...withSection('General', [
+        { key: 'symbols', label: 'Symbols', type: 'symbol_list' },
+        { key: 'timeframe', label: 'Timeframe', type: 'select', options: DATE_RANGE_OPTIONS },
+        { key: 'showSymbolLogo', label: 'Show Symbol Logo', type: 'boolean' },
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' },
+        { key: 'linkPageTemplate', label: 'Link Page Template', type: 'text', placeholder: '/symbol/{tv-symbol}' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+      ]),
     ],
   },
   {
@@ -663,17 +1101,22 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 12, h: 10, minW: 8, minH: 7 },
     searchKeywords: ['stock heatmap', 'treemap', 'sector heatmap'],
     settings: [
-      { key: 'dataSource', label: 'Data Source', type: 'text', placeholder: 'SPX500' },
-      { key: 'grouping', label: 'Grouping', type: 'text', placeholder: 'sector' },
-      { key: 'blockSize', label: 'Block Size', type: 'select', options: HEATMAP_BLOCK_SIZE_OPTIONS },
-      { key: 'blockColor', label: 'Block Color', type: 'select', options: HEATMAP_BLOCK_COLOR_OPTIONS },
-      { key: 'autosize', label: 'Auto Size', type: 'boolean' },
-      { key: 'hasTopBar', label: 'Show Top Bar', type: 'boolean' },
-      { key: 'isDataSetEnabled', label: 'Enable Data Set Switch', type: 'boolean' },
-      { key: 'isZoomEnabled', label: 'Enable Zoom', type: 'boolean' },
-      { key: 'hasSymbolTooltip', label: 'Show Symbol Tooltip', type: 'boolean' },
-      { key: 'isMonoSize', label: 'Mono Size', type: 'boolean' },
-      ...COMMON_IFRAME_THEME_FIELDS,
+      ...withSection('General', [
+        { key: 'dataSource', label: 'Data Source', type: 'text', placeholder: 'SPX500' },
+        { key: 'grouping', label: 'Grouping', type: 'select', options: HEATMAP_GROUPING_OPTIONS },
+        { key: 'blockSize', label: 'Block Size', type: 'select', options: HEATMAP_BLOCK_SIZE_OPTIONS },
+        { key: 'blockColor', label: 'Block Color', type: 'select', options: HEATMAP_BLOCK_COLOR_OPTIONS },
+        { key: 'exchanges', label: 'Exchanges', type: 'list', rows: 3, placeholder: 'NASDAQ\nNYSE' },
+        { key: 'symbolUrl', label: 'Symbol URL Template', type: 'text', placeholder: 'https://example.com/{symbol}' },
+        { key: 'autosize', label: 'Auto Size', type: 'boolean' },
+        { key: 'hasTopBar', label: 'Show Top Bar', type: 'boolean' },
+        { key: 'isDataSetEnabled', label: 'Enable Data Set Switch', type: 'boolean' },
+        { key: 'isZoomEnabled', label: 'Enable Zoom', type: 'boolean' },
+        { key: 'hasSymbolTooltip', label: 'Show Symbol Tooltip', type: 'boolean' },
+        { key: 'isMonoSize', label: 'Mono Size', type: 'boolean' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -701,15 +1144,20 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 12, h: 10, minW: 8, minH: 7 },
     searchKeywords: ['crypto heatmap', 'coins heatmap', 'treemap'],
     settings: [
-      { key: 'blockSize', label: 'Block Size', type: 'select', options: HEATMAP_BLOCK_SIZE_OPTIONS },
-      { key: 'blockColor', label: 'Block Color', type: 'select', options: HEATMAP_BLOCK_COLOR_OPTIONS },
-      { key: 'autosize', label: 'Auto Size', type: 'boolean' },
-      { key: 'hasTopBar', label: 'Show Top Bar', type: 'boolean' },
-      { key: 'isDataSetEnabled', label: 'Enable Data Set Switch', type: 'boolean' },
-      { key: 'isZoomEnabled', label: 'Enable Zoom', type: 'boolean' },
-      { key: 'hasSymbolTooltip', label: 'Show Symbol Tooltip', type: 'boolean' },
-      { key: 'isMonoSize', label: 'Mono Size', type: 'boolean' },
-      ...COMMON_IFRAME_THEME_FIELDS,
+      ...withSection('General', [
+        { key: 'dataSource', label: 'Data Source', type: 'text', placeholder: 'Crypto' },
+        { key: 'blockSize', label: 'Block Size', type: 'select', options: HEATMAP_BLOCK_SIZE_OPTIONS },
+        { key: 'blockColor', label: 'Block Color', type: 'select', options: HEATMAP_BLOCK_COLOR_OPTIONS },
+        { key: 'symbolUrl', label: 'Symbol URL Template', type: 'text', placeholder: 'https://example.com/{symbol}' },
+        { key: 'autosize', label: 'Auto Size', type: 'boolean' },
+        { key: 'hasTopBar', label: 'Show Top Bar', type: 'boolean' },
+        { key: 'isDataSetEnabled', label: 'Enable Data Set Switch', type: 'boolean' },
+        { key: 'isZoomEnabled', label: 'Enable Zoom', type: 'boolean' },
+        { key: 'hasSymbolTooltip', label: 'Show Symbol Tooltip', type: 'boolean' },
+        { key: 'isMonoSize', label: 'Mono Size', type: 'boolean' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -734,10 +1182,14 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 10, h: 8, minW: 7, minH: 5 },
     searchKeywords: ['forex cross rates', 'fx matrix', 'currency matrix'],
     settings: [
-      { key: 'currencies', label: 'Currencies', type: 'symbol_list' },
-      { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        { key: 'currencies', label: 'Currencies', type: 'symbol_list' },
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' },
+        { key: 'backgroundColor', label: 'Background', type: 'color' },
+        { key: 'disableCrossClickHref', label: 'Disable Cross Click', type: 'boolean' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -766,17 +1218,21 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 12, h: 10, minW: 8, minH: 7 },
     searchKeywords: ['etf heatmap', 'etf treemap'],
     settings: [
-      { key: 'dataSource', label: 'Data Source', type: 'text', placeholder: 'AllUSEtf' },
-      { key: 'grouping', label: 'Grouping', type: 'text', placeholder: 'asset_class' },
-      { key: 'blockSize', label: 'Block Size', type: 'select', options: HEATMAP_BLOCK_SIZE_OPTIONS },
-      { key: 'blockColor', label: 'Block Color', type: 'select', options: HEATMAP_BLOCK_COLOR_OPTIONS },
-      { key: 'autosize', label: 'Auto Size', type: 'boolean' },
-      { key: 'hasTopBar', label: 'Show Top Bar', type: 'boolean' },
-      { key: 'isDataSetEnabled', label: 'Enable Data Set Switch', type: 'boolean' },
-      { key: 'isZoomEnabled', label: 'Enable Zoom', type: 'boolean' },
-      { key: 'hasSymbolTooltip', label: 'Show Symbol Tooltip', type: 'boolean' },
-      { key: 'isMonoSize', label: 'Mono Size', type: 'boolean' },
-      ...COMMON_IFRAME_THEME_FIELDS,
+      ...withSection('General', [
+        { key: 'dataSource', label: 'Data Source', type: 'text', placeholder: 'AllUSEtf' },
+        { key: 'grouping', label: 'Grouping', type: 'select', options: HEATMAP_GROUPING_OPTIONS },
+        { key: 'blockSize', label: 'Block Size', type: 'select', options: HEATMAP_BLOCK_SIZE_OPTIONS },
+        { key: 'blockColor', label: 'Block Color', type: 'select', options: HEATMAP_BLOCK_COLOR_OPTIONS },
+        { key: 'symbolUrl', label: 'Symbol URL Template', type: 'text', placeholder: 'https://example.com/{symbol}' },
+        { key: 'autosize', label: 'Auto Size', type: 'boolean' },
+        { key: 'hasTopBar', label: 'Show Top Bar', type: 'boolean' },
+        { key: 'isDataSetEnabled', label: 'Enable Data Set Switch', type: 'boolean' },
+        { key: 'isZoomEnabled', label: 'Enable Zoom', type: 'boolean' },
+        { key: 'hasSymbolTooltip', label: 'Show Symbol Tooltip', type: 'boolean' },
+        { key: 'isMonoSize', label: 'Mono Size', type: 'boolean' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -801,10 +1257,14 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 10, h: 8, minW: 7, minH: 5 },
     searchKeywords: ['forex heatmap', 'currency heatmap'],
     settings: [
-      { key: 'currencies', label: 'Currencies', type: 'symbol_list' },
-      { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        { key: 'currencies', label: 'Currencies', type: 'symbol_list' },
+        { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' },
+        { key: 'backgroundColor', label: 'Background', type: 'color' },
+        { key: 'disableCrossClickHref', label: 'Disable Cross Click', type: 'boolean' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -829,12 +1289,15 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 14, h: 10, minW: 10, minH: 7 },
     searchKeywords: ['tradingview screener', 'screener', 'scanner'],
     settings: [
-      { key: 'market', label: 'Market', type: 'text', placeholder: 'forex' },
-      { key: 'defaultColumn', label: 'Default Column', type: 'text', placeholder: 'overview' },
-      { key: 'defaultScreen', label: 'Default Screen', type: 'text', placeholder: 'general' },
-      { key: 'showToolbar', label: 'Show Toolbar', type: 'boolean' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        { key: 'market', label: 'Market', type: 'select', options: SCREENER_MARKET_OPTIONS },
+        { key: 'defaultColumn', label: 'Default Column', type: 'text', placeholder: 'overview' },
+        { key: 'defaultScreen', label: 'Default Screen', type: 'text', placeholder: 'general' },
+        { key: 'displayCurrency', label: 'Display Currency', type: 'text', placeholder: 'USD' },
+        { key: 'showToolbar', label: 'Show Toolbar', type: 'boolean' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -859,10 +1322,12 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     defaultLayout: { w: 14, h: 10, minW: 10, minH: 7 },
     searchKeywords: ['crypto market', 'crypto screener', 'market cap'],
     settings: [
-      { key: 'defaultColumn', label: 'Default Column', type: 'text', placeholder: 'overview' },
-      { key: 'displayCurrency', label: 'Display Currency', type: 'text', placeholder: 'USD' },
-      ...COMMON_IFRAME_THEME_FIELDS,
-      ...AUTO_SIZE_FIELDS,
+      ...withSection('General', [
+        { key: 'defaultColumn', label: 'Default Column', type: 'text', placeholder: 'overview' },
+        { key: 'displayCurrency', label: 'Display Currency', type: 'text', placeholder: 'USD' },
+        ...COMMON_IFRAME_THEME_FIELDS,
+        ...AUTO_SIZE_FIELDS,
+      ]),
     ],
   },
   {
@@ -875,6 +1340,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     symbolMode: 'widget',
     defaultConfig: {
       symbol: 'NASDAQ:AAPL',
+      useLinkedSymbol: true,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
       width: '100%',
@@ -884,6 +1350,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     searchKeywords: ['symbol info', 'quote info', 'symbol snapshot'],
     settings: [
       ...withSection('General', [
+        LINKED_SYMBOL_FIELD,
         ...BASE_SYMBOL_FIELDS,
         { key: 'autosize', label: 'Auto Size', type: 'boolean' },
         { key: 'width', label: 'Width', type: 'text', placeholder: '100%' },
@@ -903,6 +1370,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     symbolMode: 'widget',
     defaultConfig: {
       symbol: 'NASDAQ:QQQ',
+      useLinkedSymbol: true,
       interval: DEFAULT_INTERVAL,
       width: '100%',
       height: '100%',
@@ -917,6 +1385,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     searchKeywords: ['technical analysis', 'gauge', 'signals'],
     settings: [
       ...withSection('General', [
+        LINKED_SYMBOL_FIELD,
         ...BASE_SYMBOL_FIELDS,
         { key: 'interval', label: 'Interval', type: 'select', options: INTERVAL_OPTIONS },
         { key: 'displayMode', label: 'Display Mode', type: 'select', options: DISPLAY_MODE_OPTIONS },
@@ -936,11 +1405,13 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     symbolMode: 'widget',
     defaultConfig: {
       symbol: 'NASDAQ:AAPL',
+      useLinkedSymbol: true,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
       isTransparent: true,
       autosize: true,
       displayMode: 'adaptive',
+      panelPreset: 'overview',
       width: '100%',
       height: '100%',
       largeChartUrl: '',
@@ -949,6 +1420,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     searchKeywords: ['fundamental data', 'financials', 'company fundamentals'],
     settings: [
       ...withSection('General', [
+        LINKED_SYMBOL_FIELD,
         ...BASE_SYMBOL_FIELDS,
         { key: 'displayMode', label: 'Display Mode', type: 'select', options: DISPLAY_MODE_OPTIONS },
         { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text' },
@@ -956,6 +1428,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
         ...AUTO_SIZE_FIELDS,
       ]),
       ...withSection('Data Fields', [
+        { key: 'panelPreset', label: 'Financial Panel', type: 'select', options: FINANCIAL_PANEL_PRESET_OPTIONS, description: 'Friendly presets for the most common financial views.' },
         {
           key: 'columns',
           label: 'Columns',
@@ -984,6 +1457,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     symbolMode: 'widget',
     defaultConfig: {
       symbol: 'NASDAQ:AAPL',
+      useLinkedSymbol: true,
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
       isTransparent: true,
@@ -994,6 +1468,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     searchKeywords: ['company profile', 'business description', 'industry'],
     settings: [
       ...withSection('General', [
+        LINKED_SYMBOL_FIELD,
         ...BASE_SYMBOL_FIELDS,
         { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
         ...COMMON_IFRAME_THEME_FIELDS,
@@ -1010,6 +1485,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/news/top-stories/',
     symbolMode: 'widget',
     defaultConfig: {
+      useLinkedSymbol: true,
       feedMode: 'all_symbols',
       colorTheme: 'dark',
       locale: DEFAULT_LOCALE,
@@ -1023,9 +1499,10 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     searchKeywords: ['top stories', 'news', 'timeline'],
     settings: [
       ...withSection('General', [
+        LINKED_SYMBOL_FIELD,
         { key: 'feedMode', label: 'Feed Mode', type: 'select', options: FEED_MODE_OPTIONS },
         ...BASE_SYMBOL_FIELDS,
-        { key: 'market', label: 'Market', type: 'text', placeholder: 'stock' },
+        { key: 'market', label: 'Market', type: 'select', options: TOP_STORIES_MARKET_OPTIONS },
         { key: 'displayMode', label: 'Display Mode', type: 'select', options: DISPLAY_MODE_OPTIONS },
         { key: 'largeChartUrl', label: 'Large Chart URL', type: 'text', placeholder: 'https://...' },
         ...COMMON_IFRAME_THEME_FIELDS,
@@ -1164,10 +1641,26 @@ export function buildTradingViewRuntimeConfig(
     merged.symbol = symbol;
   }
 
+  delete merged.useLinkedSymbol;
+
   if (type === 'tradingview_symbol_overview') {
     const configuredSymbols = Array.isArray(merged.symbols) ? merged.symbols : [];
     merged.symbols = configuredSymbols.length > 0 ? configuredSymbols : buildSymbolOverviewSymbols(symbol || 'NASDAQ:AAPL');
     delete merged.symbol;
+  }
+
+  if (type === 'tradingview_market_overview') {
+    if (!Array.isArray(merged.tabs) || merged.tabs.length === 0) {
+      merged.tabs = buildMarketOverviewTabsPreset(toText(merged.tabsPreset) || 'global_macro');
+    }
+    delete merged.tabsPreset;
+  }
+
+  if (type === 'tradingview_market_data') {
+    if (!Array.isArray(merged.symbolsGroups) || merged.symbolsGroups.length === 0) {
+      merged.symbolsGroups = buildMarketDataGroupsPreset(toText(merged.symbolsGroupsPreset) || 'global_macro');
+    }
+    delete merged.symbolsGroupsPreset;
   }
 
   if (type === 'tradingview_ticker') {
@@ -1182,6 +1675,23 @@ export function buildTradingViewRuntimeConfig(
     if (merged.feedMode !== 'symbol') {
       delete merged.symbol;
     }
+    if (!merged.market) {
+      delete merged.market;
+    }
+  }
+
+  if (type === 'tradingview_fundamental_data') {
+    const panelPreset = buildFinancialPanelPreset(toText(merged.panelPreset));
+
+    if ((!Array.isArray(merged.fieldGroups) || merged.fieldGroups.length === 0) && panelPreset.fieldGroups?.length) {
+      merged.fieldGroups = panelPreset.fieldGroups;
+    }
+
+    if ((!Array.isArray(merged.columns) || merged.columns.length === 0) && panelPreset.columns?.length) {
+      merged.columns = panelPreset.columns;
+    }
+
+    delete merged.panelPreset;
   }
 
   if (type === 'tradingview_crypto_market') {

@@ -43,6 +43,11 @@ Source of truth:
 ## Notes
 
 - TradingView widget settings are editable in-app through `WidgetSettingsModal`.
-- Common options are exposed as typed controls; nested or uncommon settings can still be edited through the advanced JSON editor.
+- Common options are exposed as typed controls, grouped by widget section where TradingView exposes a richer settings surface.
+- `Advanced Chart` now includes grouped controls for chart visuals, indicators, compare symbols, watchlist symbols, and additional toolbar/popup options.
+- `Market Overview` and `Market Data` now support TradingView-compatible preset builders for tabs and symbol groups, including cross-asset macro and Vietnam/regional risk presets, while advanced JSON still supports fully custom payloads.
+- `Fundamental Data` now exposes a friendlier `Financial Panel` preset selector such as `Overview`, `Valuation`, `Profitability`, `Growth`, `Balance Sheet`, and `Cash Flow`, with manual `fieldGroups` and `columns` editors still available.
+- Symbol-bearing TradingView widgets now support an app-level `Sync With Dashboard Symbol` option so linked chart and company-detail widgets can follow the same ticker.
+- Dark mode is the default across TradingView widgets today. Light mode is still available per widget, and a future app-level theme pass can promote that into a global TradingView theme preference.
 - Symbol-bearing TradingView widgets store their symbol in widget-local config so dashboards can keep different TradingView symbols and layouts.
 - The default Global Markets starter layout was updated to use a TradingView-native mix instead of the earlier mixed native/TradingView setup.
