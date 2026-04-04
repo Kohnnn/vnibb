@@ -5,6 +5,7 @@ Equity API Endpoints with Graceful Degradation.
 import asyncio
 from bisect import bisect_right
 import logging
+import math
 import re
 import unicodedata
 from datetime import date, timedelta, datetime
@@ -958,15 +959,76 @@ async def _get_profile_last_data_date(db: AsyncSession, symbol: str) -> Optional
     return _coerce_iso_timestamp(stock_result.scalar())
 
 
-def _to_historical_data(row: StockPrice) -> EquityHistoricalData:
+def _apply_adjustment_mode_to_ohlc(
+    *,
+    open_value: float,
+    high_value: float,
+    low_value: float,
+    close_value: float,
+    adjusted_close: Any,
+    adjustment_mode: str,
+) -> tuple[float, float, float, float, Optional[float], bool]:
+    normalized_mode = str(adjustment_mode or "raw").strip().lower() or "raw"
+    raw_close = _coerce_optional_float(close_value)
+    adjusted_close_value = _coerce_optional_float(adjusted_close)
+
+    if normalized_mode != "adjusted" or raw_close in (None, 0) or adjusted_close_value in (None, 0):
+        return (
+            float(open_value),
+            float(high_value),
+            float(low_value),
+            float(close_value),
+            None,
+            False,
+        )
+
+    factor = adjusted_close_value / raw_close
+    if not math.isfinite(factor) or factor <= 0:
+        return (
+            float(open_value),
+            float(high_value),
+            float(low_value),
+            float(close_value),
+            None,
+            False,
+        )
+
+    return (
+        float(open_value) * factor,
+        float(high_value) * factor,
+        float(low_value) * factor,
+        adjusted_close_value,
+        factor,
+        True,
+    )
+
+
+def _to_historical_data(row: StockPrice, *, adjustment_mode: str = "raw") -> EquityHistoricalData:
+    adjusted_open, adjusted_high, adjusted_low, adjusted_close_value, factor, applied = (
+        _apply_adjustment_mode_to_ohlc(
+            open_value=row.open,
+            high_value=row.high,
+            low_value=row.low,
+            close_value=row.close,
+            adjusted_close=row.adj_close,
+            adjustment_mode=adjustment_mode,
+        )
+    )
+
     return EquityHistoricalData(
         symbol=row.symbol,
         time=row.time,
-        open=row.open,
-        high=row.high,
-        low=row.low,
-        close=row.close,
+        open=adjusted_open,
+        high=adjusted_high,
+        low=adjusted_low,
+        close=adjusted_close_value,
         volume=row.volume,
+        value=row.value,
+        raw_close=row.close,
+        adjusted_close=row.adj_close,
+        adjustment_factor=factor,
+        adjustment_mode=str(adjustment_mode or "raw").strip().lower() or "raw",
+        adjustment_applied=applied,
     )
 
 
@@ -976,6 +1038,7 @@ async def _load_historical_from_db(
     start_date: date,
     end_date: date,
     interval: str,
+    adjustment_mode: str = "raw",
 ) -> List[EquityHistoricalData]:
     interval_value = interval or "1D"
     stmt = (
@@ -990,7 +1053,7 @@ async def _load_historical_from_db(
     )
 
     rows = (await db.execute(stmt)).scalars().all()
-    return [_to_historical_data(row) for row in rows]
+    return [_to_historical_data(row, adjustment_mode=adjustment_mode) for row in rows]
 
 
 def _appwrite_optional_int(value: Any) -> Optional[int]:
@@ -1012,26 +1075,45 @@ def _appwrite_time_to_date(value: Any) -> Optional[date]:
         return None
 
 
-def _to_historical_data_from_appwrite(doc: dict[str, Any]) -> Optional[EquityHistoricalData]:
+def _to_historical_data_from_appwrite(
+    doc: dict[str, Any], *, adjustment_mode: str = "raw"
+) -> Optional[EquityHistoricalData]:
     time_value = _appwrite_time_to_date(doc.get("time"))
     open_value = _coerce_optional_float(doc.get("open"))
     high_value = _coerce_optional_float(doc.get("high"))
     low_value = _coerce_optional_float(doc.get("low"))
     close_value = _coerce_optional_float(doc.get("close"))
+    adj_close_value = _coerce_optional_float(doc.get("adj_close") or doc.get("adjClose"))
     volume_value = _appwrite_optional_int(doc.get("volume"))
 
     if not time_value or None in {open_value, high_value, low_value, close_value, volume_value}:
         return None
 
+    adjusted_open, adjusted_high, adjusted_low, adjusted_close_resolved, factor, applied = (
+        _apply_adjustment_mode_to_ohlc(
+            open_value=open_value,
+            high_value=high_value,
+            low_value=low_value,
+            close_value=close_value,
+            adjusted_close=adj_close_value,
+            adjustment_mode=adjustment_mode,
+        )
+    )
+
     return EquityHistoricalData(
         symbol=str(doc.get("symbol") or "").upper(),
         time=time_value,
-        open=open_value,
-        high=high_value,
-        low=low_value,
-        close=close_value,
+        open=adjusted_open,
+        high=adjusted_high,
+        low=adjusted_low,
+        close=adjusted_close_resolved,
         volume=volume_value,
         value=_coerce_optional_float(doc.get("value")),
+        raw_close=close_value,
+        adjusted_close=adj_close_value,
+        adjustment_factor=factor,
+        adjustment_mode=str(adjustment_mode or "raw").strip().lower() or "raw",
+        adjustment_applied=applied,
     )
 
 
@@ -1040,6 +1122,7 @@ async def _load_historical_from_appwrite(
     start_date: date,
     end_date: date,
     interval: str,
+    adjustment_mode: str = "raw",
 ) -> List[EquityHistoricalData]:
     docs = await get_appwrite_stock_prices(
         symbol,
@@ -1051,7 +1134,7 @@ async def _load_historical_from_appwrite(
     )
     rows: List[EquityHistoricalData] = []
     for doc in docs:
-        item = _to_historical_data_from_appwrite(doc)
+        item = _to_historical_data_from_appwrite(doc, adjustment_mode=adjustment_mode)
         if item is not None:
             rows.append(item)
     return rows
@@ -1097,6 +1180,7 @@ async def _load_historical_from_recent_cache(
     start_date: date,
     end_date: date,
     interval: str,
+    adjustment_mode: str = "raw",
 ) -> List[EquityHistoricalData]:
     if (interval or "1D").upper() != "1D":
         return []
@@ -1121,7 +1205,8 @@ async def _load_historical_from_recent_cache(
                 "symbol": symbol.upper(),
                 "interval": "1D",
                 **row,
-            }
+            },
+            adjustment_mode=adjustment_mode,
         )
         if item is None:
             continue
@@ -3552,13 +3637,14 @@ async def _enrich_missing_ratio_metrics(
 
 
 @router.get("/historical", response_model=StandardResponse[List[EquityHistoricalData]])
-@cached(ttl=300, key_prefix="historical")
+@cached(ttl=300, key_prefix="historical_v2")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),
     end_date: date = Query(default_factory=date.today),
     interval: str = Query(default="1D", pattern=r"^(1m|5m|15m|30m|1H|1D|1W|1M)$"),
     source: str = Query(default="VCI", pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.upper()
@@ -3575,7 +3661,7 @@ async def get_historical_prices(
         allow_stale=True,
     )
     if cache_result.hit and cache_result.data:
-        data = [_to_historical_data(r) for r in cache_result.data]
+        data = [_to_historical_data(r, adjustment_mode=adjustment_mode) for r in cache_result.data]
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
 
     recent_cache_data = await _load_historical_from_recent_cache(
@@ -3583,6 +3669,7 @@ async def get_historical_prices(
         start_date=start_date,
         end_date=end_date,
         interval=interval,
+        adjustment_mode=adjustment_mode,
     )
     if recent_cache_data:
         return StandardResponse(data=recent_cache_data, meta=MetaData(count=len(recent_cache_data)))
@@ -3593,6 +3680,7 @@ async def get_historical_prices(
             start_date=start_date,
             end_date=end_date,
             interval=interval,
+            adjustment_mode=adjustment_mode,
         )
         if appwrite_data:
             return StandardResponse(data=appwrite_data, meta=MetaData(count=len(appwrite_data)))
@@ -3607,7 +3695,20 @@ async def get_historical_prices(
         )
         data = await VnstockEquityHistoricalFetcher.fetch(params)
         if data:
-            return StandardResponse(data=data, meta=MetaData(count=len(data)))
+            normalized_mode = str(adjustment_mode or "raw").strip().lower() or "raw"
+            normalized_data = [
+                item.model_copy(
+                    update={
+                        "raw_close": item.raw_close if item.raw_close is not None else item.close,
+                        "adjustment_mode": normalized_mode,
+                        "adjustment_applied": bool(
+                            normalized_mode == "adjusted" and item.adjusted_close not in (None, 0)
+                        ),
+                    }
+                )
+                for item in data
+            ]
+            return StandardResponse(data=normalized_data, meta=MetaData(count=len(normalized_data)))
 
         if use_appwrite_data:
             appwrite_data = await _load_historical_from_appwrite(
@@ -3615,6 +3716,7 @@ async def get_historical_prices(
                 start_date=start_date,
                 end_date=end_date,
                 interval=interval,
+                adjustment_mode=adjustment_mode,
             )
             if appwrite_data:
                 logger.info(
@@ -3630,6 +3732,7 @@ async def get_historical_prices(
             start_date=start_date,
             end_date=end_date,
             interval=interval,
+            adjustment_mode=adjustment_mode,
         )
         if fallback_data:
             logger.info(
@@ -3659,6 +3762,7 @@ async def get_historical_prices(
                 start_date=start_date,
                 end_date=end_date,
                 interval=interval,
+                adjustment_mode=adjustment_mode,
             )
             if appwrite_data:
                 logger.info(
@@ -3674,6 +3778,7 @@ async def get_historical_prices(
             start_date=start_date,
             end_date=end_date,
             interval=interval,
+            adjustment_mode=adjustment_mode,
         )
         if fallback_data:
             logger.info(
@@ -4551,7 +4656,7 @@ async def get_company_news(symbol: str, limit: int = Query(20)):
 
 
 @router.get("/{symbol}/events", response_model=StandardResponse[List[Any]])
-@cached(ttl=settings.news_retention_days * 86400, key_prefix="company_events_v26")
+@cached(ttl=settings.news_retention_days * 86400, key_prefix="company_events_v27")
 async def get_company_events(symbol: str, limit: int = Query(20, ge=1, le=100)):
     try:
         data = await VnstockCompanyEventsFetcher.fetch(

@@ -153,6 +153,14 @@ Implementation focus:
 - adjusted price modes and adjustment factors
 - event markers and adjustment-aware analytics
 
+Current shipped slice:
+
+- `adjustment_mode` support on historical prices (`raw` or `adjusted`)
+- adjusted OHLC derivation from stored `adj_close` when available
+- frontend raw/adjusted toggle in key chart consumers
+- adjusted-history default for risk-oriented consumers
+- normalized company event classification fields for dividends, splits, issuance, and meetings
+
 ## Delivery Order
 
 Recommended execution order:

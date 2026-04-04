@@ -143,6 +143,7 @@ export function TradingViewAdvancedChart({
   const [points, setPoints] = useState<ChartPoint[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [adjustmentMode, setAdjustmentMode] = useState<'raw' | 'adjusted'>('adjusted');
 
   const dateRange = useMemo(() => resolveDateRange(timeframe), [timeframe]);
 
@@ -162,6 +163,7 @@ export function TradingViewAdvancedChart({
             startDate: dateRange.startDate,
             endDate: dateRange.endDate,
             interval: '1D',
+            adjustmentMode,
             signal: controller.signal,
           }),
           getQuote(symbol, controller.signal).catch(() => null),
@@ -188,7 +190,7 @@ export function TradingViewAdvancedChart({
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [symbol, dateRange.startDate, dateRange.endDate]);
+  }, [adjustmentMode, symbol, dateRange.startDate, dateRange.endDate]);
 
   useEffect(() => {
     if (!containerRef.current || points.length === 0) return;
@@ -350,6 +352,24 @@ export function TradingViewAdvancedChart({
   return (
     <div className={cn('relative h-full w-full', className)} style={{ minHeight: height }}>
       <div ref={containerRef} className="absolute inset-0 h-full w-full" />
+
+      <div className="absolute left-3 top-3 z-10 flex items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 p-1 backdrop-blur">
+        {(['adjusted', 'raw'] as const).map((modeOption) => (
+          <button
+            key={modeOption}
+            type="button"
+            onClick={() => setAdjustmentMode(modeOption)}
+            className={cn(
+              'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
+              adjustmentMode === modeOption
+                ? 'bg-blue-600 text-white'
+                : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+            )}
+          >
+            {modeOption}
+          </button>
+        ))}
+      </div>
 
       {isLoading && (
         <div

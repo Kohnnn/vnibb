@@ -8,12 +8,21 @@ export interface EquityHistoricalData {
   low: number;
   close: number;
   volume: number;
+  value?: number | null;
+  raw_close?: number | null;
+  adjusted_close?: number | null;
+  adjustment_factor?: number | null;
+  adjustment_mode?: 'raw' | 'adjusted';
+  adjustment_applied?: boolean;
 }
 
 export interface EquityHistoricalResponse {
-  symbol: string;
-  count: number;
   data: EquityHistoricalData[];
+  meta?: {
+    count: number;
+    last_data_date?: string | null;
+  };
+  error?: string | null;
 }
 
 export interface EquityProfileData {
@@ -69,12 +78,19 @@ export interface CompanyEventData {
   payment_date?: string;
   description?: string;
   value?: string;
+  action_category?: string;
+  action_subtype?: string | null;
+  effective_date?: string | null;
+  cash_amount_per_share?: number | null;
+  share_ratio?: string | null;
 }
 
 export interface CompanyEventsResponse {
-  symbol: string;
-  count: number;
   data: CompanyEventData[];
+  meta?: {
+    count: number;
+  };
+  error?: string | null;
 }
 
 export interface AnalystEstimateDataRow {

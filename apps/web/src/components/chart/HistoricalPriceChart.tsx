@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   CartesianGrid,
   Line,
@@ -13,6 +13,7 @@ import { useHistoricalPrices } from '@/lib/queries'
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetEmpty } from '@/components/ui/widget-states'
+import { cn } from '@/lib/utils'
 
 const TIMEFRAME_DAYS: Record<string, number> = {
   '1M': 30,
@@ -35,6 +36,7 @@ interface HistoricalPriceChartProps {
 }
 
 export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPriceChartProps) {
+  const [adjustmentMode, setAdjustmentMode] = useState<'raw' | 'adjusted'>('adjusted')
   const dateRange = useMemo(() => {
     const days = TIMEFRAME_DAYS[timeframe] ?? TIMEFRAME_DAYS['1Y']
     const end = new Date()
@@ -48,6 +50,7 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
     startDate: dateRange.startDate,
     endDate: dateRange.endDate,
     interval: '1D',
+    adjustmentMode,
     enabled: Boolean(symbol)
   })
 
@@ -76,37 +79,57 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
   }
 
   return (
-    <ChartSizeBox className="h-full" minHeight={220}>
-      {({ width, height }) => (
-        <LineChart
-          width={width}
-          height={height}
-          data={chartData}
-          margin={{ top: 8, right: 16, left: 12, bottom: 8 }}
-        >
-          <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
-          <XAxis
-            dataKey="date"
-            tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
-            tickFormatter={formatShortDate}
-            axisLine={false}
-            tickLine={false}
-          />
-          <YAxis
-            tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
-            axisLine={false}
-            tickLine={false}
-            domain={['auto', 'auto']}
-            label={{ value: 'VND', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 10 }}
-          />
-          <Tooltip
-            contentStyle={{ background: 'var(--bg-tooltip)', border: '1px solid var(--border-default)', fontSize: '11px' }}
-            labelStyle={{ color: 'var(--text-muted)' }}
-          />
-          <Line type="monotone" dataKey="close" stroke="#38bdf8" strokeWidth={2} dot={false} />
-        </LineChart>
-      )}
-    </ChartSizeBox>
+    <div className="flex h-full flex-col gap-2">
+      <div className="flex items-center justify-end gap-1">
+        {(['adjusted', 'raw'] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setAdjustmentMode(mode)}
+            className={cn(
+              'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
+              adjustmentMode === mode
+                ? 'bg-blue-600 text-white'
+                : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+            )}
+          >
+            {mode}
+          </button>
+        ))}
+      </div>
+
+      <ChartSizeBox className="h-full" minHeight={220}>
+        {({ width, height }) => (
+          <LineChart
+            width={width}
+            height={height}
+            data={chartData}
+            margin={{ top: 8, right: 16, left: 12, bottom: 8 }}
+          >
+            <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
+            <XAxis
+              dataKey="date"
+              tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
+              tickFormatter={formatShortDate}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fill: 'var(--text-muted)', fontSize: 10 }}
+              axisLine={false}
+              tickLine={false}
+              domain={['auto', 'auto']}
+              label={{ value: adjustmentMode === 'adjusted' ? 'Adj. VND' : 'VND', angle: -90, position: 'insideLeft', fill: 'var(--text-muted)', fontSize: 10 }}
+            />
+            <Tooltip
+              contentStyle={{ background: 'var(--bg-tooltip)', border: '1px solid var(--border-default)', fontSize: '11px' }}
+              labelStyle={{ color: 'var(--text-muted)' }}
+            />
+            <Line type="monotone" dataKey="close" stroke="#38bdf8" strokeWidth={2} dot={false} />
+          </LineChart>
+        )}
+      </ChartSizeBox>
+    </div>
   )
 }
 

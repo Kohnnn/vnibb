@@ -39,6 +39,7 @@ export function useQuantRegime(
 
   const historyQuery = useHistoricalPrices(upperSymbol, {
     startDate: quantPeriodToStartDate(period),
+    adjustmentMode: 'adjusted',
     enabled,
   })
 
