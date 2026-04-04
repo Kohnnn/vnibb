@@ -796,6 +796,7 @@ export function AICopilot({
                                             sources={message.sources || []}
                                             responseMeta={message.responseMeta}
                                             surface="sidebar"
+                                            showWorkflowActions={aiSettings.enableSidebarWorkflowOutputs}
                                         />
                                     )}
                                 </div>

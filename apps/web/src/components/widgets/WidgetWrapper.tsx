@@ -135,6 +135,8 @@ export function WidgetWrapper({
     const [isContentVisible, setIsContentVisible] = useState(false);
     const contentHostRef = useRef<HTMLDivElement | null>(null);
     const baseWidgetHeightRef = useRef<number | null>(null);
+    const autoCompactHeightRef = useRef<number | null>(null);
+    const lastObservedHeightRef = useRef<number | null>(null);
     const runtimeWidgetIdRef = useRef<string | null>(null);
     const currentDashboard = state.dashboards.find((dashboard) => dashboard.id === dashboardId) || null;
     const currentTab = currentDashboard?.tabs.find((tab) => tab.id === tabId) || null;
@@ -165,7 +167,20 @@ export function WidgetWrapper({
         if (runtimeWidgetIdRef.current !== currentWidget.id) {
             runtimeWidgetIdRef.current = currentWidget.id;
             baseWidgetHeightRef.current = currentWidget.layout.h;
+            autoCompactHeightRef.current = null;
+            lastObservedHeightRef.current = currentWidget.layout.h;
+            return;
         }
+
+        const currentHeight = currentWidget.layout.h;
+        const lastObservedHeight = lastObservedHeightRef.current;
+        const wasAutoCompactHeight = autoCompactHeightRef.current !== null && lastObservedHeight === autoCompactHeightRef.current;
+
+        if (lastObservedHeight !== currentHeight && !wasAutoCompactHeight) {
+            baseWidgetHeightRef.current = currentHeight;
+        }
+
+        lastObservedHeightRef.current = currentHeight;
     }, [currentWidget]);
 
     useEffect(() => {
@@ -234,16 +249,43 @@ export function WidgetWrapper({
             layoutHint.compactHeight ?? currentWidget.layout.minH ?? 3,
             currentWidget.layout.minH ?? 2,
         );
-        const targetHeight = layoutHint.empty ? compactHeight : baseHeight;
+        const currentHeight = currentWidget.layout.h;
 
-        if (currentWidget.layout.h === targetHeight) {
+        if (layoutHint.empty) {
+            if (currentHeight <= compactHeight) {
+                autoCompactHeightRef.current = compactHeight;
+                return;
+            }
+
+            autoCompactHeightRef.current = compactHeight;
+            lastObservedHeightRef.current = compactHeight;
+
+            updateWidgetRuntime(dashboardId, tabId, id, {
+                layout: {
+                    ...currentWidget.layout,
+                    h: compactHeight,
+                },
+            });
             return;
         }
+
+        const wasAutoCompacted = autoCompactHeightRef.current !== null && currentHeight === autoCompactHeightRef.current;
+        if (!wasAutoCompacted) {
+            return;
+        }
+
+        autoCompactHeightRef.current = null;
+
+        if (baseHeight === currentHeight) {
+            return;
+        }
+
+        lastObservedHeightRef.current = baseHeight;
 
         updateWidgetRuntime(dashboardId, tabId, id, {
             layout: {
                 ...currentWidget.layout,
-                h: targetHeight,
+                h: baseHeight,
             },
         });
     }, [currentWidget, dashboardId, id, internalData, tabId, updateWidgetRuntime]);

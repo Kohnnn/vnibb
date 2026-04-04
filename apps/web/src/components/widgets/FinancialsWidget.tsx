@@ -26,6 +26,7 @@ import {
     formatUnitValuePlain,
     getUnitLegend,
     resolveUnitScale,
+    convertFinancialValueForUnit,
 } from '@/lib/units';
 
 type FinancialTab = 'balance_sheet' | 'income_statement' | 'cash_flow' | 'ratios';
@@ -107,16 +108,20 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
         const sortedData = [...normalizedRows].sort((a: any, b: any) => {
             return periodSortKey(a?.__period) - periodSortKey(b?.__period);
         });
-        const sortedPeriods = sortedData
+        const quarterOnlyRows = sortedData.filter((row: any) => String(row.__period).startsWith('Q'));
+        const comparisonRows = periodMode === 'quarter'
+            ? quarterOnlyRows
+            : periodMode === 'ttm'
+                ? sortedData.filter((row: any) => String(row.__period).toUpperCase().includes('TTM'))
+                : sortedData;
+        const sortedPeriods = comparisonRows
             .map((row: any) => row.__period)
             .filter((periodValue: string | null | undefined): periodValue is string => Boolean(periodValue));
         const sortedPeriodIndex = new Map(sortedPeriods.map((periodValue, index) => [periodValue, index]));
 
         let displayRows = normalizedRows;
         if (periodMode === 'quarter') {
-            const quarterRows = normalizedRows
-                .filter((row: any) => String(row.__period).startsWith('Q'))
-                .sort((a: any, b: any) => periodSortKey(a.__period) - periodSortKey(b.__period));
+            const quarterRows = quarterOnlyRows;
 
             if (period === 'TTM') {
                 if (activeTab === 'ratios') {
@@ -177,9 +182,14 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                         if (!periodLabel) {
                             return;
                         }
-                        const currentVal = d[m.key];
+                        const currentVal = activeTab === 'ratios'
+                            ? d[m.key]
+                            : convertFinancialValueForUnit(d[m.key], unitConfig, periodLabel);
                         const periodIndex = sortedPeriodIndex.get(periodLabel) ?? -1;
-                        const prevVal = periodIndex > 0 ? (sortedData[periodIndex - 1] as any)?.[m.key] : null;
+                        const prevValRaw = periodIndex > 0 ? (comparisonRows[periodIndex - 1] as any)?.[m.key] : null;
+                        const prevVal = activeTab === 'ratios'
+                            ? prevValRaw
+                            : convertFinancialValueForUnit(prevValRaw, unitConfig, comparisonRows[periodIndex - 1]?.__period);
 
                     let growth = null;
                     if (prevVal && prevVal !== 0 && currentVal !== null) {
@@ -191,7 +201,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                 return { label: m.label, isPct: m.isPct, values };
             })
         };
-    }, [activeQuery?.data, activeTab, periodMode, period]);
+    }, [activeQuery?.data, activeTab, periodMode, period, unitConfig]);
 
     const hasData = Boolean(tableData && tableData.periods.length > 0);
     const isFallback = Boolean(activeQuery?.error && hasData);

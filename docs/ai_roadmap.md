@@ -56,6 +56,7 @@ Reduce avoidable complexity in VniAgent and improve answer quality and runtime r
 - keep app-default runtime behavior globally consistent
 - make the active global model clearly visible to users
 - prefer VNIBB database wording in user-facing VniAgent surfaces
+- keep the sidebar, widget, and analysis views answer-first with details collapsed by default
 
 ## Batch 1: Table Artifacts
 

@@ -30,6 +30,7 @@ def normalize_statement_period(
 
     year = fiscal_year if fiscal_year and 1900 <= fiscal_year <= 2100 else None
     quarter = fiscal_quarter if fiscal_quarter and 1 <= fiscal_quarter <= 4 else None
+    prefers_quarter = normalized_period_type == "quarter" or quarter is not None
 
     if text:
         if text == "TTM" or "TTM" in text:
@@ -45,7 +46,11 @@ def normalize_statement_period(
             return f"{year} YTD" if year is not None else "YTD"
 
         if re.match(r"^20\d{2}$", text):
-            return text
+            if year is None:
+                year = int(text)
+            if prefers_quarter and quarter is not None:
+                return f"Q{quarter}-{year}"
+            return str(year)
 
         quarter_first = re.match(r"^Q([1-4])[-_/ ]?(20\d{2})$", text)
         if quarter_first:
@@ -69,17 +74,18 @@ def normalize_statement_period(
         if text.isdigit():
             numeric = int(text)
             if 1900 <= numeric <= 2100:
-                return str(numeric)
+                if year is None:
+                    year = numeric
+                if prefers_quarter and quarter is not None:
+                    return f"Q{quarter}-{year}"
+                return str(year)
             if 1 <= numeric <= 4 and year is not None:
                 quarter = numeric
 
     if year is None:
         return None
 
-    if quarter is not None and normalized_period_type != "year":
-        return f"Q{quarter}-{year}"
-
-    if normalized_period_type == "quarter" and quarter is not None:
+    if prefers_quarter and quarter is not None:
         return f"Q{quarter}-{year}"
 
     return str(year)
@@ -137,7 +143,9 @@ def _normalize_statement_rows(
     for row in rows:
         normalized_period = normalize_statement_period(
             row.period,
-            period_type=period_type,
+            fiscal_year=getattr(row, "fiscal_year", None),
+            fiscal_quarter=getattr(row, "fiscal_quarter", None),
+            period_type=getattr(row, "period_type", None) or period_type,
         )
         if normalized_period is None:
             continue

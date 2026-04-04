@@ -170,7 +170,10 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                     message: userMessage,
                     context: context || null,
                     history: historyForRequest,
-                    settings: readStoredAISettings(),
+                    settings: {
+                        ...readStoredAISettings(),
+                        enableSidebarWorkflowOutputs: true,
+                    },
                 },
                 abortControllerRef.current.signal,
             );

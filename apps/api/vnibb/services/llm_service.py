@@ -580,6 +580,11 @@ class LlmService:
         resolved_config: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         config = resolved_config or self.resolve_request_config(request_settings)
+        workflow_outputs_enabled = bool(
+            True
+            if request_settings is None
+            else request_settings.get("enableWorkflowOutputs", True)
+        )
         payload = self._build_payload(
             model=config["model"],
             messages=messages,
@@ -590,11 +595,19 @@ class LlmService:
         raw_text = await self._request_completion_text(config, payload)
         rendered = _render_validated_markdown(raw_text, context)
         rendered["sources"] = _build_used_source_entries(context, rendered["used_source_ids"])
-        rendered["artifacts"] = build_artifacts(_latest_user_message(messages), context)
-        rendered["actions"] = build_action_suggestions(
-            _latest_user_message(messages),
-            context,
-            rendered["artifacts"],
+        rendered["artifacts"] = (
+            build_artifacts(_latest_user_message(messages), context)
+            if workflow_outputs_enabled
+            else []
+        )
+        rendered["actions"] = (
+            build_action_suggestions(
+                _latest_user_message(messages),
+                context,
+                rendered["artifacts"],
+            )
+            if workflow_outputs_enabled
+            else []
         )
         rendered["config"] = {
             "provider": config["provider"],

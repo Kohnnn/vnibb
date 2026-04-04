@@ -30,11 +30,27 @@ interface MoneyFlowTrendWidgetProps {
 }
 
 type Timeframe = 'short' | 'medium' | 'long';
+type TopCount = 5 | 10 | 20 | -1;
+type RankingMetric = 'composite' | 'trend' | 'strength' | 'change';
 
 const TIMEFRAME_OPTIONS: Array<{ id: Timeframe; label: string }> = [
   { id: 'short', label: 'Short' },
   { id: 'medium', label: 'Medium' },
   { id: 'long', label: 'Long' },
+];
+
+const TOP_COUNT_OPTIONS: Array<{ id: TopCount; label: string }> = [
+  { id: 5, label: 'Top 5' },
+  { id: 10, label: 'Top 10' },
+  { id: 20, label: 'Top 20' },
+  { id: -1, label: 'All' },
+];
+
+const RANKING_OPTIONS: Array<{ id: RankingMetric; label: string }> = [
+  { id: 'composite', label: 'Composite' },
+  { id: 'trend', label: 'Trend' },
+  { id: 'strength', label: 'Strength' },
+  { id: 'change', label: 'Change %' },
 ];
 
 const QUADRANT_STYLES = {
@@ -52,7 +68,7 @@ function FlowPointShape(props: any) {
   return (
     <g>
       <circle cx={cx} cy={cy} r={radius} fill={stroke} fillOpacity={latest ? 0.95 : 0.35} stroke="#f8fafc" strokeWidth={latest ? 1.5 : 0.5} />
-      {latest ? (
+      {latest && payload?.showLabel ? (
         <text x={cx + 10} y={cy + 4} fontSize={11} fontWeight={700} fill="#e2e8f0">
           {payload.symbol}
         </text>
@@ -61,8 +77,28 @@ function FlowPointShape(props: any) {
   );
 }
 
+function getRankingValue(stock: any, metric: RankingMetric): number {
+  const trend = Number(stock.s_trend ?? 100)
+  const strength = Number(stock.s_strength ?? 100)
+  const change = Number(stock.change_pct ?? 0)
+
+  switch (metric) {
+    case 'trend':
+      return trend
+    case 'strength':
+      return strength
+    case 'change':
+      return change
+    case 'composite':
+    default:
+      return (trend - 100) + (strength - 100)
+  }
+}
+
 function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendWidgetProps) {
   const [timeframe, setTimeframe] = useState<Timeframe>('medium');
+  const [topCount, setTopCount] = useState<TopCount>(10);
+  const [rankingMetric, setRankingMetric] = useState<RankingMetric>('composite');
   const [visibleSymbols, setVisibleSymbols] = useState<Record<string, boolean>>({});
   const upperSymbol = symbol?.toUpperCase() || '';
 
@@ -76,27 +112,58 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendW
   const stocks = data?.stocks || [];
   const hasData = stocks.length > 0;
 
+  const rankedStocks = useMemo(() => {
+    const sorted = [...stocks].sort((left, right) => getRankingValue(right, rankingMetric) - getRankingValue(left, rankingMetric))
+    return topCount === -1 ? sorted : sorted.slice(0, topCount)
+  }, [rankingMetric, stocks, topCount]);
+
   const stockDatasets = useMemo(() => {
-    return stocks
+    return rankedStocks
       .filter((stock) => visibleSymbols[stock.symbol] !== false)
-      .map((stock) => ({
+      .map((stock, index) => ({
         ...stock,
-        trailData: (stock.trail || []).map((point, index, items) => ({
+        rankScore: getRankingValue(stock, rankingMetric),
+        trailData: ((stock.trail && stock.trail.length > 0)
+          ? stock.trail
+          : [{ date: data?.updated_at || '', s_trend: stock.s_trend, s_strength: stock.s_strength }]
+        ).map((point, pointIndex, items) => ({
           ...point,
           x: point.s_trend,
           y: point.s_strength,
           symbol: stock.symbol,
-          isLatest: index === items.length - 1,
+          isLatest: pointIndex === items.length - 1,
+          showLabel: index < 5,
         })),
       }))
-  }, [stocks, visibleSymbols]);
+  }, [data?.updated_at, rankedStocks, rankingMetric, visibleSymbols]);
+
+  const chartDomain = useMemo(() => {
+    const points = stockDatasets.flatMap((stock) => stock.trailData)
+    if (!points.length) {
+      return { x: [80, 120] as [number, number], y: [80, 120] as [number, number] }
+    }
+
+    const xValues = points.map((point) => Number(point.x ?? 100)).filter(Number.isFinite)
+    const yValues = points.map((point) => Number(point.y ?? 100)).filter(Number.isFinite)
+    const minX = Math.min(...xValues, 100)
+    const maxX = Math.max(...xValues, 100)
+    const minY = Math.min(...yValues, 100)
+    const maxY = Math.max(...yValues, 100)
+    const xPad = Math.max(4, (maxX - minX) * 0.12)
+    const yPad = Math.max(4, (maxY - minY) * 0.12)
+
+    return {
+      x: [Math.floor(minX - xPad), Math.ceil(maxX + xPad)] as [number, number],
+      y: [Math.floor(minY - yPad), Math.ceil(maxY + yPad)] as [number, number],
+    }
+  }, [stockDatasets]);
 
   const note = data?.sector
     ? `${data.sector} vs ${data.benchmark}`
     : `Universe vs ${data?.benchmark || 'VNINDEX'}`;
   const referenceStock = useMemo(
-    () => stocks.find((stock) => stock.symbol === upperSymbol) || stocks[0] || null,
-    [stocks, upperSymbol]
+    () => rankedStocks.find((stock) => stock.symbol === upperSymbol) || rankedStocks[0] || null,
+    [rankedStocks, upperSymbol]
   );
 
   const toggleSymbol = (ticker: string) => {
@@ -140,17 +207,51 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendW
                 </button>
               ))}
             </div>
+            <div className="flex items-center gap-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-0.5">
+              {TOP_COUNT_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setTopCount(option.id)}
+                  className={cn(
+                    'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
+                    topCount === option.id
+                      ? 'bg-cyan-600 text-white'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-0.5">
+              {RANKING_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setRankingMetric(option.id)}
+                  className={cn(
+                    'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
+                    rankingMetric === option.id
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
             <WidgetMeta
               updatedAt={data?.updated_at || dataUpdatedAt}
               isFetching={isFetching && hasData}
-              note={note}
+              note={`${note} · ${topCount === -1 ? 'All names' : `Top ${topCount}`} by ${RANKING_OPTIONS.find((option) => option.id === rankingMetric)?.label}`}
               align="right"
             />
           </div>
-          <div className="mt-2 flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
-            <Info size={12} className="text-cyan-300" />
-            <span>Proxy model: relative strength vs VNINDEX with trend and momentum centered at 100.</span>
-          </div>
+            <div className="mt-2 flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
+              <Info size={12} className="text-cyan-300" />
+              <span>Proxy model: relative strength vs VNINDEX with trend and momentum centered at 100. Ranked view trims clutter to the strongest names first.</span>
+            </div>
           {referenceStock && (
             <div className="mt-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
               <span className="font-semibold text-[var(--text-primary)]">Current read:</span>{' '}
@@ -180,7 +281,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendW
                     <XAxis
                       type="number"
                       dataKey="x"
-                      domain={[80, 120]}
+                      domain={chartDomain.x}
                       tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                       axisLine={false}
                       tickLine={false}
@@ -189,7 +290,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendW
                     <YAxis
                       type="number"
                       dataKey="y"
-                      domain={[80, 120]}
+                      domain={chartDomain.y}
                       tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                       axisLine={false}
                       tickLine={false}
@@ -208,7 +309,6 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendW
                         return point ? `${point.symbol} · ${point.date}` : '';
                       }}
                     />
-                    <Legend />
                     {stockDatasets.map((stock) => (
                       <Scatter
                         key={stock.symbol}
@@ -226,18 +326,33 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendW
             )}
           </div>
 
-          <div className="w-[180px] border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 overflow-auto scrollbar-hide">
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Universe</div>
+          <div className="w-[220px] border-l border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3 overflow-auto scrollbar-hide">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Universe</div>
+            <div className="mb-2 text-[10px] text-[var(--text-muted)]">
+              Showing {rankedStocks.length} of {stocks.length} names
+            </div>
             <div className="space-y-2">
-              {stocks.map((stock) => (
-                <label key={stock.symbol} className="flex items-center gap-2 text-xs text-[var(--text-primary)]">
+              {rankedStocks.map((stock) => (
+                <label key={stock.symbol} className="flex items-start gap-2 text-xs text-[var(--text-primary)]">
                   <input
                     type="checkbox"
                     checked={visibleSymbols[stock.symbol] !== false}
                     onChange={() => toggleSymbol(stock.symbol)}
                   />
                   <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: stock.color }} />
-                  <span className="font-medium">{stock.symbol}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{stock.symbol}</span>
+                      <span className="text-[10px] text-[var(--text-muted)]">
+                        {rankingMetric === 'change'
+                          ? `${Number(stock.change_pct ?? 0).toFixed(1)}%`
+                          : formatNumber(getRankingValue(stock, rankingMetric), { decimals: 1 })}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-[var(--text-muted)]">
+                      T {formatNumber(Number(stock.s_trend ?? 0), { decimals: 1 })} · S {formatNumber(Number(stock.s_strength ?? 0), { decimals: 1 })}
+                    </div>
+                  </div>
                 </label>
               ))}
             </div>

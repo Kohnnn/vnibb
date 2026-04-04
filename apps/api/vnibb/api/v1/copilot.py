@@ -59,6 +59,7 @@ class CopilotRequestSettings(BaseModel):
     baseUrl: str | None = None
     webSearch: bool = False
     preferAppwriteData: bool = True
+    enableWorkflowOutputs: bool = True
 
 
 class ChatStreamRequest(BaseModel):

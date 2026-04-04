@@ -229,6 +229,24 @@ function normalizeQueryValue(value, spec) {
   return text
 }
 
+function parseJsonObject(value) {
+  if (value === null || value === undefined) return {}
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return { ...value }
+  }
+  if (typeof value === 'string') {
+    const raw = value.trim()
+    if (!raw) return {}
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed
+      }
+    } catch {}
+  }
+  return {}
+}
+
 function buildQueryOverlay(row, queryAttributes) {
   const output = {}
 
@@ -243,11 +261,38 @@ function buildQueryOverlay(row, queryAttributes) {
   return output
 }
 
-function buildDocumentData(row, precisionColumns, coerceAllToString, queryAttributes = []) {
+function buildDocumentData(
+  row,
+  precisionColumns,
+  coerceAllToString,
+  queryAttributes = [],
+  includedColumns = null,
+  packColumnsIntoJson = {}
+) {
   const output = {}
+  const included = Array.isArray(includedColumns) && includedColumns.length > 0
+    ? new Set(includedColumns)
+    : null
+  const packedSourceColumns = new Set(
+    Object.values(packColumnsIntoJson || {}).flat().map(value => String(value))
+  )
+
   for (const [key, value] of Object.entries(row)) {
+    if (included && !included.has(key)) continue
+    if (packedSourceColumns.has(key)) continue
     output[key] = normalizeValue(value, key, precisionColumns, coerceAllToString)
   }
+
+  for (const [targetKey, sourceColumns] of Object.entries(packColumnsIntoJson || {})) {
+    const merged = parseJsonObject(row[targetKey])
+    for (const sourceKey of sourceColumns || []) {
+      if (sourceKey === targetKey) continue
+      if (!(sourceKey in row)) continue
+      merged[sourceKey] = row[sourceKey]
+    }
+    output[targetKey] = normalizeValue(merged, targetKey, precisionColumns, coerceAllToString)
+  }
+
   Object.assign(output, buildQueryOverlay(row, queryAttributes))
   return output
 }
@@ -535,9 +580,13 @@ async function main() {
     const batchSize = collectionConfig.batchSize || defaultBatchSize
     const documentIdColumns = collectionConfig.documentIdColumns || ['id']
     const precisionColumns = new Set(collectionConfig.precisionColumns || [])
+    const includedColumns = Array.isArray(collectionConfig.includedColumns)
+      ? collectionConfig.includedColumns
+      : null
     const queryAttributes = Array.isArray(collectionConfig.queryAttributes)
       ? collectionConfig.queryAttributes
       : []
+    const packColumnsIntoJson = collectionConfig.packColumnsIntoJson || {}
 
     if (!tableName || !collectionId) {
       throw new Error('Each collection config needs table and collectionId')
@@ -578,7 +627,9 @@ async function main() {
           row,
           precisionColumns,
           coerceAllToString,
-          queryAttributes
+          queryAttributes,
+          includedColumns,
+          packColumnsIntoJson
         )
         const documentId = deterministicDocumentId(collectionId, row, documentIdColumns)
         const permissions = buildPermissions(collectionConfig, row)

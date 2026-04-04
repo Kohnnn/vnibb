@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Area, AreaChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { AreaChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Sigma } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -11,6 +11,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useRatioHistory } from '@/lib/queries';
+import { formatFinancialPeriodLabel } from '@/lib/financialPeriods';
 import type { RatioHistoryResponse } from '@/types/equity';
 
 interface ValuationBandWidgetProps {
@@ -22,6 +23,9 @@ interface ValuationBandWidgetProps {
 const METRIC_OPTIONS = [
   { key: 'pe', label: 'P/E', color: '#38bdf8' },
   { key: 'pb', label: 'P/B', color: '#22c55e' },
+  { key: 'ps', label: 'P/S', color: '#f59e0b' },
+  { key: 'ev_ebitda', label: 'EV/EBITDA', color: '#f97316' },
+  { key: 'ev_sales', label: 'EV/Sales', color: '#e11d48' },
 ] as const;
 
 function average(values: number[]): number | null {
@@ -46,9 +50,9 @@ export function ValuationBandWidget({ id, symbol, onRemove }: ValuationBandWidge
   const [metric, setMetric] = useState<(typeof METRIC_OPTIONS)[number]['key']>('pe');
 
   const ratioHistoryQuery = useRatioHistory(upperSymbol, {
-    ratios: ['pe', 'pb'],
+    ratios: ['pe', 'pb', 'ps', 'ev_ebitda', 'ev_sales'],
     period: 'year',
-    limit: 20,
+    limit: 60,
     enabled: Boolean(upperSymbol),
   });
   const historyResponse = ratioHistoryQuery.data as RatioHistoryResponse | undefined;
@@ -62,29 +66,31 @@ export function ValuationBandWidget({ id, symbol, onRemove }: ValuationBandWidge
     .filter((value) => Number.isFinite(value) && value > 0);
   const mean = average(seriesValues);
   const sigma = std(seriesValues);
+  const sigma1Lower = mean !== null ? Math.max(mean - sigma, 0) : null;
+  const sigma1Upper = mean !== null ? mean + sigma : null;
+  const sigma2Lower = mean !== null ? Math.max(mean - sigma * 2, 0) : null;
+  const sigma2Upper = mean !== null ? mean + sigma * 2 : null;
   const current = seriesValues[seriesValues.length - 1] ?? null;
   const percentile = current !== null && seriesValues.length
     ? Math.round((seriesValues.filter((value) => value <= current).length / seriesValues.length) * 100)
     : null;
 
   const chartData = useMemo(() => {
-    const lower = mean !== null ? Math.max(mean - sigma, 0) : null;
-    const upper = mean !== null ? mean + sigma : null;
-
     return rows
       .slice()
-      .reverse()
       .map((row) => {
         const value = Number(row[metric]);
         return {
-          period: row.period || '—',
+          period: formatFinancialPeriodLabel(row.period || '—', { mode: 'year' }),
           current: Number.isFinite(value) && value > 0 ? value : null,
-          lowerBase: lower,
-          bandRange: lower !== null && upper !== null ? upper - lower : null,
+          sigma2Lower,
+          sigma2Upper,
+          sigma1Lower,
+          sigma1Upper,
           mean,
         };
       });
-  }, [rows, metric, mean, sigma]);
+  }, [rows, metric, mean, sigma1Lower, sigma1Upper, sigma2Lower, sigma2Upper]);
 
   const hasData = seriesValues.length >= 3;
 
@@ -127,7 +133,7 @@ export function ValuationBandWidget({ id, symbol, onRemove }: ValuationBandWidge
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
-            note="Annual bands"
+            note="Annual · oldest to newest"
             align="right"
           />
         </div>
@@ -161,12 +167,15 @@ export function ValuationBandWidget({ id, symbol, onRemove }: ValuationBandWidge
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">1σ Band</div>
                 <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-                  {mean !== null ? `${formatMetric(Math.max(mean - sigma, 0))} - ${formatMetric(mean + sigma)}` : '—'}
+                  {mean !== null ? `${formatMetric(sigma1Lower)} - ${formatMetric(sigma1Upper)}` : '—'}
                 </div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Percentile</div>
-                <div className="mt-1 text-lg font-semibold text-cyan-300">{percentile === null ? '—' : `${percentile}%`}</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">2σ Band / Percentile</div>
+                <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                  {mean !== null ? `${formatMetric(sigma2Lower)} - ${formatMetric(sigma2Upper)}` : '—'}
+                </div>
+                <div className="mt-1 text-xs font-semibold text-cyan-300">{percentile === null ? '—' : `${percentile}% percentile`}</div>
               </div>
             </div>
 
@@ -187,9 +196,11 @@ export function ValuationBandWidget({ id, symbol, onRemove }: ValuationBandWidge
                         fontSize: '11px',
                       }}
                     />
-                    {mean !== null ? <ReferenceLine y={mean} stroke="#94a3b8" strokeDasharray="4 4" /> : null}
-                    <Area type="monotone" dataKey="lowerBase" stackId="band" stroke="none" fill="transparent" />
-                    <Area type="monotone" dataKey="bandRange" stackId="band" stroke="none" fill="rgba(56,189,248,0.18)" />
+                    {sigma2Lower !== null ? <ReferenceLine y={sigma2Lower} stroke="rgba(148,163,184,0.38)" strokeDasharray="2 4" /> : null}
+                    {sigma2Upper !== null ? <ReferenceLine y={sigma2Upper} stroke="rgba(148,163,184,0.38)" strokeDasharray="2 4" /> : null}
+                    {sigma1Lower !== null ? <ReferenceLine y={sigma1Lower} stroke="rgba(56,189,248,0.5)" strokeDasharray="4 4" /> : null}
+                    {sigma1Upper !== null ? <ReferenceLine y={sigma1Upper} stroke="rgba(56,189,248,0.5)" strokeDasharray="4 4" /> : null}
+                    {mean !== null ? <ReferenceLine y={mean} stroke="#cbd5e1" strokeDasharray="4 4" /> : null}
                     <Line type="monotone" dataKey="current" stroke={seriesConfig.color} strokeWidth={2} dot={{ r: 3 }} />
                     <Line type="monotone" dataKey="mean" stroke="#cbd5e1" strokeWidth={1.5} dot={false} strokeDasharray="4 4" />
                   </AreaChart>

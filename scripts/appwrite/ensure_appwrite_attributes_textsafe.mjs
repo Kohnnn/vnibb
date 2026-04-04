@@ -149,6 +149,9 @@ async function main() {
   for (const item of selectedCollections) {
     const tableName = item.table
     const collectionId = item.collectionId
+    const includedColumns = Array.isArray(item.includedColumns)
+      ? new Set(item.includedColumns.map(value => String(value)))
+      : null
     if (!tableName || !collectionId) {
       continue
     }
@@ -171,6 +174,9 @@ async function main() {
 
     for (const row of columnsResult.rows) {
       const sourceKey = row.column_name
+      if (includedColumns && !includedColumns.has(sourceKey)) {
+        continue
+      }
       const key = normalizeColumnKey(sourceKey)
 
       if (existingKeys.has(key)) {

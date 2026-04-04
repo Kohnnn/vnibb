@@ -7,10 +7,12 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useHistoricalPrices, useQuantMetrics } from '@/lib/queries';
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods';
+import { cn } from '@/lib/utils';
 import type { OHLCData } from '@/lib/chartUtils';
 
 interface RiskDashboardWidgetProps {
@@ -125,18 +127,31 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
   );
   const hurstState = classifyHurst(hurst);
 
-  const riskScore = useMemo(() => {
+  const riskComputation = useMemo(() => {
     const drawdownPenalty = Math.min(Math.abs(Number(drawdown?.max_drawdown_from_52w_high_pct || 0)) * 1.1, 35);
     const volatilityPenalty = Math.min(Number(parkinson?.current_parkinson_vol_30d_pct || 0), 30);
     const sortinoPenalty = sortinoAverage === null ? 12 : Math.min(Math.max(2 - sortinoAverage, 0) * 12, 20);
     const hurstPenalty = hurst === null ? 8 : Math.abs(hurst - 0.5) < 0.08 ? 6 : 0;
-    return Math.max(0, Math.min(100, Math.round(100 - drawdownPenalty - volatilityPenalty - sortinoPenalty - hurstPenalty)));
+    const score = Math.max(0, Math.min(100, Math.round(100 - drawdownPenalty - volatilityPenalty - sortinoPenalty - hurstPenalty)));
+
+    return {
+      score,
+      drivers: [
+        { label: 'Drawdown Stress', value: drawdownPenalty, tone: 'text-rose-300' },
+        { label: 'Volatility Stress', value: volatilityPenalty, tone: 'text-amber-300' },
+        { label: 'Sortino Penalty', value: sortinoPenalty, tone: 'text-cyan-300' },
+        { label: 'Structure Penalty', value: hurstPenalty, tone: 'text-violet-300' },
+      ],
+    }
   }, [drawdown?.max_drawdown_from_52w_high_pct, parkinson?.current_parkinson_vol_30d_pct, sortinoAverage, hurst]);
 
+  const riskScore = riskComputation.score
   const scoreLabel = riskGrade(riskScore);
   const hasData = Boolean(drawdown || parkinson || sortino || hurst !== null);
   const isLoading = (quantQuery.isLoading || historyQuery.isLoading) && !hasData;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading, { timeoutMs: 10_000 });
+  const warningMessage = quantQuery.data?.data?.warning || null;
+  const latestDataDate = quantQuery.data?.data?.last_data_date ?? historyQuery.data?.data?.at(-1)?.time ?? null;
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to inspect risk" icon={<ShieldAlert size={18} />} />;
@@ -216,11 +231,19 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
           <WidgetEmpty message="Risk metrics not available yet" icon={<ShieldAlert size={18} />} />
         ) : (
           <div className="flex h-full flex-col gap-3">
+            {warningMessage ? (
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90">
+                {warningMessage}
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 xl:col-span-2">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Composite Risk Score</div>
                 <div className={`mt-1 text-2xl font-black ${scoreLabel.tone}`}>{riskScore}</div>
                 <div className={`mt-1 text-sm font-semibold ${scoreLabel.tone}`}>{scoreLabel.label}</div>
+                <div className="mt-2 text-[11px] text-[var(--text-secondary)]">
+                  Built from drawdown stress, Parkinson volatility, monthly Sortino quality, and Hurst structure.
+                </div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Max Drawdown</div>
@@ -233,6 +256,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Hurst</div>
                 <div className={`mt-1 text-lg font-semibold ${hurstState.tone}`}>{hurstState.label}</div>
+                <div className="mt-1 text-[11px] text-[var(--text-secondary)]">{hurst === null ? 'Needs more price history' : `Value ${hurst.toFixed(3)} from long-run price structure`}</div>
               </div>
             </div>
 
@@ -246,7 +270,11 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
                   <WidgetEmpty message="Drawdown history is still sparse" size="compact" />
                 ) : (
                   <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
-                    <Sparkline data={underwaterSeries} width={520} height={88} color="red" />
+                    <ChartSizeBox className="w-full" minHeight={88}>
+                      {({ width, height }) => (
+                        <Sparkline data={underwaterSeries} width={width} height={Math.max(72, height)} color="red" />
+                      )}
+                    </ChartSizeBox>
                     <div className="mt-2 text-[11px] text-[var(--text-secondary)]">
                       Current drawdown: {formatSigned(drawdown?.current_drawdown_pct, '%')} • Average recovery: {formatSigned(drawdown?.avg_days_to_recovery, 'd')}
                     </div>
@@ -263,6 +291,18 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
                   </div>
                   <div className="text-[11px] text-[var(--text-secondary)]">
                     Avoid months: {(sortino?.avoid_months || []).join(', ') || '—'}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Score Drivers</div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
+                    {riskComputation.drivers.map((driver) => (
+                      <div key={driver.label} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
+                        <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">{driver.label}</div>
+                        <div className={cn('mt-1 font-mono', driver.tone)}>-{driver.value.toFixed(1)}</div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -285,6 +325,9 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Hurst Value</div>
                       <div className="mt-1 font-mono text-[var(--text-primary)]">{hurst === null ? '—' : hurst.toFixed(3)}</div>
                     </div>
+                  </div>
+                  <div className="mt-2 text-[11px] text-[var(--text-secondary)]">
+                    Latest input date: {latestDataDate ? String(latestDataDate).slice(0, 10) : '—'} • Hurst uses long-run price history for context.
                   </div>
                 </div>
               </div>

@@ -398,6 +398,10 @@
       "documentIdColumns": ["symbol", "snapshot_date"],
       "permissionsMode": "publicRead",
       "batchSize": 500,
+      "includedColumns": ["id", "symbol", "snapshot_date", "company_name", "exchange", "industry", "price", "volume", "market_cap", "pe", "pb", "ps", "extended_metrics", "source", "created_at"],
+      "packColumnsIntoJson": {
+        "extended_metrics": ["ev_ebitda", "roe", "roa", "roic", "gross_margin", "net_margin", "operating_margin", "revenue_growth", "earnings_growth", "dividend_yield", "debt_to_equity", "current_ratio", "quick_ratio", "eps", "bvps", "foreign_ownership", "rs_rating", "rs_rank"]
+      },
       "precisionColumns": ["price", "volume", "market_cap", "pe", "pb", "ps", "ev_ebitda", "roe", "roa", "roic", "gross_margin", "net_margin", "operating_margin", "revenue_growth", "earnings_growth", "dividend_yield", "debt_to_equity", "current_ratio", "quick_ratio", "eps", "bvps", "foreign_ownership", "rs_rating"],
       "queryAttributes": [
         { "key": "symbol_q", "source": "symbol", "type": "string", "size": 16, "normalize": "upper" },

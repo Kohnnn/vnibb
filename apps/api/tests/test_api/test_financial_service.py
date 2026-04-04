@@ -103,6 +103,18 @@ def test_normalize_statement_period_handles_mixed_formats():
     assert normalize_statement_period("2", fiscal_year=2025, period_type="quarter") == "Q2-2025"
 
 
+def test_normalize_statement_period_prefers_quarter_metadata_over_bare_year():
+    assert (
+        normalize_statement_period(
+            "2024",
+            fiscal_year=2024,
+            fiscal_quarter=1,
+            period_type="quarter",
+        )
+        == "Q1-2024"
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_financials_with_ttm_filters_specific_quarter_after_normalization(monkeypatch):
     async def fake_fetch(params, credentials=None):

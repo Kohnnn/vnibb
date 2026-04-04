@@ -7,10 +7,11 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { useUnit } from '@/contexts/UnitContext';
 import { useCashFlow, useCompanyEvents, useCompanyNews, useEarningsQuality, useIncomeStatement } from '@/lib/queries';
 import { formatDate, formatRelativeTime } from '@/lib/format';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
-import { formatNumber, formatPercent } from '@/lib/units';
+import { convertFinancialValueForUnit, formatNumber, formatPercent } from '@/lib/units';
 
 interface EarningsReleaseRecapWidgetProps {
     id: string;
@@ -36,6 +37,7 @@ function normalizeQuarterPeriod(period: string | undefined): string | null {
 }
 
 function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove }: EarningsReleaseRecapWidgetProps) {
+    const { config: unitConfig } = useUnit();
     const incomeQuery = useIncomeStatement(symbol, { period: 'quarter', limit: 8, enabled: Boolean(symbol) });
     const cashFlowQuery = useCashFlow(symbol, { period: 'quarter', limit: 8, enabled: Boolean(symbol) });
     const earningsQualityQuery = useEarningsQuality(symbol, Boolean(symbol));
@@ -73,44 +75,62 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove 
         return [
             {
                 label: 'Revenue',
-                current: latestIncome.revenue ?? null,
-                previous: comparableIncome?.revenue ?? null,
-                change: yoyChange(latestIncome.revenue, comparableIncome?.revenue),
+                current: convertFinancialValueForUnit(latestIncome.revenue ?? null, unitConfig, latestIncome.period),
+                previous: convertFinancialValueForUnit(comparableIncome?.revenue ?? null, unitConfig, comparableIncome?.period),
+                change: yoyChange(
+                    convertFinancialValueForUnit(latestIncome.revenue, unitConfig, latestIncome.period),
+                    convertFinancialValueForUnit(comparableIncome?.revenue, unitConfig, comparableIncome?.period)
+                ),
                 formatter: (value: number | null) => formatNumber(value, { decimals: 0 }),
             },
             {
                 label: 'Gross Profit',
-                current: latestIncome.gross_profit ?? null,
-                previous: comparableIncome?.gross_profit ?? null,
-                change: yoyChange(latestIncome.gross_profit, comparableIncome?.gross_profit),
+                current: convertFinancialValueForUnit(latestIncome.gross_profit ?? null, unitConfig, latestIncome.period),
+                previous: convertFinancialValueForUnit(comparableIncome?.gross_profit ?? null, unitConfig, comparableIncome?.period),
+                change: yoyChange(
+                    convertFinancialValueForUnit(latestIncome.gross_profit, unitConfig, latestIncome.period),
+                    convertFinancialValueForUnit(comparableIncome?.gross_profit, unitConfig, comparableIncome?.period)
+                ),
                 formatter: (value: number | null) => formatNumber(value, { decimals: 0 }),
             },
             {
                 label: 'Operating Income',
-                current: latestIncome.operating_income ?? null,
-                previous: comparableIncome?.operating_income ?? null,
-                change: yoyChange(latestIncome.operating_income, comparableIncome?.operating_income),
+                current: convertFinancialValueForUnit(latestIncome.operating_income ?? null, unitConfig, latestIncome.period),
+                previous: convertFinancialValueForUnit(comparableIncome?.operating_income ?? null, unitConfig, comparableIncome?.period),
+                change: yoyChange(
+                    convertFinancialValueForUnit(latestIncome.operating_income, unitConfig, latestIncome.period),
+                    convertFinancialValueForUnit(comparableIncome?.operating_income, unitConfig, comparableIncome?.period)
+                ),
                 formatter: (value: number | null) => formatNumber(value, { decimals: 0 }),
             },
             {
                 label: 'Pre-tax Profit',
-                current: latestIncome.pre_tax_profit ?? latestIncome.profit_before_tax ?? null,
-                previous: comparableIncome?.pre_tax_profit ?? comparableIncome?.profit_before_tax ?? null,
-                change: yoyChange(latestIncome.pre_tax_profit ?? latestIncome.profit_before_tax, comparableIncome?.pre_tax_profit ?? comparableIncome?.profit_before_tax),
+                current: convertFinancialValueForUnit(latestIncome.pre_tax_profit ?? latestIncome.profit_before_tax ?? null, unitConfig, latestIncome.period),
+                previous: convertFinancialValueForUnit(comparableIncome?.pre_tax_profit ?? comparableIncome?.profit_before_tax ?? null, unitConfig, comparableIncome?.period),
+                change: yoyChange(
+                    convertFinancialValueForUnit(latestIncome.pre_tax_profit ?? latestIncome.profit_before_tax, unitConfig, latestIncome.period),
+                    convertFinancialValueForUnit(comparableIncome?.pre_tax_profit ?? comparableIncome?.profit_before_tax, unitConfig, comparableIncome?.period)
+                ),
                 formatter: (value: number | null) => formatNumber(value, { decimals: 0 }),
             },
             {
                 label: 'Net Income',
-                current: latestIncome.net_income ?? null,
-                previous: comparableIncome?.net_income ?? null,
-                change: yoyChange(latestIncome.net_income, comparableIncome?.net_income),
+                current: convertFinancialValueForUnit(latestIncome.net_income ?? null, unitConfig, latestIncome.period),
+                previous: convertFinancialValueForUnit(comparableIncome?.net_income ?? null, unitConfig, comparableIncome?.period),
+                change: yoyChange(
+                    convertFinancialValueForUnit(latestIncome.net_income, unitConfig, latestIncome.period),
+                    convertFinancialValueForUnit(comparableIncome?.net_income, unitConfig, comparableIncome?.period)
+                ),
                 formatter: (value: number | null) => formatNumber(value, { decimals: 0 }),
             },
             {
                 label: 'EPS',
-                current: latestIncome.eps ?? null,
-                previous: comparableIncome?.eps ?? null,
-                change: yoyChange(latestIncome.eps, comparableIncome?.eps),
+                current: convertFinancialValueForUnit(latestIncome.eps ?? null, unitConfig, latestIncome.period),
+                previous: convertFinancialValueForUnit(comparableIncome?.eps ?? null, unitConfig, comparableIncome?.period),
+                change: yoyChange(
+                    convertFinancialValueForUnit(latestIncome.eps, unitConfig, latestIncome.period),
+                    convertFinancialValueForUnit(comparableIncome?.eps, unitConfig, comparableIncome?.period)
+                ),
                 formatter: (value: number | null) => formatNumber(value, { decimals: 2 }),
             },
             {
@@ -123,7 +143,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove 
                 formatter: (value: number | null) => formatPercent(value, { decimals: 1, input: 'percent', clamp: 'margin' }),
             },
         ];
-    }, [comparableIncome, latestIncome]);
+    }, [comparableIncome, latestIncome, unitConfig]);
 
     const highlights = useMemo(() => {
         if (!latestIncome) return [];
@@ -281,9 +301,9 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove 
                                     <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
                                         <div className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">Cash & quality</div>
                                         <div className="grid grid-cols-2 gap-2 text-[11px]">
-                                            <MiniMetric label="Operating CF" value={formatNumber(latestCash?.operating_cash_flow ?? null, { decimals: 0 })} />
-                                            <MiniMetric label="Free CF" value={formatNumber(latestCash?.free_cash_flow ?? null, { decimals: 0 })} />
-                                            <MiniMetric label="Net cash change" value={formatNumber(latestCash?.net_change_in_cash ?? latestCash?.net_cash_flow ?? null, { decimals: 0 })} />
+                                            <MiniMetric label="Operating CF" value={formatNumber(convertFinancialValueForUnit(latestCash?.operating_cash_flow ?? null, unitConfig, latestCash?.period), { decimals: 0 })} />
+                                            <MiniMetric label="Free CF" value={formatNumber(convertFinancialValueForUnit(latestCash?.free_cash_flow ?? null, unitConfig, latestCash?.period), { decimals: 0 })} />
+                                            <MiniMetric label="Net cash change" value={formatNumber(convertFinancialValueForUnit(latestCash?.net_change_in_cash ?? latestCash?.net_cash_flow ?? null, unitConfig, latestCash?.period), { decimals: 0 })} />
                                             <MiniMetric label="Quality grade" value={earningsQualityQuery.data?.data?.grade || '-'} />
                                         </div>
                                         {earningsQualityQuery.data?.data ? (

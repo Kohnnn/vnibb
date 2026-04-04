@@ -110,3 +110,5 @@ For current TradingView-native coverage, use:
 - History caps are intentionally retained for performance: current plan is capped annual and quarterly windows first, with broader 10Y normalization and heavier optimization deferred to a future roadmap.
 - Statement and unified financial widgets now depend on canonical quarter identities instead of raw mixed provider period strings, which reduces duplicate/out-of-order quarter columns and quarter-specific blank states.
 - Dashboard shell behavior now preserves the last active dashboard and the last active tab per dashboard locally, and low-resolution layouts treat VniAgent as an overlay sooner to protect workspace width.
+- USD display mode is now available for financial and fundamental statement widgets. Users can override USD/VND by year locally; admin settings provide the global default fallback rate.
+- Broader USD conversion for quote and market widgets is intentionally deferred to the roadmap.

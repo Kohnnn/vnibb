@@ -8,6 +8,7 @@ interface PeriodLabelOptions {
 
 const YEAR_REGEX = /(20\d{2})/
 const QUARTER_REGEX = /Q([1-4])/
+const CANONICAL_QUARTER_REGEX = /^Q[1-4]-(20\d{2})$/
 
 export function normalizeFinancialPeriod(raw: string | null | undefined): string | null {
   const cleaned = String(raw ?? '').trim()
@@ -65,6 +66,11 @@ export function matchesFinancialQuarterSelection(
 ): boolean {
   const normalized = normalizeFinancialPeriod(period)
   return normalized ? normalized.startsWith(`${selection}-`) : false
+}
+
+export function isCanonicalQuarterPeriod(period: string | null | undefined): boolean {
+  const normalized = normalizeFinancialPeriod(period)
+  return normalized ? CANONICAL_QUARTER_REGEX.test(normalized) : false
 }
 
 function inferYearFromIndex(index?: number, total?: number, quarterMode = false): number | null {
@@ -152,10 +158,7 @@ export function formatFinancialPeriodLabel(
   }
 
   if (yearMatch) {
-    const inferredQuarter = Number.isFinite(options.index)
-      ? ((Math.max(0, Math.trunc(options.index as number)) % 4) + 1)
-      : null
-    return inferredQuarter ? `Q${inferredQuarter} ${yearMatch[1]}` : yearMatch[1]
+    return yearMatch[1]
   }
 
   if (Number.isFinite(numeric)) {

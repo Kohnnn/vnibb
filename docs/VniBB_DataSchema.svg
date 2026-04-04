@@ -1,0 +1,423 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" 
+     viewBox="0 0 1600 1200" width="1600" height="1200">
+  <defs>
+    <style>
+      .title { font-family: Arial, sans-serif; font-size: 28px; font-weight: bold; fill: #1a1a2e; }
+      .subtitle { font-family: Arial, sans-serif; font-size: 14px; fill: #666; }
+      .category-title { font-family: Arial, sans-serif; font-size: 14px; font-weight: bold; fill: #fff; }
+      .collection-name { font-family: Arial, sans-serif; font-size: 11px; font-weight: bold; fill: #1a1a2e; }
+      .collection-attr { font-family: monospace; font-size: 8px; fill: #555; }
+      .relation { font-family: Arial, sans-serif; font-size: 8px; fill: #888; }
+      .legend-text { font-family: Arial, sans-serif; font-size: 10px; fill: #333; }
+    </style>
+    
+    <linearGradient id="grad-market" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#4CAF50;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2E7D32;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad-financial" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2196F3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1565C0;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad-company" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#9C27B0;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7B1FA2;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad-trading" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF9800;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#F57C00;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad-intelligence" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#00BCD4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0097A7;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="grad-user" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#E91E63;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#C2185B;stop-opacity:1" />
+    </linearGradient>
+    
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="3" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+  
+  <rect width="1600" height="1200" fill="#f5f7fa"/>
+  
+  <text x="800" y="40" text-anchor="middle" class="title">VNIBB Appwrite Database Schema</text>
+  <text x="800" y="62" text-anchor="middle" class="subtitle">26 Collections with Relationships</text>
+  
+  <rect x="20" y="78" width="1560" height="42" rx="8" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <text x="35" y="100" class="legend-text" font-weight="bold">Categories:</text>
+  
+  <rect x="115" y="90" width="14" height="14" rx="2" fill="url(#grad-market)"/>
+  <text x="135" y="102" class="legend-text">Market Data</text>
+  
+  <rect x="235" y="90" width="14" height="14" rx="2" fill="url(#grad-financial)"/>
+  <text x="255" y="102" class="legend-text">Financial Statements</text>
+  
+  <rect x="405" y="90" width="14" height="14" rx="2" fill="url(#grad-company)"/>
+  <text x="425" y="102" class="legend-text">Company Info</text>
+  
+  <rect x="530" y="90" width="14" height="14" rx="2" fill="url(#grad-trading)"/>
+  <text x="550" y="102" class="legend-text">Trading Data</text>
+  
+  <rect x="660" y="90" width="14" height="14" rx="2" fill="url(#grad-intelligence)"/>
+  <text x="680" y="102" class="legend-text">Market Intelligence</text>
+  
+  <rect x="830" y="90" width="14" height="14" rx="2" fill="url(#grad-user)"/>
+  <text x="850" y="102" class="legend-text">User Data</text>
+  
+  <text x="960" y="101" class="legend-text">|</text>
+  <text x="975" y="102" class="legend-text"> &#x2500;&#x2500; </text>
+  <text x="995" y="102" class="legend-text">N:1</text>
+  <text x="1030" y="101" class="legend-text">&#x251C;&#x2500;</text>
+  <text x="1045" y="101" class="legend-text">&#x2502;</text>
+  <text x="1060" y="102" class="legend-text">N:M</text>
+  <text x="1095" y="101" class="legend-text">&#x25C6;</text>
+  <text x="1110" y="102" class="legend-text">1:1</text>
+  
+  <rect x="1200" y="90" width="14" height="14" rx="2" fill="none" stroke="#4CAF50" stroke-width="2" stroke-dasharray="3,2"/>
+  <text x="1220" y="102" class="legend-text">Central Entity</text>
+
+  <!-- MARKET DATA COLUMN -->
+  <rect x="35" y="135" width="195" height="22" rx="4" fill="url(#grad-market)"/>
+  <text x="132" y="151" text-anchor="middle" class="category-title">Market Data</text>
+
+  <!-- stocks -->
+  <rect x="35" y="165" width="195" height="115" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="35" y="165" width="195" height="5" rx="3" fill="url(#grad-market)"/>
+  <text x="45" y="182" class="collection-name">stocks</text>
+  <text x="45" y="196" class="collection-attr">symbol* (PK)</text>
+  <text x="45" y="207" class="collection-attr">exchange</text>
+  <text x="45" y="218" class="collection-attr">industry</text>
+  <text x="45" y="229" class="collection-attr">sector</text>
+  <text x="45" y="240" class="collection-attr">symbol_q, exchange_q</text>
+  <text x="45" y="251" class="collection-attr">industry_q, sector_q</text>
+  <text x="45" y="265" class="relation" fill="#4CAF50" font-weight="bold">CENTRAL ENTITY</text>
+
+  <!-- stock_prices -->
+  <rect x="35" y="290" width="195" height="105" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="35" y="290" width="195" height="5" rx="3" fill="url(#grad-market)"/>
+  <text x="45" y="307" class="collection-name">stock_prices</text>
+  <text x="45" y="321" class="collection-attr">symbol*</text>
+  <text x="45" y="332" class="collection-attr">time* (datetime)</text>
+  <text x="45" y="343" class="collection-attr">interval</text>
+  <text x="45" y="354" class="collection-attr">open, high, low, close</text>
+  <text x="45" y="365" class="collection-attr">volume, adj_close</text>
+  <text x="45" y="376" class="collection-attr">symbol_q, time_dt, interval_q</text>
+
+  <!-- stock_indices -->
+  <rect x="35" y="405" width="195" height="95" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="35" y="405" width="195" height="5" rx="3" fill="url(#grad-market)"/>
+  <text x="45" y="422" class="collection-name">stock_indices</text>
+  <text x="45" y="436" class="collection-attr">index_code*, time*</text>
+  <text x="45" y="447" class="collection-attr">open, high, low, close</text>
+  <text x="45" y="458" class="collection-attr">value, change, change_pct</text>
+  <text x="45" y="469" class="collection-attr">index_code_q, time_dt</text>
+
+  <!-- intraday_trades -->
+  <rect x="35" y="510" width="195" height="95" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="35" y="510" width="195" height="5" rx="3" fill="url(#grad-market)"/>
+  <text x="45" y="527" class="collection-name">intraday_trades</text>
+  <text x="45" y="541" class="collection-attr">id* (PK)</text>
+  <text x="45" y="552" class="collection-attr">symbol*, trade_time</text>
+  <text x="45" y="563" class="collection-attr">price, accumulated_val</text>
+  <text x="45" y="574" class="collection-attr">match_type</text>
+  <text x="45" y="585" class="collection-attr">symbol_q, trade_time_dt</text>
+
+  <!-- derivative_prices -->
+  <rect x="35" y="615" width="195" height="95" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="35" y="615" width="195" height="5" rx="3" fill="url(#grad-market)"/>
+  <text x="45" y="632" class="collection-name">derivative_prices</text>
+  <text x="45" y="646" class="collection-attr">symbol*, trade_date*, interval</text>
+  <text x="45" y="657" class="collection-attr">open, high, low, close</text>
+  <text x="45" y="668" class="collection-attr">symbol_q (idx)</text>
+  <text x="45" y="679" class="collection-attr">trade_date_dt, interval_q</text>
+
+  <!-- FINANCIAL STATEMENTS COLUMN -->
+  <rect x="250" y="135" width="195" height="22" rx="4" fill="url(#grad-financial)"/>
+  <text x="347" y="151" text-anchor="middle" class="category-title">Financial Statements</text>
+
+  <!-- income_statements -->
+  <rect x="250" y="165" width="195" height="105" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="250" y="165" width="195" height="5" rx="3" fill="url(#grad-financial)"/>
+  <text x="260" y="182" class="collection-name">income_statements</text>
+  <text x="260" y="196" class="collection-attr">id* (PK)</text>
+  <text x="260" y="207" class="collection-attr">symbol*, period</text>
+  <text x="260" y="218" class="collection-attr">period_type, fiscal_year, fiscal_quarter</text>
+  <text x="260" y="229" class="collection-attr">revenue, net_income, eps, ebitda</text>
+  <text x="260" y="240" class="collection-attr">symbol_q, period_q (idx)</text>
+  <text x="260" y="251" class="collection-attr">fiscal_year_i, fiscal_quarter_i</text>
+
+  <!-- balance_sheets -->
+  <rect x="250" y="280" width="195" height="105" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="250" y="280" width="195" height="5" rx="3" fill="url(#grad-financial)"/>
+  <text x="260" y="297" class="collection-name">balance_sheets</text>
+  <text x="260" y="311" class="collection-attr">id* (PK)</text>
+  <text x="260" y="322" class="collection-attr">symbol*, period</text>
+  <text x="260" y="333" class="collection-attr">period_type, fiscal_year, fiscal_quarter</text>
+  <text x="260" y="344" class="collection-attr">total_assets, total_liabilities</text>
+  <text x="260" y="355" class="collection-attr">total_equity, book_value_per_share</text>
+  <text x="260" y="366" class="collection-attr">symbol_q, period_q (idx)</text>
+
+  <!-- cash_flows -->
+  <rect x="250" y="395" width="195" height="105" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="250" y="395" width="195" height="5" rx="3" fill="url(#grad-financial)"/>
+  <text x="260" y="412" class="collection-name">cash_flows</text>
+  <text x="260" y="426" class="collection-attr">id* (PK)</text>
+  <text x="260" y="437" class="collection-attr">symbol*, period</text>
+  <text x="260" y="448" class="collection-attr">period_type, fiscal_year, fiscal_quarter</text>
+  <text x="260" y="459" class="collection-attr">operating_cash_flow</text>
+  <text x="260" y="470" class="collection-attr">free_cash_flow, net_change_in_cash</text>
+  <text x="260" y="481" class="collection-attr">symbol_q, period_q (idx)</text>
+
+  <!-- financial_ratios -->
+  <rect x="250" y="510" width="195" height="105" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="250" y="510" width="195" height="5" rx="3" fill="url(#grad-financial)"/>
+  <text x="260" y="527" class="collection-name">financial_ratios</text>
+  <text x="260" y="541" class="collection-attr">id* (PK)</text>
+  <text x="260" y="552" class="collection-attr">symbol*, period</text>
+  <text x="260" y="563" class="collection-attr">period_type, fiscal_year, fiscal_quarter</text>
+  <text x="260" y="574" class="collection-attr">pe_ratio, pb_ratio, ps_ratio</text>
+  <text x="260" y="585" class="collection-attr">roe, roa, eps</text>
+  <text x="260" y="596" class="collection-attr">symbol_q, period_q (idx)</text>
+
+  <!-- COMPANY INFO COLUMN -->
+  <rect x="465" y="135" width="195" height="22" rx="4" fill="url(#grad-company)"/>
+  <text x="562" y="151" text-anchor="middle" class="category-title">Company Info</text>
+
+  <!-- companies -->
+  <rect x="465" y="165" width="195" height="100" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="465" y="165" width="195" height="5" rx="3" fill="url(#grad-company)"/>
+  <text x="475" y="182" class="collection-name">companies</text>
+  <text x="475" y="196" class="collection-attr">symbol* (PK)</text>
+  <text x="475" y="207" class="collection-attr">name, exchange</text>
+  <text x="475" y="218" class="collection-attr">industry, sector</text>
+  <text x="475" y="229" class="collection-attr">outstanding_shares, listed_shares</text>
+  <text x="475" y="240" class="collection-attr">symbol_q, exchange_q (idx)</text>
+  <text x="475" y="251" class="collection-attr">industry_q, sector_q (idx)</text>
+
+  <!-- shareholders -->
+  <rect x="465" y="275" width="195" height="90" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="465" y="275" width="195" height="5" rx="3" fill="url(#grad-company)"/>
+  <text x="475" y="292" class="collection-name">shareholders</text>
+  <text x="475" y="306" class="collection-attr">symbol*, name*, as_of_date</text>
+  <text x="475" y="317" class="collection-attr">shareholder_type</text>
+  <text x="475" y="328" class="collection-attr">shares_held, ownership_pct</text>
+  <text x="475" y="339" class="collection-attr">symbol_q (idx)</text>
+  <text x="475" y="350" class="collection-attr">as_of_date_dt</text>
+
+  <!-- officers -->
+  <rect x="465" y="375" width="195" height="90" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="465" y="375" width="195" height="5" rx="3" fill="url(#grad-company)"/>
+  <text x="475" y="392" class="collection-name">officers</text>
+  <text x="475" y="406" class="collection-attr">symbol*, name*, title*</text>
+  <text x="475" y="417" class="collection-attr">position_type</text>
+  <text x="475" y="428" class="collection-attr">shares_held, ownership_pct</text>
+  <text x="475" y="439" class="collection-attr">symbol_q (idx)</text>
+  <text x="475" y="450" class="collection-attr">position_type_q</text>
+
+  <!-- subsidiaries -->
+  <rect x="465" y="475" width="195" height="90" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="465" y="475" width="195" height="5" rx="3" fill="url(#grad-company)"/>
+  <text x="475" y="492" class="collection-name">subsidiaries</text>
+  <text x="475" y="506" class="collection-attr">symbol*, subsidiary_name*</text>
+  <text x="475" y="517" class="collection-attr">relationship_type</text>
+  <text x="475" y="528" class="collection-attr">ownership_pct, charter_capital</text>
+  <text x="475" y="539" class="collection-attr">symbol_q (idx)</text>
+  <text x="475" y="550" class="collection-attr">relationship_type_q</text>
+
+  <!-- dividends -->
+  <rect x="465" y="575" width="195" height="95" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="465" y="575" width="195" height="5" rx="3" fill="url(#grad-company)"/>
+  <text x="475" y="592" class="collection-name">dividends</text>
+  <text x="475" y="606" class="collection-attr">symbol*, exercise_date*, cash_year</text>
+  <text x="475" y="617" class="collection-attr">dividend_rate, dividend_value</text>
+  <text x="475" y="628" class="collection-attr">issue_method</text>
+  <text x="475" y="639" class="collection-attr">symbol_q (idx)</text>
+  <text x="475" y="650" class="collection-attr">exercise_date_dt, cash_year_i</text>
+
+  <!-- company_events -->
+  <rect x="465" y="680" width="195" height="90" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="465" y="680" width="195" height="5" rx="3" fill="url(#grad-company)"/>
+  <text x="475" y="697" class="collection-name">company_events</text>
+  <text x="475" y="711" class="collection-attr">symbol*, event_type*, event_date</text>
+  <text x="475" y="722" class="collection-attr">value</text>
+  <text x="475" y="733" class="collection-attr">symbol_q (idx)</text>
+  <text x="475" y="744" class="collection-attr">event_type_q, event_date_dt</text>
+
+  <!-- TRADING DATA COLUMN -->
+  <rect x="680" y="135" width="195" height="22" rx="4" fill="url(#grad-trading)"/>
+  <text x="777" y="151" text-anchor="middle" class="category-title">Trading Data</text>
+
+  <!-- foreign_trading -->
+  <rect x="680" y="165" width="195" height="100" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="680" y="165" width="195" height="5" rx="3" fill="url(#grad-trading)"/>
+  <text x="690" y="182" class="collection-name">foreign_trading</text>
+  <text x="690" y="196" class="collection-attr">symbol*, trade_date</text>
+  <text x="690" y="207" class="collection-attr">buy_value, sell_value</text>
+  <text x="690" y="218" class="collection-attr">net_value, room_available</text>
+  <text x="690" y="229" class="collection-attr">room_pct</text>
+  <text x="690" y="240" class="collection-attr">symbol_q, trade_date_dt (idx)</text>
+  <text x="690" y="251" class="collection-attr">idx_sym_trade_dt</text>
+
+  <!-- order_flow_daily -->
+  <rect x="680" y="275" width="195" height="95" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="680" y="275" width="195" height="5" rx="3" fill="url(#grad-trading)"/>
+  <text x="690" y="292" class="collection-name">order_flow_daily</text>
+  <text x="690" y="306" class="collection-attr">symbol*, trade_date</text>
+  <text x="690" y="317" class="collection-attr">buy_value, sell_value, net_value</text>
+  <text x="690" y="328" class="collection-attr">symbol_q (idx)</text>
+  <text x="690" y="339" class="collection-attr">trade_date_dt</text>
+  <text x="690" y="350" class="collection-attr">idx_sym_trade_dt</text>
+
+  <!-- orderbook_snapshots -->
+  <rect x="680" y="380" width="195" height="100" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="680" y="380" width="195" height="5" rx="3" fill="url(#grad-trading)"/>
+  <text x="690" y="397" class="collection-name">orderbook_snapshots</text>
+  <text x="690" y="411" class="collection-attr">symbol*, snapshot_time</text>
+  <text x="690" y="422" class="collection-attr">bid1/2/3_price</text>
+  <text x="690" y="433" class="collection-attr">ask1/2/3_price</text>
+  <text x="690" y="444" class="collection-attr">symbol_q, snapshot_time_dt (idx)</text>
+  <text x="690" y="455" class="collection-attr">idx_sym_snap_dt</text>
+
+  <!-- insider_deals -->
+  <rect x="680" y="490" width="195" height="95" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="680" y="490" width="195" height="5" rx="3" fill="url(#grad-trading)"/>
+  <text x="690" y="507" class="collection-name">insider_deals</text>
+  <text x="690" y="521" class="collection-attr">id* (PK)</text>
+  <text x="690" y="532" class="collection-attr">symbol*, announce_date</text>
+  <text x="690" y="543" class="collection-attr">deal_action</text>
+  <text x="690" y="554" class="collection-attr">deal_quantity, deal_price</text>
+  <text x="690" y="565" class="collection-attr">deal_value, deal_ratio</text>
+  <text x="690" y="576" class="collection-attr">symbol_q, announce_date_dt (idx)</text>
+
+  <!-- MARKET INTELLIGENCE COLUMN -->
+  <rect x="895" y="135" width="195" height="22" rx="4" fill="url(#grad-intelligence)"/>
+  <text x="992" y="151" text-anchor="middle" class="category-title">Market Intelligence</text>
+
+  <!-- company_news -->
+  <rect x="895" y="165" width="195" height="105" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="895" y="165" width="195" height="5" rx="3" fill="url(#grad-intelligence)"/>
+  <text x="905" y="182" class="collection-name">company_news</text>
+  <text x="905" y="196" class="collection-attr">symbol*, title*, published_date</text>
+  <text x="905" y="207" class="collection-attr">source</text>
+  <text x="905" y="218" class="collection-attr">rsi, rs, price</text>
+  <text x="905" y="229" class="collection-attr">price_change, price_change_ratio</text>
+  <text x="905" y="240" class="collection-attr">symbol_q, source_q (idx)</text>
+  <text x="905" y="251" class="collection-attr">published_date_dt (idx)</text>
+
+  <!-- screener_snapshots -->
+  <rect x="895" y="280" width="195" height="110" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="895" y="280" width="195" height="5" rx="3" fill="url(#grad-intelligence)"/>
+  <text x="905" y="297" class="collection-name">screener_snapshots</text>
+  <text x="905" y="311" class="collection-attr">symbol*, snapshot_date*</text>
+  <text x="905" y="322" class="collection-attr">company_name, exchange, industry</text>
+  <text x="905" y="333" class="collection-attr">price, volume, market_cap</text>
+  <text x="905" y="344" class="collection-attr">pe, pb, ps</text>
+  <text x="905" y="355" class="collection-attr">extended_metrics (JSON)</text>
+  <text x="905" y="366" class="collection-attr">snapshot_date_dt (idx)</text>
+
+  <!-- market_sectors -->
+  <rect x="895" y="400" width="195" height="90" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="895" y="400" width="195" height="5" rx="3" fill="url(#grad-intelligence)"/>
+  <text x="905" y="417" class="collection-name">market_sectors</text>
+  <text x="905" y="431" class="collection-attr">sector_code* (PK)</text>
+  <text x="905" y="442" class="collection-attr">sector_name, level</text>
+  <text x="905" y="453" class="collection-attr">parent_code</text>
+  <text x="905" y="464" class="collection-attr">sector_code_q, parent_code_q</text>
+  <text x="905" y="475" class="collection-attr">level_i (idx)</text>
+
+  <!-- sector_performance -->
+  <rect x="895" y="500" width="195" height="95" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="895" y="500" width="195" height="5" rx="3" fill="url(#grad-intelligence)"/>
+  <text x="905" y="517" class="collection-name">sector_performance</text>
+  <text x="905" y="531" class="collection-attr">sector_code*, trade_date</text>
+  <text x="905" y="542" class="collection-attr">change_pct, avg_change_pct</text>
+  <text x="905" y="553" class="collection-attr">total_value, total_market_cap</text>
+  <text x="905" y="564" class="collection-attr">top_gainer_change, top_loser_change</text>
+  <text x="905" y="575" class="collection-attr">sector_code_q, trade_date_dt (idx)</text>
+
+  <!-- USER DATA COLUMN -->
+  <rect x="1110" y="135" width="195" height="22" rx="4" fill="url(#grad-user)"/>
+  <text x="1207" y="151" text-anchor="middle" class="category-title">User Data</text>
+
+  <!-- user_dashboards -->
+  <rect x="1110" y="165" width="195" height="90" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="1110" y="165" width="195" height="5" rx="3" fill="url(#grad-user)"/>
+  <text x="1120" y="182" class="collection-name">user_dashboards</text>
+  <text x="1120" y="196" class="collection-attr">id* (PK)</text>
+  <text x="1120" y="207" class="collection-attr">user_id*</text>
+  <text x="1120" y="218" class="collection-attr">name</text>
+  <text x="1120" y="229" class="collection-attr">layout_config</text>
+  <text x="1120" y="240" class="collection-attr">ownerReadWrite permission</text>
+
+  <!-- dashboard_widgets -->
+  <rect x="1110" y="265" width="195" height="90" rx="6" fill="#fff" stroke="#ddd" filter="url(#shadow)"/>
+  <rect x="1110" y="265" width="195" height="5" rx="3" fill="url(#grad-user)"/>
+  <text x="1120" y="282" class="collection-name">dashboard_widgets</text>
+  <text x="1120" y="296" class="collection-attr">id* (PK)</text>
+  <text x="1120" y="307" class="collection-attr">dashboard_id*</text>
+  <text x="1120" y="318" class="collection-attr">widget_type</text>
+  <text x="1120" y="329" class="collection-attr">layout, widget_config</text>
+
+  <!-- RELATIONSHIP LINES -->
+  <!-- stocks -> financial statements -->
+  <path d="M 230 220 Q 280 220 280 250" stroke="#2196F3" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  <text x="245" y="215" class="relation" fill="#2196F3">N:1</text>
+  
+  <path d="M 230 250 Q 280 300 280 330" stroke="#2196F3" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  
+  <path d="M 230 280 Q 280 370 280 440" stroke="#2196F3" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  
+  <path d="M 230 310 Q 280 420 280 555" stroke="#2196F3" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <!-- stocks -> company info -->
+  <path d="M 230 190 Q 350 190 400 200 Q 450 210 465 210" stroke="#9C27B0" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  <text x="360" y="185" class="relation" fill="#9C27B0">1:1</text>
+
+  <!-- stocks -> dividends -->
+  <path d="M 230 300 Q 350 300 400 310 Q 450 600 465 620" stroke="#9C27B0" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <!-- stocks -> company_events -->
+  <path d="M 230 330 Q 350 330 400 340 Q 450 715 465 725" stroke="#9C27B0" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <!-- stocks -> trading data -->
+  <path d="M 230 200 Q 400 200 600 200 Q 650 200 680 210" stroke="#FF9800" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  <text x="450" y="195" class="relation" fill="#FF9800">N:1</text>
+
+  <path d="M 230 240 Q 400 240 600 290 650 300 680 320" stroke="#FF9800" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <path d="M 230 270 Q 450 270 600 400 650 405 680 425" stroke="#FF9800" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <!-- stocks -> insider_deals -->
+  <path d="M 230 290 Q 450 290 600 510 650 515 680 535" stroke="#FF9800" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <!-- stocks -> market intelligence -->
+  <path d="M 230 185 Q 500 185 800 210 Q 860 210 895 210" stroke="#00BCD4" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <path d="M 230 215 Q 500 215 800 325 Q 860 325 895 330" stroke="#00BCD4" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <!-- market_sectors -> sector_performance -->
+  <path d="M 1090 445 Q 1090 470 1090 495" stroke="#00BCD4" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  <text x="1100" y="475" class="relation" fill="#00BCD4">N:1</text>
+
+  <!-- companies -> shareholders/officers/subsidiaries -->
+  <path d="M 660 210 Q 660 280 660 310" stroke="#9C27B0" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  <text x="665" y="265" class="relation" fill="#9C27B0">N:1</text>
+
+  <path d="M 660 240 Q 660 310 660 410" stroke="#9C27B0" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <path d="M 660 270 Q 660 375 660 510" stroke="#9C27B0" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+
+  <!-- user_dashboards -> dashboard_widgets -->
+  <path d="M 1305 255 Q 1305 280 1305 305" stroke="#E91E63" stroke-width="1.5" fill="none" stroke-dasharray="4,2"/>
+  <text x="1315" y="285" class="relation" fill="#E91E63">N:1</text>
+
+  <!-- Footer -->
+  <rect x="20" y="1120" width="1560" height="60" rx="8" fill="#fff" stroke="#ddd"/>
+  <text x="800" y="1145" text-anchor="middle" class="subtitle" font-weight="bold">Appwrite Database: vnibb | 26 Collections | publicRead permission (except user_dashboards)</text>
+  <text x="800" y="1165" text-anchor="middle" class="subtitle">* = Document ID / Primary Key | Query attributes shown in italic | Indexes marked with (idx)</text>
+  <text x="800" y="1180" text-anchor="middle" class="subtitle">Relationships: stocks (central) connects to 14+ collections | companies links to 3 ownership collections</text>
+</svg>

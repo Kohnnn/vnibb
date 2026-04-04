@@ -61,10 +61,18 @@ Current config-backed widget state includes:
 - The app stores the last active dashboard ID and the last active tab per dashboard locally.
 - This is separate from the `defaultTab` preference, which remains a preference fallback rather than the sole source of startup navigation.
 
+## USD Display
+
+- `USD` is now a valid unit display mode for financial and statement-style widgets.
+- User overrides are stored locally by report year.
+- Missing yearly overrides fall back to the admin global default USD/VND rate.
+- Quote/market widgets are not converted to USD yet; that remains future roadmap work.
+
 ## Low-Resolution UX
 
 - On tighter desktop viewports, VniAgent should overlay instead of permanently shrinking the main workspace.
 - Header and tab-strip controls should prefer collapsing, wrapping, or hiding labels earlier rather than forcing horizontal crowding.
+- The header is now intentionally search-first and no longer tries to keep all branding/symbol/index chips visible at the same time.
 
 ## Template Rules
 

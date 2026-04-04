@@ -19,6 +19,7 @@ The widget system now reflects these completed changes:
 - time-series financial charts now use the full capped history while staying inside widget width via tick thinning instead of widening for scroll
 - last active dashboard and per-dashboard last tab now persist locally across sessions
 - low-resolution shell handling now overlays VniAgent sooner to protect workspace width
+- financial widgets now support USD display with local per-year FX overrides and an admin global fallback rate
 
 ## Canonical References
 
@@ -60,6 +61,7 @@ These are UI groupings and do not require changing the stored widget category en
   - evaluate a dedicated backend snapshot payload only if multi-endpoint composition becomes a bottleneck
   - continue compact-shell work for low-resolution layouts, especially header tool density and tab-bar controls
   - add deeper regression coverage for quarter-specific statement requests (`Q1`/`Q2`/`Q3`/`Q4`) and unified financial tabs
+  - extend USD conversion beyond statement-style widgets into quotes and broader market widgets only after the financial-first path is stable
 
 ## Final Resize Notes
 

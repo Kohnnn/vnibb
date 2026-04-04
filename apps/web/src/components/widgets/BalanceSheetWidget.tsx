@@ -18,7 +18,7 @@ import {
     Legend,
     CartesianGrid,
 } from 'recharts';
-import { formatAxisValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import { convertFinancialValueForUnit, formatAxisValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
@@ -26,7 +26,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
-import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 
 interface BalanceSheetWidgetProps {
@@ -96,33 +96,39 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
         () => [...items].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
         [items]
     );
-    const hasData = items.length > 0;
+    const displayItems = useMemo(
+        () => periodMode === 'quarter'
+            ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
+            : orderedItems,
+        [orderedItems, periodMode]
+    );
+    const hasData = displayItems.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
     const chartData = useMemo(() => {
-        if (!orderedItems.length) return [];
-        return orderedItems.map((d, index) => {
-            const equityValue = d.total_equity ?? d.equity ?? 0
-            const liabilities = d.total_liabilities ?? 0
+        if (!displayItems.length) return [];
+        return displayItems.map((d, index) => {
+            const equityValue = convertFinancialValueForUnit(d.total_equity ?? d.equity ?? 0, unitConfig, d.period) ?? 0
+            const liabilities = convertFinancialValueForUnit(d.total_liabilities ?? 0, unitConfig, d.period) ?? 0
             return {
                 equityValue,
                 period: formatFinancialPeriodLabel(d.period, {
                     mode: periodMode,
                     index,
-                    total: orderedItems.length,
+                    total: displayItems.length,
                 }),
-                totalAssets: d.total_assets || 0,
+                totalAssets: convertFinancialValueForUnit(d.total_assets || 0, unitConfig, d.period) || 0,
                 totalLiabilities: liabilities,
                 equity: equityValue,
-                cash: d.cash || 0,
+                cash: convertFinancialValueForUnit(d.cash || 0, unitConfig, d.period) || 0,
                 debtToEquity: liabilities > 0 && equityValue !== 0 ? liabilities / equityValue : 0,
             }
         });
-    }, [orderedItems, periodMode]);
+    }, [displayItems, periodMode, unitConfig]);
 
     const tableScale = useMemo(() => {
-        const values = orderedItems.flatMap((item) => [
+        const values = displayItems.flatMap((item) => [
             item.total_assets,
             item.current_assets,
             item.fixed_assets,
@@ -139,9 +145,9 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
             item.retained_earnings,
             item.cash,
             item.inventory,
-        ]);
+        ].map((value) => convertFinancialValueForUnit(value, unitConfig, item.period)));
         return resolveUnitScale(values, unitConfig);
-    }, [orderedItems, unitConfig]);
+    }, [displayItems, unitConfig]);
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
@@ -151,16 +157,16 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
 
     const tableColumns = useMemo(
         () =>
-            orderedItems.slice(-visiblePeriodLimit).map((entry, index) => ({
+            displayItems.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
                     index,
-                    total: Math.min(orderedItems.length, visiblePeriodLimit),
+                    total: Math.min(displayItems.length, visiblePeriodLimit),
                 }),
                 align: 'right' as const,
             })),
-        [orderedItems, periodMode, visiblePeriodLimit]
+        [displayItems, periodMode, visiblePeriodLimit]
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
@@ -169,7 +175,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
             if (metricKey === 'accounts_receivable') return entry.accounts_receivable ?? entry.receivables
             return (entry as unknown as Record<string, number | null | undefined>)[metricKey]
         }
-        const recentItems = orderedItems.slice(-visiblePeriodLimit)
+        const recentItems = displayItems.slice(-visiblePeriodLimit)
         const hasMetricData = (metricKey: string) =>
             recentItems.some((entry) => {
                 const value = valueFor(entry, metricKey)
@@ -180,7 +186,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
             Object.fromEntries(
                 recentItems.map((entry, index) => [
                     tableColumns[index]?.key ?? `period_${index}`,
-                    valueFor(entry, metricKey),
+                    convertFinancialValueForUnit(valueFor(entry, metricKey), unitConfig, entry.period),
                 ])
             );
 
@@ -215,7 +221,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove }
             createRow('group:equity', 'total_equity'),
             createRow('group:equity', 'retained_earnings'),
         ].filter(Boolean) as DenseTableRow[];
-    }, [orderedItems, tableColumns, visiblePeriodLimit]);
+    }, [displayItems, tableColumns, unitConfig, visiblePeriodLimit]);
 
     const renderTable = () => (
         <DenseFinancialTable

@@ -20,7 +20,7 @@ import {
     CartesianGrid,
     ReferenceLine,
 } from 'recharts';
-import { formatAxisValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale } from '@/lib/units';
+import { convertFinancialValueForUnit, formatAxisValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
@@ -28,7 +28,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
-import { formatFinancialPeriodLabel, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { buildCashFlowWaterfallModel } from '@/lib/financialVisualizations';
 import { CashFlowWaterfallChart } from '@/components/widgets/charts/CashFlowWaterfallChart';
@@ -151,28 +151,34 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
         () => [...items].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
         [items]
     );
-    const hasData = items.length > 0;
+    const displayItems = useMemo(
+        () => periodMode === 'quarter'
+            ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
+            : orderedItems,
+        [orderedItems, periodMode]
+    );
+    const hasData = displayItems.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
     const chartData = useMemo(() => {
-        if (!orderedItems.length) return [];
-        return orderedItems.map((d, index) => ({
+        if (!displayItems.length) return [];
+        return displayItems.map((d, index) => ({
             period: formatFinancialPeriodLabel(d.period, {
                 mode: periodMode,
                 index,
-                total: orderedItems.length,
+                total: displayItems.length,
             }),
-            operatingCF: d.operating_cash_flow || 0,
-            investingCF: d.investing_cash_flow || 0,
-            financingCF: d.financing_cash_flow || 0,
-            freeCashFlow: d.free_cash_flow || 0,
-            netCashFlow: d.net_change_in_cash ?? d.net_cash_flow ?? 0,
+            operatingCF: convertFinancialValueForUnit(d.operating_cash_flow || 0, unitConfig, d.period) || 0,
+            investingCF: convertFinancialValueForUnit(d.investing_cash_flow || 0, unitConfig, d.period) || 0,
+            financingCF: convertFinancialValueForUnit(d.financing_cash_flow || 0, unitConfig, d.period) || 0,
+            freeCashFlow: convertFinancialValueForUnit(d.free_cash_flow || 0, unitConfig, d.period) || 0,
+            netCashFlow: convertFinancialValueForUnit(d.net_change_in_cash ?? d.net_cash_flow ?? 0, unitConfig, d.period) || 0,
         }));
-    }, [orderedItems, periodMode]);
+    }, [displayItems, periodMode, unitConfig]);
 
     const tableScale = useMemo(() => {
-        const values = orderedItems.flatMap((item) => [
+        const values = displayItems.flatMap((item) => [
             item.operating_cash_flow,
             item.investing_cash_flow,
             item.financing_cash_flow,
@@ -195,9 +201,9 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
             item.dividends_paid,
             item.debt_repayment,
             item.stock_repurchased,
-        ]);
+        ].map((value) => convertFinancialValueForUnit(value, unitConfig, item.period)));
         return resolveUnitScale(values, unitConfig);
-    }, [orderedItems, unitConfig]);
+    }, [displayItems, unitConfig]);
 
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const unitNote = useMemo(
@@ -207,16 +213,16 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
 
     const tableColumns = useMemo(
         () =>
-            orderedItems.slice(-visiblePeriodLimit).map((entry, index) => ({
+            displayItems.slice(-visiblePeriodLimit).map((entry, index) => ({
                 key: entry.period ?? `period_${index}`,
                 label: formatFinancialPeriodLabel(entry.period, {
                     mode: periodMode,
                     index,
-                    total: Math.min(orderedItems.length, visiblePeriodLimit),
+                    total: Math.min(displayItems.length, visiblePeriodLimit),
                 }),
                 align: 'right' as const,
             })),
-        [orderedItems, periodMode, visiblePeriodLimit]
+        [displayItems, periodMode, visiblePeriodLimit]
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
@@ -232,7 +238,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
             if (metricKey in RAW_CASHFLOW_ALIASES) return getRawMetric(entry as CashFlowData, metricKey)
             return normalizedValue
         }
-        const recentItems = orderedItems.slice(-visiblePeriodLimit)
+        const recentItems = displayItems.slice(-visiblePeriodLimit)
         const hasMetricData = (metricKey: string) =>
             recentItems.some((entry) => {
                 const value = valueFor(entry, metricKey)
@@ -243,7 +249,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
             Object.fromEntries(
                 recentItems.map((entry, index) => [
                     tableColumns[index]?.key ?? `period_${index}`,
-                    valueFor(entry, metricKey),
+                    convertFinancialValueForUnit(valueFor(entry, metricKey), unitConfig, entry.period),
                 ])
             );
 
@@ -284,7 +290,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
             createRow('group:summary', 'free_cash_flow'),
             createRow('group:summary', 'net_change_in_cash'),
         ].filter(Boolean) as DenseTableRow[];
-    }, [orderedItems, tableColumns, visiblePeriodLimit]);
+    }, [displayItems, tableColumns, unitConfig, visiblePeriodLimit]);
 
     const renderTable = () => (
         <DenseFinancialTable
@@ -301,7 +307,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
         />
     );
 
-    const waterfallModel = useMemo(() => buildCashFlowWaterfallModel(orderedItems), [orderedItems]);
+    const waterfallModel = useMemo(() => buildCashFlowWaterfallModel(displayItems), [displayItems]);
     const [chartType, setChartType] = useState<'overview' | 'fcf' | 'waterfall'>('overview');
     const xAxisInterval = useMemo(
         () => (chartData.length > 12 ? Math.max(1, Math.ceil(chartData.length / 8)) - 1 : 0),
@@ -447,7 +453,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
             noPadding
             widgetId={id}
             showLinkToggle
-            exportData={orderedItems}
+            exportData={displayItems}
         >
             <div className="h-full flex flex-col px-2 py-1.5">
                 <div className="pb-1 border-b border-[var(--border-subtle)]">
