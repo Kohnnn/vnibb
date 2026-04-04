@@ -133,6 +133,13 @@ Dashboard persistence notes:
 - Legacy layout caps are also normalized on load, removing stale `maxW`/`maxH` values that used to block manual widget resizing.
 - Existing statement, ratio, events, news, and earnings-quality endpoints now also power the new `financial_snapshot` and `earnings_release_recap` widgets; no separate snapshot endpoint is required in the shipped version.
 - Screener Pro now sends backend `filters` JSON and `sort` parameters for primary screening and ranking instead of only filtering a prefetched subset in the browser.
+- The web app now stores the last active dashboard ID plus the last active tab per dashboard locally, so reloads reopen the latest workspace context instead of only falling back to the configured default tab preference.
+
+Financial statement notes:
+- Financial statement periods are normalized to canonical strings before frontend rendering and fallback merge logic. Quarter formats like `2025-Q2`, `Q2/2025`, and `Q2-2025` should converge to one canonical quarter identity.
+- Specific-quarter requests such as `Q1`, `Q2`, `Q3`, and `Q4` are intended to return the matching quarter across years after canonical normalization rather than relying on raw provider text matching.
+- Frontend financial tables now render periods in ascending chronological order and auto-scroll horizontally to the newest visible periods on first open.
+- Current history caps remain intentionally in place for performance; wider default history windows are deferred to a later optimization pass.
 
 Copilot notes:
 - The VniAgent prompt library is now expected to be opened from within the copilot sidebar. Global prompt actions route into the sidebar instead of a disconnected standalone modal.
@@ -140,6 +147,7 @@ Copilot notes:
 - Copilot no longer depends on a browser-minted Appwrite JWT for the streaming chat route, which avoids noisy Appwrite `/account/jwts` CORS failures on deployed web origins.
 - Appwrite JWT mint failures are now cooled down client-side before retrying, so broken Appwrite platform/CORS setups do not spam repeated failing JWT requests on every action.
 - The frontend still uses browser-side Appwrite session flows for login and account operations, but copilot streaming no longer depends on that JWT mint path.
+- On tighter desktop viewports the VniAgent sidebar is expected to behave as an overlay instead of always shrinking the central workspace.
 
 ## Request/Response Examples
 

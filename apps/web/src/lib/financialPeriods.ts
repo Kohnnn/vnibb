@@ -9,6 +9,64 @@ interface PeriodLabelOptions {
 const YEAR_REGEX = /(20\d{2})/
 const QUARTER_REGEX = /Q([1-4])/
 
+export function normalizeFinancialPeriod(raw: string | null | undefined): string | null {
+  const cleaned = String(raw ?? '').trim()
+  if (!cleaned) return null
+
+  const upper = cleaned.toUpperCase()
+  if (!upper || upper === 'UNKNOWN' || upper === 'NAN' || upper === 'NULL') return null
+
+  if (upper === 'TTM' || upper.includes('TTM')) {
+    const yearMatch = upper.match(YEAR_REGEX)
+    return yearMatch ? `TTM-${yearMatch[1]}` : 'TTM'
+  }
+
+  if (upper.includes('YTD')) {
+    const yearMatch = upper.match(YEAR_REGEX)
+    return yearMatch ? `${yearMatch[1]} YTD` : 'YTD'
+  }
+
+  if (/^20\d{2}$/.test(upper)) {
+    return upper
+  }
+
+  const quarterFirst = upper.match(/^Q([1-4])[-_/ ]?(20\d{2})$/)
+  if (quarterFirst) {
+    return `Q${quarterFirst[1]}-${quarterFirst[2]}`
+  }
+
+  const yearFirst = upper.match(/^(20\d{2})[-_/ ]?Q([1-4])$/)
+  if (yearFirst) {
+    return `Q${yearFirst[2]}-${yearFirst[1]}`
+  }
+
+  const compactQuarter = upper.match(/^(20\d{2})Q([1-4])$/)
+  if (compactQuarter) {
+    return `Q${compactQuarter[2]}-${compactQuarter[1]}`
+  }
+
+  const altQuarter = upper.match(/^([1-4])[/_-](20\d{2})$/)
+  if (altQuarter) {
+    return `Q${altQuarter[1]}-${altQuarter[2]}`
+  }
+
+  const yearMatch = upper.match(YEAR_REGEX)
+  const quarterMatch = upper.match(QUARTER_REGEX)
+  if (yearMatch && quarterMatch) {
+    return `Q${quarterMatch[1]}-${yearMatch[1]}`
+  }
+
+  return null
+}
+
+export function matchesFinancialQuarterSelection(
+  period: string | null | undefined,
+  selection: 'Q1' | 'Q2' | 'Q3' | 'Q4'
+): boolean {
+  const normalized = normalizeFinancialPeriod(period)
+  return normalized ? normalized.startsWith(`${selection}-`) : false
+}
+
 function inferYearFromIndex(index?: number, total?: number, quarterMode = false): number | null {
   if (!Number.isFinite(index) || !Number.isFinite(total) || (total as number) <= 0) return null
 
@@ -36,6 +94,22 @@ export function formatFinancialPeriodLabel(
 
   const safe = normalizeUnknown(cleaned)
   if (safe === '-') return '-'
+
+  const normalized = normalizeFinancialPeriod(safe)
+  if (normalized) {
+    if (normalized === 'TTM') return 'TTM'
+    if (normalized.startsWith('TTM-')) return `TTM ${normalized.slice(4)}`
+    if (normalized.endsWith(' YTD')) return normalized.replace(' YTD', ' (YTD)')
+
+    const normalizedQuarter = normalized.match(/^Q([1-4])-(20\d{2})$/)
+    if (normalizedQuarter) {
+      return `Q${normalizedQuarter[1]} ${normalizedQuarter[2]}`
+    }
+
+    if (/^20\d{2}$/.test(normalized)) {
+      return normalized
+    }
+  }
 
   const upper = safe.toUpperCase()
   if (upper.includes('TTM')) return 'TTM'
@@ -98,7 +172,8 @@ export function formatFinancialPeriodLabel(
 }
 
 export function periodSortKey(period: string | null | undefined): number {
-  const label = String(period ?? '').trim().toUpperCase()
+  const normalized = normalizeFinancialPeriod(period)
+  const label = String(normalized ?? period ?? '').trim().toUpperCase()
   if (!label) return 0
 
   const yearMatch = label.match(YEAR_REGEX)

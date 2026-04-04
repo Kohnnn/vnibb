@@ -15,7 +15,7 @@ OpenBB is still ahead in four workflow areas:
 
 VNIBB is already strong in:
 
-1. Appwrite-first market grounding
+1. VNIBB database-first market grounding
 2. validated source citations
 3. Vietnam-specific equity context
 4. browser-local provider flexibility
@@ -23,7 +23,7 @@ VNIBB is already strong in:
 
 ## Roadmap Principles
 
-1. Keep AI Appwrite-first and grounded by default
+1. Keep AI VNIBB database-first and grounded by default
 2. Prefer small deterministic backend tools over broad autonomous actions
 3. Make AI outputs reusable in the dashboard, not just readable in chat
 4. Add observability as features become more autonomous
@@ -34,12 +34,28 @@ These pieces are already in place:
 
 - OpenRouter-backed active copilot path
 - browser-local BYOK and OpenAI-compatible provider mode
-- Appwrite-first context with Postgres fallback
+- VNIBB database-first context with Postgres fallback
 - structured output validation
 - validated source catalog and evidence panels
 - reasoning/status SSE events
 - integrated VniAgent prompt library with backend default/shared prompt support
 - OpenRouter model catalog-backed selection UX
+
+## Stability Pass
+
+Status: in progress
+
+### Goal
+
+Reduce avoidable complexity in VniAgent and improve answer quality and runtime reliability before adding more features.
+
+### Focus
+
+- simplify prompt/output behavior so models can answer more naturally
+- reduce optional or noisy behaviors when they hurt reliability
+- keep app-default runtime behavior globally consistent
+- make the active global model clearly visible to users
+- prefer VNIBB database wording in user-facing VniAgent surfaces
 
 ## Batch 1: Table Artifacts
 
@@ -203,9 +219,8 @@ OpenBB benefits from explicit user feedback loops. VNIBB needs this before more 
 
 ### Remaining follow-up
 
-- richer feedback capture such as notes and classification labels
-- artifact-level feedback and action-level success tracking
-- richer review dashboards and filters on top of the new durable telemetry store
+- action-level success tracking refinement
+- richer review dashboards and deeper aggregations on top of the durable telemetry store
 
 ### Metrics
 
@@ -216,6 +231,8 @@ OpenBB benefits from explicit user feedback loops. VNIBB needs this before more 
 
 ## Batch 5: Document Context
 
+Status: shipped MVP
+
 ### Why
 
 OpenBB handles unstructured data better. VNIBB should support annual reports, filings, and uploaded notes.
@@ -225,6 +242,18 @@ OpenBB handles unstructured data better. VNIBB should support annual reports, fi
 - ingest PDF and markdown/text documents
 - chunk documents with stable source IDs
 - merge document citations into the same evidence system
+
+### MVP shipped
+
+- PDF, TXT, MD, and JSON uploads in the sidebar VniAgent flow
+- document parsing into temporary chat context
+- document context included alongside VNIBB market context in requests
+
+### Remaining follow-up
+
+- persistent document libraries
+- document citations with page-level references
+- admin or user-managed document stores
 
 ### Candidate sources
 

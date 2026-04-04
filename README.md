@@ -17,6 +17,7 @@
 </div>
 
 ---
+
 # For human
 
 ## Product Introduction
@@ -32,195 +33,50 @@ It combines:
 
 The goal is not to be just another screener or charting page. VNIBB is meant to feel like a serious research cockpit for Vietnam-focused investors, builders, and agents.
 
-> [Image 1]
-> Personalized hero suggestion for this repo: a full-width VNIBB dashboard screenshot showing the `Initial` workspace with `Fundamentals`, `Technical`, and `Quant` views, using `VCI` as the main symbol, plus visible widgets such as Financials, Seasonality Heatmap, Signal Summary, Industry Bubble, and Bank Analytics.
-
 ## What Makes It Different
 
 - **Vietnam-first modeling**: the app is designed around Vietnamese equities, not retrofitted from a US-market product
 - **OpenBB-inspired workflow**: dense, modular, multi-widget research surfaces instead of shallow page-by-page navigation
-- **OpenBB-inspired AI copilot**: Appwrite-first context, validated source citations, evidence panels, and reasoning/status events influenced by OpenBB copilot patterns
+- **OpenBB-inspired AI copilot**: Appwrite-first context, validated source citations, evidence panels, and reasoning/status events
 - **Bank-aware analytics**: banks are treated as a distinct analytical class, not forced into industrial-company ratios
 - **Fallback-first backend**: provider instability, missing values, and schema quirks are handled in the backend instead of leaking directly into the UI
 - **Agent-friendly repo**: phased planning, ops notes, AGENTS guidance, and docs make handoff to other coding agents much easier
 
-## VNIBB Ecosystem
-
-VNIBB is more than one app folder. It is a working system made of cooperating layers.
-
-- `apps/web` - Next.js frontend for the dashboard, widget system, routing, and user-facing workflows
-- `apps/api` - FastAPI backend for normalization, fallbacks, caching, logging, and API contracts
-- `packages/shared` - shared TypeScript utilities
-- `packages/ui` - reusable UI package
-- `packages/widgets` - reusable widget package
-- `scripts/ci-gate.mjs` - local source of truth for validation order
-- `../docs/` - human-facing documentation for architecture, setup, widgets, ops, and project history
-- `AGENTS.md` - repo instructions for coding agents
-
-## Architecture
-
-For the current copilot design and OpenBB-inspired AI notes, see `docs/ai_copilot.md`, `docs/ai_roadmap.md`, and `apps/api/docs/openbb_architecture.md`.
-
-### System Architecture
-
-```text
-                              +----------------------+
-                              |     End Users        |
-                              |  Investors / Quants  |
-                              |   Research Agents    |
-                              +----------+-----------+
-                                         |
-                                         v
-                     +-------------------------------------------+
-                     |         apps/web (Next.js 16)             |
-                     |  Dashboard UI, widgets, routing, queries  |
-                     +-------------------+-----------------------+
-                                         |
-                                         v
-                     +-------------------------------------------+
-                     |        apps/api (FastAPI backend)         |
-                     | validation, orchestration, normalization, |
-                     | retries, caching, logging, rate limiting  |
-                     +-------------------+-----------------------+
-                                         |
-                  +----------------------+----------------------+
-                  |                      |                      |
-                  v                      v                      v
-      +------------------+   +---------------------+  +------------------+
-      |  services layer  |   |  providers layer    |  |  core infra      |
-      | business logic   |   | vnstock + fallback  |  | config/cache/log |
-      +--------+---------+   +----------+----------+  +---------+--------+
-               |                        |                       |
-               +------------+-----------+-----------------------+
-                            |
-                            v
-          +---------------------------------------------------------+
-          | Appwrite / Redis / persisted cache / external providers |
-          +---------------------------------------------------------+
-```
-
-### Data Flow
-
-```text
-User action
-   |
-   v
-Widget -> query hook -> src/lib/api.ts
-   |
-   v
-FastAPI route -> service -> provider/fallback chain
-   |
-   +--> fresh provider data succeeds -----------------------------+
-   |                                                              |
-   +--> provider unstable -> alternate source / cache / fallback  |
-   |                                                              |
-   +--> enrichment logic fills product-critical fields -----------+
-                                                                  |
-                                                                  v
-                                                      normalized API response
-                                                                  |
-                                                                  v
-                                                   widget renders loading / empty /
-                                                   success state with stable contract
-```
-
-### Repo Layout
-
-```text
-vnibb/
-|- apps/
-|  |- web/
-|  \- api/
-|- packages/
-|  |- shared/
-|  |- ui/
-|  \- widgets/
-|- scripts/
-|- docker-compose.oracle.yml
-|- package.json
-|- turbo.json
-\- pnpm-workspace.yaml
-```
-
 ## Quick Start
-
-### From Source
 
 Run from `vnibb/`.
 
-1. Install JavaScript dependencies
-
 ```bash
+# 1. Install dependencies
 pnpm install --frozen-lockfile
-```
-
-2. Install backend dependencies
-
-```bash
 python -m pip install -e "apps/api[dev]"
-```
 
-3. Add local env values
-
-```env
-# apps/web/.env.local
+# 2. Add env values to apps/web/.env.local
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_WS_URL=ws://localhost:8000/api/v1/ws/prices
-```
 
-4. Start the backend
-
-```bash
+# 3. Start backend
 python -m uvicorn vnibb.api.main:app --reload --app-dir apps/api
-```
 
-5. Start the frontend
-
-```bash
+# 4. Start frontend
 pnpm --filter frontend dev
+
+# 5. Open: http://localhost:3000 (frontend) and http://localhost:8000/docs (API docs)
 ```
 
-6. Open:
+---
 
-- frontend: `http://localhost:3000`
-- backend docs: `http://localhost:8000/docs`
+# For AI coding agents
 
-### With Docker
+## Quick handoff prompt
 
-VNIBB includes a production-oriented OCI compose file rather than a generic local-all-in-one dev compose.
-
-Available container assets:
-
-- `apps/api/Dockerfile`
-- `apps/api/Dockerfile.premium`
-- `apps/web/Dockerfile`
-- `docker-compose.oracle.yml`
-
-Example OCI-style compose run:
-
-```bash
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build
 ```
-
-Notes:
-
-- this path is closer to production deployment than local contributor setup
-- local source-first development is still the recommended default
-
-
-# For AI
-
-If you want another coding agent to take over quickly, send it the repo link plus this instruction block.
-
-## Prompt
-```text
 You are working on VNIBB, a Vietnam-first financial analytics monorepo.
 
 Start here:
 1. Read `AGENTS.md`
-2. Read `docs/README.md`
-3. Read `docs/DEVELOPMENT_JOURNAL.md`
-4. Work from `vnibb/`
+2. Read `docs/README.md` (docs hub)
+3. Work from `vnibb/`
 
 Install:
 - `pnpm install --frozen-lockfile`
@@ -237,48 +93,67 @@ Validate:
 - `python -m pytest apps/api/tests -v`
 - `pnpm run ci:gate`
 
-Important context:
-- active product code lives in `vnibb/`
-- docs history and planning live in `../docs/` and `.agent/`
-- backend is FastAPI, frontend is Next.js 16 + React 19
-- current roadmap focus is Phase 11 UX/workflow refinement
+Key context:
+- Active product code lives in `vnibb/`
+- Docs and planning live in `../docs/` and `.agent/`
+- Backend is FastAPI, frontend is Next.js 16 + React 19
+- Primary configs: `package.json`, `scripts/ci-gate.mjs`, `apps/api/pyproject.toml`
+- Never commit secrets, tokens, keys, or `.env*` files
 ```
 
-## Built-in Tools
+## Fast commands for common tasks
 
-### Workspace scripts
-
-```bash
-pnpm dev
-pnpm build
-pnpm lint
-pnpm test
-pnpm run ci:gate
-pnpm run gate:no502
-pnpm run gate:widgets:strict
-```
-
-### Frontend commands
+### Fix a bug
 
 ```bash
-pnpm --filter frontend dev
-pnpm --filter frontend build
-pnpm --filter frontend lint
+# 1. Run narrow test first
+pnpm --filter frontend test -- --runTestsByPath src/lib/financialPeriods.test.ts -t "bug description"
+python -m pytest apps/api/tests/test_api/test_news_service.py -v -k "test_name"
+
+# 2. Fix the code
+# 3. Validate
 pnpm --filter frontend exec tsc --noEmit
+python -m ruff check apps/api
+pnpm --filter frontend lint
+
+# 4. Run broader test
 pnpm --filter frontend test
-pnpm --filter frontend test -- --runInBand
-pnpm --filter frontend test -- --runTestsByPath src/lib/financialPeriods.test.ts
+python -m pytest apps/api/tests -v
+
+# 5. Full gate before commit
+pnpm run ci:gate
 ```
 
-### Backend commands
+### Add a feature
 
 ```bash
-python -m uvicorn vnibb.api.main:app --reload --app-dir apps/api
+# 1. Read relevant existing code patterns
+# 2. Implement smallest coherent change
+# 3. Add test
+# 4. Validate
+pnpm --filter frontend exec tsc --noEmit
+pnpm --filter frontend lint
 python -m ruff check apps/api
-python -m py_compile apps/api/vnibb/api/main.py
-python -m pytest apps/api/tests -v
-python -m pytest apps/api/tests/test_api/test_news_service.py -v
-python -m pytest apps/api/tests/test_api/test_financial_service.py::test_get_financials_with_ttm_caps_quarter_fetch_limit -v
+# 5. Full gate
+pnpm run ci:gate
+```
+
+### Fix lint/type errors
+
+```bash
+# TypeScript
+pnpm --filter frontend exec tsc --noEmit
+pnpm --filter frontend lint --fix
+
+# Python
+python -m ruff check apps/api --fix
+```
+
+## Built-in validation
+
+```bash
+pnpm run ci:gate        # Full gate: lint → build → test → compile → pytest
+pnpm run gate:no502     # Widget health probe (5 repeats, 10s timeout)
 ```
 
 ## Documentation
@@ -293,9 +168,413 @@ python -m pytest apps/api/tests/test_api/test_financial_service.py::test_get_fin
 - development journal: `../docs/DEVELOPMENT_JOURNAL.md`
 - agent instructions: `AGENTS.md`
 
-## Testing
+## License
 
-Recommended validation order:
+MIT. See `LICENSE`.
+
+---
+
+# Architecture Reference
+
+## System Overview
+
+VNIBB is a monorepo with three main layers:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        End Users / Agents                           │
+│           (Investors, Quants, Research Agents, AI Cops)             │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    apps/web (Next.js 16)                           │
+│   Dashboard UI, Widgets, TanStack Query, React Context, Routing     │
+│   Port: 3000                                                        │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    ▼                           ▼
+┌───────────────────────────────┐   ┌───────────────────────────────┐
+│     apps/api (FastAPI)        │   │    External Services           │
+│     Port: 8000                │   │    - VNStock API              │
+│                               │   │    - PostgreSQL                │
+│  Middleware → Routes →        │   │    - Redis Cache              │
+│    Services → Providers       │   │    - Appwrite (optional)       │
+│                               │   │    - Scrapers (fallback)      │
+└───────────────────────────────┘   └───────────────────────────────┘
+```
+
+## Frontend Architecture
+
+```
+apps/web/src/
+├── app/                    # Next.js App Router pages
+├── components/
+│   ├── widgets/           # 50+ research widgets (FinancialsWidget, etc.)
+│   │   └── charts/        # Chart sub-components
+│   ├── ui/               # Shared UI (WidgetContainer, WidgetSkeleton, etc.)
+│   └── common/           # ExportButton, ProtectedRoute, etc.
+├── contexts/             # React contexts
+│   ├── DashboardContext   # Widget layout state
+│   ├── SymbolContext      # Current stock symbol
+│   ├── ThemeContext       # Light/dark mode
+│   ├── AuthContext        # Appwrite/Supabase auth
+│   └── ...
+├── hooks/                # Custom hooks (usePeriodState, useWebSocket, etc.)
+├── lib/
+│   ├── api.ts           # fetchAPI() wrapper with error handling
+│   ├── queries.ts       # TanStack Query hooks (useFinancialRatios, etc.)
+│   ├── appwrite.ts      # Appwrite client
+│   └── supabase.ts      # Supabase client
+├── types/               # TypeScript interfaces
+└── styles/             # Global CSS
+```
+
+### Frontend Data Flow
+
+```
+Widget (tsx)
+   │
+   ├─ useFinancialRatios(symbol, { period })
+   │
+   └─► TanStack Query
+        ├─ queryKey: ['financialRatios', 'VNM', 'FY']
+        ├─ staleTime: 60 * 60 * 1000 (1 hour)
+        └─ queryFn: api.getFinancialRatios(symbol, params, signal)
+             │
+             └─► fetchAPI('/equity/{symbol}/ratios')
+                  ├─ Adds Authorization header
+                  ├─ Handles timeout (default 30s)
+                  └─ Returns typed response
+```
+
+### Key API Client Features (`lib/api.ts`)
+
+- `fetchAPI<T>()` - Central fetch wrapper with:
+  - Configurable timeout (default 30s)
+  - Automatic query parameter handling
+  - Authorization token management (Appwrite JWT or Supabase)
+  - Structured error handling (`APIError`, `RateLimitError`)
+
+### TanStack Query Pattern
+
+```typescript
+useQuery({
+  queryKey: queryKeys.financialRatios(symbol, period),
+  queryFn: ({ signal }) => api.getFinancialRatios(symbol, { period }, signal),
+  staleTime: 60 * 60 * 1000, // 1 hour
+});
+```
+
+## Backend Architecture
+
+### Entry Point (`apps/api/vnibb/api/main.py`)
+
+FastAPI application with middleware stack (outer to inner):
+
+```
+1. CORSMiddleware          # CORS headers
+2. CORSErrorMiddleware     # CORS on exceptions
+3. APIVersionMiddleware    # API version headers
+4. RequestLoggingMiddleware # Request ID + error logging
+5. ResponseCacheControlMiddleware # Cache headers by endpoint
+6. GZipMiddleware          # Compression
+7. RequestTimeoutMiddleware # Global timeout
+8. PerformanceLoggingMiddleware # Latency logging
+9. MetricsMiddleware       # Sentry performance
+10. RateLimitMiddleware    # Rate limiting (120 req/min)
+```
+
+**Lifespan Events**: Startup validation → Redis connect → Scheduler start → WebSocket broadcaster → vnstock pre-init
+
+### Backend Directory Structure
+
+```
+apps/api/vnibb/
+├── api/
+│   ├── main.py            # FastAPI app factory, middleware, exception handlers
+│   ├── router.py          # Route aggregation
+│   ├── deps.py            # Dependency injection
+│   └── v1/
+│       ├── equity.py      # /equity/{symbol}/* endpoints
+│       ├── screener.py    # /screener endpoints
+│       ├── financials.py  # /financials endpoints
+│       ├── dashboard.py   # /dashboard endpoints
+│       ├── data_sync.py   # /data pipeline triggers
+│       ├── realtime.py    # /stream real-time
+│       ├── technical.py   # /analysis technical
+│       ├── market.py      # /market indices, sectors
+│       ├── news.py        # /news, /market/news
+│       ├── websocket.py   # WebSocket /ws/prices
+│       ├── quant.py       # /quant analytics
+│       ├── comparison.py  # /compare, /analysis
+│       ├── rs_rating.py   # /rs relative strength
+│       ├── copilot.py     # /copilot AI
+│       ├── health.py      # /health checks
+│       └── ...
+├── core/
+│   ├── config.py          # Pydantic Settings, env validation
+│   ├── database.py       # SQLAlchemy async engine
+│   ├── cache.py           # Redis + memory fallback, @cached decorator
+│   ├── auth.py            # JWT validation
+│   ├── exceptions.py      # VniBBException hierarchy
+│   ├── rate_limiter.py    # Slowapi configuration
+│   └── logging_config.py  # Structured JSON logging
+├── models/                # Pydantic response models
+│   ├── financials.py
+│   ├── market_news.py
+│   ├── stock.py
+│   └── ...
+├── providers/
+│   ├── base.py            # BaseFetcher abstract class
+│   ├── retry.py           # Retry logic
+│   ├── errors.py          # Provider exceptions
+│   └── vnstock/           # VNStock API fetchers (50+)
+│       ├── equity_historical.py
+│       ├── financials.py
+│       ├── financial_ratios.py
+│       └── ...
+├── services/              # Business logic
+│   ├── financial_service.py   # TTM calculation, period normalization
+│   ├── screener_service.py    # Screener data sync
+│   ├── market_service.py      # Market indices, top movers
+│   ├── comparison_service.py  # Stock comparison
+│   ├── news_service.py        # News fetching
+│   ├── technical_analysis.py  # Technical indicators
+│   ├── rs_rating_service.py  # Relative Strength
+│   ├── cache_manager.py       # Multi-tier cache
+│   ├── fallback_resolver.py   # Provider fallback chain
+│   └── ...
+└── utils/
+    └── validators.py
+```
+
+## Data Flow: Full Request Lifecycle
+
+```
+1. REQUEST
+   │
+   ▼
+2. MIDDLEWARE STACK
+   ├─ CORS check
+   ├─ Rate limit check (120 req/min)
+   ├─ Request logging
+   └─ Timeout check (30s global)
+   │
+   ▼
+3. ROUTER → ROUTE HANDLER
+   └─ @cached(ttl=86400, key_prefix="ratios_v3")
+   │
+   ▼
+4. SERVICE LAYER
+   │
+   ├─► Check Redis Cache
+   │    ├─ HIT → Return cached data
+   │    └─ MISS → Continue
+   │
+   └─► Provider Chain
+        │
+        ├─► Primary: VNStock API
+        │    ├─ SUCCESS → Cache + Return
+        │    └─ FAIL → Continue
+        │
+        ├─► Secondary: Scraper Fallback
+        │    ├─ SUCCESS → Cache + Return
+        │    └─ FAIL → Continue
+        │
+        └─► Tertiary: Appwrite Storage
+             ├─ SUCCESS → Return
+             └─ FAIL → Return stale cache or DataNotFoundError
+   │
+   ▼
+5. RESPONSE
+   ├─ Cache-Control header set
+   ├─ Response logged
+   └─ Return to client
+```
+
+## Caching Strategy
+
+### Cache Backends
+
+| Backend | Use Case | TTL |
+|---------|----------|-----|
+| **Redis** | Primary cache | 30s - 24h |
+| **Memory** | Fallback when Redis unavailable | Same as Redis |
+
+### Cache Key Patterns
+
+```
+v:sc:<hash>    # screener
+v:q:<hash>     # quote
+v:r:<hash>     # ratios
+v:f:<hash>     # financials
+v:is:<hash>    # income statement
+v:n:<hash>     # news
+```
+
+### Response Cache Headers
+
+| Policy | Endpoints | Header |
+|--------|-----------|--------|
+| `real_time` | `/health`, `/equity/*/quote` | `no-store, max-age=0` |
+| `near_real_time` | `/screener`, `/sectors`, `/historical` | `public, max-age=30, stale-while-revalidate=90` |
+| `staticish` | `/profile`, `/ratios`, `/financials` | `public, max-age=300, stale-while-revalidate=1800` |
+
+## Fallback Chain
+
+```
+Request
+   │
+   ▼
+1. Check Redis Cache
+   │
+   ▼
+2. Try Primary Provider (VNStock)
+   │   └─ API: VNStock (KBS, VCI, DNSE sources)
+   │
+   ▼
+3. Try Scraper Fallback
+   │   └─ cophieu68 historical scraper
+   │
+   ▼
+4. Try Appwrite Storage
+   │   └─ Price data archival
+   │
+   ▼
+5. Return Stale Cache (if available)
+   │
+   ▼
+6. Raise DataNotFoundError
+```
+
+## External Data Providers
+
+| Provider | Type | Purpose |
+|----------|------|---------|
+| **VNStock** | Primary API | Prices, financials, ratios, screener, news, derivatives |
+| **VNStock Scrapers** | Fallback | Historical data when API unavailable |
+| **Appwrite** | Storage | Price archival, dashboard templates |
+| **Redis** | Cache | Session, rate limits, API cache |
+
+## Database Schema (PostgreSQL via SQLAlchemy)
+
+| Table | Purpose |
+|-------|---------|
+| `stocks` | Stock metadata |
+| `stock_prices` | Historical OHLCV data |
+| `income_statements` | Annual/quarterly income |
+| `balance_sheets` | Balance sheet data |
+| `cash_flows` | Cash flow data |
+| `financial_ratios` | Pre-calculated ratios |
+| `screener_snapshots` | Daily screener data |
+| `foreign_trading` | Foreign buy/sell data |
+| `company_news` | News articles |
+| `dashboards` | User dashboards |
+
+## API Routes Reference
+
+### Route Groups (mounted under `/api/v1`)
+
+| Router | Prefix | Description |
+|--------|--------|-------------|
+| equity | `/equity` | Stock data: profile, ratios, financials, historical |
+| screener | `/screener` | Stock screening with filters |
+| financials | `/financials` | Unified financial statements |
+| dashboard | `/dashboard` | User dashboards & widgets |
+| data_sync | `/data` | Data pipeline triggers |
+| realtime | `/stream` | Real-time streaming |
+| technical | `/analysis` | Technical analysis |
+| market | `/market` | Market indices, sectors |
+| news | `/news` | News feeds |
+| listing | `/listing` | Stock listings, symbols |
+| search | `/search` | Ticker search |
+| trading | `/trading` | Top movers, price boards |
+| quant | `/quant` | Quant analytics |
+| comparison | `/compare` | Stock comparison |
+| rs_rating | `/rs` | Relative Strength ratings |
+| websocket | `/ws` | WebSocket for real-time |
+| copilot | `/copilot` | AI copilot |
+| health | `/health` | Health checks |
+
+### Key Equity Endpoints
+
+```
+GET /api/v1/equity/{symbol}/profile        # Company profile
+GET /api/v1/equity/{symbol}/quote          # Real-time quote
+GET /api/v1/equity/{symbol}/historical     # Historical OHLCV
+GET /api/v1/equity/{symbol}/ratios         # Financial ratios
+GET /api/v1/equity/{symbol}/financials     # Financial statements
+GET /api/v1/equity/{symbol}/income-statement
+GET /api/v1/equity/{symbol}/balance-sheet
+GET /api/v1/equity/{symbol}/cash-flow
+GET /api/v1/equity/{symbol}/dividends
+GET /api/v1/equity/{symbol}/news
+GET /api/v1/equity/{symbol}/foreign-trading
+```
+
+### Key Market Endpoints
+
+```
+GET /api/v1/market/indices              # Vietnam indices
+GET /api/v1/market/world-indices        # Global indices
+GET /api/v1/market/top-gainers         # Top gaining stocks
+GET /api/v1/market/top-losers          # Top losing stocks
+GET /api/v1/market/sector-performance  # Sector performance
+```
+
+## Provider Pattern (OpenBB-style Fetchers)
+
+Each data fetcher follows a 3-step pattern:
+
+```python
+class VnstockFinancialsFetcher(BaseFetcher):
+    def transform_query(self, params: FinancialsQueryParams) -> dict:
+        # Convert Pydantic params to provider format
+        pass
+
+    def extract_data(self, transformed: dict) -> RawData:
+        # Make API call, return raw data
+        pass
+
+    def transform_data(self, raw: RawData) -> List[FinancialStatementData]:
+        # Convert raw data to Pydantic models
+        pass
+```
+
+## Error Handling
+
+### Frontend Errors (`src/lib/api.ts`)
+
+```typescript
+export class APIError extends Error {
+  status?: number;
+  statusText?: string;
+}
+
+export class RateLimitError extends APIError {
+  retryAfter: number; // seconds
+}
+```
+
+### Backend Errors (`core/exceptions.py`)
+
+```
+VniBBException (base)
+├── ProviderError
+│   ├── ProviderTimeoutError
+│   ├── ProviderRateLimitError
+│   └── ProviderAuthError
+├── DataNotFoundError
+├── DataValidationError
+├── StaleDataError
+├── DatabaseError
+├── CacheError
+└── InvalidParameterError
+```
+
+## Testing recommendations
 
 1. run the narrowest relevant test for the touched area
 2. run package-level validation if the change is broader
@@ -306,23 +585,6 @@ Example flows:
 - frontend UI change -> `pnpm --filter frontend exec tsc --noEmit` + relevant Jest test
 - backend service fix -> focused `pytest` target + broader backend tests
 - cross-stack change -> package checks + `pnpm run ci:gate`
-
-## Project Status
-
-Current position based on the active planning context:
-
-- major Phase 7 financial data and hardening work completed
-- major Phase 8 widget expansion completed
-- major Phase 9 and 10 UX/product planning executed or prepared
-- current refinement frontier is Phase 11
-
-Current strategic focus:
-
-- folder-level symbol scope
-- consolidated financial workflows
-- categorized comparison analysis
-- stronger table hierarchy and readability
-- tighter OpenBB-style workflow polish
 
 ## Acknowledgments
 

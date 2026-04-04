@@ -9,10 +9,12 @@ import {
     ChevronDown,
     ChevronRight,
     Bot,
+    Paperclip,
     Globe,
     Sparkles,
     Search as SearchIcon,
     Download,
+    FileText,
     Terminal,
     type LucideIcon,
 } from 'lucide-react';
@@ -22,6 +24,9 @@ import { useProfile, useStockQuote, useFinancialRatios } from '@/lib/queries';
 import { PromptsLibrary } from '@/components/modals/PromptsLibrary';
 import {
     type CopilotActionSuggestion,
+    createCopilotDocumentContext,
+    getCopilotRuntimeConfig,
+    type CopilotDocumentContext,
     consumeCopilotStream,
     openCopilotChatStream,
     type CopilotArtifact,
@@ -35,7 +40,6 @@ import { CopilotFeedbackBar } from '@/components/ui/CopilotFeedbackBar';
 import {
     AI_SETTINGS_UPDATED_EVENT,
     readStoredAISettings,
-    writeStoredAISettings,
     type AISettings,
 } from '@/lib/aiSettings';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
@@ -90,6 +94,8 @@ type PromptSuggestion = {
     icon: LucideIcon;
     prompt: string;
 };
+
+type DetailsState = Record<string, boolean>;
 
 const DEFAULT_PROMPTS: PromptSuggestion[] = [
     { label: "Analyze", icon: Sparkles, prompt: "Analyze the financial health of this company" },
@@ -252,7 +258,7 @@ function appendSourcesForExport(message: Message): string {
     }
 
     const sourceLines = message.sources.map((source) => {
-        const meta = [source.source, source.asOf ? `as of ${source.asOf}` : null]
+        const meta = [source.source === 'appwrite' ? 'VNIBB database' : source.source, source.asOf ? `as of ${source.asOf}` : null]
             .filter(Boolean)
             .join(', ');
         return `- [${source.id}] ${source.label || source.kind || 'Source'}${meta ? ` (${meta})` : ''}`;
@@ -264,6 +270,25 @@ function appendSourcesForExport(message: Message): string {
 function appendReasoningStep(existing: string | undefined, step: CopilotReasoningStep): string {
     const line = `[${step.eventType}] ${step.message}`;
     return existing ? `${existing}\n${line}` : line;
+}
+
+function hasMessageDetails(message: Message): boolean {
+    return Boolean(
+        message.reasoning ||
+        message.responseMeta ||
+        message.actions?.length ||
+        message.artifacts?.length ||
+        message.sources?.length
+    );
+}
+
+function getMessageDetailsLabel(message: Message): string {
+    const parts: string[] = [];
+    if (message.reasoning) parts.push('reasoning');
+    if (message.actions?.length) parts.push(`${message.actions.length} action${message.actions.length > 1 ? 's' : ''}`);
+    if (message.artifacts?.length) parts.push(`${message.artifacts.length} artifact${message.artifacts.length > 1 ? 's' : ''}`);
+    if (message.sources?.length) parts.push(`${message.sources.length} source${message.sources.length > 1 ? 's' : ''}`);
+    return parts.join(' · ') || 'details';
 }
 
 function getProviderLabel(provider: AISettings['provider']): string {
@@ -308,13 +333,16 @@ export function AICopilot({
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [showReasoning, setShowReasoning] = useState<Record<string, boolean>>({});
+    const [showDetails, setShowDetails] = useState<DetailsState>({});
     const [aiSettings, setAISettings] = useState<AISettings>(() => readStoredAISettings());
     const [currentStatus, setCurrentStatus] = useState<string | null>(null);
     const [isPromptLibraryOpen, setIsPromptLibraryOpen] = useState(false);
+    const [attachedDocuments, setAttachedDocuments] = useState<CopilotDocumentContext[]>([]);
+    const [runtimeConfig, setRuntimeConfig] = useState<{ provider: string; model: string } | null>(null);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const contextualStarterKeyRef = useRef<string | null>(null);
     const lastPromptLibraryRequestIdRef = useRef(0);
 
@@ -405,6 +433,33 @@ export function AICopilot({
     }, []);
 
     useEffect(() => {
+        let cancelled = false;
+
+        const loadRuntime = async () => {
+            if (aiSettings.mode !== 'app_default') {
+                setRuntimeConfig(null);
+                return;
+            }
+            try {
+                const config = await getCopilotRuntimeConfig();
+                if (!cancelled) {
+                    setRuntimeConfig(config);
+                }
+            } catch {
+                if (!cancelled) {
+                    setRuntimeConfig(null);
+                }
+            }
+        };
+
+        void loadRuntime();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [aiSettings.mode]);
+
+    useEffect(() => {
         if (!isOpen) return;
         if (!widgetContext) {
             contextualStarterKeyRef.current = null;
@@ -461,7 +516,10 @@ export function AICopilot({
                     quote: quote || null,
                     ratios: ratios?.data || null,
                 },
-                widgetPayload: widgetContextData || null,
+                widgetPayload: {
+                    ...(widgetContextData || {}),
+                    documentContexts: attachedDocuments,
+                },
             };
 
             // Prepare messages for API
@@ -535,18 +593,40 @@ export function AICopilot({
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `copilot-chat-${currentSymbol}-${new Date().toISOString().slice(0, 10)}.md`;
+        a.download = `vniagent-chat-${currentSymbol}-${new Date().toISOString().slice(0, 10)}.md`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     };
 
-    const toggleReasoning = (messageId: string) => {
-        setShowReasoning((prev) => ({
+    const toggleDetails = (messageId: string) => {
+        setShowDetails((prev) => ({
             ...prev,
             [messageId]: !prev[messageId],
         }));
+    };
+
+    const handleAttachDocument = async (file: File | undefined) => {
+        if (!file) return;
+
+        try {
+            setCurrentStatus(`Parsing ${file.name}...`);
+            const response = await createCopilotDocumentContext(file);
+            setAttachedDocuments((prev) => [...prev, response.document]);
+            setCurrentStatus(null);
+        } catch (error) {
+            setCurrentStatus(null);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: `${Date.now()}-document-error`,
+                    role: 'assistant',
+                    content: `**Document upload failed:** ${String(error)}`,
+                    timestamp: new Date(),
+                },
+            ]);
+        }
     };
 
     if (!isOpen) return null;
@@ -574,7 +654,7 @@ export function AICopilot({
                 <span className="text-xs text-blue-400">
                     {widgetContext ? `Context: @${widgetContext} · ` : ''}
                     {activeTabName ? `${activeTabName} · ` : ''}
-                    {currentSymbol} · {getProviderLabel(aiSettings.provider)} · {aiSettings.mode === 'browser_key' ? `Browser key · ${aiSettings.model}` : `App default · ${latestResolvedResponseMeta?.model || 'admin-managed model'}`}
+                    {currentSymbol} · {getProviderLabel(aiSettings.provider)} · {aiSettings.mode === 'browser_key' ? `Browser key · ${aiSettings.model}` : `App default · ${runtimeConfig?.model || latestResolvedResponseMeta?.model || 'global model'}`}
                 </span>
                 {messages.length > 0 && (
                     <button
@@ -608,6 +688,27 @@ export function AICopilot({
                             {widgetDataPreview}
                         </div>
                     )}
+                </div>
+            )}
+
+            {attachedDocuments.length > 0 && (
+                <div className="px-4 py-2 border-b border-[var(--border-color)] bg-cyan-500/5">
+                    <div className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">Attached Documents</div>
+                    <div className="flex flex-wrap gap-2">
+                        {attachedDocuments.map((document) => (
+                            <div key={document.id} className="inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] text-cyan-200">
+                                <FileText size={10} />
+                                <span>{document.filename}</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setAttachedDocuments((prev) => prev.filter((item) => item.id !== document.id))}
+                                    className="text-cyan-100/70 hover:text-cyan-100"
+                                >
+                                    <X size={10} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
 
@@ -652,64 +753,59 @@ export function AICopilot({
                                 </div>
                             </div>
 
-                            {/* Reasoning Section - Keeping for UI completeness, though custom LLM service might not send it separately yet */}
-                            {message.role === 'assistant' && message.reasoning && (
+                            {message.role === 'assistant' && hasMessageDetails(message) && (
                                 <button
-                                    onClick={() => toggleReasoning(message.id)}
+                                    onClick={() => toggleDetails(message.id)}
                                     className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 >
-                                    {showReasoning[message.id] ? (
+                                    {showDetails[message.id] ? (
                                         <ChevronDown size={12} />
                                     ) : (
                                         <ChevronRight size={12} />
                                     )}
-                                    Step-by-step reasoning
+                                    Details · {getMessageDetailsLabel(message)}
                                 </button>
                             )}
-                            {showReasoning[message.id] && message.reasoning && (
-                                <div className="ml-4 p-2 text-xs text-[var(--text-secondary)] bg-[var(--bg-tertiary)]/70 rounded border-l-2 border-blue-500">
-                                    {message.reasoning}
-                                </div>
-                            )}
-                            {message.role === 'assistant' && message.responseMeta && (
-                                <div className="mr-4">
-                                    <CopilotFeedbackBar
-                                        responseMeta={message.responseMeta}
-                                        surface="sidebar"
-                                        currentVote={message.feedbackVote}
-                                        onVoteChange={(vote) => {
-                                            setMessages((prev) => prev.map((item) =>
-                                                item.id === message.id ? { ...item, feedbackVote: vote } : item
-                                            ));
-                                        }}
-                                    />
-                                </div>
-                            )}
-                            {message.role === 'assistant' && Boolean(message.actions?.length) && (
-                                <div className="mr-4">
-                                    <CopilotActionPanel
-                                        actions={message.actions || []}
-                                        responseMeta={message.responseMeta}
-                                        surface="sidebar"
-                                    />
-                                </div>
-                            )}
-                            {message.role === 'assistant' && Boolean(message.artifacts?.length) && (
-                                <div className="mr-4">
-                                    <CopilotArtifactPanel
-                                        artifacts={message.artifacts || []}
-                                        responseMeta={message.responseMeta}
-                                        surface="sidebar"
-                                    />
-                                </div>
-                            )}
-                            {message.role === 'assistant' && Boolean(message.sources?.length) && (
-                                <div className="mr-4">
-                                    <CopilotEvidencePanel
-                                        sources={message.sources || []}
-                                        responseMeta={message.responseMeta}
-                                        surface="sidebar"
-                                    />
+                            {message.role === 'assistant' && showDetails[message.id] && (
+                                <div className="mr-4 space-y-3">
+                                    {message.reasoning && (
+                                        <div className="p-2 text-xs text-[var(--text-secondary)] bg-[var(--bg-tertiary)]/70 rounded border-l-2 border-blue-500">
+                                            {message.reasoning}
+                                        </div>
+                                    )}
+                                    {message.responseMeta && (
+                                        <CopilotFeedbackBar
+                                            responseMeta={message.responseMeta}
+                                            surface="sidebar"
+                                            currentVote={message.feedbackVote}
+                                            onVoteChange={(vote) => {
+                                                setMessages((prev) => prev.map((item) =>
+                                                    item.id === message.id ? { ...item, feedbackVote: vote } : item
+                                                ));
+                                            }}
+                                        />
+                                    )}
+                                    {Boolean(message.actions?.length) && (
+                                        <CopilotActionPanel
+                                            actions={message.actions || []}
+                                            responseMeta={message.responseMeta}
+                                            surface="sidebar"
+                                        />
+                                    )}
+                                    {Boolean(message.artifacts?.length) && (
+                                        <CopilotArtifactPanel
+                                            artifacts={message.artifacts || []}
+                                            responseMeta={message.responseMeta}
+                                            surface="sidebar"
+                                        />
+                                    )}
+                                    {Boolean(message.sources?.length) && (
+                                        <CopilotEvidencePanel
+                                            sources={message.sources || []}
+                                            responseMeta={message.responseMeta}
+                                            surface="sidebar"
+                                        />
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -727,33 +823,33 @@ export function AICopilot({
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Settings Toggles */}
-            <div className="px-4 py-2 border-t border-[var(--border-color)] flex items-center gap-4 text-xs">
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={aiSettings.preferAppwriteData}
-                        onChange={(e) => setAISettings(writeStoredAISettings({ preferAppwriteData: e.target.checked }))}
-                        className="w-3 h-3 rounded"
-                    />
-                    <Globe size={12} className="text-[var(--text-muted)]" />
-                    <span className="text-[var(--text-muted)]">Appwrite first</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={aiSettings.webSearch}
-                        onChange={(e) => setAISettings(writeStoredAISettings({ webSearch: e.target.checked }))}
-                        className="w-3 h-3 rounded"
-                    />
-                    <SearchIcon size={12} className="text-[var(--text-muted)]" />
-                    <span className="text-[var(--text-muted)]">Web Search</span>
-                </label>
-            </div>
-
             {/* Input */}
             <div className="p-4 border-t border-[var(--border-color)]">
                 <div className="flex items-center gap-2 bg-[var(--bg-secondary)] rounded-lg px-3 py-2 border border-[var(--border-color)]">
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.txt,.md,.json,application/pdf,text/plain,text/markdown,application/json"
+                        className="hidden"
+                        onChange={(event) => {
+                            void handleAttachDocument(event.target.files?.[0]);
+                            event.currentTarget.value = '';
+                        }}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="p-1 text-cyan-300 hover:text-cyan-200"
+                        aria-label="Attach document context"
+                        title="Attach PDF or text context"
+                    >
+                        <Paperclip size={16} />
+                    </button>
+                    <div className="hidden md:flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+                        <Globe size={11} />
+                        <span>{aiSettings.preferAppwriteData ? 'VNIBB database' : 'external-first'}</span>
+                        {aiSettings.webSearch ? <span>· web</span> : null}
+                    </div>
                     <input
                         ref={inputRef}
                         type="text"

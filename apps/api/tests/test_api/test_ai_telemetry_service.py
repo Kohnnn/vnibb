@@ -83,3 +83,41 @@ async def test_ai_telemetry_service_handles_unmatched_outcome():
 
     assert outcome_payload["matched"] is False
     assert await service.get_recent_records(limit=5) == []
+
+
+@pytest.mark.asyncio
+async def test_ai_telemetry_service_returns_filtered_review_payload():
+    service = AITelemetryService(max_records=5)
+
+    await service.record_response(
+        response_id="resp-1",
+        provider="openrouter",
+        model="openrouter/free",
+        mode="app_default",
+        latency_ms=700,
+        used_source_ids=["VCI-PRICES"],
+        artifact_ids=["price_trend_chart"],
+        action_ids=[],
+        reasoning_events=[],
+        current_symbol="VCI",
+        prompt_preview="Analyze VCI",
+    )
+    await service.record_feedback(
+        response_id="resp-1",
+        vote="down",
+        surface="sidebar",
+        reasons=["wrong_data", "generic_answer"],
+    )
+    await service.record_outcome(
+        response_id="resp-1",
+        kind="artifact",
+        item_id="price_trend_chart",
+        status="liked",
+        surface="sidebar",
+    )
+
+    payload = await service.get_review_payload(vote="down", symbol="VCI")
+
+    assert payload["count"] == 1
+    assert payload["summary"]["negative_feedback"] == 1
+    assert payload["summary"]["artifact_ratings"]["liked"] == 1

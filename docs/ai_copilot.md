@@ -11,12 +11,10 @@ VNIBB does not use Gemini in the active copilot path anymore.
 The active copilot flow is:
 
 1. Frontend sends widget-aware chat context to `POST /api/v1/copilot/chat/stream`
-2. Backend builds Appwrite-first market context with Postgres fallback
-3. Backend sends a structured prompt to the configured provider
-4. Model returns JSON with:
-   - `answer_markdown`
-   - `used_source_ids`
-5. Backend validates cited source IDs against `source_catalog`
+2. Backend builds VNIBB database-first market context with Postgres fallback
+3. Backend sends a context-aware prompt to the configured provider
+4. Model answers naturally in Markdown
+5. Backend validates any cited source IDs against `source_catalog`
 6. Backend emits SSE events for:
    - reasoning/status
    - markdown chunks
@@ -81,7 +79,7 @@ VNIBB mirrors that by sending:
 - current symbol
 - active tab
 - widget snapshots
-- Appwrite-first server context
+- VNIBB database-first server context
 
 Browser widget data remains lower-priority than backend data.
 
@@ -96,7 +94,7 @@ Browser widget data remains lower-priority than backend data.
 - OpenRouter free-model detection and admin runtime status checks
 - backend prompt library service with default and shared prompt support
 - shared prompt versioning and history
-- Appwrite-first context assembly for:
+- VNIBB database-first context assembly for:
   - stock profile
   - prices
   - ratios
@@ -120,25 +118,42 @@ Browser widget data remains lower-priority than backend data.
 ### Frontend
 
 - browser-local AI settings
+- public runtime-model visibility for app-default mode
 - OpenRouter model suggestions and searchable model selection
 - OpenRouter free-model helper link under model selection
 - integrated VniAgent prompt library in the main agent panel
 - admin-managed shared prompt library editing
 - admin-managed shared prompt version history
+- admin telemetry review filters and summary metrics
 - authenticated SSE chat transport
 - inline table artifact rendering in copilot surfaces
 - inline chart artifact rendering in copilot surfaces
 - action confirmation panels in copilot surfaces
 - thumbs up/down feedback bars in copilot surfaces
+- thumbs-down reason categories and optional feedback notes
 - evidence panel in sidebar copilot, widget copilot, and AI analysis widget
 - widget-linked evidence actions and artifact-to-widget promotion
 - reasoning/status display while the answer is being prepared
+- document/PDF attachment support in the main VniAgent sidebar
+- advanced artifacts/actions/evidence are collapsed behind per-message details in the main sidebar flow
 
 Current telemetry note:
 
-- recent AI telemetry review is currently process-local and in-memory
 - recent AI telemetry review is available through the admin review panel
 - AI telemetry now persists durably through the application metadata store across restarts
+- admin review now supports filters and summary metrics for acceptance, latency, and artifact ratings
+
+Current document context note:
+
+- VniAgent supports PDF, TXT, MD, and JSON uploads in the sidebar flow
+- uploaded documents are parsed into temporary chat context and sent alongside VNIBB market context
+- PDF support requires `pypdf` and multipart upload support in the backend runtime
+
+Current stability note:
+
+- VniAgent currently favors freer Markdown responses instead of forcing a rigid JSON answer contract
+- optional features remain available, but the current focus is answer quality and runtime reliability
+- low-value runtime toggles were moved out of the main sidebar to keep the chat surface cleaner
 
 ## What We Explicitly Did Not Copy
 

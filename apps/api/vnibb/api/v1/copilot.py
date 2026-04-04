@@ -10,11 +10,12 @@ Provides:
 import json
 from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from vnibb.services.ai_context_service import ai_context_service
+from vnibb.services.ai_document_service import ai_document_service
 from vnibb.services.ai_model_catalog_service import ai_model_catalog_service
 from vnibb.services.ai_prompt_library_service import ai_prompt_library_service
 from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
@@ -113,6 +114,15 @@ class ModelCatalogResponse(BaseModel):
     models: list[ModelOption]
 
 
+class RuntimeConfigResponse(BaseModel):
+    provider: str
+    model: str
+
+
+class DocumentContextResponse(BaseModel):
+    document: dict[str, Any]
+
+
 class SharedPromptRequest(BaseModel):
     prompts: list[PromptTemplate]
 
@@ -122,6 +132,7 @@ class FeedbackRequest(BaseModel):
     vote: Literal["up", "down"]
     surface: Literal["sidebar", "widget", "analysis"]
     notes: str | None = None
+    reasons: list[str] | None = None
 
 
 class FeedbackResponse(BaseModel):
@@ -133,7 +144,7 @@ class OutcomeRequest(BaseModel):
     responseId: str
     kind: Literal["artifact", "action"]
     itemId: str
-    status: Literal["shown", "executed", "failed"]
+    status: Literal["shown", "executed", "failed", "liked", "disliked"]
     surface: Literal["sidebar", "widget", "analysis"]
     notes: str | None = None
 
@@ -169,7 +180,7 @@ async def chat_stream(request: ChatStreamRequest):
                     runtime_config.get("provider")
                 )
                 request_settings["model"] = str(runtime_config.get("model") or "").strip()
-            yield f"data: {json.dumps({'reasoning': {'eventType': 'INFO', 'message': 'Building Appwrite-first runtime context'}})}\n\n"
+            yield f"data: {json.dumps({'reasoning': {'eventType': 'INFO', 'message': 'Building VNIBB database runtime context'}})}\n\n"
 
             context_dict = {}
             if request.context:
@@ -252,6 +263,7 @@ async def submit_feedback(request: FeedbackRequest):
         vote=request.vote,
         surface=request.surface,
         notes=request.notes,
+        reasons=request.reasons,
     )
     return FeedbackResponse(accepted=True, matched=bool(payload.get("matched")))
 
@@ -288,6 +300,26 @@ async def get_models(provider: Literal["openrouter"] = "openrouter"):
         ModelOption(**model) for model in await ai_model_catalog_service.get_openrouter_models()
     ]
     return ModelCatalogResponse(models=models)
+
+
+@router.get("/runtime", response_model=RuntimeConfigResponse)
+async def get_runtime_config():
+    config = await ai_runtime_config_service.get_runtime_config()
+    return RuntimeConfigResponse(
+        provider=str(config.get("provider") or "openrouter"),
+        model=str(config.get("model") or "openrouter/free"),
+    )
+
+
+@router.post("/document-context", response_model=DocumentContextResponse)
+async def create_document_context(file: UploadFile = File(...)):
+    content = await file.read()
+    document = await ai_document_service.ingest_document(
+        filename=file.filename or "document",
+        content_type=file.content_type,
+        content=content,
+    )
+    return DocumentContextResponse(document=document)
 
 
 @router.get("/suggestions", response_model=CopilotSuggestionResponse)

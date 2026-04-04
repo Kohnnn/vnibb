@@ -15,6 +15,12 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { useUnit } from '@/contexts/UnitContext';
 import {
+    formatFinancialPeriodLabel,
+    matchesFinancialQuarterSelection,
+    normalizeFinancialPeriod,
+    periodSortKey,
+} from '@/lib/financialPeriods';
+import {
     formatNumber,
     formatPercent,
     formatUnitValuePlain,
@@ -89,56 +95,22 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
             ? RATIO_METRIC_KEYS
             : STATEMENT_METRIC_KEYS[activeTab as 'income_statement' | 'balance_sheet' | 'cash_flow'];
 
-        // Sort chronological for growth calculation
-        const sortedData = [...rawData].sort((a: any, b: any) => {
-            return periodSortKey(a?.period) - periodSortKey(b?.period);
-        });
-
-        const resolvePeriod = (row: any, index: number, total: number) => {
-            const candidate =
-                row?.period ??
-                row?.fiscal_year ??
-                row?.fiscalYear ??
-                row?.year ??
-                row?.yearReport;
-            if (!candidate) return null;
-            const label = String(candidate).trim();
-            if (!label || label.toLowerCase() === 'unknown' || label.toLowerCase() === 'nan') {
-                return null;
-            }
-
-            if (periodMode === 'year') {
-                const yearMatch = label.match(/(20\d{2})/);
-                return yearMatch ? yearMatch[1] : label;
-            }
-
-            if (periodMode === 'ttm') {
-                const upper = label.toUpperCase();
-                if (upper.includes('TTM')) return 'TTM';
-                return upper;
-            }
-
-            const upper = label.toUpperCase();
-            const quarterMatch = upper.match(/Q([1-4])/);
-            if (quarterMatch) {
-                const yearMatch = upper.match(/(20\d{2})/);
-                const year = yearMatch ? yearMatch[1] : String(new Date().getFullYear() - Math.floor((total - index - 1) / 4));
-                return `Q${quarterMatch[1]}-${year}`;
-            }
-
-            const numeric = Number(upper);
-            if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
-                const quarter = ((Math.max(1, numeric) - 1) % 4) + 1;
-                const year = new Date().getFullYear() - Math.floor((Math.max(1, total) - Math.max(1, numeric)) / 4);
-                return `Q${quarter}-${year}`;
-            }
-
-            return upper;
-        };
-
         const normalizedRows = rawData
-            .map((row: any, index: number) => ({ ...row, __period: resolvePeriod(row, index, rawData.length) }))
+            .map((row: any) => ({
+                ...row,
+                __period: normalizeFinancialPeriod(
+                    row?.period ?? row?.fiscal_year ?? row?.fiscalYear ?? row?.year ?? row?.yearReport
+                ),
+            }))
             .filter((row: any) => Boolean(row.__period));
+
+        const sortedData = [...normalizedRows].sort((a: any, b: any) => {
+            return periodSortKey(a?.__period) - periodSortKey(b?.__period);
+        });
+        const sortedPeriods = sortedData
+            .map((row: any) => row.__period)
+            .filter((periodValue: string | null | undefined): periodValue is string => Boolean(periodValue));
+        const sortedPeriodIndex = new Map(sortedPeriods.map((periodValue, index) => [periodValue, index]));
 
         let displayRows = normalizedRows;
         if (periodMode === 'quarter') {
@@ -164,8 +136,10 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                     }
                     displayRows = ttmRows;
                 }
-            } else if (period !== 'FY') {
-                displayRows = quarterRows.filter((row: any) => String(row.__period).startsWith(`${period}-`));
+            } else {
+                displayRows = quarterRows.filter((row: any) =>
+                    matchesFinancialQuarterSelection(row.__period, period as 'Q1' | 'Q2' | 'Q3' | 'Q4')
+                );
             }
         } else if (periodMode === 'ttm') {
             displayRows = normalizedRows.filter((row: any) => String(row.__period).toUpperCase().includes('TTM'));
@@ -204,11 +178,8 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                             return;
                         }
                         const currentVal = d[m.key];
-                        // Find previous period for growth
-                        const prevIndex = sortedData.findIndex((sd: any, idx: number) => {
-                            return resolvePeriod(sd, idx, sortedData.length) === periodLabel;
-                        }) - 1;
-                        const prevVal = prevIndex >= 0 ? (sortedData[prevIndex] as any)[m.key] : null;
+                        const periodIndex = sortedPeriodIndex.get(periodLabel) ?? -1;
+                        const prevVal = periodIndex > 0 ? (sortedData[periodIndex - 1] as any)?.[m.key] : null;
 
                     let growth = null;
                     if (prevVal && prevVal !== 0 && currentVal !== null) {
@@ -256,12 +227,16 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
     const unitLegend = useMemo(() => getUnitLegend(tableScale, unitConfig), [tableScale, unitConfig]);
     const denseColumns = useMemo<DenseTableColumn[]>(() => {
         if (!tableData) return []
-        return tableData.periods.map((periodLabel) => ({
+        return tableData.periods.map((periodLabel, index) => ({
             key: periodLabel,
-            label: periodLabel,
+            label: formatFinancialPeriodLabel(periodLabel, {
+                mode: periodMode,
+                index,
+                total: tableData.periods.length,
+            }),
             align: 'right',
         }))
-    }, [tableData])
+    }, [periodMode, tableData])
 
     const denseRows = useMemo<DenseTableRow[]>(() => {
         if (!tableData) return []
@@ -398,16 +373,6 @@ function formatRatio(value: number | null | undefined): string {
 
 function formatPct(value: number | null | undefined): string {
     return formatPercent(value, { decimals: 2, input: 'auto', clamp: 'margin' });
-}
-
-function periodSortKey(period?: string): number {
-    if (!period) return 0;
-    const upper = period.toUpperCase();
-    const yearMatch = upper.match(/(20\d{2})/);
-    const year = yearMatch ? Number(yearMatch[1]) : 0;
-    const quarterMatch = upper.match(/Q([1-4])/);
-    const quarter = quarterMatch ? Number(quarterMatch[1]) : 0;
-    return year * 10 + quarter;
 }
 
 export const FinancialsWidget = memo(FinancialsWidgetComponent);

@@ -104,9 +104,9 @@ def test_build_messages_includes_citation_rules_and_source_catalog():
     )
 
     assert len(messages) >= 4
-    assert "Return only valid JSON" in messages[1]["content"]
-    assert "used_source_ids" in messages[1]["content"]
-    assert "server will append a normalized Sources section" in messages[1]["content"]
+    assert "Answer naturally in Markdown" in messages[1]["content"]
+    assert "VNIBB database context" in messages[1]["content"]
+    assert "source IDs like [VNM-PRICES]" in messages[1]["content"]
     assert '"id": "VNM-PRICES"' in messages[2]["content"]
     assert messages[-1] == {"role": "user", "content": "Analyze VNM"}
 
@@ -134,7 +134,7 @@ def test_render_validated_markdown_filters_unknown_sources_and_appends_normalize
     assert rendered["used_source_ids"] == ["VNM-PRICES"]
     assert "## Sources" in rendered["final_markdown"]
     assert (
-        "`[VNM-PRICES]` Price history snapshot (appwrite, as of 2026-04-03)"
+        "`[VNM-PRICES]` Price history snapshot (VNIBB database, as of 2026-04-03)"
         in rendered["final_markdown"]
     )
 
@@ -152,4 +152,4 @@ def test_render_validated_markdown_strips_model_sources_heading_and_uses_fallbac
 
     assert rendered["answer_markdown"] == "Summary body."
     assert rendered["used_source_ids"] == []
-    assert rendered["final_markdown"].endswith("## Sources\n- No validated sources cited.")
+    assert rendered["final_markdown"] == "Summary body."

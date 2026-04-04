@@ -295,9 +295,9 @@ export function TabBar(_props: TabBarProps) {
     return (
         <>
             <div data-tour="tab-bar" className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80" {...swipeHandlers}>
-                <div className="flex items-center gap-0.5 px-3">
+                <div className="flex items-center gap-0.5 px-2 sm:px-3">
                     {/* Tabs */}
-                    <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
+                    <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
                         {sortedTabs.map((tab, index) => {
                             const isActive = activeTab?.id === tab.id;
                             const isEditing = editingTabId === tab.id;
@@ -393,7 +393,7 @@ export function TabBar(_props: TabBarProps) {
                             <button
                                 onClick={handleAddTab}
                                 disabled={reachedTabLimit || isCreatingTab}
-                                className={`p-1.5 rounded transition-colors ml-1 ${
+                                className={`ml-1 shrink-0 rounded p-1.5 transition-colors ${
                                     reachedTabLimit || isCreatingTab
                                         ? 'text-[var(--text-muted)]/50 cursor-not-allowed'
                                         : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60'
@@ -405,7 +405,7 @@ export function TabBar(_props: TabBarProps) {
 
                             <button
                                 onClick={() => setIsManageModalOpen(true)}
-                                className="p-1.5 rounded transition-colors text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60"
+                                className="hidden shrink-0 rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-secondary)] sm:block"
                                 title="Manage tabs"
                             >
                                 <Settings2 size={14} />
@@ -417,7 +417,7 @@ export function TabBar(_props: TabBarProps) {
                     <div className="flex-1" />
 
                     {/* Keyboard shortcuts hint */}
-                    <div className="hidden md:flex items-center gap-2 text-[10px] text-[var(--text-muted)] mr-2">
+                    <div className="mr-2 hidden shrink-0 items-center gap-2 text-[10px] text-[var(--text-muted)] xl:flex">
                         <span className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded">⌘1-9</span>
                         <span>quick switch</span>
                         {reachedTabLimit && <span className="text-amber-400">max {MAX_TABS} tabs</span>}

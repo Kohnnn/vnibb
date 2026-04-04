@@ -49,11 +49,22 @@ Current config-backed widget state includes:
 - `unified_financials`, `income_statement`, `balance_sheet`, `cash_flow`, `financial_ratios`, and `financial_snapshot` now render periods in chronological ascending order.
 - These tables auto-scroll to the newest periods on first render so the latest data is visible by default while older history remains accessible to the left.
 - Growth badges still compare current values against the older adjacent period.
+- Quarter identities should be treated as canonicalized before display or filtering; mixed raw forms should not produce duplicate visible quarter columns.
 
 ## History Caps
 
 - Current annual and quarterly caps are intentionally retained to avoid first-load regressions and oversized financial payloads.
 - Broader 10Y normalization is a planned future optimization, not part of the current default history window.
+
+## Workspace Persistence
+
+- The app stores the last active dashboard ID and the last active tab per dashboard locally.
+- This is separate from the `defaultTab` preference, which remains a preference fallback rather than the sole source of startup navigation.
+
+## Low-Resolution UX
+
+- On tighter desktop viewports, VniAgent should overlay instead of permanently shrinking the main workspace.
+- Header and tab-strip controls should prefer collapsing, wrapping, or hiding labels earlier rather than forcing horizontal crowding.
 
 ## Template Rules
 

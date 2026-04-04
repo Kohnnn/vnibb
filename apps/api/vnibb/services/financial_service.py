@@ -18,6 +18,73 @@ YEAR_PATTERN = re.compile(r"(20\d{2})")
 QUARTER_PATTERN = re.compile(r"Q([1-4])")
 
 
+def normalize_statement_period(
+    period_value: str | None,
+    *,
+    fiscal_year: int | None = None,
+    fiscal_quarter: int | None = None,
+    period_type: str | None = None,
+) -> str | None:
+    text = str(period_value or "").strip().upper()
+    normalized_period_type = str(period_type or "").strip().lower()
+
+    year = fiscal_year if fiscal_year and 1900 <= fiscal_year <= 2100 else None
+    quarter = fiscal_quarter if fiscal_quarter and 1 <= fiscal_quarter <= 4 else None
+
+    if text:
+        if text == "TTM" or "TTM" in text:
+            if year is None:
+                year_match = YEAR_PATTERN.search(text)
+                year = int(year_match.group(1)) if year_match else None
+            return f"TTM-{year}" if year is not None else "TTM"
+
+        if text.endswith("YTD") or "YTD" in text:
+            if year is None:
+                year_match = YEAR_PATTERN.search(text)
+                year = int(year_match.group(1)) if year_match else None
+            return f"{year} YTD" if year is not None else "YTD"
+
+        if re.match(r"^20\d{2}$", text):
+            return text
+
+        quarter_first = re.match(r"^Q([1-4])[-_/ ]?(20\d{2})$", text)
+        if quarter_first:
+            return f"Q{quarter_first.group(1)}-{quarter_first.group(2)}"
+
+        year_first = re.match(r"^(20\d{2})[-_/ ]?Q([1-4])$", text)
+        if year_first:
+            return f"Q{year_first.group(2)}-{year_first.group(1)}"
+
+        alt_quarter = re.match(r"^([1-4])[/_-](20\d{2})$", text)
+        if alt_quarter:
+            return f"Q{alt_quarter.group(1)}-{alt_quarter.group(2)}"
+
+        year_match = YEAR_PATTERN.search(text)
+        quarter_match = QUARTER_PATTERN.search(text)
+        if year_match:
+            year = int(year_match.group(1))
+        if quarter_match:
+            quarter = int(quarter_match.group(1))
+
+        if text.isdigit():
+            numeric = int(text)
+            if 1900 <= numeric <= 2100:
+                return str(numeric)
+            if 1 <= numeric <= 4 and year is not None:
+                quarter = numeric
+
+    if year is None:
+        return None
+
+    if quarter is not None and normalized_period_type != "year":
+        return f"Q{quarter}-{year}"
+
+    if normalized_period_type == "quarter" and quarter is not None:
+        return f"Q{quarter}-{year}"
+
+    return str(year)
+
+
 def _is_control_flow_exception(exc: BaseException) -> bool:
     return isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, GeneratorExit))
 
@@ -33,17 +100,60 @@ def _provider_timeout_budget(reserve_seconds: int = 5) -> float:
 
 
 def _extract_period_year(period: str | None) -> int | None:
-    if not period:
+    normalized = normalize_statement_period(period)
+    if not normalized:
         return None
-    match = YEAR_PATTERN.search(period.upper())
+    match = YEAR_PATTERN.search(normalized)
     return int(match.group(1)) if match else None
 
 
 def _extract_period_quarter(period: str | None) -> int | None:
-    if not period:
+    normalized = normalize_statement_period(period)
+    if not normalized:
         return None
-    match = QUARTER_PATTERN.search(period.upper())
+    match = QUARTER_PATTERN.search(normalized)
     return int(match.group(1)) if match else None
+
+
+def _merge_statement_row_pair(
+    primary: FinancialStatementData,
+    secondary: FinancialStatementData,
+) -> FinancialStatementData:
+    payload = primary.model_dump(mode="json")
+    secondary_payload = secondary.model_dump(mode="json")
+    for field_name in FinancialStatementData.model_fields:
+        if payload.get(field_name) is None and secondary_payload.get(field_name) is not None:
+            payload[field_name] = secondary_payload[field_name]
+    return FinancialStatementData.model_validate(payload)
+
+
+def _normalize_statement_rows(
+    rows: list[FinancialStatementData],
+    *,
+    period_type: str | None,
+) -> list[FinancialStatementData]:
+    normalized_rows: dict[str, FinancialStatementData] = {}
+
+    for row in rows:
+        normalized_period = normalize_statement_period(
+            row.period,
+            period_type=period_type,
+        )
+        if normalized_period is None:
+            continue
+
+        candidate = row.model_copy(update={"period": normalized_period})
+        existing = normalized_rows.get(normalized_period)
+        normalized_rows[normalized_period] = (
+            candidate if existing is None else _merge_statement_row_pair(existing, candidate)
+        )
+
+    return sorted(
+        normalized_rows.values(),
+        key=lambda item: (_extract_period_year(item.period) or 0) * 10
+        + (_extract_period_quarter(item.period) or 0),
+        reverse=True,
+    )
 
 
 def _build_ytd_snapshot(
@@ -156,6 +266,8 @@ async def _inject_latest_ytd_row(
         logger.debug("YTD quarter fetch skipped for %s (%s): %s", symbol, statement_type, exc)
         return annual_rows
 
+    quarter_rows = _normalize_statement_rows(quarter_rows, period_type="quarter")
+
     latest_annual_year = max(
         (_extract_period_year(row.period) or 0 for row in annual_rows),
         default=0,
@@ -246,19 +358,11 @@ async def get_financials_with_ttm(
         )
         return []
 
+    data = _normalize_statement_rows(data, period_type=actual_period)
+
     if is_specific_quarter:
-        # Filter for specific quarter across years
-        q_num = normalized_period[1]
-
-        def is_matching_quarter(period_value: str) -> bool:
-            if not period_value:
-                return False
-            upper = period_value.upper()
-            if f"Q{q_num}" in upper:
-                return True
-            return upper.startswith(f"{q_num}/") or upper.startswith(f"{q_num}-")
-
-        filtered = [d for d in data if is_matching_quarter(d.period)]
+        q_num = int(normalized_period[1])
+        filtered = [d for d in data if _extract_period_quarter(d.period) == q_num]
         filtered.sort(
             key=lambda row: (_extract_period_year(row.period) or 0) * 10
             + (_extract_period_quarter(row.period) or 0),
@@ -300,6 +404,8 @@ async def calculate_ttm(symbol: str, statement_type: str) -> list[FinancialState
             exc,
         )
         return []
+
+    quarters = _normalize_statement_rows(quarters, period_type="quarter")
 
     if len(quarters) < 4:
         logger.warning(f"Not enough quarterly data for TTM calculation for {symbol}")

@@ -71,7 +71,7 @@ function appendSourcesForExport(message: Message): string {
     }
 
     const sourceLines = message.sources.map((source) => {
-        const meta = [source.source, source.asOf ? `as of ${source.asOf}` : null]
+        const meta = [source.source === 'appwrite' ? 'VNIBB database' : source.source, source.asOf ? `as of ${source.asOf}` : null]
             .filter(Boolean)
             .join(', ');
         return `- [${source.id}] ${source.label || source.kind || 'Source'}${meta ? ` (${meta})` : ''}`;
@@ -262,7 +262,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `copilot-chat-${new Date().toISOString().slice(0, 10)}.md`;
+        a.download = `vniagent-chat-${new Date().toISOString().slice(0, 10)}.md`;
         a.click();
         URL.revokeObjectURL(url);
     };

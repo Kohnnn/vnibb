@@ -26,7 +26,7 @@ interface CopilotEvidencePanelProps {
 function formatSourceMeta(source: CopilotSourceRef): string {
   const parts: string[] = [];
   if (source.source) {
-    parts.push(source.source);
+    parts.push(source.source === 'appwrite' ? 'VNIBB database' : source.source);
   }
   if (source.symbol) {
     parts.push(source.symbol);

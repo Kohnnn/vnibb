@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
-import { ExternalLink, Plus } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, ExternalLink, Loader2, Plus, ThumbsDown, ThumbsUp } from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -248,6 +248,8 @@ function ArtifactCard({
     () => (intent ? findMatchingWidgetTarget(state, intent) : null),
     [intent, state],
   );
+  const [ratingStatus, setRatingStatus] = useState<'liked' | 'disliked' | undefined>(undefined)
+  const [pendingRating, setPendingRating] = useState<'liked' | 'disliked' | null>(null)
 
   const recordOutcome = async (status: 'executed' | 'failed', notes?: string) => {
     if (!responseMeta?.responseId) return;
@@ -262,6 +264,25 @@ function ArtifactCard({
       })
     } catch {
       // Ignore telemetry failures in UI.
+    }
+  }
+
+  const rateArtifact = async (status: 'liked' | 'disliked') => {
+    if (!responseMeta?.responseId) return
+    try {
+      setPendingRating(status)
+      await submitCopilotOutcome({
+        responseId: responseMeta.responseId,
+        kind: 'artifact',
+        itemId: artifact.id,
+        status,
+        surface,
+      })
+      setRatingStatus(status)
+    } catch {
+      // ignore telemetry failures in UI
+    } finally {
+      setPendingRating(null)
     }
   }
 
@@ -310,6 +331,24 @@ function ArtifactCard({
               <div className="text-[10px] text-blue-300">
                 {artifact.type === 'chart' ? artifact.chartType : artifact.type}
                 {artifact.sourceIds?.length ? ` · ${artifact.sourceIds.length} source refs` : ''}
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { void rateArtifact('liked') }}
+                  className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-500/20"
+                >
+                  {pendingRating === 'liked' ? <Loader2 size={11} className="animate-spin" /> : ratingStatus === 'liked' ? <Check size={11} /> : <ThumbsUp size={11} />}
+                  Useful
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void rateArtifact('disliked') }}
+                  className="inline-flex items-center gap-1 rounded-md border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-[10px] font-semibold text-rose-200 hover:bg-rose-500/20"
+                >
+                  {pendingRating === 'disliked' ? <Loader2 size={11} className="animate-spin" /> : ratingStatus === 'disliked' ? <Check size={11} /> : <ThumbsDown size={11} />}
+                  Not useful
+                </button>
               </div>
               {intent && (
                 <div className="flex flex-wrap justify-end gap-2">
