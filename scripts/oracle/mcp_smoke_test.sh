@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-${1:-http://127.0.0.1}}"
+BASE_URL="${BASE_URL:-${1:-http://127.0.0.1:8001}}"
 BASE_URL="${BASE_URL%/}"
 MCP_URL="${MCP_URL:-${BASE_URL}/mcp}"
-HEALTH_URL="${HEALTH_URL:-${BASE_URL}/mcp-health}"
+
+if [[ -z "${HEALTH_URL:-}" ]]; then
+  if [[ "$BASE_URL" =~ :[0-9]+$ ]]; then
+    HEALTH_URL="${BASE_URL}/health"
+  else
+    HEALTH_URL="${BASE_URL}/mcp-health"
+  fi
+fi
+
 TIMEOUT="${TIMEOUT:-15}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.oracle.yml}"
 MCP_SHARED_TOKEN="${VNIBB_MCP_SHARED_BEARER_TOKEN:-}"
@@ -101,11 +109,16 @@ async def main() -> int:
                     print("MCP tool call returned an error")
                     return 1
                 payload = result.structuredContent or {}
-                print(json.dumps({
-                    "status": "ok",
-                    "tool_count": len(tools.tools),
-                    "connectivity": payload.get("connectivity"),
-                }, indent=2))
+                print(
+                    json.dumps(
+                        {
+                            "status": "ok",
+                            "tool_count": len(tools.tools),
+                            "connectivity": payload.get("connectivity"),
+                        },
+                        indent=2,
+                    )
+                )
                 return 0
 
 
@@ -143,11 +156,16 @@ async def main() -> int:
                     print("MCP tool call returned an error")
                     return 1
                 payload = result.structuredContent or {}
-                print(json.dumps({
-                    "status": "ok",
-                    "tool_count": len(tools.tools),
-                    "connectivity": payload.get("connectivity"),
-                }, indent=2))
+                print(
+                    json.dumps(
+                        {
+                            "status": "ok",
+                            "tool_count": len(tools.tools),
+                            "connectivity": payload.get("connectivity"),
+                        },
+                        indent=2,
+                    )
+                )
                 return 0
 
 

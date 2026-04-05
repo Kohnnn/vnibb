@@ -190,6 +190,7 @@ OCI runtime model in this branch:
 
 - `api` continues serving FastAPI on internal `8000`
 - `mcp` serves the read-only MCP on internal `8001`
+- `mcp` is also published to the OCI host on `127.0.0.1:8001` by default for host-level testing outside Docker
 - `caddy` routes normal API traffic to `api`
 - `caddy` routes `/mcp*` to the MCP service
 
@@ -197,6 +198,11 @@ Public paths on the existing API hostname:
 
 - MCP endpoint: `https://api.example.com/mcp`
 - MCP health: `https://api.example.com/mcp-health`
+
+Host-level direct paths on OCI:
+
+- MCP endpoint: `http://127.0.0.1:8001/mcp`
+- MCP health: `http://127.0.0.1:8001/health`
 
 Recommended OCI env values:
 
@@ -206,7 +212,11 @@ VNIBB_MCP_PORT=8001
 VNIBB_MCP_TRANSPORT=streamable-http
 VNIBB_MCP_SHARED_BEARER_TOKEN=replace-with-long-random-value
 MCP_UPSTREAM=mcp:8001
+MCP_PUBLIC_BIND=127.0.0.1
+MCP_PUBLIC_PORT=8001
 ```
+
+Keep `MCP_PUBLIC_BIND=127.0.0.1` if you only want host-level access outside Docker. Change it to `0.0.0.0` only if you intentionally want to expose the raw MCP port beyond the OCI host.
 
 ## VniAgent integration guidance
 

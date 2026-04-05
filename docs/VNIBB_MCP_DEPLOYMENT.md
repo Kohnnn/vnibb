@@ -14,6 +14,7 @@ The deployed topology is:
 
 - `api` serves the FastAPI backend on internal `8000`
 - `mcp` serves the read-only MCP companion on internal `8001`
+- `mcp` is also published on the OCI host as `127.0.0.1:8001` by default for host-level smoke checks outside Docker
 - `caddy` reverse proxies:
   - normal API traffic to `api`
   - `/mcp*` traffic to `mcp`
@@ -40,6 +41,8 @@ VNIBB_MCP_URL=http://mcp:8001/mcp
 VNIBB_MCP_TIMEOUT_SECONDS=20
 VNIBB_MCP_SHARED_BEARER_TOKEN=replace-with-long-random-value
 MCP_UPSTREAM=mcp:8001
+MCP_PUBLIC_BIND=127.0.0.1
+MCP_PUBLIC_PORT=8001
 ```
 
 Important notes:
@@ -47,6 +50,8 @@ Important notes:
 - `VNIBB_MCP_URL` is used by the backend so VniAgent can call the MCP sidecar server-side
 - `VNIBB_MCP_SHARED_BEARER_TOKEN` protects remote MCP HTTP access when requests arrive through Caddy
 - the backend and MCP service should share the same Appwrite runtime env so they read the same data source
+- `MCP_PUBLIC_BIND=127.0.0.1` makes the raw MCP HTTP port reachable on the OCI host outside Docker without exposing it publicly on the internet
+- if you intentionally want a public raw MCP port, change `MCP_PUBLIC_BIND=0.0.0.0` and open the security rule explicitly, but prefer the Caddy-routed `/mcp` endpoint whenever possible
 
 ## Public endpoints
 
@@ -54,6 +59,13 @@ Assuming the backend hostname is `https://api.example.com`:
 
 - MCP endpoint: `https://api.example.com/mcp`
 - MCP health: `https://api.example.com/mcp-health`
+
+Host-level direct endpoints on OCI:
+
+- MCP endpoint: `http://127.0.0.1:8001/mcp`
+- MCP health: `http://127.0.0.1:8001/health`
+
+The direct port is plain HTTP. Use it for on-host testing and operational smoke checks. Use the Caddy path for public TLS access.
 
 ## Deploy sequence
 
@@ -73,6 +85,7 @@ Run the dedicated smoke check:
 ```bash
 bash scripts/oracle/mcp_smoke_test.sh
 BASE_URL=https://api.example.com bash scripts/oracle/mcp_smoke_test.sh
+BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
 ```
 
 If the deployment is protected by a shared bearer token, export it first:
@@ -84,6 +97,7 @@ export VNIBB_MCP_SHARED_BEARER_TOKEN=replace-with-long-random-value
 What success looks like:
 
 - `/mcp-health` returns `200`
+- or `/health` returns `200` when using the direct host port
 - MCP initialization succeeds
 - tool listing succeeds
 - `get_appwrite_status` returns successfully
