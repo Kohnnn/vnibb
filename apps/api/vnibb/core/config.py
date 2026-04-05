@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     api_request_timeout_seconds: int = 30
     admin_api_key: Optional[str] = None
+    vnibb_mcp_host: str = "0.0.0.0"
+    vnibb_mcp_port: int = 8001
+    vnibb_mcp_transport: str = "stdio"
+    vnibb_mcp_url: Optional[str] = None
+    vnibb_mcp_timeout_seconds: int = 20
+    vnibb_mcp_shared_bearer_token: Optional[str] = None
     cors_origins: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -341,6 +347,18 @@ class Settings(BaseSettings):
         if backend not in valid_backends:
             raise ValueError(f"Invalid DATA_BACKEND '{v}'. Must be one of: {valid_backends}")
         return backend
+
+    @field_validator("vnibb_mcp_transport")
+    @classmethod
+    def validate_vnibb_mcp_transport(cls, v: str) -> str:
+        """Validate supported MCP transports for the dedicated VNIBB server."""
+        valid_transports = {"stdio", "streamable-http"}
+        transport = (v or "stdio").strip().lower()
+        if transport not in valid_transports:
+            raise ValueError(
+                f"Invalid VNIBB_MCP_TRANSPORT '{v}'. Must be one of: {valid_transports}"
+            )
+        return transport
 
     @field_validator("vnstock_source")
     @classmethod
