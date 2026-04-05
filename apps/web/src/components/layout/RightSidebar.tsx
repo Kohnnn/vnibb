@@ -2,7 +2,7 @@
 'use client';
 
 import { MessageSquare, ChevronRight } from 'lucide-react';
-import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 
 interface RightSidebarProps {
     isOpen: boolean;
@@ -21,34 +21,39 @@ export function RightSidebar({
     onWidthChange,
     children
 }: RightSidebarProps) {
-    const handleResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const [isResizing, setIsResizing] = useState(false);
+
+    const handleResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
         if (overlay || !isOpen || !onWidthChange) return;
 
         event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
         const startX = event.clientX;
         const startWidth = width;
 
-        const handleMouseMove = (moveEvent: MouseEvent) => {
+        const handlePointerMove = (moveEvent: PointerEvent) => {
             const nextWidth = startWidth - (moveEvent.clientX - startX);
             onWidthChange(nextWidth);
         };
 
-        const handleMouseUp = () => {
+        const handlePointerUp = () => {
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
+            setIsResizing(false);
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
         };
 
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
+        setIsResizing(true);
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
     };
 
     const asideClassName = overlay
         ? `fixed top-12 bottom-0 right-0 z-40 bg-[var(--bg-secondary)] border-l border-[var(--border-color)] transition-transform duration-300 ease-in-out flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`
-        : `relative h-full bg-[var(--bg-secondary)] border-l border-[var(--border-color)] flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`;
+        : `relative h-full bg-[var(--bg-secondary)] border-l border-[var(--border-color)] flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)] ${isResizing ? 'transition-none' : 'transition-[width] duration-150'}`;
 
     const asideStyle: CSSProperties = overlay
         ? {
@@ -69,7 +74,7 @@ export function RightSidebar({
             {!overlay && isOpen && onWidthChange ? (
                 <div
                     className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-blue-500/30"
-                    onMouseDown={handleResizeStart}
+                    onPointerDown={handleResizeStart}
                     role="separator"
                     aria-orientation="vertical"
                     aria-label="Resize VniAgent sidebar"
