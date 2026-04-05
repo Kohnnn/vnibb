@@ -11,11 +11,13 @@ VNIBB does not use Gemini in the active copilot path anymore.
 The active copilot flow is:
 
 1. Frontend sends widget-aware chat context to `POST /api/v1/copilot/chat/stream`
-2. Backend builds VNIBB database-first market context with Postgres fallback
-3. Backend sends a context-aware prompt to the configured provider
-4. Model answers naturally in Markdown
-5. Backend validates any cited source IDs against `source_catalog`
-6. Backend emits SSE events for:
+2. Backend builds VNIBB market context and prefers the dedicated `vnibb-mcp` read path when `VNIBB_MCP_URL` is configured
+3. `vnibb-mcp` serves curated Appwrite-backed reads for selected VniAgent context requests
+4. If MCP is unavailable, backend falls back to direct Appwrite/Postgres context assembly
+5. Backend sends a context-aware prompt to the configured provider
+6. Model answers naturally in Markdown
+7. Backend validates any cited source IDs against `source_catalog`
+8. Backend emits SSE events for:
    - reasoning/status
    - markdown chunks
    - normalized evidence metadata on `done`
@@ -23,7 +25,7 @@ The active copilot flow is:
    - inline chart artifacts on `done`
    - suggested dashboard actions on `done`
    - response metadata on `done`
-7. Frontend renders:
+9. Frontend renders:
    - answer body
    - inline table artifacts
    - inline chart artifacts
@@ -31,6 +33,19 @@ The active copilot flow is:
    - thumbs up/down feedback controls
    - collapsible evidence panel
    - process/reasoning log
+
+## Current Runtime Diagram
+
+```text
+VniAgent sidebar / widget copilot
+  -> POST /api/v1/copilot/chat/stream
+  -> AIContextService in apps/api
+  -> vnibb-mcp via VNIBB_MCP_URL for selected Appwrite-backed reads
+  -> Appwrite
+  -> validated source_catalog + runtime context
+  -> model provider
+  -> SSE response back to VniAgent UI
+```
 
 ## OpenBB References Reviewed
 
@@ -94,7 +109,7 @@ Browser widget data remains lower-priority than backend data.
 - OpenRouter free-model detection and admin runtime status checks
 - backend prompt library service with default and shared prompt support
 - shared prompt versioning and history
-- VNIBB database-first context assembly for:
+- VNIBB MCP-first context assembly for selected Appwrite-backed reads, with direct Appwrite/Postgres fallback, for:
   - stock profile
   - prices
   - ratios

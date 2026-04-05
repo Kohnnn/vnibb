@@ -27,10 +27,24 @@ The deployment and ops work has focused on:
 At a high level, production looks like:
 
 1. Vercel serves the frontend
-2. OCI hosts the backend runtime
+2. OCI hosts the backend runtime and the dedicated `vnibb-mcp` sidecar
 3. the backend exposes HTTP and WebSocket surfaces
-4. Appwrite and cache services back persistence and runtime state
-5. upstream market providers feed the service layer
+4. the `vnibb-mcp` sidecar exposes the read-only MCP HTTP surface for VniAgent and remote clients
+5. Appwrite and cache services back persistence and runtime state
+6. upstream market providers feed the service layer
+
+```text
+Vercel frontend
+  -> OCI Caddy
+     -> FastAPI api service (:8000)
+     -> vnibb-mcp service (:8001)
+
+VniAgent server context path
+  -> apps/api
+  -> VNIBB_MCP_URL
+  -> vnibb-mcp
+  -> Appwrite
+```
 
 ## Important operational lessons already learned
 
