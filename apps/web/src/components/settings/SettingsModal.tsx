@@ -233,21 +233,36 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           Object.entries(localUsdVndRatesByYear).map(([year, rate]) => [year, String(rate)])
         )
       )
+    }
+  }, [globalSymbol, isOpen, localUsdVndRatesByYear]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (activeTab === 'ai' || activeTab === 'admin') {
       void loadOpenRouterModels()
       void loadPublicRuntimeConfig()
-      if (readAdminLayoutKeyValidated()) {
-        void loadAdminAiRuntimeConfig(readAdminLayoutKey())
-        void loadAdminUnitRuntimeConfig(readAdminLayoutKey())
-        void loadAdminPromptLibrary(readAdminLayoutKey())
-      }
     }
-  }, [globalSymbol, isOpen, loadAdminAiRuntimeConfig, loadAdminPromptLibrary, loadAdminUnitRuntimeConfig, loadOpenRouterModels, loadPublicRuntimeConfig, localUsdVndRatesByYear]);
+
+    if (activeTab === 'admin' && readAdminLayoutKeyValidated()) {
+      const adminKey = readAdminLayoutKey()
+      void loadAdminAiRuntimeConfig(adminKey)
+      void loadAdminUnitRuntimeConfig(adminKey)
+      void loadAdminPromptLibrary(adminKey)
+    }
+  }, [activeTab, isOpen, loadAdminAiRuntimeConfig, loadAdminPromptLibrary, loadAdminUnitRuntimeConfig, loadOpenRouterModels, loadPublicRuntimeConfig])
 
   useEffect(() => {
     if (!preferenceStatus) return;
     const timeoutId = window.setTimeout(() => setPreferenceStatus(null), 2400);
     return () => window.clearTimeout(timeoutId);
   }, [preferenceStatus]);
+
+  const usdRateYears = useMemo(() => {
+    const startYear = 2016
+    const endYear = new Date().getFullYear() + 1
+    return Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index)
+  }, [])
   
   if (!isOpen) return null;
 
@@ -411,11 +426,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   ];
 
   const decimalOptions = [0, 1, 2, 3];
-  const usdRateYears = useMemo(() => {
-    const startYear = 2016
-    const endYear = new Date().getFullYear() + 1
-    return Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index)
-  }, [])
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm animate-in fade-in duration-200">

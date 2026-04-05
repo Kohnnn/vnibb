@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel'
 import { useTheme } from '@/contexts/ThemeContext'
-import { useHistoricalPrices, useStockQuote } from '@/lib/queries'
+import { useHistoricalPrices, useMarketOverview, useStockQuote } from '@/lib/queries'
 import { probeBackendReadiness } from '@/lib/backendHealth'
 import type { UnitDisplay } from '@/lib/units'
 import { cn } from '@/lib/utils'
@@ -119,6 +119,7 @@ export function Header({
   const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('checking')
 
   const quoteQuery = useStockQuote(currentSymbol, Boolean(currentSymbol))
+  const marketOverviewQuery = useMarketOverview(true)
   const historyQuery = useHistoricalPrices(currentSymbol, {
     interval: '1D',
     enabled: Boolean(currentSymbol),
@@ -155,6 +156,20 @@ export function Header({
           ? 'text-rose-700'
           : 'text-rose-400'
   const marketStatus = useMemo(() => getVietnamMarketStatus(new Date(marketClock)), [marketClock])
+  const vnIndex = useMemo(
+    () => marketOverviewQuery.data?.data?.find((item) => item.index_name === 'VN-INDEX' || item.index_name === 'VNINDEX') || null,
+    [marketOverviewQuery.data?.data]
+  )
+  const vnIndexChangeClass =
+    vnIndex?.change_pct == null
+      ? 'text-[var(--text-muted)]'
+      : vnIndex.change_pct >= 0
+        ? resolvedTheme === 'light'
+          ? 'text-emerald-700'
+          : 'text-emerald-400'
+        : resolvedTheme === 'light'
+          ? 'text-rose-700'
+          : 'text-rose-400'
 
   const healthBadge = useMemo(() => {
     if (connectionStatus === 'online') {
@@ -275,6 +290,23 @@ export function Header({
                 </div>
               </div>
             </div>
+            {vnIndex ? (
+              <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
+                    VN-INDEX
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-[var(--text-primary)]">
+                      {formatHeaderPrice(vnIndex.current_value)}
+                    </span>
+                    <span className={cn('text-xs font-semibold', vnIndexChangeClass)}>
+                      {formatHeaderPercent(vnIndex.change_pct)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div data-tour="header-search" className="relative min-w-[220px] flex-1">
