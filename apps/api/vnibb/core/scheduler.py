@@ -24,6 +24,7 @@ _job_guards: dict[str, asyncio.Lock] = {}
 
 DAILY_SYNC_TIMEOUT_SECONDS = 2 * 60 * 60
 DAILY_TRADING_TIMEOUT_SECONDS = 2 * 60 * 60
+SUPPLEMENTAL_SYNC_TIMEOUT_SECONDS = 90 * 60
 RS_RATING_TIMEOUT_SECONDS = 15 * 60
 HOURLY_NEWS_TIMEOUT_SECONDS = 20 * 60
 INTRADAY_TIMEOUT_SECONDS = 30 * 60
@@ -82,7 +83,7 @@ def configure_scheduler():
         run_hourly_news_sync,
         run_intraday_sync,
     )
-    from vnibb.services.sync_all_data import run_daily_market_sync
+    from vnibb.services.sync_all_data import run_daily_market_sync, run_supplemental_company_sync
     from vnibb.services.data_quality import run_scheduled_data_quality_check
     from vnibb.services.realtime_pipeline import get_realtime_pipeline
 
@@ -107,6 +108,13 @@ def configure_scheduler():
             "hourly_news",
             run_hourly_news_sync,
             HOURLY_NEWS_TIMEOUT_SECONDS,
+        )
+
+    async def guarded_supplemental_company_sync():
+        await _run_guarded_job(
+            "supplemental_company_sync",
+            run_supplemental_company_sync,
+            SUPPLEMENTAL_SYNC_TIMEOUT_SECONDS,
         )
 
     async def guarded_intraday_sync():
@@ -201,6 +209,23 @@ def configure_scheduler():
         misfire_grace_time=300,
     )
     logger.info("Scheduled: hourly_news every hour")
+
+    # =========================================================================
+    # Supplemental Company Sync - After close / off hours
+    # Rotates shareholders, officers, subsidiaries, and broad company news.
+    # Weekend runs process a broader universe.
+    # =========================================================================
+    scheduler.add_job(
+        guarded_supplemental_company_sync,
+        trigger=CronTrigger(hour=10, minute=30, timezone="UTC"),
+        id="supplemental_company_sync",
+        name="Supplemental Company Sync",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+    logger.info("Scheduled: supplemental_company_sync at 10:30 UTC (5:30 PM VNT)")
 
     # =========================================================================
     # Intraday Sync - Every 5 minutes during market hours

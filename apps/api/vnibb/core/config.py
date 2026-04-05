@@ -153,6 +153,10 @@ class Settings(BaseSettings):
     cache_foreign_trading_per_symbol: bool = False
     cache_order_flow_chunked: bool = True
     cache_order_flow_per_symbol: bool = False
+    scheduler_live_symbols_per_run: int = 60
+    scheduler_supplemental_symbols_per_run: int = 120
+    scheduler_weekend_symbols_per_run: int = 300
+    scheduler_company_news_limit: int = 10
 
     # ==========================================================================
     # Data Retention

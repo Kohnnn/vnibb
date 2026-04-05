@@ -732,13 +732,7 @@ function DashboardContent() {
                 onOpenTemplateSelector={() => setIsTemplateSelectorOpen(true)}
             />
 
-            <main
-                className="flex-1 flex flex-col relative transition-all duration-300"
-                style={{
-                    marginLeft: effectiveLeftSidebarWidth,
-                    marginRight: showAICopilot && !overlayAICopilot ? effectiveRightSidebarWidth : 0
-                }}
-            >
+            <main className="flex-1 min-w-0 flex flex-col relative">
                 <Header
                     currentSymbol={stockGlobalSymbol}
                     onSymbolChange={handleSymbolChange}
@@ -760,60 +754,63 @@ function DashboardContent() {
 
                 <TabBar symbol={stockGlobalSymbol} />
 
-                <div className="relative flex-1 overflow-hidden bg-[var(--bg-primary)] p-2 sm:p-3 lg:p-4">
-                    {activeDashboard && activeTab ? (
-                        <>
-                            {showAdminSystemLayoutControls ? (
-                                <div className="pointer-events-none absolute right-4 top-4 z-20">
-                                    <div className="pointer-events-auto flex min-w-[260px] max-w-[min(520px,calc(100vw-2rem))] flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.18),rgba(30,41,59,0.96))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.25)] backdrop-blur-sm">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="flex min-w-0 items-start gap-2">
-                                                <Shield className="mt-0.5 h-4 w-4 text-amber-300" />
-                                                <div>
-                                                    <div className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
-                                                        Global Layout Controls
-                                                    </div>
-                                                    <div className="mt-1 text-xs text-[var(--text-secondary)]">
-                                                        Admin-only draft/publish controls for the Initial workspace.
-                                                    </div>
-                                                </div>
+                <div className="relative flex-1 min-h-0 overflow-hidden bg-[var(--bg-primary)] p-2 sm:p-3 lg:p-4">
+                    {showAdminSystemLayoutControls && activeDashboard ? (
+                        <div className="pointer-events-none absolute right-4 top-4 z-20">
+                            <div className="pointer-events-auto flex min-w-[260px] max-w-[min(520px,calc(100vw-2rem))] flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.18),rgba(30,41,59,0.96))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.25)] backdrop-blur-sm">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="flex min-w-0 items-start gap-2">
+                                        <Shield className="mt-0.5 h-4 w-4 text-amber-300" />
+                                        <div>
+                                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
+                                                Global Layout Controls
                                             </div>
-                                            <button
-                                                type="button"
-                                                onClick={handleToggleAdminLayoutMode}
-                                                disabled={!adminLayoutKey || isPublishingSystemLayout}
-                                                className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                                {activeDashboard.adminUnlocked ? 'Disable Admin Mode' : 'Enable Admin Mode'}
-                                            </button>
-                                        </div>
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => void handlePersistSystemLayout(false)}
-                                                disabled={!adminLayoutKey || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
-                                                className="rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                                Save Draft
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => void handlePersistSystemLayout(true)}
-                                                disabled={!adminLayoutKey || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
-                                                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                                {isPublishingSystemLayout ? 'Publishing...' : 'Publish Global'}
-                                            </button>
-                                            {adminLayoutStatus ? (
-                                                <div className="inline-flex items-center gap-1 text-[11px] text-amber-200/85">
-                                                    <AlertCircle className="h-3.5 w-3.5" />
-                                                    <span>{adminLayoutStatus}</span>
-                                                </div>
-                                            ) : null}
+                                            <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                                                Admin-only draft/publish controls for the Initial workspace.
+                                            </div>
                                         </div>
                                     </div>
+                                    <button
+                                        type="button"
+                                        onClick={handleToggleAdminLayoutMode}
+                                        disabled={!adminLayoutKey || isPublishingSystemLayout}
+                                        className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {activeDashboard.adminUnlocked ? 'Disable Admin Mode' : 'Enable Admin Mode'}
+                                    </button>
                                 </div>
-                            ) : null}
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => void handlePersistSystemLayout(false)}
+                                        disabled={!adminLayoutKey || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
+                                        className="rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Save Draft
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => void handlePersistSystemLayout(true)}
+                                        disabled={!adminLayoutKey || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
+                                        className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {isPublishingSystemLayout ? 'Publishing...' : 'Publish Global'}
+                                    </button>
+                                    {adminLayoutStatus ? (
+                                        <div className="inline-flex items-center gap-1 text-[11px] text-amber-200/85">
+                                            <AlertCircle className="h-3.5 w-3.5" />
+                                            <span>{adminLayoutStatus}</span>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
+                        </div>
+                    ) : null}
+
+                    <div className="flex h-full min-h-0 w-full gap-3">
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                            {activeDashboard && activeTab ? (
+                                <>
                             <div className="h-full w-full overflow-y-auto scrollbar-hide">
                             {isSystemFundamentalsTab ? (
                                 <div className="mb-2 flex flex-col gap-2 rounded-2xl border border-blue-500/20 bg-[linear-gradient(135deg,rgba(30,41,59,0.92),rgba(15,23,42,0.92))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.22)]">
@@ -954,38 +951,63 @@ function DashboardContent() {
                                 </div>
                             )}
                         </div>
-                        </>
-                    ) : (
-                        state.dashboards.length === 0 ? (
-                            <EmptyDashboardState onCreateWorkspace={handleCreateWorkspace} />
-                        ) : (
-                            <div className="flex items-center justify-center h-full">
-                                <RefreshCw className="animate-spin text-blue-500" />
-                            </div>
-                        )
-                    )}
-                </div>
+                                </>
+                            ) : (
+                                state.dashboards.length === 0 ? (
+                                    <EmptyDashboardState onCreateWorkspace={handleCreateWorkspace} />
+                                ) : (
+                                    <div className="flex items-center justify-center h-full">
+                                        <RefreshCw className="animate-spin text-blue-500" />
+                                    </div>
+                                )
+                            )}
+                        </div>
 
-                <RightSidebar 
-                    isOpen={showAICopilot} 
-                    onToggle={() => setShowAICopilot(false)}
-                    width={effectiveRightSidebarWidth}
-                    overlay={overlayAICopilot}
-                    onWidthChange={(nextWidth) => {
-                        const clamped = Math.max(RIGHT_SIDEBAR_MIN_WIDTH, Math.min(RIGHT_SIDEBAR_MAX_WIDTH, nextWidth));
-                        setRightSidebarWidth(clamped);
-                    }}
-                >
-                    <AICopilot 
-                        isOpen={showAICopilot} 
-                        onClose={() => setShowAICopilot(false)} 
-                        currentSymbol={stockGlobalSymbol}
-                        widgetContext={copilotWidgetContext}
-                        widgetContextData={copilotWidgetData}
-                        activeTabName={activeTab?.name}
-                        promptLibraryRequestId={copilotPromptLibraryRequestId}
-                    />
-                </RightSidebar>
+                        {!overlayAICopilot && showAICopilot ? (
+                            <div className="hidden lg:block h-full shrink-0" style={{ width: effectiveRightSidebarWidth }}>
+                                <RightSidebar 
+                                    isOpen={showAICopilot} 
+                                    onToggle={() => setShowAICopilot(false)}
+                                    width={effectiveRightSidebarWidth}
+                                    overlay={false}
+                                    onWidthChange={(nextWidth) => {
+                                        const clamped = Math.max(RIGHT_SIDEBAR_MIN_WIDTH, Math.min(RIGHT_SIDEBAR_MAX_WIDTH, nextWidth));
+                                        setRightSidebarWidth(clamped);
+                                    }}
+                                >
+                                    <AICopilot 
+                                        isOpen={showAICopilot} 
+                                        onClose={() => setShowAICopilot(false)} 
+                                        currentSymbol={stockGlobalSymbol}
+                                        widgetContext={copilotWidgetContext}
+                                        widgetContextData={copilotWidgetData}
+                                        activeTabName={activeTab?.name}
+                                        promptLibraryRequestId={copilotPromptLibraryRequestId}
+                                    />
+                                </RightSidebar>
+                            </div>
+                        ) : null}
+                    </div>
+
+                    {overlayAICopilot && showAICopilot ? (
+                        <RightSidebar 
+                            isOpen={showAICopilot} 
+                            onToggle={() => setShowAICopilot(false)}
+                            width={effectiveRightSidebarWidth}
+                            overlay={true}
+                        >
+                            <AICopilot 
+                                isOpen={showAICopilot} 
+                                onClose={() => setShowAICopilot(false)} 
+                                currentSymbol={stockGlobalSymbol}
+                                widgetContext={copilotWidgetContext}
+                                widgetContextData={copilotWidgetData}
+                                activeTabName={activeTab?.name}
+                                promptLibraryRequestId={copilotPromptLibraryRequestId}
+                            />
+                        </RightSidebar>
+                    ) : null}
+                </div>
             </main>
 
             <WidgetLibrary
