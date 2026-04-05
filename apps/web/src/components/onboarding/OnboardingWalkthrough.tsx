@@ -217,8 +217,8 @@ export function OnboardingWalkthrough({ open, onComplete }: OnboardingWalkthroug
   const progressLabel = isFinalStep ? `${anchoredStepCount} of ${anchoredStepCount}` : `${stepIndex + 1} of ${anchoredStepCount}`
 
   return createPortal(
-    <div className="fixed inset-0 z-[140]">
-      <div className={highlightStyle ? 'fixed inset-0' : 'fixed inset-0 bg-[rgba(2,6,23,0.72)]'} />
+    <div className="pointer-events-none fixed inset-0 z-[140]">
+      <div className={highlightStyle ? 'fixed inset-0 pointer-events-none' : 'fixed inset-0 pointer-events-none bg-[rgba(2,6,23,0.72)]'} />
       {highlightStyle ? (
         <div
           aria-hidden="true"
@@ -231,7 +231,7 @@ export function OnboardingWalkthrough({ open, onComplete }: OnboardingWalkthroug
         role="dialog"
         aria-modal="true"
         aria-label="VNIBB walkthrough"
-        className="fixed rounded-2xl border border-[var(--border-default)] bg-[rgba(10,15,26,0.98)] p-4 text-left text-[var(--text-primary)] shadow-[0_24px_80px_rgba(2,6,23,0.4)]"
+        className="pointer-events-auto fixed rounded-2xl border border-[var(--border-default)] bg-[rgba(10,15,26,0.98)] p-4 text-left text-[var(--text-primary)] shadow-[0_24px_80px_rgba(2,6,23,0.4)]"
         style={panelStyle}
       >
         <div className="flex items-start justify-between gap-3">
