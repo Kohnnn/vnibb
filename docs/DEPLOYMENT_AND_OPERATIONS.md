@@ -6,6 +6,7 @@ The current operational picture reflected in recent project context is:
 
 - frontend deployed on Vercel
 - backend deployed on OCI
+- read-only VNIBB MCP companion deployed alongside the backend on OCI for VniAgent and remote clients
 - Appwrite serving as the primary database and auth provider
 - Supabase (PostgreSQL) retained as fallback database for seeding and population scripts
 - Redis used for cache and resilience behavior

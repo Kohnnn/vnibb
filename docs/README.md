@@ -23,6 +23,7 @@
 
 - `MCP_STRATEGY.md`: MCP applicability and agent integration ideas
 - `VNIBB_MCP_READONLY.md`: implemented read-only MCP server for Appwrite-backed VNIBB access
+- `VNIBB_MCP_DEPLOYMENT.md`: dedicated OCI deployment and smoke-check reference for `vnibb-mcp`
 - `DEVELOPMENT_JOURNAL.md`: maintainer journal and decision history
 - `WIDGET_CATALOG.md`: legacy widget snapshot, useful as historical context only
 

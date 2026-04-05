@@ -27,6 +27,31 @@ services:
       retries: 5
       start_period: 120s
 
+  mcp:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: vnibb-mcp
+    hostname: vnibb-mcp
+    restart: unless-stopped
+    env_file:
+      - ./deployment/env.oracle
+    environment:
+      VNIBB_MCP_HOST: ${VNIBB_MCP_HOST:-0.0.0.0}
+      VNIBB_MCP_PORT: ${VNIBB_MCP_PORT:-8001}
+      VNIBB_MCP_TRANSPORT: ${VNIBB_MCP_TRANSPORT:-streamable-http}
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      INTRADAY_MARKET_TZ: ${INTRADAY_MARKET_TZ:-Asia/Ho_Chi_Minh}
+    entrypoint: ["python", "-m", "vnibb.mcp.server"]
+    expose:
+      - "8001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/health >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   caddy:
     image: caddy:2.8-alpine
     container_name: vnibb-caddy
@@ -40,6 +65,7 @@ services:
     environment:
       SITE_HOSTNAME: ${SITE_HOSTNAME:-api.example.com}
       API_UPSTREAM: ${API_UPSTREAM:-api:8000}
+      MCP_UPSTREAM: ${MCP_UPSTREAM:-mcp:8001}
       ACME_EMAIL: ${ACME_EMAIL:-ops@example.com}
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
     ports:
