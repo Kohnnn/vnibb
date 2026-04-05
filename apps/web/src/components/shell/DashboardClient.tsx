@@ -68,13 +68,13 @@ export default function DashboardPage() {
     );
 }
 
-const LEFT_SIDEBAR_DEFAULT_WIDTH = 208;
+const LEFT_SIDEBAR_DEFAULT_WIDTH = 148;
 const LEFT_SIDEBAR_COLLAPSED_WIDTH = 56;
-const LEFT_SIDEBAR_MIN_WIDTH = 180;
-const LEFT_SIDEBAR_MAX_WIDTH = 420;
-const RIGHT_SIDEBAR_DEFAULT_WIDTH = 350;
-const RIGHT_SIDEBAR_MIN_WIDTH = 300;
-const RIGHT_SIDEBAR_MAX_WIDTH = 560;
+const LEFT_SIDEBAR_MIN_WIDTH = 132;
+const LEFT_SIDEBAR_MAX_WIDTH = 280;
+const RIGHT_SIDEBAR_DEFAULT_WIDTH = 320;
+const RIGHT_SIDEBAR_MIN_WIDTH = 280;
+const RIGHT_SIDEBAR_MAX_WIDTH = 440;
 const LEFT_SIDEBAR_STORAGE_KEY = 'vnibb-left-sidebar-width';
 const RIGHT_SIDEBAR_STORAGE_KEY = 'vnibb-right-sidebar-width';
 const MAIN_FUNDAMENTAL_DASHBOARD_ID = 'default-fundamental';
@@ -214,8 +214,12 @@ function DashboardContent() {
         setIsEditing(false);
     }, [activeDashboard, adminLayoutControlsVisible, isEditing, setDashboardAdminUnlocked]);
 
-    const openWalkthrough = useCallback(() => {
+    const openWalkthrough = useCallback((force = false) => {
         if (!mounted || effectiveLeftSidebarWidth === 0) {
+            return;
+        }
+
+        if (!force && !shouldShowDashboardWalkthrough()) {
             return;
         }
 
@@ -269,7 +273,7 @@ function DashboardContent() {
             }
 
             window.requestAnimationFrame(() => {
-                openWalkthrough();
+                openWalkthrough(true);
             });
         };
 

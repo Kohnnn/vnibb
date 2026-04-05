@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import Link from 'next/link';
 import {
     LayoutDashboard,
@@ -65,6 +65,7 @@ export function Sidebar({
     const [editingName, setEditingName] = useState('');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [showMoveSubmenu, setShowMoveSubmenu] = useState(false);
+    const [isResizing, setIsResizing] = useState(false);
     const createMenuRef = useRef<HTMLDivElement | null>(null);
     const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -74,29 +75,32 @@ export function Sidebar({
         }
     }, [mobileMode, onCollapsedChange]);
 
-    const handleResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const handleResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
         if (mobileMode || collapsed || !onWidthChange) return;
 
         event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
         const startX = event.clientX;
         const startWidth = width;
 
-        const handleMouseMove = (moveEvent: MouseEvent) => {
+        const handlePointerMove = (moveEvent: PointerEvent) => {
             const nextWidth = startWidth + (moveEvent.clientX - startX);
             onWidthChange(nextWidth);
         };
 
-        const handleMouseUp = () => {
+        const handlePointerUp = () => {
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
+            setIsResizing(false);
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
         };
 
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
+        setIsResizing(true);
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
     };
 
     useEffect(() => {
@@ -618,7 +622,7 @@ export function Sidebar({
                 data-mobile-sidebar={mobileMode ? 'true' : 'false'}
                 className={`
                     relative bg-[var(--bg-secondary)] border-r border-[var(--border-color)]
-                    flex flex-col
+                    flex flex-col ${isResizing ? 'transition-none' : 'transition-[width] duration-150'}
                     ${mobileMode
                         ? 'relative h-full w-full'
                         : 'hidden lg:flex h-screen shrink-0'
@@ -740,7 +744,7 @@ export function Sidebar({
                 {!mobileMode && !collapsed && onWidthChange ? (
                     <div
                         className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-blue-500/30"
-                        onMouseDown={handleResizeStart}
+                        onPointerDown={handleResizeStart}
                         role="separator"
                         aria-orientation="vertical"
                         aria-label="Resize workspace sidebar"

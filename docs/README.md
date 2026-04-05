@@ -22,6 +22,7 @@
 ## Product And Architecture
 
 - `MCP_STRATEGY.md`: MCP applicability and agent integration ideas
+- `VNIBB_MCP_READONLY.md`: implemented read-only MCP server for Appwrite-backed VNIBB access
 - `DEVELOPMENT_JOURNAL.md`: maintainer journal and decision history
 - `WIDGET_CATALOG.md`: legacy widget snapshot, useful as historical context only
 
