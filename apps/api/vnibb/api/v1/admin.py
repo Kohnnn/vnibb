@@ -108,6 +108,11 @@ async def get_ai_runtime_config() -> Dict[str, Any]:
     return await ai_runtime_config_service.get_runtime_config()
 
 
+@router.get("/ai-runtime/public")
+async def get_public_ai_runtime_config() -> Dict[str, Any]:
+    return await ai_runtime_config_service.get_runtime_config()
+
+
 @router.put("/ai-runtime", dependencies=[Depends(require_admin_access)])
 async def save_ai_runtime_config(data: Any = Body(...)) -> Dict[str, Any]:
     if isinstance(data, dict):

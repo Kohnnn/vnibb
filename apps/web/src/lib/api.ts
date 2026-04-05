@@ -2474,7 +2474,7 @@ export async function getCopilotModelCatalog(provider: 'openrouter' = 'openroute
 }
 
 export async function getCopilotRuntimeConfig(): Promise<CopilotRuntimeConfig> {
-    return fetchAPI<CopilotRuntimeConfig>('/copilot/runtime', {
+    return fetchAPI<CopilotRuntimeConfig>('/admin/ai-runtime/public', {
         timeout: 10000,
     });
 }

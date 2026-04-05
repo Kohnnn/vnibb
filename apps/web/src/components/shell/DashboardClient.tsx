@@ -68,7 +68,15 @@ export default function DashboardPage() {
     );
 }
 
-const RIGHT_SIDEBAR_WIDTH = 350;
+const LEFT_SIDEBAR_DEFAULT_WIDTH = 208;
+const LEFT_SIDEBAR_COLLAPSED_WIDTH = 56;
+const LEFT_SIDEBAR_MIN_WIDTH = 180;
+const LEFT_SIDEBAR_MAX_WIDTH = 420;
+const RIGHT_SIDEBAR_DEFAULT_WIDTH = 350;
+const RIGHT_SIDEBAR_MIN_WIDTH = 300;
+const RIGHT_SIDEBAR_MAX_WIDTH = 560;
+const LEFT_SIDEBAR_STORAGE_KEY = 'vnibb-left-sidebar-width';
+const RIGHT_SIDEBAR_STORAGE_KEY = 'vnibb-right-sidebar-width';
 const MAIN_FUNDAMENTAL_DASHBOARD_ID = 'default-fundamental';
 const TECHNICAL_DASHBOARD_ID = 'default-technical';
 const QUANT_DASHBOARD_ID = 'default-quant';
@@ -113,7 +121,9 @@ function DashboardContent() {
     const [copilotWidgetContext, setCopilotWidgetContext] = useState<string | undefined>(undefined);
     const [copilotWidgetData, setCopilotWidgetData] = useState<Record<string, unknown> | undefined>(undefined);
     const [copilotPromptLibraryRequestId, setCopilotPromptLibraryRequestId] = useState(0);
-    const [sidebarWidth, setSidebarWidth] = useState(208);
+    const [sidebarWidth, setSidebarWidth] = useState(LEFT_SIDEBAR_DEFAULT_WIDTH);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [rightSidebarWidth, setRightSidebarWidth] = useState(RIGHT_SIDEBAR_DEFAULT_WIDTH);
     const [viewportWidth, setViewportWidth] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
     const [mounted, setMounted] = useState(false);
@@ -135,32 +145,50 @@ function DashboardContent() {
             .filter((template): template is DashboardTemplate => Boolean(template));
     }, []);
 
-    const updateSidebarWidth = useCallback(() => {
+    const updateViewport = useCallback(() => {
         if (typeof window !== 'undefined') {
             setViewportWidth(window.innerWidth);
             setViewportHeight(window.innerHeight);
-            if (window.innerWidth < 1024) {
-                setSidebarWidth(0);
-                return;
-            }
-
-            const sidebar = document.querySelector('aside[data-mobile-sidebar="false"]');
-            const sidebarW = sidebar?.clientWidth || 208;
-            setSidebarWidth(sidebarW);
         }
     }, []);
 
+    const effectiveLeftSidebarWidth = viewportWidth < 1024
+        ? 0
+        : (isSidebarCollapsed ? LEFT_SIDEBAR_COLLAPSED_WIDTH : sidebarWidth);
+
     const overlayAICopilot = viewportWidth > 0 && (viewportWidth < 1480 || viewportHeight < 840);
     const effectiveRightSidebarWidth = overlayAICopilot
-        ? Math.min(RIGHT_SIDEBAR_WIDTH, Math.max(280, viewportWidth - 24))
-        : RIGHT_SIDEBAR_WIDTH;
+        ? Math.min(rightSidebarWidth, Math.max(280, viewportWidth - 24))
+        : rightSidebarWidth;
 
     useEffect(() => {
         setMounted(true);
-        updateSidebarWidth();
-        window.addEventListener('resize', updateSidebarWidth);
-        return () => window.removeEventListener('resize', updateSidebarWidth);
-    }, [updateSidebarWidth]);
+        updateViewport();
+
+        if (typeof window !== 'undefined') {
+            const storedLeftWidth = Number(window.localStorage.getItem(LEFT_SIDEBAR_STORAGE_KEY));
+            const storedRightWidth = Number(window.localStorage.getItem(RIGHT_SIDEBAR_STORAGE_KEY));
+            if (Number.isFinite(storedLeftWidth) && storedLeftWidth >= LEFT_SIDEBAR_MIN_WIDTH && storedLeftWidth <= LEFT_SIDEBAR_MAX_WIDTH) {
+                setSidebarWidth(storedLeftWidth);
+            }
+            if (Number.isFinite(storedRightWidth) && storedRightWidth >= RIGHT_SIDEBAR_MIN_WIDTH && storedRightWidth <= RIGHT_SIDEBAR_MAX_WIDTH) {
+                setRightSidebarWidth(storedRightWidth);
+            }
+        }
+
+        window.addEventListener('resize', updateViewport);
+        return () => window.removeEventListener('resize', updateViewport);
+    }, [updateViewport]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(LEFT_SIDEBAR_STORAGE_KEY, String(sidebarWidth));
+    }, [sidebarWidth]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(RIGHT_SIDEBAR_STORAGE_KEY, String(rightSidebarWidth));
+    }, [rightSidebarWidth]);
 
     useEffect(() => {
         if (!mounted) return;
@@ -187,7 +215,7 @@ function DashboardContent() {
     }, [activeDashboard, adminLayoutControlsVisible, isEditing, setDashboardAdminUnlocked]);
 
     const openWalkthrough = useCallback(() => {
-        if (!mounted || sidebarWidth === 0) {
+        if (!mounted || effectiveLeftSidebarWidth === 0) {
             return;
         }
 
@@ -197,7 +225,7 @@ function DashboardContent() {
         setWidgetSettingsState(null);
         setShowAICopilot(false);
         setIsWalkthroughOpen(true);
-    }, [mounted, sidebarWidth]);
+    }, [effectiveLeftSidebarWidth, mounted]);
 
     const closeWalkthrough = useCallback(() => {
         markDashboardWalkthroughCompleted();
@@ -214,7 +242,7 @@ function DashboardContent() {
     useEffect(() => {
         if (
             !mounted ||
-            sidebarWidth === 0 ||
+            effectiveLeftSidebarWidth === 0 ||
             !activeDashboard ||
             !activeTab ||
             autoWalkthroughQueuedRef.current ||
@@ -232,11 +260,11 @@ function DashboardContent() {
         }, 240);
 
         return () => window.clearTimeout(timeoutId);
-    }, [activeDashboard, activeTab, mounted, openWalkthrough, sidebarWidth]);
+    }, [activeDashboard, activeTab, effectiveLeftSidebarWidth, mounted, openWalkthrough]);
 
     useEffect(() => {
         const handleRestartWalkthrough = () => {
-            if (!mounted || sidebarWidth === 0 || !activeDashboard || !activeTab) {
+            if (!mounted || effectiveLeftSidebarWidth === 0 || !activeDashboard || !activeTab) {
                 return;
             }
 
@@ -249,7 +277,7 @@ function DashboardContent() {
         return () => {
             window.removeEventListener(DASHBOARD_WALKTHROUGH_RESTART_EVENT, handleRestartWalkthrough);
         };
-    }, [activeDashboard, activeTab, mounted, openWalkthrough, sidebarWidth]);
+    }, [activeDashboard, activeTab, effectiveLeftSidebarWidth, mounted, openWalkthrough]);
 
     const applySelectedSymbol = useCallback((rawSymbol: string) => {
         const normalizedSymbol = rawSymbol.trim().toUpperCase();
@@ -688,6 +716,13 @@ function DashboardContent() {
                 onOpenAppsLibrary={() => setIsAppsLibraryOpen(true)}
                 onOpenPromptsLibrary={handleOpenGlobalPrompts}
                 onOpenTemplateSelector={() => setIsTemplateSelectorOpen(true)}
+                width={sidebarWidth}
+                collapsed={isSidebarCollapsed}
+                onCollapsedChange={setIsSidebarCollapsed}
+                onWidthChange={(nextWidth) => {
+                    const clamped = Math.max(LEFT_SIDEBAR_MIN_WIDTH, Math.min(LEFT_SIDEBAR_MAX_WIDTH, nextWidth));
+                    setSidebarWidth(clamped);
+                }}
             />
 
             <MobileNav
@@ -700,7 +735,7 @@ function DashboardContent() {
             <main
                 className="flex-1 flex flex-col relative transition-all duration-300"
                 style={{
-                    marginLeft: sidebarWidth,
+                    marginLeft: effectiveLeftSidebarWidth,
                     marginRight: showAICopilot && !overlayAICopilot ? effectiveRightSidebarWidth : 0
                 }}
             >
@@ -936,6 +971,10 @@ function DashboardContent() {
                     onToggle={() => setShowAICopilot(false)}
                     width={effectiveRightSidebarWidth}
                     overlay={overlayAICopilot}
+                    onWidthChange={(nextWidth) => {
+                        const clamped = Math.max(RIGHT_SIDEBAR_MIN_WIDTH, Math.min(RIGHT_SIDEBAR_MAX_WIDTH, nextWidth));
+                        setRightSidebarWidth(clamped);
+                    }}
                 >
                     <AICopilot 
                         isOpen={showAICopilot} 
