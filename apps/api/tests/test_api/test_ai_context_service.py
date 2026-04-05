@@ -162,3 +162,65 @@ async def test_build_runtime_context_expands_single_symbol_with_peers_for_compar
 
     assert captured_symbols == ["VNM", "FPT", "MWG"]
     assert [item["symbol"] for item in context["market_context"]] == ["VNM", "FPT", "MWG"]
+
+
+@pytest.mark.asyncio
+async def test_build_appwrite_snapshot_uses_vnibb_mcp_when_configured(monkeypatch):
+    service = AIContextService()
+
+    async def fail_direct(symbol: str):
+        raise AssertionError(f"direct Appwrite path should not run for {symbol}")
+
+    async def fake_get_symbol_snapshot(symbol: str):
+        assert symbol == "VNM"
+        return {
+            "symbol": "VNM",
+            "found": True,
+            "snapshot": {
+                "symbol": "VNM",
+                "source": "appwrite",
+                "company": {"symbol": "VNM"},
+            },
+        }
+
+    monkeypatch.setattr(
+        "vnibb.services.ai_context_service.settings.vnibb_mcp_url", "http://mcp:8001/mcp"
+    )
+    monkeypatch.setattr(
+        "vnibb.services.ai_context_service.vnibb_mcp_client_service.get_symbol_snapshot",
+        fake_get_symbol_snapshot,
+    )
+    monkeypatch.setattr(service, "_build_appwrite_snapshot_direct", fail_direct)
+
+    snapshot = await service._build_appwrite_snapshot("VNM", use_vnibb_mcp=True)
+
+    assert snapshot == {
+        "symbol": "VNM",
+        "source": "appwrite",
+        "company": {"symbol": "VNM"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_build_appwrite_snapshot_falls_back_when_vnibb_mcp_fails(monkeypatch):
+    service = AIContextService()
+
+    async def fake_get_symbol_snapshot(symbol: str):
+        raise RuntimeError(f"mcp unavailable for {symbol}")
+
+    async def fake_direct(symbol: str):
+        assert symbol == "VNM"
+        return {"symbol": symbol, "source": "appwrite", "company": {"symbol": symbol}}
+
+    monkeypatch.setattr(
+        "vnibb.services.ai_context_service.settings.vnibb_mcp_url", "http://mcp:8001/mcp"
+    )
+    monkeypatch.setattr(
+        "vnibb.services.ai_context_service.vnibb_mcp_client_service.get_symbol_snapshot",
+        fake_get_symbol_snapshot,
+    )
+    monkeypatch.setattr(service, "_build_appwrite_snapshot_direct", fake_direct)
+
+    snapshot = await service._build_appwrite_snapshot("VNM", use_vnibb_mcp=True)
+
+    assert snapshot == {"symbol": "VNM", "source": "appwrite", "company": {"symbol": "VNM"}}

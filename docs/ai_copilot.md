@@ -157,6 +157,8 @@ Current stability note:
 - advanced message panels in sidebar, widget, and analysis views are collapsed behind `Details`
 - prompt starters are trimmed down to the strongest few per context
 - document attach is now behind a secondary tools menu in the sidebar composer
+- when `VNIBB_MCP_URL` is configured, selected server-side VniAgent runtime reads now flow through the dedicated read-only VNIBB MCP instead of hitting Appwrite directly
+- if the MCP companion is unavailable, the backend falls back to direct Appwrite/Postgres context reads so chat does not hard-fail on transport issues
 
 ## What We Explicitly Did Not Copy
 

@@ -162,6 +162,7 @@ pnpm run gate:no502     # Widget health probe (5 repeats, 10s timeout)
 - deployment and operations: `docs/DEPLOYMENT_AND_OPERATIONS.md`
 - auto update strategy: `docs/AUTO_UPDATE_STRATEGY.md`
 - appwrite rollout: `docs/APPWRITE_VNSTOCK_ROLLOUT.md`
+- read-only MCP server: `docs/VNIBB_MCP_READONLY.md`
 - development journal: `docs/DEVELOPMENT_JOURNAL.md`
 - project-level overview docs: `../docs/README.md`
 - agent instructions: `AGENTS.md`
