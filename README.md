@@ -11,6 +11,18 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-4-06B6D4?logo=tailwindcss)](https://tailwindcss.com/)
+[![TanStack Query](https://img.shields.io/badge/TanStack%20Query-5-FF4154?logo=reactquery)](https://tanstack.com/query)
+[![Supabase](https://img.shields.io/badge/Supabase-3-3ECF8E?logo=supabase)](https://supabase.com/)
+[![Appwrite](https://img.shields.io/badge/Appwrite-F02-FF61CD?logo=appwrite)](https://appwrite.io/)
+[![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis)](https://redis.io/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://postgresql.org/)
+[![Pydantic](https://img.shields.io/badge/Pydantic-2-E92063?logo=pydantic)](https://docs.pydantic.dev/)
+[![pnpm](https://img.shields.io/badge/pnpm-9-F69220?logo=pnpm)](https://pnpm.io/)
+[![Turbo](https://img.shields.io/badge/Turbo-2-26A65B?logo=vercel)](https://turbo.build/)
+[![Vercel](https://img.shields.io/badge/Vercel-Deployment-black?logo=vercel)](https://vercel.com/)
 
 [Live Demo](https://vnibb-web.vercel.app/) · [Docs Hub](./docs/README.md) · [Development Journal](./docs/DEVELOPMENT_JOURNAL.md)
 
@@ -28,6 +40,7 @@ It combines:
 
 - a high-density widget workspace for fundamentals, technicals, quant, sector rotation, and company intelligence
 - a FastAPI backend that normalizes messy local-market data into product-ready responses
+- a dedicated `vnibb-mcp` sidecar so VniAgent and other trusted clients can read VNIBB/Appwrite data through a curated MCP surface
 - bank-aware analytics, market-structure tools, and Vietnam-specific workflows that generic global terminals usually miss
 - a repo structure and documentation style that make it practical for AI agents to continue development, debugging, and deployment work
 
@@ -37,7 +50,7 @@ The goal is not to be just another screener or charting page. VNIBB is meant to 
 
 - **Vietnam-first modeling**: the app is designed around Vietnamese equities, not retrofitted from a US-market product
 - **OpenBB-inspired workflow**: dense, modular, multi-widget research surfaces instead of shallow page-by-page navigation
-- **OpenBB-inspired AI copilot**: Appwrite-first context, validated source citations, evidence panels, and reasoning/status events
+- **VniAgent**: Appwrite-first context, validated source citations, evidence panels, and reasoning/status events
 - **Bank-aware analytics**: banks are treated as a distinct analytical class, not forced into industrial-company ratios
 - **Fallback-first backend**: provider instability, missing values, and schema quirks are handled in the backend instead of leaking directly into the UI
 - **Agent-friendly repo**: phased planning, ops notes, AGENTS guidance, and docs make handoff to other coding agents much easier
@@ -58,10 +71,19 @@ NEXT_PUBLIC_WS_URL=ws://localhost:8000/api/v1/ws/prices
 # 3. Start backend
 python -m uvicorn vnibb.api.main:app --reload --app-dir apps/api
 
-# 4. Start frontend
+# 4. Optional: start the dedicated read-only MCP sidecar for VniAgent/local MCP clients
+vnibb-mcp --transport streamable-http --host 127.0.0.1 --port 8001
+
+# 5. Start frontend
 pnpm --filter frontend dev
 
-# 5. Open: http://localhost:3000 (frontend) and http://localhost:8000/docs (API docs)
+# 6. Open: http://localhost:3000 (frontend), http://localhost:8000/docs (API docs), and http://127.0.0.1:8001/health (MCP health)
+```
+
+If you want VniAgent to use the MCP sidecar locally, add this backend env:
+
+```env
+VNIBB_MCP_URL=http://127.0.0.1:8001/mcp
 ```
 
 ---
@@ -171,36 +193,44 @@ pnpm run gate:no502     # Widget health probe (5 repeats, 10s timeout)
 MIT. See `LICENSE`.
 
 ---
-
-# Architecture Reference
+# Architecture Reference for Maintainers
 
 ## System Overview
 
-VNIBB is a monorepo with three main layers:
+VNIBB is a monorepo with a frontend, a backend, and a dedicated read-only MCP sidecar for agent-facing data access:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        End Users / Agents                           │
-│           (Investors, Quants, Research Agents, AI Cops)             │
+│      (Investors, Quants, Research Agents, VniAgent, MCP Clients)    │
 └─────────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    apps/web (Next.js 16)                           │
-│   Dashboard UI, Widgets, TanStack Query, React Context, Routing     │
+│   Dashboard UI, Widgets, VniAgent Sidebar, Routing                  │
 │   Port: 3000                                                        │
 └─────────────────────────────────────────────────────────────────────┘
                                   │
-                    ┌─────────────┴─────────────┐
-                    ▼                           ▼
+                                  │
+                     ┌────────────┴─────────────┐
+                     ▼                          ▼
 ┌───────────────────────────────┐   ┌───────────────────────────────┐
-│     apps/api (FastAPI)        │   │    External Services           │
-│     Port: 8000                │   │    - VNStock API              │
-│                               │   │    - PostgreSQL                │
-│  Middleware → Routes →        │   │    - Redis Cache              │
-│    Services → Providers       │   │    - Appwrite (optional)       │
-│                               │   │    - Scrapers (fallback)      │
-└───────────────────────────────┘   └───────────────────────────────┘
+│     apps/api (FastAPI)        │   │   vnibb-mcp (read-only MCP)   │
+│     Port: 8000                │   │   Port: 8001                  │
+│                               │   │                               │
+│  Middleware → Routes →        │   │  Curated tools/resources      │
+│    Services → Providers       │   │  for Appwrite-backed reads    │
+│                               │   │                               │
+└───────────────┬───────────────┘   └───────────────┬───────────────┘
+                │                                   │
+                └──────────────┬────────────────────┘
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         External Services                           │
+│   Appwrite (primary) · PostgreSQL (fallback) · Redis · VNStock      │
+│   Scrapers / Provider fallbacks                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Frontend Architecture
@@ -453,6 +483,8 @@ Request
 ┌──────────────────────────────────────────────────────────────────┐
 │                        External Sources                           │
 │   VNStock API ──batch sync──> Appwrite ──serve──> FastAPI ──> UI │
+│                                      └────serve────> vnibb-mcp   │
+│   VniAgent server reads: UI ─> FastAPI ─> vnibb-mcp ─> Appwrite  │
 └──────────────────────────────────────────────────────────────────┘
 
 Appwrite Collections (26 total):
@@ -467,6 +499,26 @@ Appwrite Collections (26 total):
 
 Redis Cache: Session, rate limits, API response cache (TTL: 30s - 24h)
 ```
+
+## VniAgent MCP Path
+
+`VniAgent` now has a dedicated server-side MCP path for selected reads.
+
+```text
+VniAgent UI
+  -> POST /api/v1/copilot/chat/stream
+  -> apps/api runtime context assembly
+  -> vnibb-mcp (when VNIBB_MCP_URL is configured)
+  -> Appwrite curated read tools
+  -> source-validated answer + SSE events back to UI
+```
+
+Current MCP-backed VniAgent reads:
+
+- `get_market_snapshot`
+- `get_symbol_snapshot`
+
+If `vnibb-mcp` is unavailable, the backend falls back to direct Appwrite/Postgres context assembly.
 
 ## Database Schema
 
