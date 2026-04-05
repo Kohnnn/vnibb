@@ -22,6 +22,7 @@ from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
 from vnibb.services.copilot_service import copilot_service
 from vnibb.services.llm_service import llm_service
+from vnibb.services.vnibb_mcp_client_service import vnibb_mcp_client_service
 
 router = APIRouter()
 SUPPORTED_COPILOT_PROVIDERS = {"openrouter", "openai_compatible"}
@@ -181,7 +182,12 @@ async def chat_stream(request: ChatStreamRequest):
                     runtime_config.get("provider")
                 )
                 request_settings["model"] = str(runtime_config.get("model") or "").strip()
-            yield f"data: {json.dumps({'reasoning': {'eventType': 'INFO', 'message': 'Building VNIBB database runtime context'}})}\n\n"
+            context_message = (
+                "Building VNIBB MCP runtime context"
+                if vnibb_mcp_client_service.is_enabled
+                else "Building VNIBB database runtime context"
+            )
+            yield f"data: {json.dumps({'reasoning': {'eventType': 'INFO', 'message': context_message}})}\n\n"
 
             context_dict = {}
             if request.context:

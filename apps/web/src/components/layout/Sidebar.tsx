@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
     LayoutDashboard,
@@ -41,10 +41,8 @@ interface SidebarProps {
     onOpenPromptsLibrary?: () => void;
     onOpenTemplateSelector?: () => void;
     mobileMode?: boolean;
-    width?: number;
     collapsed?: boolean;
     onCollapsedChange?: (collapsed: boolean) => void;
-    onWidthChange?: (width: number) => void;
 }
 
 export function Sidebar({
@@ -53,10 +51,8 @@ export function Sidebar({
     onOpenPromptsLibrary,
     onOpenTemplateSelector,
     mobileMode = false,
-    width = 208,
     collapsed = false,
     onCollapsedChange,
-    onWidthChange,
 }: SidebarProps) {
     const INITIAL_FOLDER_ID = 'folder-initial';
     const [showCreateMenu, setShowCreateMenu] = useState(false);
@@ -73,31 +69,6 @@ export function Sidebar({
             onCollapsedChange?.(false);
         }
     }, [mobileMode, onCollapsedChange]);
-
-    const handleResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
-        if (mobileMode || collapsed || !onWidthChange) return;
-
-        event.preventDefault();
-        const startX = event.clientX;
-        const startWidth = width;
-
-        const handleMouseMove = (moveEvent: MouseEvent) => {
-            const nextWidth = startWidth + (moveEvent.clientX - startX);
-            onWidthChange(nextWidth);
-        };
-
-        const handleMouseUp = () => {
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-        };
-
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-    };
 
     useEffect(() => {
         if (!showCreateMenu && !showMoveSubmenu) {
@@ -621,10 +592,9 @@ export function Sidebar({
                     flex flex-col
                     ${mobileMode
                         ? 'relative h-full w-full'
-                        : 'hidden lg:flex h-screen shrink-0'
+                        : 'h-screen w-full'
                     }
                 `}
-                style={mobileMode ? undefined : { width: collapsed ? COLLAPSED_SIDEBAR_WIDTH : width }}
             >
 
                 {/* Logo */}
@@ -736,16 +706,6 @@ export function Sidebar({
                         </div>
                     )}
                 </div>
-
-                {!mobileMode && !collapsed && onWidthChange ? (
-                    <div
-                        className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-blue-500/30"
-                        onMouseDown={handleResizeStart}
-                        role="separator"
-                        aria-orientation="vertical"
-                        aria-label="Resize workspace sidebar"
-                    />
-                ) : null}
 
                 {/* Footer with Settings and Version */}
                 <div className="px-2 py-1 border-t border-[var(--border-color)] shrink-0">

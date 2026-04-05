@@ -2,14 +2,13 @@
 'use client';
 
 import { MessageSquare, ChevronRight } from 'lucide-react';
-import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { type CSSProperties } from 'react';
 
 interface RightSidebarProps {
     isOpen: boolean;
     onToggle: () => void;
     width?: number;
     overlay?: boolean;
-    onWidthChange?: (width: number) => void;
     children: React.ReactNode;
 }
 
@@ -18,37 +17,11 @@ export function RightSidebar({
     onToggle,
     width = 320,
     overlay = false,
-    onWidthChange,
     children
 }: RightSidebarProps) {
-    const handleResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
-        if (overlay || !isOpen || !onWidthChange) return;
-
-        event.preventDefault();
-        const startX = event.clientX;
-        const startWidth = width;
-
-        const handleMouseMove = (moveEvent: MouseEvent) => {
-            const nextWidth = startWidth - (moveEvent.clientX - startX);
-            onWidthChange(nextWidth);
-        };
-
-        const handleMouseUp = () => {
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-        };
-
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-    };
-
     const asideClassName = overlay
         ? `fixed top-12 bottom-0 right-0 z-40 bg-[var(--bg-secondary)] border-l border-[var(--border-color)] transition-transform duration-300 ease-in-out flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`
-        : `relative h-full bg-[var(--bg-secondary)] border-l border-[var(--border-color)] flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`;
+        : `relative h-full w-full bg-[var(--bg-secondary)] border-l border-[var(--border-color)] flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`;
 
     const asideStyle: CSSProperties = overlay
         ? {
@@ -66,16 +39,6 @@ export function RightSidebar({
             className={asideClassName}
             style={asideStyle}
         >
-            {!overlay && isOpen && onWidthChange ? (
-                <div
-                    className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-blue-500/30"
-                    onMouseDown={handleResizeStart}
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label="Resize VniAgent sidebar"
-                />
-            ) : null}
-
             {/* Header */}
             <div className="h-10 flex items-center justify-between px-4 border-b border-[var(--border-color)] bg-[var(--bg-tertiary)]/70">
                 <div className="flex items-center gap-2 text-blue-400">

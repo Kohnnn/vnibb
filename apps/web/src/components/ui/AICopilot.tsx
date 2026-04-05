@@ -7,6 +7,7 @@ import {
     X,
     Send,
     Plus,
+    Trash2,
     ChevronDown,
     ChevronRight,
     Bot,
@@ -592,6 +593,18 @@ export function AICopilot({
         URL.revokeObjectURL(url);
     };
 
+    const handleNewChat = () => {
+        setMessages([])
+        setInput('')
+        setAttachedDocuments([])
+        setCurrentStatus(null)
+        setShowDetails({})
+        if (typeof window !== 'undefined') {
+            window.sessionStorage.removeItem(sessionKey)
+        }
+        inputRef.current?.focus()
+    }
+
     const toggleDetails = (messageId: string) => {
         setShowDetails((prev) => ({
             ...prev,
@@ -632,13 +645,32 @@ export function AICopilot({
                         {widgetContext ? 'Widget-native workspace agent' : 'Workspace-native Vietnam equity agent'}
                     </div>
                 </div>
-                <button
-                    type="button"
-                    onClick={() => setIsPromptLibraryOpen(true)}
-                    className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200 transition-colors hover:bg-cyan-500/20"
-                >
-                    Prompt Library
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={handleNewChat}
+                        className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    >
+                        <span className="inline-flex items-center gap-1"><Plus size={11} /> New Chat</span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleNewChat}
+                        disabled={messages.length === 0 && attachedDocuments.length === 0}
+                        className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label="Clear chat"
+                        title="Clear chat"
+                    >
+                        <Trash2 size={12} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setIsPromptLibraryOpen(true)}
+                        className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200 transition-colors hover:bg-cyan-500/20"
+                    >
+                        Prompt Library
+                    </button>
+                </div>
             </div>
 
             {/* Context Badge */}

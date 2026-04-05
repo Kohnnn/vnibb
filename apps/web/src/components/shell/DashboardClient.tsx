@@ -68,13 +68,13 @@ export default function DashboardPage() {
     );
 }
 
-const LEFT_SIDEBAR_DEFAULT_WIDTH = 208;
+const LEFT_SIDEBAR_DEFAULT_WIDTH = 248;
 const LEFT_SIDEBAR_COLLAPSED_WIDTH = 56;
 const LEFT_SIDEBAR_MIN_WIDTH = 180;
-const LEFT_SIDEBAR_MAX_WIDTH = 420;
-const RIGHT_SIDEBAR_DEFAULT_WIDTH = 350;
+const LEFT_SIDEBAR_MAX_WIDTH = 320;
+const RIGHT_SIDEBAR_DEFAULT_WIDTH = 360;
 const RIGHT_SIDEBAR_MIN_WIDTH = 300;
-const RIGHT_SIDEBAR_MAX_WIDTH = 560;
+const RIGHT_SIDEBAR_MAX_WIDTH = 480;
 const LEFT_SIDEBAR_STORAGE_KEY = 'vnibb-left-sidebar-width';
 const RIGHT_SIDEBAR_STORAGE_KEY = 'vnibb-right-sidebar-width';
 const MAIN_FUNDAMENTAL_DASHBOARD_ID = 'default-fundamental';
@@ -132,11 +132,17 @@ function DashboardContent() {
     const [adminLayoutControlsVisible, setAdminLayoutControlsVisible] = useState(false);
     const [adminLayoutStatus, setAdminLayoutStatus] = useState<string | null>(null);
     const [isPublishingSystemLayout, setIsPublishingSystemLayout] = useState(false);
+    const [draggingPane, setDraggingPane] = useState<'left' | 'right' | null>(null);
     const [widgetSettingsState, setWidgetSettingsState] = useState<{
         widgetId: string;
         tabId: string;
     } | null>(null);
     const autoWalkthroughQueuedRef = useRef(false);
+    const dragStateRef = useRef<{ pane: 'left' | 'right' | null; startX: number; startWidth: number }>({
+        pane: null,
+        startX: 0,
+        startWidth: 0,
+    });
 
     const starterTemplates = useMemo(() => {
         const preferredIds = ['getting-started', 'fundamental-analyst', 'global-markets', 'earnings-season'];
@@ -190,6 +196,56 @@ function DashboardContent() {
         window.localStorage.setItem(RIGHT_SIDEBAR_STORAGE_KEY, String(rightSidebarWidth));
     }, [rightSidebarWidth]);
 
+    const beginPaneResize = useCallback((pane: 'left' | 'right', clientX: number) => {
+        dragStateRef.current = {
+            pane,
+            startX: clientX,
+            startWidth: pane === 'left' ? sidebarWidth : rightSidebarWidth,
+        };
+        setDraggingPane(pane);
+    }, [rightSidebarWidth, sidebarWidth]);
+
+    useEffect(() => {
+        if (!draggingPane) return;
+
+        const handlePointerMove = (event: PointerEvent) => {
+            const { pane, startWidth, startX } = dragStateRef.current;
+            if (!pane) return;
+
+            if (pane === 'left') {
+                const nextWidth = startWidth + (event.clientX - startX);
+                const clamped = Math.max(LEFT_SIDEBAR_MIN_WIDTH, Math.min(LEFT_SIDEBAR_MAX_WIDTH, nextWidth));
+                setSidebarWidth(clamped);
+                return;
+            }
+
+            const nextWidth = startWidth - (event.clientX - startX);
+            const clamped = Math.max(RIGHT_SIDEBAR_MIN_WIDTH, Math.min(RIGHT_SIDEBAR_MAX_WIDTH, nextWidth));
+            setRightSidebarWidth(clamped);
+        };
+
+        const handlePointerUp = () => {
+            dragStateRef.current = { pane: null, startX: 0, startWidth: 0 };
+            setDraggingPane(null);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+        };
+
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+
+        return () => {
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+        };
+    }, [draggingPane]);
+
     useEffect(() => {
         if (!mounted) return;
         const syncAdminKey = () => {
@@ -214,8 +270,12 @@ function DashboardContent() {
         setIsEditing(false);
     }, [activeDashboard, adminLayoutControlsVisible, isEditing, setDashboardAdminUnlocked]);
 
-    const openWalkthrough = useCallback(() => {
+    const openWalkthrough = useCallback((force = false) => {
         if (!mounted || effectiveLeftSidebarWidth === 0) {
+            return;
+        }
+
+        if (!force && !shouldShowDashboardWalkthrough()) {
             return;
         }
 
@@ -269,7 +329,7 @@ function DashboardContent() {
             }
 
             window.requestAnimationFrame(() => {
-                openWalkthrough();
+                openWalkthrough(true);
             });
         };
 
@@ -710,20 +770,34 @@ function DashboardContent() {
     if (!mounted) return null;
 
     return (
-        <div aria-label="Dashboard workspace" className="flex min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-hidden">
-            <Sidebar
-                onOpenWidgetLibrary={() => setIsWidgetLibraryOpen(true)}
-                onOpenAppsLibrary={() => setIsAppsLibraryOpen(true)}
-                onOpenPromptsLibrary={handleOpenGlobalPrompts}
-                onOpenTemplateSelector={() => setIsTemplateSelectorOpen(true)}
-                width={sidebarWidth}
-                collapsed={isSidebarCollapsed}
-                onCollapsedChange={setIsSidebarCollapsed}
-                onWidthChange={(nextWidth) => {
-                    const clamped = Math.max(LEFT_SIDEBAR_MIN_WIDTH, Math.min(LEFT_SIDEBAR_MAX_WIDTH, nextWidth));
-                    setSidebarWidth(clamped);
-                }}
-            />
+        <div aria-label="Dashboard workspace" className="flex h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-hidden">
+            <div
+                className={`hidden lg:flex h-screen shrink-0 ${draggingPane === 'left' ? 'transition-none' : 'transition-[width] duration-150 ease-out'}`}
+                style={{ width: effectiveLeftSidebarWidth }}
+            >
+                <Sidebar
+                    onOpenWidgetLibrary={() => setIsWidgetLibraryOpen(true)}
+                    onOpenAppsLibrary={() => setIsAppsLibraryOpen(true)}
+                    onOpenPromptsLibrary={handleOpenGlobalPrompts}
+                    onOpenTemplateSelector={() => setIsTemplateSelectorOpen(true)}
+                    collapsed={isSidebarCollapsed}
+                    onCollapsedChange={setIsSidebarCollapsed}
+                />
+            </div>
+
+            {!isSidebarCollapsed && effectiveLeftSidebarWidth > 0 ? (
+                <div
+                    className="hidden lg:block h-screen w-[4px] shrink-0 cursor-col-resize bg-[var(--bg-secondary)] hover:bg-blue-500/30"
+                    onPointerDown={(event) => {
+                        if (event.button !== 0) return;
+                        event.preventDefault();
+                        beginPaneResize('left', event.clientX);
+                    }}
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize workspace sidebar"
+                />
+            ) : null}
 
             <MobileNav
                 onOpenWidgetLibrary={() => setIsWidgetLibraryOpen(true)}
@@ -732,7 +806,7 @@ function DashboardContent() {
                 onOpenTemplateSelector={() => setIsTemplateSelectorOpen(true)}
             />
 
-            <main className="flex-1 min-w-0 flex flex-col relative">
+            <main className="flex-1 min-w-0 flex flex-col relative overflow-hidden">
                 <Header
                     currentSymbol={stockGlobalSymbol}
                     onSymbolChange={handleSymbolChange}
@@ -807,7 +881,7 @@ function DashboardContent() {
                         </div>
                     ) : null}
 
-                    <div className="flex h-full min-h-0 w-full gap-3">
+                    <div className="flex h-full min-h-0 w-full overflow-hidden">
                         <div className="min-w-0 flex-1 overflow-hidden">
                             {activeDashboard && activeTab ? (
                                 <>
@@ -964,16 +1038,27 @@ function DashboardContent() {
                         </div>
 
                         {!overlayAICopilot && showAICopilot ? (
-                            <div className="hidden lg:block h-full shrink-0" style={{ width: effectiveRightSidebarWidth }}>
+                            <>
+                            <div
+                                className="hidden lg:block h-full w-[4px] shrink-0 cursor-col-resize bg-[var(--bg-secondary)] hover:bg-blue-500/30"
+                                onPointerDown={(event) => {
+                                    if (event.button !== 0) return;
+                                    event.preventDefault();
+                                    beginPaneResize('right', event.clientX);
+                                }}
+                                role="separator"
+                                aria-orientation="vertical"
+                                aria-label="Resize VniAgent sidebar"
+                            />
+                            <div
+                                className={`hidden lg:block h-full shrink-0 ${draggingPane === 'right' ? 'transition-none' : 'transition-[width] duration-150 ease-out'}`}
+                                style={{ width: effectiveRightSidebarWidth }}
+                            >
                                 <RightSidebar 
                                     isOpen={showAICopilot} 
                                     onToggle={() => setShowAICopilot(false)}
                                     width={effectiveRightSidebarWidth}
                                     overlay={false}
-                                    onWidthChange={(nextWidth) => {
-                                        const clamped = Math.max(RIGHT_SIDEBAR_MIN_WIDTH, Math.min(RIGHT_SIDEBAR_MAX_WIDTH, nextWidth));
-                                        setRightSidebarWidth(clamped);
-                                    }}
                                 >
                                     <AICopilot 
                                         isOpen={showAICopilot} 
@@ -986,6 +1071,7 @@ function DashboardContent() {
                                     />
                                 </RightSidebar>
                             </div>
+                            </>
                         ) : null}
                     </div>
 

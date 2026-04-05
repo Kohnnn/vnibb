@@ -71,6 +71,8 @@ Edit `deployment/env.oracle` and set:
 - `APPWRITE_API_KEY`
 - `APPWRITE_DATABASE_ID` (reuse the existing VNIBB Appwrite database)
 - `APPWRITE_SYSTEM_TEMPLATES_COLLECTION_ID=system_dashboard_templates`
+- `VNIBB_MCP_URL=http://mcp:8001/mcp`
+- `VNIBB_MCP_SHARED_BEARER_TOKEN`
 - `REDIS_URL` if Redis remains enabled
 - `SENTRY_DSN`
 - `ADMIN_API_KEY`
@@ -127,14 +129,17 @@ docker compose -f docker-compose.oracle.yml logs caddy --tail=200
 ```bash
 bash scripts/oracle/healthcheck.sh
 bash scripts/oracle/smoke_test.sh
+bash scripts/oracle/mcp_smoke_test.sh
 BASE_URL=https://oracle-api.example.com bash scripts/oracle/healthcheck.sh
 CORS_TEST_ORIGIN=https://vnibb.vercel.app BASE_URL=https://oracle-api.example.com bash scripts/oracle/smoke_test.sh
+BASE_URL=https://oracle-api.example.com bash scripts/oracle/mcp_smoke_test.sh
 ```
 
 Notes:
 
 - The scripts default to `http://127.0.0.1:8000`, which is useful for local VM rehearsal before DNS is live.
 - Override `CORS_TEST_ORIGIN` when validating a non-default frontend origin.
+- Set `VNIBB_MCP_SHARED_BEARER_TOKEN` in the shell before running the MCP smoke script against a protected deployment.
 
 ### Log review
 
@@ -146,6 +151,8 @@ docker compose -f docker-compose.oracle.yml logs caddy --tail=200
 ### What to confirm
 
 - `/live`, `/ready`, `/health/`, and `/api/v1/health` return `200`
+- `/mcp-health` returns `200`
+- `/mcp` accepts MCP initialization and `get_appwrite_status`
 - Appwrite is reported as connected
 - CORS preflight succeeds for `https://vnibb-web.vercel.app`
 - Key API endpoints succeed
