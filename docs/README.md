@@ -1,11 +1,29 @@
 # Docs Index
 
+`vnibb/docs` is the canonical maintainer-facing documentation tree for the active application repo.
+
 ## Core References
 
+- `API_REFERENCE.md`: API-level reference material for the backend surface
+- `APPWRITE_SCHEMA.md`: Appwrite schema and collection model
 - `WIDGET_SYSTEM_REFERENCE.md`: canonical non-TradingView widget rules and behavior
-- `WIDGET_IMPROVEMENT_ROADMAP.md`: structured priorities, shipped work, and remaining follow-up
-- `TRADINGVIEW_WIDGET_CATALOG.md`: TradingView widget coverage and status
-- `API_REFERENCE.md`: API-level reference material
+- `WIDGET_IMPROVEMENT_ROADMAP.md`: structured priorities, shipped work, and follow-up work
+- `TRADINGVIEW_WIDGET_CATALOG.md`: current TradingView widget coverage and status
+
+## Operations And Data
+
+- `DEPLOYMENT_AND_OPERATIONS.md`: deployment profile, Oracle runtime guidance, and ops notes
+- `APPWRITE_VNSTOCK_ROLLOUT.md`: Appwrite rollout strategy, schema, and migration history
+- `AUTO_UPDATE_STRATEGY.md`: automatic update plan, rate-budget strategy, and scheduler model
+- `daily_trading_updater.md`: trading-flow updater behavior and reinforced scheduler notes
+- `SCREENER_SNAPSHOTS_APPWRITE_RECOVERY.md`: last-mile recovery notes for the screener Appwrite collection
+- `data_retention_partitioning.md`: retention and partitioning guidance
+
+## Product And Architecture
+
+- `MCP_STRATEGY.md`: MCP applicability and agent integration ideas
+- `DEVELOPMENT_JOURNAL.md`: maintainer journal and decision history
+- `WIDGET_CATALOG.md`: legacy widget snapshot, useful as historical context only
 
 ## TradingView / Global Markets
 
@@ -13,21 +31,16 @@
 - `TRADINGVIEW_GLOBAL_MARKETS_IMPLEMENTATION_PLAN.md`
 - `TRADINGVIEW_WIDGET_CATALOG.md`
 
-## Platform / Runtime
-
-- `APPWRITE_SCHEMA.md`
-- `admin_global_system_layouts.md`
-- `appwrite_system_layouts_manual_setup.md`
-- `daily_trading_updater.md`
-- `data_retention_partitioning.md`
-
-## Migration / Database Notes
+## Oracle / Deployment Runbooks
 
 - `oracle_migration_plan.md`
 - `oracle_rollback_plan.md`
 - `oracle_runbook.md`
-- `sql/`
+- `admin_global_system_layouts.md`
+- `appwrite_system_layouts_manual_setup.md`
 
-## Legacy / Snapshot Docs
+## Note On Root Docs
 
-- `WIDGET_CATALOG.md`: legacy snapshot, not the current source of truth
+The root `docs/` folder is now a lighter project-level overview set.
+
+For backend, scheduler, Appwrite, and maintainer-operational references, prefer `vnibb/docs/` first.
