@@ -14,10 +14,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
 from vnibb.services.appwrite_population import populate_appwrite_tables
 from vnibb.services.data_pipeline import data_pipeline
@@ -62,6 +63,11 @@ class FullMarketSync:
                 "cash_flows",
                 "financial_ratios",
             ),
+            "corporate_actions": ("dividends", "company_events"),
+            "shareholders": ("shareholders",),
+            "officers": ("officers",),
+            "subsidiaries": ("subsidiaries",),
+            "company_news": ("company_news",),
         }
         return stage_tables.get(stage_name, ()), stage_name in {"symbols", "profiles"}
 
@@ -82,6 +88,53 @@ class FullMarketSync:
         if max_symbols is not None and max_symbols > 0:
             return symbols[:max_symbols]
         return symbols
+
+    async def _get_priority_symbols(self, limit: int) -> list[str]:
+        if limit <= 0:
+            return []
+
+        async with async_session_maker() as session:
+            latest_snapshot_result = await session.execute(
+                select(func.max(ScreenerSnapshot.snapshot_date))
+            )
+            latest_snapshot = latest_snapshot_result.scalar()
+
+            if latest_snapshot is not None:
+                rows = await session.execute(
+                    select(ScreenerSnapshot.symbol)
+                    .where(
+                        ScreenerSnapshot.snapshot_date == latest_snapshot,
+                        ScreenerSnapshot.market_cap.is_not(None),
+                    )
+                    .order_by(ScreenerSnapshot.market_cap.desc().nullslast())
+                    .limit(limit)
+                )
+                symbols = [str(row[0]).upper() for row in rows.fetchall() if row[0]]
+                if symbols:
+                    return symbols
+
+        return await self._get_seeded_symbols(max_symbols=limit)
+
+    async def _get_rotating_priority_symbols(
+        self,
+        batch_size: int,
+        rotation_buckets: int = 5,
+        target_day: date | None = None,
+    ) -> list[str]:
+        if batch_size <= 0:
+            return []
+
+        buckets = max(1, rotation_buckets)
+        candidate_limit = batch_size * buckets
+        candidates = await self._get_priority_symbols(candidate_limit)
+        if not candidates:
+            return []
+
+        day = target_day or date.today()
+        bucket_index = day.weekday() % buckets
+        start = bucket_index * batch_size
+        selected = candidates[start : start + batch_size]
+        return selected or candidates[:batch_size]
 
     async def _run_stage(
         self,
@@ -407,6 +460,8 @@ async def run_daily_market_sync(
     async def _run_direct_stage(
         stage_name: str,
         operation: Callable[[], Awaitable[int]],
+        *,
+        populate_appwrite_stage: str | None = None,
     ) -> SyncResult:
         start = time.monotonic()
         errors: list[str] = []
@@ -415,6 +470,10 @@ async def run_daily_market_sync(
 
         try:
             synced_count = int(await operation())
+            stage_key = populate_appwrite_stage or stage_name
+            tables, full_refresh = FullMarketSync._stage_appwrite_tables(stage_key)
+            if tables:
+                await populate_appwrite_tables(tables, full_refresh=full_refresh)
         except Exception as exc:  # noqa: BLE001
             success = False
             errors.append(str(exc))
@@ -443,6 +502,8 @@ async def run_daily_market_sync(
         history_days=history_days,
     )
     results["indices"] = await sync.sync_all_indices()
+    results["profiles"] = await sync.sync_all_profiles(symbols=symbols)
+    results["financials"] = await sync.sync_all_financials(symbols=symbols)
 
     async def _sync_rs_ratings() -> int:
         from vnibb.services.rs_rating_service import RSRatingService
@@ -465,6 +526,7 @@ async def run_daily_market_sync(
         results["corporate_actions"] = await _run_direct_stage(
             "corporate_actions",
             _sync_corporate_actions,
+            populate_appwrite_stage="corporate_actions",
         )
 
     return results
@@ -481,3 +543,93 @@ async def run_full_sync(
         include_historical=include_historical,
         include_corporate_actions=include_corporate_actions,
     )
+
+
+async def run_supplemental_company_sync() -> dict[str, SyncResult]:
+    """Rotate company-level vnstock updates into the automatic schedule."""
+
+    async def _run_direct_stage(
+        stage_name: str,
+        operation: Callable[[], Awaitable[int]],
+    ) -> SyncResult:
+        start = time.monotonic()
+        errors: list[str] = []
+        synced_count = 0
+        success = True
+
+        try:
+            synced_count = int(await operation())
+            tables, full_refresh = FullMarketSync._stage_appwrite_tables(stage_name)
+            if tables:
+                await populate_appwrite_tables(tables, full_refresh=full_refresh)
+        except Exception as exc:  # noqa: BLE001
+            success = False
+            errors.append(str(exc))
+            logger.exception("%s supplemental sync failed: %s", stage_name, exc)
+
+        duration_seconds = time.monotonic() - start
+        return SyncResult(
+            success=success,
+            synced_count=synced_count,
+            error_count=len(errors),
+            duration_seconds=duration_seconds,
+            errors=errors,
+        )
+
+    sync = FullMarketSync()
+    today = date.today()
+    weekend = today.weekday() >= 5
+    batch_size = (
+        settings.scheduler_weekend_symbols_per_run
+        if weekend
+        else settings.scheduler_supplemental_symbols_per_run
+    )
+
+    results: dict[str, SyncResult] = {}
+
+    if weekend:
+        symbols = await sync._get_priority_symbols(batch_size)
+        if not symbols:
+            return results
+
+        results["shareholders"] = await _run_direct_stage(
+            "shareholders",
+            lambda: data_pipeline.sync_shareholders(symbols=symbols),
+        )
+        results["officers"] = await _run_direct_stage(
+            "officers",
+            lambda: data_pipeline.sync_officers(symbols=symbols),
+        )
+        results["subsidiaries"] = await _run_direct_stage(
+            "subsidiaries",
+            lambda: data_pipeline.sync_subsidiaries(symbols=symbols),
+        )
+        results["company_news"] = await _run_direct_stage(
+            "company_news",
+            lambda: data_pipeline.sync_company_news(
+                symbols=symbols,
+                limit=settings.scheduler_company_news_limit,
+            ),
+        )
+        return results
+
+    symbols = await sync._get_rotating_priority_symbols(batch_size=batch_size)
+    if not symbols:
+        return results
+
+    weekday_plan: list[tuple[str, Callable[[], Awaitable[int]]]] = [
+        ("shareholders", lambda: data_pipeline.sync_shareholders(symbols=symbols)),
+        ("officers", lambda: data_pipeline.sync_officers(symbols=symbols)),
+        ("subsidiaries", lambda: data_pipeline.sync_subsidiaries(symbols=symbols)),
+        (
+            "company_news",
+            lambda: data_pipeline.sync_company_news(
+                symbols=symbols,
+                limit=settings.scheduler_company_news_limit,
+            ),
+        ),
+    ]
+
+    stage_name, operation = weekday_plan[today.weekday() % len(weekday_plan)]
+    results[stage_name] = await _run_direct_stage(stage_name, operation)
+    return results

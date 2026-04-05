@@ -87,10 +87,14 @@ export function Sidebar({
         };
 
         const handleMouseUp = () => {
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
         };
 
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
     };
@@ -614,10 +618,10 @@ export function Sidebar({
                 data-mobile-sidebar={mobileMode ? 'true' : 'false'}
                 className={`
                     relative bg-[var(--bg-secondary)] border-r border-[var(--border-color)]
-                    transition-[width] duration-300 flex flex-col
+                    flex flex-col
                     ${mobileMode
                         ? 'relative h-full w-full'
-                        : 'hidden lg:flex fixed left-0 top-0 h-screen z-50'
+                        : 'hidden lg:flex h-screen shrink-0'
                     }
                 `}
                 style={mobileMode ? undefined : { width: collapsed ? COLLAPSED_SIDEBAR_WIDTH : width }}

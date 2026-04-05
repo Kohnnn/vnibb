@@ -6177,6 +6177,37 @@ class DataPipeline:
 
 
 # Standalone functions for scheduler
+async def _get_scheduler_priority_symbols(limit: int) -> List[str]:
+    if limit <= 0:
+        return []
+
+    async with async_session_maker() as session:
+        snapshot_result = await session.execute(select(func.max(ScreenerSnapshot.snapshot_date)))
+        latest_snapshot = snapshot_result.scalar()
+
+        if latest_snapshot is not None:
+            rows = await session.execute(
+                select(ScreenerSnapshot.symbol)
+                .where(
+                    ScreenerSnapshot.snapshot_date == latest_snapshot,
+                    ScreenerSnapshot.market_cap.is_not(None),
+                )
+                .order_by(ScreenerSnapshot.market_cap.desc().nullslast())
+                .limit(limit)
+            )
+            symbols = [str(row[0]).upper() for row in rows.fetchall() if row[0]]
+            if symbols:
+                return symbols
+
+        rows = await session.execute(
+            select(Stock.symbol)
+            .where(Stock.is_active == 1)
+            .order_by(Stock.symbol.asc())
+            .limit(limit)
+        )
+        return [str(row[0]).upper() for row in rows.fetchall() if row[0]]
+
+
 async def run_daily_sync():
     """Wrapper for scheduler to run daily sync."""
     await data_pipeline.run_full_seeding(days=1, resume=False)
@@ -6185,6 +6216,16 @@ async def run_daily_sync():
 async def run_daily_trading_sync():
     """Wrapper for scheduler to run daily trading updates."""
     await data_pipeline.run_daily_trading_updates()
+
+    from vnibb.services.appwrite_population import populate_appwrite_tables
+
+    tables = ["foreign_trading", "order_flow_daily", "derivative_prices"]
+    if settings.store_intraday_trades:
+        tables.append("intraday_trades")
+    if not settings.orderbook_at_close_only:
+        tables.append("orderbook_snapshots")
+
+    await populate_appwrite_tables(tables)
 
 
 async def run_hourly_news_sync():
@@ -6200,10 +6241,32 @@ async def run_hourly_news_sync():
 
 
 async def run_intraday_sync():
-    """Wrapper for scheduler to run intraday sync."""
-    # TODO: Implement intraday sync in DataPipeline class
-    logger.info("Intraday sync placeholder")
-    pass
+    """Wrapper for scheduler to run limited market-hours vnstock updates."""
+    symbols = await _get_scheduler_priority_symbols(settings.scheduler_live_symbols_per_run)
+    if not symbols:
+        logger.info("Intraday sync skipped: no priority symbols available")
+        return
+
+    results: Dict[str, int] = {}
+    results["foreign_trading"] = await data_pipeline.sync_foreign_trading(symbols=symbols)
+    results["intraday_trades"] = await data_pipeline.sync_intraday_trades(symbols=symbols)
+    results["orderbook_snapshots"] = await data_pipeline.sync_orderbook_snapshots(symbols=symbols)
+    results["derivative_prices"] = await data_pipeline.sync_derivatives_prices()
+
+    from vnibb.services.appwrite_population import populate_appwrite_tables
+
+    tables = ["foreign_trading", "order_flow_daily", "derivative_prices"]
+    if settings.store_intraday_trades:
+        tables.append("intraday_trades")
+    if not settings.orderbook_at_close_only:
+        tables.append("orderbook_snapshots")
+    await populate_appwrite_tables(tables)
+
+    logger.info(
+        "Intraday scheduler sync completed for %s symbols with results=%s",
+        len(symbols),
+        results,
+    )
 
 
 data_pipeline = DataPipeline()

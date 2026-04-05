@@ -123,6 +123,28 @@ The updater runs daily at 09:20 UTC (4:20 PM VNT) via APScheduler:
 - Job ID: `daily_trading_sync`
 - Defined in: `vnibb/apps/api/vnibb/core/scheduler.py`
 
+## Reinforced scheduling
+
+The backend now has two adjacent scheduler behaviors around the daily trading updater:
+
+1. `intraday_sync`
+   - runs every 5 minutes during market hours
+   - no longer acts as a placeholder
+   - uses a limited priority symbol slice (`scheduler_live_symbols_per_run`, default `60`)
+   - primarily refreshes `foreign_trading`, `order_flow_daily`, and `derivative_prices`
+   - `intraday_trades` and `orderbook_snapshots` still respect the existing close-only / market-hours config gates
+
+2. `supplemental_company_sync`
+   - runs at 10:30 UTC (5:30 PM VNT)
+   - rotates slower-changing vnstock domains outside trading hours:
+     - `shareholders`
+     - `officers`
+     - `subsidiaries`
+     - broader `company_news`
+   - weekends use a broader top-symbol universe than weekdays
+
+These jobs are designed to fit a practical vnstock operating budget instead of trying to run the full market universe live all day.
+
 ## API Trigger
 
 ```

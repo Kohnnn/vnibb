@@ -2474,9 +2474,26 @@ export async function getCopilotModelCatalog(provider: 'openrouter' = 'openroute
 }
 
 export async function getCopilotRuntimeConfig(): Promise<CopilotRuntimeConfig> {
-    return fetchAPI<CopilotRuntimeConfig>('/admin/ai-runtime/public', {
-        timeout: 10000,
-    });
+    try {
+        return await fetchAPI<CopilotRuntimeConfig>('/copilot/runtime', {
+            timeout: 10000,
+        });
+    } catch (error) {
+        if (error instanceof APIError && error.status !== 404) {
+            throw error;
+        }
+
+        try {
+            return await fetchAPI<CopilotRuntimeConfig>('/admin/ai-runtime/public', {
+                timeout: 10000,
+            });
+        } catch {
+            return {
+                provider: 'openrouter',
+                model: 'openai/gpt-4o-mini',
+            };
+        }
+    }
 }
 
 export async function createCopilotDocumentContext(file: File): Promise<{ document: CopilotDocumentContext }> {

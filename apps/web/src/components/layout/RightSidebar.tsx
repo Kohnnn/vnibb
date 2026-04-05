@@ -2,7 +2,7 @@
 'use client';
 
 import { MessageSquare, ChevronRight } from 'lucide-react';
-import { type MouseEvent as ReactMouseEvent } from 'react';
+import { type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 
 interface RightSidebarProps {
     isOpen: boolean;
@@ -34,29 +34,37 @@ export function RightSidebar({
         };
 
         const handleMouseUp = () => {
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
         };
 
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
     };
 
+    const asideClassName = overlay
+        ? `fixed top-12 bottom-0 right-0 z-40 bg-[var(--bg-secondary)] border-l border-[var(--border-color)] transition-transform duration-300 ease-in-out flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`
+        : `relative h-full bg-[var(--bg-secondary)] border-l border-[var(--border-color)] flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`;
+
+    const asideStyle: CSSProperties = overlay
+        ? {
+            width: isOpen ? width : 0,
+            transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
+            visibility: isOpen ? 'visible' : 'hidden',
+            maxWidth: 'calc(100vw - 1rem)',
+        }
+        : {
+            width,
+        };
+
     return (
         <aside
-            className={`
-                fixed top-12 bottom-0 right-0 z-40 relative
-                bg-[var(--bg-secondary)] border-l border-[var(--border-color)]
-                transition-all duration-300 ease-in-out
-                flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]
-            `}
-            style={{
-                width: isOpen ? width : 0,
-                transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
-                // Make completely invisible when closed to prevent interaction
-                visibility: isOpen ? 'visible' : 'hidden',
-                maxWidth: overlay ? 'calc(100vw - 1rem)' : undefined,
-            }}
+            className={asideClassName}
+            style={asideStyle}
         >
             {!overlay && isOpen && onWidthChange ? (
                 <div
