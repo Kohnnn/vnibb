@@ -9,6 +9,8 @@ import { ShareStatisticsWidget } from './ShareStatisticsWidget';
 import { EarningsHistoryWidget } from './EarningsHistoryWidget';
 import { EarningsReleaseRecapWidget } from './EarningsReleaseRecapWidget';
 import { EarningsSeasonMonitorWidget } from './EarningsSeasonMonitorWidget';
+import { DerivativesContractsBoardWidget } from './DerivativesContractsBoardWidget';
+import { DerivativesPriceHistoryWidget } from './DerivativesPriceHistoryWidget';
 import { DividendPaymentWidget } from './DividendPaymentWidget';
 import { ValuationWidget } from './ValuationWidget';
 import { ValuationMultiplesChartWidget } from './ValuationMultiplesChartWidget';
@@ -55,6 +57,7 @@ import { TechnicalSummaryWidget } from './TechnicalSummaryWidget';
 import { ForexRatesWidget } from './ForexRatesWidget';
 import { CommoditiesWidget } from './CommoditiesWidget';
 import { SimilarStocksWidget } from './SimilarStocksWidget';
+import { ListingBrowserWidget } from './ListingBrowserWidget';
 import { QuickStatsWidget } from './QuickStatsWidget';
 import { NotesWidget } from './NotesWidget';
 import { SectorTopMoversWidget } from './SectorTopMoversWidget';
@@ -289,6 +292,8 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     earnings_history: EarningsHistoryWidget as ComponentType<WidgetProps>,
     earnings_release_recap: EarningsReleaseRecapWidget as ComponentType<WidgetProps>,
     earnings_season_monitor: EarningsSeasonMonitorWidget as ComponentType<WidgetProps>,
+    derivatives_contracts_board: DerivativesContractsBoardWidget as ComponentType<WidgetProps>,
+    derivatives_price_history: DerivativesPriceHistoryWidget as ComponentType<WidgetProps>,
     dividend_payment: DividendPaymentWidget as ComponentType<WidgetProps>,
     valuation_multiples: ValuationWidget as ComponentType<WidgetProps>,
     valuation_multiples_chart: ValuationMultiplesChartWidget as ComponentType<WidgetProps>,
@@ -388,6 +393,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     risk_dashboard: RiskDashboardWidget as ComponentType<WidgetProps>,
     quant_summary: QuantSummaryWidget as ComponentType<WidgetProps>,
     similar_stocks: SimilarStocksWidget as ComponentType<WidgetProps>,
+    listing_browser: ListingBrowserWidget as ComponentType<WidgetProps>,
     quick_stats: QuickStatsWidget as ComponentType<WidgetProps>,
 
     // Reference widgets
@@ -425,6 +431,8 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     earnings_history: { w: 7, h: 7, minW: 5, minH: 5 },
     earnings_release_recap: { w: 10, h: 8, minW: 6, minH: 6 },
     earnings_season_monitor: { w: 10, h: 8, minW: 8, minH: 6 },
+    derivatives_contracts_board: { w: 8, h: 8, minW: 6, minH: 6 },
+    derivatives_price_history: { w: 10, h: 8, minW: 6, minH: 6 },
     dividend_payment: { w: 7, h: 7, minW: 5, minH: 5 },
     stock_splits: { w: 7, h: 5, minW: 4, minH: 4 },
     company_filings: { w: 7, h: 7, minW: 5, minH: 5 },
@@ -495,6 +503,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     forex_rates: { w: 8, h: 7, minW: 6, minH: 6 },
     commodities: { w: 8, h: 6, minW: 5, minH: 4 },
     similar_stocks: { w: 4, h: 6, minW: 3, minH: 5 },
+    listing_browser: { w: 8, h: 8, minW: 6, minH: 6 },
     quick_stats: { w: 6, h: 6, minW: 6, minH: 5 },
     notes: { w: 4, h: 6, minW: 3, minH: 5 },
     research_browser: { w: 8, h: 8, minW: 6, minH: 6 },
@@ -537,6 +546,8 @@ export const widgetNames: Record<WidgetType, string> = {
     earnings_history: 'Earnings History',
     earnings_release_recap: 'Earnings Release Recap',
     earnings_season_monitor: 'Earnings Season Monitor',
+    derivatives_contracts_board: 'Derivatives Contracts',
+    derivatives_price_history: 'Derivatives Price History',
     dividend_payment: 'Dividend Payment',
     stock_splits: 'Stock Splits',
     company_filings: 'Company Filings',
@@ -607,6 +618,7 @@ export const widgetNames: Record<WidgetType, string> = {
     forex_rates: 'Forex Rates',
     commodities: 'Commodities',
     similar_stocks: 'Similar Stocks',
+    listing_browser: 'Listing Browser',
     quick_stats: 'Quick Stats',
     notes: 'Notes',
     research_browser: 'External Intelligence Hub',
@@ -646,6 +658,8 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     earnings_history: 'Latest-first quarterly revenue, earnings, and margin history',
     earnings_release_recap: 'Quarter bridge with YoY deltas, cash context, quality checks, and linked news',
     earnings_season_monitor: 'Latest quarterly releases with quick revenue, earnings, and margin cross-checks',
+    derivatives_contracts_board: 'Available futures contracts with expiry schedule and quick filtering',
+    derivatives_price_history: 'Historical futures price chart with contract selection and basic stats',
     dividend_payment: 'Dividend history and yields',
     stock_splits: 'History of corporate splits',
     company_filings: 'Direct SEC/HOSE documents',
@@ -716,6 +730,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     forex_rates: 'Currency exchange (VND pairs)',
     commodities: 'Gold, oil, and metals',
     similar_stocks: 'Stocks with high correlation',
+    listing_browser: 'Exchange and industry browser for the listed universe',
     quick_stats: 'Market at a glance',
     notes: 'Symbol-specific research notes',
     research_browser: 'Curated external intelligence links by ticker',

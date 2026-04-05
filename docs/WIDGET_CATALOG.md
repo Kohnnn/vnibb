@@ -112,3 +112,10 @@ For current TradingView-native coverage, use:
 - Dashboard shell behavior now preserves the last active dashboard and the last active tab per dashboard locally, and low-resolution layouts treat VniAgent as an overlay sooner to protect workspace width.
 - USD display mode is now available for financial and fundamental statement widgets. Users can override USD/VND by year locally; admin settings provide the global default fallback rate.
 - Broader USD conversion for quote and market widgets is intentionally deferred to the roadmap.
+- Additional widgets now exposed in the widget library:
+  - `block_trade`
+  - `earnings_release_recap`
+  - `financial_snapshot`
+  - `derivatives_contracts_board`
+  - `derivatives_price_history`
+  - `listing_browser`
