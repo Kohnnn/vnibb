@@ -149,6 +149,16 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 6, h: 5, minW: 4, minH: 3 }
     },
     {
+        type: 'earnings_release_recap',
+        name: 'Earnings Release Recap',
+        description: 'Latest quarter bridge with YoY deltas, cash context, quality checks, and linked news',
+        category: 'calendar',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 6, minH: 6 },
+        recommended: true,
+        searchKeywords: ['earnings', 'quarter', 'results', 'recap', 'release']
+    },
+    {
         type: 'earnings_season_monitor',
         name: 'Earnings Season Monitor',
         description: 'Track the latest quarterly releases, YoY changes, and high-priority follow-up names',
@@ -348,6 +358,16 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['financials', 'statements', 'income', 'balance', 'cash flow', 'ratios']
     },
     {
+        type: 'financial_snapshot',
+        name: 'Financial Snapshot',
+        description: 'Compact 4-panel snapshot covering P&L, balance sheet, cash flow, and ratios',
+        category: 'core_data',
+        defaultConfig: {},
+        defaultLayout: { w: 24, h: 16, minW: 12, minH: 10 },
+        recommended: true,
+        searchKeywords: ['financial snapshot', 'pl', 'balance sheet', 'cash flow', 'ratios']
+    },
+    {
         type: 'balance_sheet',
         name: 'Balance Sheet',
         description: 'Assets, liabilities, and equity breakdown',
@@ -494,6 +514,24 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'calendar',
         defaultConfig: {},
         defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
+    },
+    {
+        type: 'derivatives_contracts_board',
+        name: 'Derivatives Contracts',
+        description: 'Available futures contracts with expiry schedule and quick filtering',
+        category: 'global_markets',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 },
+        searchKeywords: ['derivatives', 'futures', 'contracts', 'expiry']
+    },
+    {
+        type: 'derivatives_price_history',
+        name: 'Derivatives Price History',
+        description: 'Historical futures price chart with contract selection and basic stats',
+        category: 'global_markets',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 6, minH: 6 },
+        searchKeywords: ['derivatives', 'futures', 'history', 'price chart']
     },
     {
         type: 'dividend_ladder',
@@ -782,6 +820,15 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 4, h: 6, minW: 2, minH: 4 }
     },
     {
+        type: 'listing_browser',
+        name: 'Listing Browser',
+        description: 'Explore listed symbols by exchange, company, and industry',
+        category: 'screener',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 },
+        searchKeywords: ['listing', 'universe', 'exchange', 'industry', 'browser']
+    },
+    {
         type: 'research_browser',
         name: 'External Intelligence Hub',
         description: 'Curated external research links and ticker-aware intelligence sources',
@@ -796,6 +843,15 @@ export const widgetDefinitions: WidgetDefinition[] = [
         category: 'ownership',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
+    },
+    {
+        type: 'block_trade',
+        name: 'Block Trade Alerts',
+        description: 'Large negotiated prints with buy/sell and participant context',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 },
+        searchKeywords: ['block trade', 'large trades', 'smart money', 'negotiated']
     },
     {
         type: 'ownership_changes',
@@ -1009,6 +1065,8 @@ const WIDGET_LIBRARY_SECTION_OVERRIDES: Partial<Record<WidgetType, WidgetLibrary
     events_calendar: 'news_events',
     earnings_season_monitor: 'news_events',
     news_corporate_actions: 'news_events',
+    derivatives_contracts_board: 'global_markets',
+    derivatives_price_history: 'global_markets',
     peer_comparison: 'ai_research',
     comparison_analysis: 'ai_research',
     ai_analysis: 'ai_research',
@@ -1018,6 +1076,7 @@ const WIDGET_LIBRARY_SECTION_OVERRIDES: Partial<Record<WidgetType, WidgetLibrary
     portfolio_tracker: 'screeners_tools',
     price_alerts: 'screeners_tools',
     notes: 'screeners_tools',
+    listing_browser: 'screeners_tools',
     database_inspector: 'screeners_tools',
     intraday_trades: 'screeners_tools',
     block_trade: 'screeners_tools',

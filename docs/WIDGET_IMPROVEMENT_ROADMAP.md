@@ -36,6 +36,13 @@ Improve data correctness, chart semantics, resize behavior, analytical depth, an
 - Full corporate-action propagation through all quant endpoints
 - Event markers and action-aware annotations across all chart widgets
 - Deeper risk model upgrade with benchmark-relative and downside distribution measures
+- Lower-priority backend-ready widget backlog:
+  - `ttm_snapshot`
+  - `growth_bridge`
+  - `ownership_rating_summary`
+  - `market_sentiment`
+  - expanded derivatives analytics beyond contracts/history
+  - broader listing/discovery surfaces beyond the first `listing_browser` pass
 
 ## Priority Structure
 
@@ -258,6 +265,8 @@ See also:
    backend quant endpoints that still assume raw history
 2. Add chart/event integration:
    event markers for dividends, splits, issuance
+3. Consider the lower-priority data-to-widget expansion set after current surfaces settle:
+   TTM snapshot, growth bridge, ownership/rating summary, market sentiment, and richer derivatives widgets
 3. Add more money-flow universe metrics if the backend can supply them cleanly
 4. Add valuation viewport focus/pinning around the newest range
 
