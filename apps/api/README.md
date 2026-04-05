@@ -145,6 +145,32 @@ Set `ENABLE_AI_SENTIMENT_ANALYSIS=0` to pause news sentiment processing entirely
 
 Appwrite is now the expected primary runtime backend. Keep `DATABASE_URL` configured so Postgres/Supabase can act as the fallback source and Appwrite population bridge.
 
+### Read-only MCP companion
+
+This backend now includes a dedicated read-only MCP server for Appwrite-backed VNIBB access.
+
+Local stdio usage:
+
+```bash
+vnibb-mcp --transport stdio
+```
+
+Remote HTTP usage:
+
+```bash
+vnibb-mcp --transport streamable-http --host 0.0.0.0 --port 8001
+```
+
+Key env values:
+- `VNIBB_MCP_TRANSPORT=stdio|streamable-http`
+- `VNIBB_MCP_PORT=8001`
+- `VNIBB_MCP_URL=http://127.0.0.1:8001/mcp` for local API-to-MCP calls, or `http://mcp:8001/mcp` on OCI
+- `VNIBB_MCP_SHARED_BEARER_TOKEN=<shared secret for remote deployments>`
+
+When `VNIBB_MCP_URL` is configured, VniAgent runtime context reads use the MCP companion for selected Appwrite-backed reads instead of direct Appwrite access.
+
+Canonical implementation notes live in `../../docs/VNIBB_MCP_READONLY.md`.
+
 Premium package strategy:
 - Default `Dockerfile` keeps runtime installer disabled (`VNSTOCK_RUNTIME_INSTALL=0`) to avoid cold-start CPU spikes.
 - Use `Dockerfile.premium` for prebuilt premium layers when `VNSTOCK_API_KEY` is available at build time.
