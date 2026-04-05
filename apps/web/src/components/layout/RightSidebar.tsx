@@ -2,14 +2,13 @@
 'use client';
 
 import { MessageSquare, ChevronRight } from 'lucide-react';
-import { useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { type CSSProperties } from 'react';
 
 interface RightSidebarProps {
     isOpen: boolean;
     onToggle: () => void;
     width?: number;
     overlay?: boolean;
-    onWidthChange?: (width: number) => void;
     children: React.ReactNode;
 }
 
@@ -18,42 +17,11 @@ export function RightSidebar({
     onToggle,
     width = 320,
     overlay = false,
-    onWidthChange,
     children
 }: RightSidebarProps) {
-    const [isResizing, setIsResizing] = useState(false);
-
-    const handleResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
-        if (overlay || !isOpen || !onWidthChange) return;
-
-        event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        const startX = event.clientX;
-        const startWidth = width;
-
-        const handlePointerMove = (moveEvent: PointerEvent) => {
-            const nextWidth = startWidth - (moveEvent.clientX - startX);
-            onWidthChange(nextWidth);
-        };
-
-        const handlePointerUp = () => {
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-            setIsResizing(false);
-            window.removeEventListener('pointermove', handlePointerMove);
-            window.removeEventListener('pointerup', handlePointerUp);
-        };
-
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-        setIsResizing(true);
-        window.addEventListener('pointermove', handlePointerMove);
-        window.addEventListener('pointerup', handlePointerUp);
-    };
-
     const asideClassName = overlay
         ? `fixed top-12 bottom-0 right-0 z-40 bg-[var(--bg-secondary)] border-l border-[var(--border-color)] transition-transform duration-300 ease-in-out flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`
-        : `relative h-full bg-[var(--bg-secondary)] border-l border-[var(--border-color)] flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)] ${isResizing ? 'transition-none' : 'transition-[width] duration-150'}`;
+        : `relative h-full w-full bg-[var(--bg-secondary)] border-l border-[var(--border-color)] flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`;
 
     const asideStyle: CSSProperties = overlay
         ? {
@@ -71,16 +39,6 @@ export function RightSidebar({
             className={asideClassName}
             style={asideStyle}
         >
-            {!overlay && isOpen && onWidthChange ? (
-                <div
-                    className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-blue-500/30"
-                    onPointerDown={handleResizeStart}
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label="Resize VniAgent sidebar"
-                />
-            ) : null}
-
             {/* Header */}
             <div className="h-10 flex items-center justify-between px-4 border-b border-[var(--border-color)] bg-[var(--bg-tertiary)]/70">
                 <div className="flex items-center gap-2 text-blue-400">

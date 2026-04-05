@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
     LayoutDashboard,
@@ -41,10 +41,8 @@ interface SidebarProps {
     onOpenPromptsLibrary?: () => void;
     onOpenTemplateSelector?: () => void;
     mobileMode?: boolean;
-    width?: number;
     collapsed?: boolean;
     onCollapsedChange?: (collapsed: boolean) => void;
-    onWidthChange?: (width: number) => void;
 }
 
 export function Sidebar({
@@ -53,10 +51,8 @@ export function Sidebar({
     onOpenPromptsLibrary,
     onOpenTemplateSelector,
     mobileMode = false,
-    width = 208,
     collapsed = false,
     onCollapsedChange,
-    onWidthChange,
 }: SidebarProps) {
     const INITIAL_FOLDER_ID = 'folder-initial';
     const [showCreateMenu, setShowCreateMenu] = useState(false);
@@ -65,7 +61,6 @@ export function Sidebar({
     const [editingName, setEditingName] = useState('');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [showMoveSubmenu, setShowMoveSubmenu] = useState(false);
-    const [isResizing, setIsResizing] = useState(false);
     const createMenuRef = useRef<HTMLDivElement | null>(null);
     const contextMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -74,34 +69,6 @@ export function Sidebar({
             onCollapsedChange?.(false);
         }
     }, [mobileMode, onCollapsedChange]);
-
-    const handleResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
-        if (mobileMode || collapsed || !onWidthChange) return;
-
-        event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        const startX = event.clientX;
-        const startWidth = width;
-
-        const handlePointerMove = (moveEvent: PointerEvent) => {
-            const nextWidth = startWidth + (moveEvent.clientX - startX);
-            onWidthChange(nextWidth);
-        };
-
-        const handlePointerUp = () => {
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-            setIsResizing(false);
-            window.removeEventListener('pointermove', handlePointerMove);
-            window.removeEventListener('pointerup', handlePointerUp);
-        };
-
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-        setIsResizing(true);
-        window.addEventListener('pointermove', handlePointerMove);
-        window.addEventListener('pointerup', handlePointerUp);
-    };
 
     useEffect(() => {
         if (!showCreateMenu && !showMoveSubmenu) {
@@ -622,13 +589,12 @@ export function Sidebar({
                 data-mobile-sidebar={mobileMode ? 'true' : 'false'}
                 className={`
                     relative bg-[var(--bg-secondary)] border-r border-[var(--border-color)]
-                    flex flex-col ${isResizing ? 'transition-none' : 'transition-[width] duration-150'}
+                    flex flex-col
                     ${mobileMode
                         ? 'relative h-full w-full'
-                        : 'hidden lg:flex h-screen shrink-0'
+                        : 'h-screen w-full'
                     }
                 `}
-                style={mobileMode ? undefined : { width: collapsed ? COLLAPSED_SIDEBAR_WIDTH : width }}
             >
 
                 {/* Logo */}
@@ -740,16 +706,6 @@ export function Sidebar({
                         </div>
                     )}
                 </div>
-
-                {!mobileMode && !collapsed && onWidthChange ? (
-                    <div
-                        className="absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-blue-500/30"
-                        onPointerDown={handleResizeStart}
-                        role="separator"
-                        aria-orientation="vertical"
-                        aria-label="Resize workspace sidebar"
-                    />
-                ) : null}
 
                 {/* Footer with Settings and Version */}
                 <div className="px-2 py-1 border-t border-[var(--border-color)] shrink-0">
