@@ -12,7 +12,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688)](https://fastapi.tiangolo.com/)
 
-[Live Demo](https://vnibb-web.vercel.app/) · [Docs Hub](../docs/README.md) · [Development Journal](../docs/DEVELOPMENT_JOURNAL.md)
+[Live Demo](https://vnibb-web.vercel.app/) · [Docs Hub](./docs/README.md) · [Development Journal](./docs/DEVELOPMENT_JOURNAL.md)
 
 </div>
 
@@ -95,7 +95,7 @@ Validate:
 
 Key context:
 - Active product code lives in `vnibb/`
-- Docs and planning live in `../docs/` and `.agent/`
+- Docs and planning live in `docs/`, `../docs/`, and `.agent/`
 - Backend is FastAPI, frontend is Next.js 16 + React 19
 - Primary configs: `package.json`, `scripts/ci-gate.mjs`, `apps/api/pyproject.toml`
 - Never commit secrets, tokens, keys, or `.env*` files
@@ -158,14 +158,12 @@ pnpm run gate:no502     # Widget health probe (5 repeats, 10s timeout)
 
 ## Documentation
 
-- docs hub: `../docs/README.md`
-- product overview: `../docs/PRODUCT_OVERVIEW.md`
-- architecture: `../docs/ARCHITECTURE.md`
-- development setup: `../docs/DEVELOPMENT_SETUP.md`
-- API reference: `../docs/API_REFERENCE.md`
-- widget catalog: `../docs/WIDGET_CATALOG.md`
-- deployment and operations: `../docs/DEPLOYMENT_AND_OPERATIONS.md`
-- development journal: `../docs/DEVELOPMENT_JOURNAL.md`
+- maintainer docs hub: `docs/README.md`
+- deployment and operations: `docs/DEPLOYMENT_AND_OPERATIONS.md`
+- auto update strategy: `docs/AUTO_UPDATE_STRATEGY.md`
+- appwrite rollout: `docs/APPWRITE_VNSTOCK_ROLLOUT.md`
+- development journal: `docs/DEVELOPMENT_JOURNAL.md`
+- project-level overview docs: `../docs/README.md`
 - agent instructions: `AGENTS.md`
 
 ## License
