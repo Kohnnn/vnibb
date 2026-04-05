@@ -149,6 +149,8 @@ Copilot notes:
 - Copilot no longer depends on a browser-minted Appwrite JWT for the streaming chat route, which avoids noisy Appwrite `/account/jwts` CORS failures on deployed web origins.
 - Appwrite JWT mint failures are now cooled down client-side before retrying, so broken Appwrite platform/CORS setups do not spam repeated failing JWT requests on every action.
 - The frontend still uses browser-side Appwrite session flows for login and account operations, but copilot streaming no longer depends on that JWT mint path.
+- When `VNIBB_MCP_URL` is configured in the backend runtime, selected VniAgent runtime context reads now use the dedicated server-side VNIBB MCP companion instead of direct Appwrite access.
+- The current MCP-backed copilot reads are market snapshot and symbol snapshot retrieval; if the MCP path fails, the backend falls back to direct Appwrite/Postgres context assembly.
 - On tighter desktop viewports the VniAgent sidebar is expected to behave as an overlay instead of always shrinking the central workspace.
 
 UI notes:

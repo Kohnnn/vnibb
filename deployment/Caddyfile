@@ -13,5 +13,18 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 
-	reverse_proxy {$API_UPSTREAM}
+	@mcpHealth path /mcp-health
+	handle @mcpHealth {
+		uri replace /mcp-health /health
+		reverse_proxy {$MCP_UPSTREAM}
+	}
+
+	@mcp path /mcp*
+	handle @mcp {
+		reverse_proxy {$MCP_UPSTREAM}
+	}
+
+	handle {
+		reverse_proxy {$API_UPSTREAM}
+	}
 }

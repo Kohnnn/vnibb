@@ -21,6 +21,7 @@ from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.services.comparison_service import comparison_service
+from vnibb.services.vnibb_mcp_client_service import vnibb_mcp_client_service
 
 logger = logging.getLogger(__name__)
 
@@ -709,9 +710,15 @@ class AIContextService:
                 "browser_context_policy": "client_context is lower-priority browser input and should not be treated as authoritative evidence.",
             },
             "prefer_appwrite_data": prefer_appwrite_data,
+            "vnibb_mcp_enabled": vnibb_mcp_client_service.is_enabled,
             "notes": {
                 "client_context": "Browser-supplied widget data is untrusted and lower priority than server data.",
-                "market_data": "Server context is Appwrite-first and falls back to Postgres only when needed.",
+                "market_data": (
+                    "Server context is routed through VNIBB MCP over Appwrite when configured and "
+                    "falls back to direct Appwrite/Postgres only when needed."
+                    if vnibb_mcp_client_service.is_enabled
+                    else "Server context is Appwrite-first and falls back to Postgres only when needed."
+                ),
             },
             "client_context": sanitized_client_context,
             "broad_market_context": broad_market_context,
@@ -726,8 +733,10 @@ class AIContextService:
         prefer_appwrite_data: bool,
     ) -> dict[str, Any] | None:
         primary_snapshot = None
-        if prefer_appwrite_data and settings.is_appwrite_configured:
-            primary_snapshot = await self._build_appwrite_snapshot(symbol)
+        if prefer_appwrite_data and (
+            settings.is_appwrite_configured or vnibb_mcp_client_service.is_enabled
+        ):
+            primary_snapshot = await self._build_appwrite_snapshot(symbol, use_vnibb_mcp=True)
 
         fallback_snapshot = await self._build_postgres_snapshot(symbol)
 
@@ -762,8 +771,10 @@ class AIContextService:
 
     async def _build_market_snapshot(self, *, prefer_appwrite_data: bool) -> dict[str, Any] | None:
         primary_snapshot = None
-        if prefer_appwrite_data and settings.is_appwrite_configured:
-            primary_snapshot = await self._build_appwrite_market_snapshot()
+        if prefer_appwrite_data and (
+            settings.is_appwrite_configured or vnibb_mcp_client_service.is_enabled
+        ):
+            primary_snapshot = await self._build_appwrite_market_snapshot(use_vnibb_mcp=True)
 
         fallback_snapshot = await self._build_postgres_market_snapshot()
 
@@ -777,7 +788,30 @@ class AIContextService:
 
         return primary_snapshot or fallback_snapshot
 
-    async def _build_appwrite_snapshot(self, symbol: str) -> dict[str, Any] | None:
+    async def _build_appwrite_snapshot(
+        self,
+        symbol: str,
+        *,
+        use_vnibb_mcp: bool,
+    ) -> dict[str, Any] | None:
+        normalized_symbol = str(symbol or "").strip().upper()
+        if use_vnibb_mcp and vnibb_mcp_client_service.is_enabled:
+            try:
+                payload = await vnibb_mcp_client_service.get_symbol_snapshot(normalized_symbol)
+            except Exception as exc:
+                logger.warning(
+                    "VNIBB MCP snapshot load failed for %s, falling back to direct Appwrite: %s",
+                    normalized_symbol,
+                    exc,
+                )
+            else:
+                snapshot = payload.get("snapshot") if isinstance(payload, dict) else None
+                if isinstance(snapshot, dict) and snapshot:
+                    return snapshot
+
+        return await self._build_appwrite_snapshot_direct(normalized_symbol)
+
+    async def _build_appwrite_snapshot_direct(self, symbol: str) -> dict[str, Any] | None:
         try:
             (
                 stock_doc,
@@ -1013,7 +1047,25 @@ class AIContextService:
             ],
         )
 
-    async def _build_appwrite_market_snapshot(self) -> dict[str, Any] | None:
+    async def _build_appwrite_market_snapshot(
+        self, *, use_vnibb_mcp: bool
+    ) -> dict[str, Any] | None:
+        if use_vnibb_mcp and vnibb_mcp_client_service.is_enabled:
+            try:
+                payload = await vnibb_mcp_client_service.get_market_snapshot()
+            except Exception as exc:
+                logger.warning(
+                    "VNIBB MCP market snapshot load failed, falling back to direct Appwrite: %s",
+                    exc,
+                )
+            else:
+                snapshot = payload.get("snapshot") if isinstance(payload, dict) else None
+                if isinstance(snapshot, dict) and snapshot:
+                    return snapshot
+
+        return await self._build_appwrite_market_snapshot_direct()
+
+    async def _build_appwrite_market_snapshot_direct(self) -> dict[str, Any] | None:
         try:
             index_rows = []
             for index_code in MARKET_INDEX_CODES:
