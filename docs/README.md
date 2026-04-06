@@ -12,6 +12,11 @@
 
 ## Operations And Data
 
+Current-month source of truth:
+
+- follow `APPWRITE_FREEZE_SUPABASE_PRIMARY.md` first while Appwrite writes are blocked by org quota limits
+- treat older Appwrite rollout/mirroring docs as historical or next-month planning context unless they explicitly say otherwise
+
 - `DEPLOYMENT_AND_OPERATIONS.md`: deployment profile, Oracle runtime guidance, and ops notes
 - `APPWRITE_VNSTOCK_ROLLOUT.md`: Appwrite rollout strategy, schema, and migration history
 - `APPWRITE_FREEZE_SUPABASE_PRIMARY.md`: Appwrite quota-freeze operating mode and Supabase-primary runbook
