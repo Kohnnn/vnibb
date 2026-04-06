@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from functools import lru_cache
 import hashlib
 import json
 import logging
 import os
 import shutil
 from collections.abc import Sequence
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,10 @@ PRIMARY_APPWRITE_TABLES: tuple[str, ...] = (
     "financial_ratios",
 )
 FULL_REFRESH_TABLES = frozenset({"stocks"})
+
+
+def _appwrite_writes_enabled() -> bool:
+    return settings.appwrite_writes_active
 
 
 def _repo_root() -> Path:
@@ -367,6 +371,13 @@ async def upsert_appwrite_documents(
     if not rows:
         return {"created": 0, "updated": 0, "failed": 0}
 
+    if not _appwrite_writes_enabled():
+        logger.info(
+            "Skipping Appwrite document upsert for %s because Appwrite writes are disabled",
+            collection_id,
+        )
+        return {"created": 0, "updated": 0, "failed": 0}
+
     database_id = settings.appwrite_database_id
     if not database_id:
         raise RuntimeError("Appwrite database ID is not configured")
@@ -402,12 +413,10 @@ async def upsert_appwrite_documents(
                         True,
                         query_attributes,
                         list(
-                            (
-                                (_collection_config_by_id().get(collection_id) or {}).get(
-                                    "includedColumns"
-                                )
-                                or []
+                            (_collection_config_by_id().get(collection_id) or {}).get(
+                                "includedColumns"
                             )
+                            or []
                         ),
                         (_collection_config_by_id().get(collection_id) or {}).get(
                             "packColumnsIntoJson"
@@ -533,6 +542,9 @@ async def _populate_via_http(
                     document_id_columns: list[str] = document_id_columns,
                     precision_columns: set[str] = precision_columns,
                     collection_config: dict[str, Any] = collection_config,
+                    query_attributes: list[dict[str, Any]] = query_attributes,
+                    included_columns: list[str] = included_columns,
+                    pack_columns_into_json: dict[str, Any] = pack_columns_into_json,
                 ) -> str:
                     async with semaphore:
                         document_id = _deterministic_document_id(
@@ -676,6 +688,13 @@ async def populate_appwrite_tables(
 ) -> None:
     normalized_tables = _normalize_tables(tables)
     if not normalized_tables:
+        return
+
+    if not _appwrite_writes_enabled():
+        logger.info(
+            "Skipping Appwrite population for tables=%s because Appwrite writes are disabled",
+            ",".join(normalized_tables),
+        )
         return
 
     if not settings.is_appwrite_configured:

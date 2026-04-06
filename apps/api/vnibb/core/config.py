@@ -97,6 +97,7 @@ class Settings(BaseSettings):
     supabase_anon_key: Optional[str] = None
     supabase_service_role_key: Optional[str] = None
     supabase_jwt_secret: Optional[str] = None  # For JWT validation
+    allow_anonymous_dashboard_writes: bool = True
 
     # ==========================================================================
     # Appwrite (migration target)
@@ -109,12 +110,15 @@ class Settings(BaseSettings):
     appwrite_system_templates_collection_id: Optional[str] = "system_dashboard_templates"
     appwrite_name: Optional[str] = None  # Alias for APPWRITE_PROJECT_ID
     appwrite_secret: Optional[str] = None  # Alias for APPWRITE_API_KEY
+    appwrite_write_enabled: bool = False
 
     # ==========================================================================
     # Cache Backend Selection
     # ==========================================================================
     cache_backend: str = "auto"  # auto, redis, memory, appwrite
-    data_backend: str = "appwrite"  # appwrite primary, postgres fallback, hybrid legacy alias
+    data_backend: str = (
+        "postgres"  # postgres primary, appwrite optional projection, hybrid legacy alias
+    )
 
     # ==========================================================================
     # Redis Cache
@@ -480,6 +484,11 @@ class Settings(BaseSettings):
                 self.appwrite_database_id,
             ]
         )
+
+    @property
+    def appwrite_writes_active(self) -> bool:
+        """Check whether Appwrite document writes are enabled and configured."""
+        return self.appwrite_write_enabled and self.is_appwrite_configured
 
     @property
     def resolved_data_backend(self) -> str:

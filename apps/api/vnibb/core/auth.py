@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 import httpx
 from fastapi import Header, HTTPException, status
@@ -12,6 +13,7 @@ from pydantic import BaseModel
 from vnibb.core.config import settings
 
 logger = logging.getLogger(__name__)
+ANONYMOUS_DASHBOARD_CLIENT_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 
 
 class User(BaseModel):
@@ -160,6 +162,38 @@ async def get_current_user(authorization: str | None = Header(None)) -> User:
         raise AuthError("Invalid or expired token")
 
     raise AuthError("Authentication is not configured")
+
+
+def _normalize_dashboard_client_id(client_id: str | None) -> str | None:
+    normalized = str(client_id or "").strip()
+    if not normalized:
+        return None
+    if not settings.allow_anonymous_dashboard_writes:
+        return None
+    if not ANONYMOUS_DASHBOARD_CLIENT_RE.fullmatch(normalized):
+        return None
+    return normalized
+
+
+async def get_dashboard_user(
+    authorization: str | None = Header(None),
+    x_vnibb_client_id: str | None = Header(default=None, alias="X-VNIBB-Client-ID"),
+) -> User:
+    """Resolve a dashboard owner from auth when present, or from a browser-local client ID."""
+    if authorization:
+        return await get_current_user(authorization)
+
+    client_id = _normalize_dashboard_client_id(x_vnibb_client_id)
+    if client_id:
+        return User(
+            id=f"anon:{client_id}",
+            email="",
+            role="anonymous",
+            aud="anonymous",
+            provider="anonymous",
+        )
+
+    raise AuthError("Authentication required")
 
 
 async def get_optional_user(authorization: str | None = Header(None)) -> User | None:

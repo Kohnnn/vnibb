@@ -14,6 +14,7 @@
 
 - `DEPLOYMENT_AND_OPERATIONS.md`: deployment profile, Oracle runtime guidance, and ops notes
 - `APPWRITE_VNSTOCK_ROLLOUT.md`: Appwrite rollout strategy, schema, and migration history
+- `APPWRITE_FREEZE_SUPABASE_PRIMARY.md`: Appwrite quota-freeze operating mode and Supabase-primary runbook
 - `AUTO_UPDATE_STRATEGY.md`: automatic update plan, rate-budget strategy, and scheduler model
 - `daily_trading_updater.md`: trading-flow updater behavior and reinforced scheduler notes
 - `SCREENER_SNAPSHOTS_APPWRITE_RECOVERY.md`: last-mile recovery notes for the screener Appwrite collection

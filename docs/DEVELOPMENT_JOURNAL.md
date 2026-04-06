@@ -425,3 +425,53 @@ That matters because freshness is not only an infrastructure concern. In a resea
 Users do not care whether a stale number came from a scheduler omission, an Appwrite mirror gap, or a provider budget decision. They only experience it as a product that feels current or a product that feels behind.
 
 This phase was therefore less glamorous than new widget work, but strategically important. It moved VNIBB closer to behaving like an operations-aware market platform rather than a collection of sync utilities with a UI attached.
+
+## 20. Appwrite quota pressure forced a more honest runtime split
+
+Another useful operational lesson arrived when Appwrite writes became the limiting factor instead of vnstock calls or frontend bugs.
+
+That kind of pressure is clarifying because it reveals which parts of the system are truly essential and which parts were still carrying migration-era assumptions.
+
+The most important realization was simple:
+
+- Appwrite had become too expensive to treat as the live write target for everything
+- but VNIBB did not actually need Appwrite to keep the product working day to day
+
+The codebase already had most of the ingredients for a better emergency posture:
+
+- Supabase/Postgres already held the durable market-data tables
+- Redis already handled hot cache responsibilities
+- the dashboard UI already saved locally in the browser
+- and Supabase auth was already available for production login
+
+What was missing was not a new platform. It was a cleaner statement of system ownership.
+
+The mitigation that followed was intentionally conservative:
+
+- keep `Supabase` as the auth provider
+- make `Postgres/Supabase` the durable primary source for runtime data
+- keep dashboards local-first so the UI never blocks on cloud writes
+- reconcile new local dashboards into SQL after save instead of requiring them to start life with a remote ID
+- freeze Appwrite writes and treat Appwrite as a legacy read fallback or future projection target only
+
+That change mattered for more than just cost control.
+
+It removed a hidden failure mode where users could believe they had "saved" their work while new custom dashboards were still stuck in browser-only IDs that never made it into durable storage.
+
+It also led to a more sensible startup rule for dashboard hydration:
+
+- if a browser already has custom local dashboards, preserve them
+- if a browser is effectively fresh and only contains the built-in system dashboards, pull the durable dashboards from SQL
+
+This was a better fit for the actual product than an Appwrite-first runtime.
+
+During earnings season, the system does not need architectural purity. It needs dependable behavior under pressure.
+
+The resulting operating model is clearer:
+
+- browser state for immediate dashboard resilience
+- SQL for durable user state and market data
+- vnstock for freshness and gap-fill
+- Appwrite only where it still provides value without being allowed to block the month
+
+That is a healthier split because it matches the economics of the tools instead of pretending all persistence layers should be treated equally.

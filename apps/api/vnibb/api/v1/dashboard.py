@@ -7,14 +7,13 @@ Provides endpoints for:
 - Layout persistence
 """
 
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from vnibb.api.deps import DatabaseDep
-from vnibb.core.auth import User, get_current_user
+from vnibb.core.auth import User, get_dashboard_user
 from vnibb.models.dashboard import DashboardWidget, UserDashboard
 from vnibb.providers.vnstock.market_overview import (
     MarketIndexData,
@@ -163,7 +162,7 @@ async def _get_owned_dashboard(
 )
 async def list_dashboards(
     db: DatabaseDep,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_dashboard_user),
 ) -> DashboardListResponse:
     """Get all dashboards for a user."""
     result = await db.execute(
@@ -190,7 +189,7 @@ async def list_dashboards(
 async def create_dashboard(
     data: DashboardCreate,
     db: DatabaseDep,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_dashboard_user),
 ) -> DashboardResponse:
     """Create a dashboard for the authenticated user."""
     if data.is_default:
@@ -319,7 +318,7 @@ async def list_published_system_layouts() -> SystemLayoutTemplateListResponse:
 async def get_dashboard(
     dashboard_id: int,
     db: DatabaseDep,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_dashboard_user),
 ) -> DashboardResponse:
     """Get a dashboard by ID."""
     dashboard = await _get_owned_dashboard(
@@ -341,7 +340,7 @@ async def update_dashboard(
     dashboard_id: int,
     data: DashboardUpdate,
     db: DatabaseDep,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_dashboard_user),
 ) -> DashboardResponse:
     """Update a dashboard."""
     dashboard = await _get_owned_dashboard(db, dashboard_id, current_user.id)
@@ -384,7 +383,7 @@ async def update_dashboard(
 async def delete_dashboard(
     dashboard_id: int,
     db: DatabaseDep,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_dashboard_user),
 ) -> None:
     """Delete a dashboard."""
     dashboard = await _get_owned_dashboard(db, dashboard_id, current_user.id)
@@ -405,7 +404,7 @@ async def add_widget(
     dashboard_id: int,
     data: WidgetCreate,
     db: DatabaseDep,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_dashboard_user),
 ) -> WidgetResponse:
     """Add a widget to a dashboard."""
     await _get_owned_dashboard(db, dashboard_id, current_user.id)
@@ -440,7 +439,7 @@ async def remove_widget(
     dashboard_id: int,
     widget_id: int,
     db: DatabaseDep,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_dashboard_user),
 ) -> None:
     """Remove a widget from a dashboard."""
     result = await db.execute(

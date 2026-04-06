@@ -453,7 +453,7 @@ function DashboardContent() {
             );
             setDashboardAdminUnlocked(activeDashboard.id, false);
             setIsEditing(false);
-            setAdminLayoutStatus(publish ? 'Published globally.' : 'Draft saved to Appwrite.');
+            setAdminLayoutStatus(publish ? 'Published globally.' : 'Draft saved.');
         } catch (error) {
             console.error('Failed to persist system layout template:', error);
             setAdminLayoutStatus(
