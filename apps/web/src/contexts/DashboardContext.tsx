@@ -27,7 +27,7 @@ import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
 import { DEFAULT_GLOBAL_MARKETS_SYMBOL } from '@/lib/globalMarketsSymbol';
 import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
-import { useDashboardSync } from '@/lib/useDashboardSync';
+import { useDashboardSync, useLoadFromBackend } from '@/lib/useDashboardSync';
 import { normalizeWidgetType } from '@/data/widgetDefinitions';
 import { autoFitGridItems, compactGridItems, findNextAvailableLayout, getWidgetDefaultLayout, preserveTemplateGridItems } from '@/lib/dashboardLayout';
 import { getPublishedSystemDashboardTemplates } from '@/lib/api';
@@ -1810,7 +1810,9 @@ const applyPublishedSystemTemplates = (
 
 type DashboardAction =
     | { type: 'SET_STATE'; payload: DashboardState }
+    | { type: 'MERGE_REMOTE_DASHBOARDS'; payload: Dashboard[] }
     | { type: 'APPLY_SYSTEM_TEMPLATES'; payload: Dashboard[] }
+    | { type: 'RECONCILE_DASHBOARD_ID'; payload: { localId: string; dashboard: Dashboard } }
     | { type: 'SET_DASHBOARD_ADMIN_UNLOCKED'; payload: { dashboardId: string; unlocked: boolean } }
     | { type: 'SET_ACTIVE_DASHBOARD'; payload: string }
     | { type: 'SET_ACTIVE_TAB'; payload: string }
@@ -1869,6 +1871,52 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
                 dashboards,
                 activeDashboardId,
                 activeTabId,
+            };
+        }
+
+        case 'MERGE_REMOTE_DASHBOARDS': {
+            const existingIds = new Set(state.dashboards.map((dashboard) => dashboard.id));
+            const remoteDashboards = action.payload.filter(
+                (dashboard) => !GLOBAL_SYSTEM_TEMPLATE_IDS.has(dashboard.id)
+            );
+
+            if (!remoteDashboards.length) {
+                return state;
+            }
+
+            const mergedDashboards = ensureMainDashboardPresent([
+                ...state.dashboards,
+                ...remoteDashboards.filter((dashboard) => !existingIds.has(dashboard.id)),
+            ]);
+
+            return {
+                ...state,
+                dashboards: mergedDashboards,
+            };
+        }
+
+        case 'RECONCILE_DASHBOARD_ID': {
+            const { localId, dashboard } = action.payload;
+            const nextDashboards = state.dashboards.map((item) =>
+                item.id === localId
+                    ? {
+                        ...item,
+                        id: dashboard.id,
+                        createdAt: dashboard.createdAt,
+                        updatedAt: dashboard.updatedAt,
+                        isDefault: dashboard.isDefault,
+                    }
+                    : item
+            );
+
+            if (nextDashboards.every((item) => item.id !== dashboard.id)) {
+                return state;
+            }
+
+            return {
+                ...state,
+                dashboards: nextDashboards,
+                activeDashboardId: state.activeDashboardId === localId ? dashboard.id : state.activeDashboardId,
             };
         }
 
@@ -2428,6 +2476,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         activeDashboardId: null,
         activeTabId: null,
     });
+    const [localStateReady, setLocalStateReady] = useState(false);
 
     const getPreferredActiveTabId = useCallback((dashboard: Dashboard | null | undefined) => {
         if (!dashboard) return null;
@@ -2622,6 +2671,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 type: 'SET_STATE',
                 payload: { dashboards, folders, activeDashboardId, activeTabId },
             });
+            setLocalStateReady(true);
             void loadPublishedTemplates();
         } catch (error) {
             console.error('Failed to load dashboards from storage:', error);
@@ -2635,6 +2685,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     activeTabId: getPreferredActiveTabId(defaultDashboard),
                 },
             });
+            setLocalStateReady(true);
             void loadPublishedTemplates();
         }
 
@@ -2702,11 +2753,28 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
     // Sync to backend (debounced)
     const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+    const hasLocalCustomDashboards = state.dashboards.some(
+        (dashboard) => !GLOBAL_SYSTEM_TEMPLATE_IDS.has(dashboard.id)
+    );
+
+    const mergeDashboardsFromBackend = useCallback((dashboards: Dashboard[]) => {
+        dispatch({ type: 'MERGE_REMOTE_DASHBOARDS', payload: dashboards });
+    }, []);
+
+    const reconcileDashboardId = useCallback((localId: string, dashboard: Dashboard) => {
+        dispatch({ type: 'RECONCILE_DASHBOARD_ID', payload: { localId, dashboard } });
+    }, []);
+
+    useLoadFromBackend(
+        mergeDashboardsFromBackend,
+        localStateReady && state.dashboards.length > 0 && !hasLocalCustomDashboards
+    );
 
     useDashboardSync(state, {
         enabled: true,
         onSyncSuccess: () => setSyncStatus('synced'),
         onSyncError: () => setSyncStatus('error'),
+        onDashboardIdReconciled: reconcileDashboardId,
     });
 
     // ========================================================================

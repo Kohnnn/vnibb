@@ -103,7 +103,7 @@ vercel --prod
 ```env
 NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/api/v1/ws/prices
-NEXT_PUBLIC_AUTH_PROVIDER=appwrite
+NEXT_PUBLIC_AUTH_PROVIDER=supabase
 NEXT_PUBLIC_APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
 NEXT_PUBLIC_APPWRITE_PROJECT_ID=your-appwrite-project-id
 ```

@@ -34,6 +34,42 @@ function getRuntimeApiBaseUrl(rawValue: string): string {
 }
 
 export const API_BASE_URL = `${getRuntimeApiBaseUrl(env.apiUrl)}/api/v1`;
+const DASHBOARD_CLIENT_ID_STORAGE_KEY = 'vnibb_dashboard_client_id'
+
+
+function createDashboardClientId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID().replace(/-/g, '')
+    }
+
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 18)}`
+}
+
+
+function getDashboardClientId(): string | null {
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+        return null
+    }
+
+    const existing = window.localStorage.getItem(DASHBOARD_CLIENT_ID_STORAGE_KEY)
+    if (existing) {
+        return existing
+    }
+
+    const next = createDashboardClientId()
+    window.localStorage.setItem(DASHBOARD_CLIENT_ID_STORAGE_KEY, next)
+    return next
+}
+
+
+function withDashboardClientHeader(headers?: HeadersInit): HeadersInit {
+    const resolved = new Headers(headers || {})
+    const clientId = getDashboardClientId()
+    if (clientId && !resolved.has('X-VNIBB-Client-ID')) {
+        resolved.set('X-VNIBB-Client-ID', clientId)
+    }
+    return resolved
+}
 
 
 interface FetchOptions extends RequestInit {
@@ -143,12 +179,18 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
     const hasBody = requestBody !== undefined && requestBody !== null;
 
     if (auth !== 'none' && !headers.has('Authorization')) {
-        const token = await getAuthorizationToken();
-        if (!token && auth === 'required') {
-            throw new APIError('Authentication required. Please log in.', 401, 'Unauthorized');
-        }
-        if (token) {
-            headers.set('Authorization', `Bearer ${token}`);
+        try {
+            const token = await getAuthorizationToken();
+            if (!token && auth === 'required') {
+                throw new APIError('Authentication required. Please log in.', 401, 'Unauthorized');
+            }
+            if (token) {
+                headers.set('Authorization', `Bearer ${token}`);
+            }
+        } catch (error) {
+            if (auth === 'required') {
+                throw error;
+            }
         }
     }
 
@@ -740,13 +782,15 @@ export async function getScreenerData(options?: ScreenerFilterParams, signal?: A
 export async function getDashboards(userId = 'anonymous'): Promise<{ count: number; data: Dashboard[] }> {
     void userId;
     return fetchAPI('/dashboard/', {
-        auth: 'required',
+        auth: 'optional',
+        headers: withDashboardClientHeader(),
     });
 }
 
 export async function getDashboard(id: number): Promise<Dashboard> {
     return fetchAPI(`/dashboard/${id}`, {
-        auth: 'required',
+        auth: 'optional',
+        headers: withDashboardClientHeader(),
     });
 }
 
@@ -754,7 +798,8 @@ export async function createDashboard(data: DashboardCreate): Promise<Dashboard>
     return fetchAPI('/dashboard/', {
         method: 'POST',
         body: JSON.stringify(data),
-        auth: 'required',
+        auth: 'optional',
+        headers: withDashboardClientHeader(),
     });
 }
 
@@ -765,14 +810,16 @@ export async function updateDashboard(
     return fetchAPI(`/dashboard/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(data),
-        auth: 'required',
+        auth: 'optional',
+        headers: withDashboardClientHeader(),
     });
 }
 
 export async function deleteDashboard(id: number): Promise<void> {
     return fetchAPI(`/dashboard/${id}`, {
         method: 'DELETE',
-        auth: 'required',
+        auth: 'optional',
+        headers: withDashboardClientHeader(),
     });
 }
 
@@ -780,14 +827,16 @@ export async function addWidget(dashboardId: number, data: WidgetCreate): Promis
     return fetchAPI(`/dashboard/${dashboardId}/widgets`, {
         method: 'POST',
         body: JSON.stringify(data),
-        auth: 'required',
+        auth: 'optional',
+        headers: withDashboardClientHeader(),
     });
 }
 
 export async function removeWidget(dashboardId: number, widgetId: number): Promise<void> {
     return fetchAPI(`/dashboard/${dashboardId}/widgets/${widgetId}`, {
         method: 'DELETE',
-        auth: 'required',
+        auth: 'optional',
+        headers: withDashboardClientHeader(),
     });
 }
 

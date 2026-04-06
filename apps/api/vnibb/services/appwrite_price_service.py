@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -74,7 +74,7 @@ class AppwritePriceService:
 
     @staticmethod
     def _created_at_iso() -> str:
-        return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
     @staticmethod
     def _synthetic_row_id(symbol: str, row_time: str, interval: str = "1D") -> str:
@@ -304,6 +304,10 @@ class AppwritePriceService:
         appwrite_concurrency: int = 6,
         appwrite_batch_size: int = 200,
     ) -> AppwritePriceSyncStats:
+        if not settings.appwrite_writes_active:
+            logger.info("Skipping Appwrite price mirror because Appwrite writes are disabled")
+            return AppwritePriceSyncStats()
+
         resolved_symbols = await self._resolve_symbols(symbols, max_symbols=max_symbols)
         stats = AppwritePriceSyncStats(symbols_requested=len(resolved_symbols))
         if not resolved_symbols:
@@ -377,6 +381,10 @@ class AppwritePriceService:
         appwrite_concurrency: int = 6,
         appwrite_batch_size: int = 150,
     ) -> AppwritePriceSyncStats:
+        if not settings.appwrite_writes_active:
+            logger.info("Skipping Appwrite direct price sync because Appwrite writes are disabled")
+            return AppwritePriceSyncStats()
+
         resolved_symbols = await self._resolve_symbols(symbols, max_symbols=max_symbols)
         stats = AppwritePriceSyncStats(symbols_requested=len(resolved_symbols))
         if not resolved_symbols:

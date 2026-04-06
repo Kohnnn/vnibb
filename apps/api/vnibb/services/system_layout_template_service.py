@@ -1,4 +1,4 @@
-"""Appwrite-backed system dashboard template registry."""
+"""System dashboard template registry with SQL primary storage and optional Appwrite mirroring."""
 
 from __future__ import annotations
 
@@ -13,8 +13,11 @@ from typing import Any, Literal
 import httpx
 from fastapi import HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker
+from vnibb.models.app_kv import AppKeyValue
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,7 @@ SYSTEM_LAYOUT_STATUS_ALIASES = {
     "draft": "dr",
     "published": "pub",
 }
+SYSTEM_LAYOUT_TEMPLATE_KEY_PREFIX = "system_layout_template"
 COMPRESSED_DASHBOARD_PREFIX = "gz:"
 
 
@@ -84,16 +88,29 @@ class SystemLayoutTemplateService:
             and self._api_key
         )
 
-    def _assert_configured(self) -> None:
-        if self.is_configured():
-            return
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="System layout templates require Appwrite collection configuration",
-        )
+    def _appwrite_writes_enabled(self) -> bool:
+        return self.is_configured() and settings.appwrite_writes_active
+
+    def _normalize_dashboard_key(self, dashboard_key: str) -> str:
+        normalized_dashboard_key = dashboard_key.strip().lower()
+        if normalized_dashboard_key not in SYSTEM_DASHBOARD_KEYS:
+            raise HTTPException(status_code=400, detail="Unsupported system dashboard key")
+        return normalized_dashboard_key
+
+    def _normalize_status(self, status_value: str) -> str:
+        normalized_status = status_value.strip().lower()
+        if normalized_status not in SYSTEM_LAYOUT_STATUSES:
+            raise HTTPException(
+                status_code=400, detail="Unsupported system dashboard template status"
+            )
+        return normalized_status
 
     def _headers(self) -> dict[str, str]:
-        self._assert_configured()
+        if not self.is_configured():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="System layout templates require Appwrite collection configuration",
+            )
         return {
             "X-Appwrite-Project": self._project_id or "",
             "X-Appwrite-Key": self._api_key or "",
@@ -101,14 +118,8 @@ class SystemLayoutTemplateService:
         }
 
     def _document_id(self, dashboard_key: str, status_value: str) -> str:
-        normalized_dashboard_key = dashboard_key.strip().lower()
-        if normalized_dashboard_key not in SYSTEM_DASHBOARD_KEYS:
-            raise HTTPException(status_code=400, detail="Unsupported system dashboard key")
-        normalized_status = status_value.strip().lower()
-        if normalized_status not in SYSTEM_LAYOUT_STATUSES:
-            raise HTTPException(
-                status_code=400, detail="Unsupported system dashboard template status"
-            )
+        normalized_dashboard_key = self._normalize_dashboard_key(dashboard_key)
+        normalized_status = self._normalize_status(status_value)
         safe_key = SYSTEM_DASHBOARD_KEY_ALIASES.get(
             normalized_dashboard_key,
             DOC_ID_RE.sub("-", normalized_dashboard_key).strip("-")[:20],
@@ -116,12 +127,20 @@ class SystemLayoutTemplateService:
         safe_status = SYSTEM_LAYOUT_STATUS_ALIASES[normalized_status]
         return f"slt-{safe_status}-{safe_key}"
 
+    def _kv_key(self, dashboard_key: str, status_value: str) -> str:
+        normalized_dashboard_key = self._normalize_dashboard_key(dashboard_key)
+        normalized_status = self._normalize_status(status_value)
+        return f"{SYSTEM_LAYOUT_TEMPLATE_KEY_PREFIX}:{normalized_dashboard_key}:{normalized_status}"
+
     def _documents_url(self) -> str:
-        self._assert_configured()
+        if not self.is_configured():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="System layout templates require Appwrite collection configuration",
+            )
         return f"{self._base_url}/databases/{self._database_id}/collections/{self._collection_id}/documents"
 
     async def _get_document(self, document_id: str) -> dict[str, Any] | None:
-        self._assert_configured()
         url = f"{self._documents_url()}/{document_id}"
         timeout = httpx.Timeout(20.0, connect=10.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
@@ -132,7 +151,6 @@ class SystemLayoutTemplateService:
         return response.json()
 
     async def _upsert_document(self, document_id: str, data: dict[str, Any]) -> dict[str, Any]:
-        self._assert_configured()
         create_payload = {"documentId": document_id, "data": self._clean_document_data(data)}
         timeout = httpx.Timeout(20.0, connect=10.0)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
@@ -165,7 +183,10 @@ class SystemLayoutTemplateService:
         if len(payload) > 65535:
             raise HTTPException(
                 status_code=400,
-                detail=f"system layout payload too large for Appwrite dashboard_json field ({len(payload)} chars)",
+                detail=(
+                    "system layout payload too large for Appwrite dashboard_json field "
+                    f"({len(payload)} chars)"
+                ),
             )
         return payload
 
@@ -174,9 +195,16 @@ class SystemLayoutTemplateService:
         if payload.startswith(COMPRESSED_DASHBOARD_PREFIX):
             compressed = payload[len(COMPRESSED_DASHBOARD_PREFIX) :]
             try:
-                return json.loads(zlib.decompress(base64.urlsafe_b64decode(compressed.encode("ascii"))).decode("utf-8"))
+                return json.loads(
+                    zlib.decompress(base64.urlsafe_b64decode(compressed.encode("ascii"))).decode(
+                        "utf-8"
+                    )
+                )
             except Exception as exc:
-                raise HTTPException(status_code=500, detail=f"Failed to decode compressed dashboard template: {exc}") from exc
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to decode compressed dashboard template: {exc}",
+                ) from exc
         return json.loads(payload)
 
     def _raise_appwrite_error(self, response: httpx.Response) -> None:
@@ -188,9 +216,11 @@ class SystemLayoutTemplateService:
             )
         except Exception:
             pass
-        raise HTTPException(status_code=response.status_code, detail=f"Appwrite template save failed: {message}")
+        raise HTTPException(
+            status_code=response.status_code, detail=f"Appwrite template save failed: {message}"
+        )
 
-    def _parse_document(self, payload: dict[str, Any]) -> SystemLayoutTemplateRecord:
+    def _parse_appwrite_document(self, payload: dict[str, Any]) -> SystemLayoutTemplateRecord:
         data = payload.get("dashboard_json") or "{}"
         dashboard = self._deserialize_dashboard_json(data)
         return SystemLayoutTemplateRecord(
@@ -204,32 +234,124 @@ class SystemLayoutTemplateService:
             published_at=payload.get("published_at"),
         )
 
-    async def list_published_templates(self) -> list[SystemLayoutTemplateRecord]:
-        if not self.is_configured():
-            return []
+    def _parse_sql_payload(self, payload: dict[str, Any]) -> SystemLayoutTemplateRecord:
+        try:
+            return SystemLayoutTemplateRecord(**payload)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Stored system layout payload is invalid: {exc}",
+            ) from exc
 
+    def _record_to_appwrite_payload(self, record: SystemLayoutTemplateRecord) -> dict[str, Any]:
+        return {
+            "dashboard_key": record.dashboard_key,
+            "status": record.status,
+            "version": record.version,
+            "dashboard_json": self._serialize_dashboard_json(record.dashboard),
+            "notes": record.notes,
+            "updated_by": record.updated_by,
+            "updated_at": record.updated_at,
+            "published_at": record.published_at,
+        }
+
+    async def _get_sql_record(
+        self, dashboard_key: str, status_value: str
+    ) -> SystemLayoutTemplateRecord | None:
+        key = self._kv_key(dashboard_key, status_value)
+        try:
+            async with async_session_maker() as session:
+                record = await session.get(AppKeyValue, key)
+                if not record or not isinstance(record.value, dict):
+                    return None
+                return self._parse_sql_payload(record.value)
+        except SQLAlchemyError as exc:
+            logger.warning("System layout SQL read failed for %s: %s", key, exc)
+            return None
+
+    async def _save_sql_record(self, record: SystemLayoutTemplateRecord) -> None:
+        key = self._kv_key(record.dashboard_key, record.status)
+        payload = record.model_dump(mode="json")
+        try:
+            async with async_session_maker() as session:
+                existing = await session.get(AppKeyValue, key)
+                now = datetime.now(UTC).replace(tzinfo=None)
+                if existing:
+                    existing.value = payload
+                    existing.updated_at = now
+                else:
+                    session.add(AppKeyValue(key=key, value=payload, updated_at=now))
+                await session.commit()
+        except SQLAlchemyError as exc:
+            logger.warning("System layout SQL write failed for %s: %s", key, exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="System layout templates could not be saved to SQL storage",
+            ) from exc
+
+    async def _get_appwrite_record(
+        self, dashboard_key: str, status_value: str
+    ) -> SystemLayoutTemplateRecord | None:
+        if not self.is_configured():
+            return None
+        try:
+            payload = await self._get_document(self._document_id(dashboard_key, status_value))
+        except Exception as exc:
+            logger.warning(
+                "Unable to fetch Appwrite system layout for %s/%s: %s",
+                dashboard_key,
+                status_value,
+                exc,
+            )
+            return None
+        if payload is None:
+            return None
+        return self._parse_appwrite_document(payload)
+
+    async def _load_record(
+        self, dashboard_key: str, status_value: str
+    ) -> SystemLayoutTemplateRecord | None:
+        record = await self._get_sql_record(dashboard_key, status_value)
+        if record is not None:
+            return record
+
+        record = await self._get_appwrite_record(dashboard_key, status_value)
+        if record is not None:
+            await self._save_sql_record(record)
+        return record
+
+    async def _mirror_record_to_appwrite(self, record: SystemLayoutTemplateRecord) -> None:
+        if not self._appwrite_writes_enabled():
+            return
+        try:
+            await self._upsert_document(
+                self._document_id(record.dashboard_key, record.status),
+                self._record_to_appwrite_payload(record),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Appwrite system layout mirror failed for %s/%s: %s",
+                record.dashboard_key,
+                record.status,
+                exc,
+            )
+
+    async def list_published_templates(self) -> list[SystemLayoutTemplateRecord]:
         records: list[SystemLayoutTemplateRecord] = []
         for dashboard_key in SYSTEM_DASHBOARD_KEYS:
-            try:
-                payload = await self._get_document(self._document_id(dashboard_key, "published"))
-            except Exception as exc:
-                logger.warning(
-                    "Unable to fetch published system layout for %s: %s", dashboard_key, exc
-                )
-                continue
-            if payload is None:
-                continue
-            records.append(self._parse_document(payload))
+            record = await self._load_record(dashboard_key, "published")
+            if record is not None:
+                records.append(record)
         return records
 
     async def get_template_bundle(self, dashboard_key: str) -> SystemLayoutTemplateBundleResponse:
-        self._assert_configured()
-        draft_payload = await self._get_document(self._document_id(dashboard_key, "draft"))
-        published_payload = await self._get_document(self._document_id(dashboard_key, "published"))
+        normalized_dashboard_key = self._normalize_dashboard_key(dashboard_key)
+        draft_record = await self._load_record(normalized_dashboard_key, "draft")
+        published_record = await self._load_record(normalized_dashboard_key, "published")
         return SystemLayoutTemplateBundleResponse(
-            dashboard_key=dashboard_key,
-            draft=self._parse_document(draft_payload) if draft_payload else None,
-            published=self._parse_document(published_payload) if published_payload else None,
+            dashboard_key=normalized_dashboard_key,
+            draft=draft_record,
+            published=published_record,
         )
 
     async def save_dashboard_template(
@@ -241,47 +363,51 @@ class SystemLayoutTemplateService:
         updated_by: str,
         publish: bool,
     ) -> SystemLayoutTemplateBundleResponse:
-        self._assert_configured()
-        draft_payload = await self._get_document(self._document_id(dashboard_key, "draft"))
-        published_payload = await self._get_document(self._document_id(dashboard_key, "published"))
+        normalized_dashboard_key = self._normalize_dashboard_key(dashboard_key)
+        draft_record = await self._load_record(normalized_dashboard_key, "draft")
+        published_record = await self._load_record(normalized_dashboard_key, "published")
 
         current_versions = [
-            int(payload.get("version") or 0)
-            for payload in [draft_payload, published_payload]
-            if payload is not None
+            record.version for record in [draft_record, published_record] if record is not None
         ]
         next_version = (max(current_versions) if current_versions else 0) + 1
         now = datetime.now(UTC).isoformat()
-        dashboard_json = self._serialize_dashboard_json(dashboard)
+        preserved_published_at = (
+            draft_record.published_at if draft_record and draft_record.published_at else None
+        ) or (
+            published_record.published_at
+            if published_record and published_record.published_at
+            else None
+        )
 
-        draft_data = {
-            "dashboard_key": dashboard_key,
-            "status": "draft",
-            "version": next_version,
-            "dashboard_json": dashboard_json,
-            "notes": notes,
-            "updated_by": updated_by,
-            "updated_at": now,
-            "published_at": draft_payload.get("published_at") if draft_payload else None,
-        }
-        await self._upsert_document(self._document_id(dashboard_key, "draft"), draft_data)
+        next_draft = SystemLayoutTemplateRecord(
+            dashboard_key=normalized_dashboard_key,
+            status="draft",
+            version=next_version,
+            dashboard=dashboard,
+            notes=notes,
+            updated_by=updated_by,
+            updated_at=now,
+            published_at=preserved_published_at,
+        )
+        await self._save_sql_record(next_draft)
+        await self._mirror_record_to_appwrite(next_draft)
 
         if publish:
-            published_data = {
-                "dashboard_key": dashboard_key,
-                "status": "published",
-                "version": next_version,
-                "dashboard_json": dashboard_json,
-                "notes": notes,
-                "updated_by": updated_by,
-                "updated_at": now,
-                "published_at": now,
-            }
-            await self._upsert_document(
-                self._document_id(dashboard_key, "published"), published_data
+            next_published = SystemLayoutTemplateRecord(
+                dashboard_key=normalized_dashboard_key,
+                status="published",
+                version=next_version,
+                dashboard=dashboard,
+                notes=notes,
+                updated_by=updated_by,
+                updated_at=now,
+                published_at=now,
             )
+            await self._save_sql_record(next_published)
+            await self._mirror_record_to_appwrite(next_published)
 
-        return await self.get_template_bundle(dashboard_key)
+        return await self.get_template_bundle(normalized_dashboard_key)
 
 
 system_layout_template_service = SystemLayoutTemplateService()

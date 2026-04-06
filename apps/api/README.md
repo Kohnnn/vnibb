@@ -111,7 +111,10 @@ Follow [docs/oracle_runbook.md](../../docs/oracle_runbook.md) for the Oracle VM 
 ```env
 DATABASE_URL=postgresql+asyncpg://...
 CACHE_BACKEND=auto  # auto|redis|memory|appwrite
-DATA_BACKEND=appwrite  # appwrite primary; postgres remains fallback. hybrid is a legacy alias.
+DATA_BACKEND=postgres  # postgres primary; appwrite is optional legacy fallback/projection
+SUPABASE_JWT_SECRET=your-supabase-jwt-secret
+ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
+APPWRITE_WRITE_ENABLED=false  # keep Appwrite writes frozen unless running a controlled backfill
 APPWRITE_POPULATE_MAX_ROWS=1000
 REDIS_URL=redis://localhost:6379/0
 VNSTOCK_API_KEY=vnstock_xxx
