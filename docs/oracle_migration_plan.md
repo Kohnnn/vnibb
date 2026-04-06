@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This plan migrates the VNIBB backend runtime from Zeabur to an Oracle Cloud Always Free VM with minimal risk. The frontend stays on Vercel. Appwrite remains the active auth and runtime data backend. PostgreSQL and `asyncpg` remain in scope for migrations, fallback reads, health checks, and existing operational scripts. Oracle Database is explicitly out of scope for this phase.
+This plan migrates the VNIBB backend runtime from Zeabur to an Oracle Cloud Always Free VM with minimal risk. The frontend stays on Vercel. This document reflects the original Oracle cutover scope; current runtime operations now prefer Supabase/Postgres for primary durable state, with Appwrite retained only as an optional legacy fallback or projection target. Oracle Database is explicitly out of scope for this phase.
 
 The migration is organized around five mitigation tracks:
 
@@ -19,8 +19,8 @@ The migration is organized around five mitigation tracks:
 - Frontend hosting: Vercel
 - Backend hosting: Zeabur
 - Backend runtime: Dockerized FastAPI
-- Auth/runtime data backend: Appwrite
-- Relational runtime assumptions still present: PostgreSQL via SQLAlchemy and `asyncpg`
+- Auth/runtime data backend at the time: Appwrite-first with PostgreSQL assumptions still present
+- Current mitigation direction: Supabase auth + Postgres primary durable state
 - Health endpoints already available: `/health/`, `/live`, `/ready`
 
 ### Observed repository risks
@@ -29,7 +29,7 @@ The migration is organized around five mitigation tracks:
 2. Zeabur hostnames were hardcoded across scripts, docs, workflows, and UI examples.
 3. The frontend used `next/font/google`, which can fail in clean or network-restricted builds.
 4. Root CI and local gate behavior had drifted from the monorepo layout and package-manager reality.
-5. Backend production still requires `DATABASE_URL` even with `DATA_BACKEND=appwrite`.
+5. Backend production still requires `DATABASE_URL`, and current mitigation keeps Postgres as the primary durable store.
 
 ## Goal And Non-Goals
 

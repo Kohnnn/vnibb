@@ -67,6 +67,50 @@ SUPABASE_JWT_SECRET=your-supabase-jwt-secret
 - do not re-enable Appwrite writes unless doing a deliberate off-peak backfill
 - do not widen the dashboard schema beyond what `layout_config` already carries
 
+## Production Smoke Checklist
+
+Run this immediately after backend/frontend deploy.
+
+### Auth and app boot
+
+1. Load the app in a clean browser session.
+2. Sign in with Supabase auth.
+3. Confirm the shell loads without Appwrite-related auth errors.
+
+### Dashboard durability
+
+1. Create a new custom dashboard.
+2. Rename it.
+3. Add a tab.
+4. Refresh the page.
+5. Confirm the dashboard still exists.
+6. Open a second browser or private window and sign in with the same account.
+7. Confirm the dashboard hydrates from backend SQL.
+8. Delete the dashboard.
+9. Refresh and confirm it remains deleted.
+
+### System templates
+
+1. Open the admin layout flow.
+2. Save a draft.
+3. Confirm the API succeeds even with `APPWRITE_WRITE_ENABLED=false`.
+4. Reload and confirm the draft is still available.
+
+### Market-data freshness
+
+1. Open one equity with recent earnings.
+2. Confirm financial statements load.
+3. Confirm ratios load.
+4. Confirm quote/history widgets render.
+5. Check `/market/earnings-season` and confirm results are present.
+
+### Guardrail checks
+
+1. Confirm backend env shows `DATA_BACKEND=postgres`.
+2. Confirm backend env shows `APPWRITE_WRITE_ENABLED=false`.
+3. Confirm frontend env shows `NEXT_PUBLIC_AUTH_PROVIDER=supabase`.
+4. Confirm no operator changed production back to Appwrite-first defaults.
+
 ## Next-Month Follow-up
 
 - decide whether Appwrite remains a read-only projection or is removed from runtime writes completely

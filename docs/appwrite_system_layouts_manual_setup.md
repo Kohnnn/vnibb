@@ -83,8 +83,9 @@ APPWRITE_DATABASE_ID=<your current VNIBB Appwrite database id>
 APPWRITE_SYSTEM_TEMPLATES_COLLECTION_ID=system_dashboard_templates
 
 ADMIN_API_KEY=<your long random admin key>
-DATA_BACKEND=appwrite
+DATA_BACKEND=postgres
 CACHE_BACKEND=redis
+APPWRITE_WRITE_ENABLED=false
 ```
 
 Notes:
@@ -106,13 +107,12 @@ NEXT_PUBLIC_APPWRITE_PROJECT_ID=<your current VNIBB Appwrite project id>
 ```
 
 Auth provider:
-- if you still use Supabase auth for now, keep:
+- current recommended production mode:
   - `NEXT_PUBLIC_AUTH_PROVIDER=supabase`
-- if you already moved auth, use:
-  - `NEXT_PUBLIC_AUTH_PROVIDER=appwrite`
+- use `NEXT_PUBLIC_AUTH_PROVIDER=appwrite` only if you intentionally move auth back, which is not recommended during the current freeze window
 
-This choice does **not** change the layout-template storage recommendation.
-The templates should still be in Appwrite and accessed through backend APIs.
+This choice does **not** change the backend API shape.
+During the current Appwrite write-freeze mode, templates are persisted in SQL first and Appwrite should remain a disabled mirror unless you are doing a controlled backfill.
 
 ## Part 5 - Redeploy
 After collection + env are ready:
