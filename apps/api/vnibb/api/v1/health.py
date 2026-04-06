@@ -1,15 +1,17 @@
 # backend/vnibb/api/v1/health.py
 
 import asyncio
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from vnibb.core.database import get_db
-from vnibb.core.config import settings
-from vnibb.core.appwrite_client import check_appwrite_connectivity
-import redis.asyncio as redis
-from datetime import datetime
 import time
+from datetime import datetime
+
+import redis.asyncio as redis
+from fastapi import APIRouter, Depends
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from vnibb.core.appwrite_client import check_appwrite_connectivity
+from vnibb.core.config import settings
+from vnibb.core.database import get_db
 
 router = APIRouter()
 
@@ -21,8 +23,8 @@ _BASIC_HEALTH_TTL_SECONDS = 30
 @router.get("")
 async def basic_health():
     """Basic health check reporting DB status."""
-    from vnibb.core.database import check_database_connection
     from vnibb.core.cache import redis_client
+    from vnibb.core.database import check_database_connection
 
     now = time.time()
     cached_data = _BASIC_HEALTH_CACHE.get("data")
@@ -39,11 +41,13 @@ async def basic_health():
             "data_backend_requested": settings.data_backend,
             "data_backend": settings.resolved_data_backend,
             "cache_backend": settings.resolved_cache_backend,
+            "appwrite_write_enabled": settings.appwrite_write_enabled,
+            "allow_anonymous_dashboard_writes": settings.allow_anonymous_dashboard_writes,
         },
-        "version": getattr(settings, 'app_version', '0.1.0'),
-        "timestamp": datetime.utcnow().isoformat()
+        "version": getattr(settings, "app_version", "0.1.0"),
+        "timestamp": datetime.utcnow().isoformat(),
     }
-    
+
     # Database check (bounded by timeout to avoid gateway timeouts)
     try:
         db_ok = await asyncio.wait_for(check_database_connection(max_retries=1), timeout=2.0)
@@ -51,7 +55,7 @@ async def basic_health():
             health["db"] = "disconnected"
     except Exception:
         health["db"] = "disconnected"
-        
+
     # Redis check (optional and bounded)
     try:
         if settings.redis_url:
@@ -84,33 +88,33 @@ async def basic_health():
 @router.get("/detailed")
 async def detailed_health(db: AsyncSession = Depends(get_db)):
     """Detailed health check with component status."""
-    
+
     health = {
         "status": "healthy",
-        "version": getattr(settings, 'app_version', '1.0.0'),
+        "version": getattr(settings, "app_version", "1.0.0"),
         "environment": settings.environment,
         "timestamp": datetime.utcnow().isoformat(),
-        "components": {}
+        "components": {},
     }
-    
+
     # Database check
     try:
         # Check basic connectivity
         await db.execute(text("SELECT 1"))
-        
+
         # Get counts
         db_rows = await db.execute(text("SELECT COUNT(*) FROM stocks"))
         screener_rows = await db.execute(text("SELECT COUNT(*) FROM screener_snapshots"))
-        
+
         health["components"]["database"] = {
             "status": "healthy",
             "stocks_count": db_rows.scalar(),
-            "screener_count": screener_rows.scalar()
+            "screener_count": screener_rows.scalar(),
         }
     except Exception as e:
         health["components"]["database"] = {"status": "unhealthy", "error": str(e)}
         health["status"] = "degraded"
-    
+
     # Redis check (if configured)
     if settings.redis_url:
         try:
@@ -136,7 +140,10 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
     appwrite_health = await check_appwrite_connectivity(timeout_seconds=2.5)
     health["components"]["appwrite"] = appwrite_health
 
-    if settings.data_backend in {"appwrite", "hybrid"} and appwrite_health.get("status") != "connected":
+    if (
+        settings.data_backend in {"appwrite", "hybrid"}
+        and appwrite_health.get("status") != "connected"
+    ):
         health["status"] = "degraded"
 
     return health

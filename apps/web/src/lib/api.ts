@@ -348,6 +348,16 @@ async function getAuthorizationToken(): Promise<string | null> {
         return null;
     }
 
+    // Prefer a valid Supabase session when available. This makes the frontend more
+    // resilient if production env drifts back to Appwrite auth while the live runtime
+    // is already operating in Supabase-auth mode.
+    if (supabase && isSupabaseConfigured) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+            return session.access_token;
+        }
+    }
+
     if (authProvider === 'appwrite') {
         if (!isAppwriteConfigured) {
             return null;
@@ -364,12 +374,7 @@ async function getAuthorizationToken(): Promise<string | null> {
         }
     }
 
-    if (!supabase || !isSupabaseConfigured) {
-        return null;
-    }
-
-    const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token || null;
+    return null;
 }
 
 async function getAuthorizationTokenForCopilot(): Promise<string | null> {

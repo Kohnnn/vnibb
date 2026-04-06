@@ -109,7 +109,9 @@ Those should therefore be scheduled outside trading hours or on smaller symbol s
 
 ## Appwrite mirroring behavior
 
-The scheduled backend should not only update SQL. It should also refresh the Appwrite collections needed by runtime reads.
+This section describes the intended Appwrite projection behavior when Appwrite writes are available.
+
+For the current month, Appwrite writes are disabled because the org is returning `limit_databases_writes_exceeded`. The scheduler should update SQL/Supabase first and treat Appwrite mirroring as paused until quota is available again.
 
 Current scheduled mirroring rules:
 
@@ -179,6 +181,16 @@ The backend now follows this philosophy:
 - fast-moving market data during trading hours on a limited priority universe
 - post-close daily market refreshes for price, index, screener, and financial freshness
 - rotating supplemental vnstock updates for slower-changing company datasets off trading hours
-- Appwrite mirroring for the tables that power runtime reads
+- optional Appwrite mirroring for the tables that power legacy runtime reads when write quota is available
 
 This is the safest way to get materially better freshness without treating every vnstock dataset like a real-time feed.
+
+## Next-month fallback plan
+
+If Appwrite quota resets cleanly next month, re-enable Appwrite writes in a controlled sequence:
+
+1. keep `Postgres/Supabase` as the primary durable store
+2. enable `APPWRITE_WRITE_ENABLED=true` only during controlled off-peak windows
+3. backfill the highest-value collections first instead of turning on all live mirroring at once
+4. verify read paths against Appwrite freshness before expanding the projection scope
+5. if Appwrite shows quota pressure again, switch writes back off immediately without changing the primary source of truth

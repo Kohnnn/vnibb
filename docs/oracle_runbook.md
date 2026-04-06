@@ -66,6 +66,12 @@ Edit `deployment/env.oracle` and set:
 - `ACME_EMAIL`
 - `DATABASE_URL`
 - `DATABASE_URL_SYNC`
+- `DATA_BACKEND=postgres`
+- `APPWRITE_WRITE_ENABLED=false` for the current month
+- `ALLOW_ANONYMOUS_DASHBOARD_WRITES=true`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_JWT_SECRET`
 - `APPWRITE_ENDPOINT`
 - `APPWRITE_PROJECT_ID`
 - `APPWRITE_API_KEY`
@@ -131,10 +137,12 @@ docker compose -f docker-compose.oracle.yml logs caddy --tail=200
 ```bash
 bash scripts/oracle/healthcheck.sh
 bash scripts/oracle/smoke_test.sh
+bash scripts/oracle/runtime_verify.sh
 bash scripts/oracle/mcp_smoke_test.sh
 BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
 BASE_URL=https://oracle-api.example.com bash scripts/oracle/healthcheck.sh
 CORS_TEST_ORIGIN=https://vnibb.vercel.app BASE_URL=https://oracle-api.example.com bash scripts/oracle/smoke_test.sh
+BASE_URL=https://oracle-api.example.com bash scripts/oracle/runtime_verify.sh
 BASE_URL=https://oracle-api.example.com bash scripts/oracle/mcp_smoke_test.sh
 ```
 
@@ -155,6 +163,10 @@ docker compose -f docker-compose.oracle.yml logs caddy --tail=200
 ### What to confirm
 
 - `/live`, `/ready`, `/health/`, and `/api/v1/health` return `200`
+- `/health/` reports `providers.data_backend=postgres`
+- `/health/` reports `providers.appwrite_write_enabled=false`
+- `/health/` reports `providers.allow_anonymous_dashboard_writes=true`
+- `/api/v1/dashboard/` returns `200` when called with `X-VNIBB-Client-ID`
 - `/mcp-health` returns `200`
 - `/mcp` accepts MCP initialization and `get_appwrite_status`
 - Appwrite is reported as connected
@@ -171,13 +183,14 @@ docker compose -f docker-compose.oracle.yml logs caddy --tail=200
 5. Switch the stable hostname from the previous backend or OCI canary hostname to the Oracle reserved IP.
 6. Wait for DNS propagation.
 7. Test the production Vercel frontend against the stable hostname.
-8. Monitor minute 0-15:
+8. Confirm the frontend build is using `NEXT_PUBLIC_AUTH_PROVIDER=supabase` by verifying the browser no longer calls `/account/jwts` on Appwrite during dashboard load.
+9. Monitor minute 0-15:
    - uptime
    - 5xx rate
    - p95 latency
    - websocket reconnects
    - Appwrite connectivity
-9. Declare success only after the 15-minute window stays green.
+10. Declare success only after the 15-minute window stays green.
 
 ### Required confirmation roles
 

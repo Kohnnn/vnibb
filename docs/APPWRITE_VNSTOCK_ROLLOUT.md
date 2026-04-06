@@ -2,6 +2,8 @@
 
 Date: 2026-04-02
 
+Historical note: this document describes the Appwrite expansion plan that existed before Appwrite org-level writes were blocked for the current month. The live operating mode now uses `Supabase/Postgres` as primary durable storage and keeps Appwrite read-only until quota is available again.
+
 ## Purpose
 
 This document turns the VNStock and Appwrite discovery work into an execution-ready rollout for VNIBB.
@@ -11,7 +13,7 @@ The goal is to:
 - fix the current Appwrite market-data footprint
 - create the missing market collections needed by VNIBB widgets
 - populate the database within the available VNStock Golden limits
-- keep FastAPI as the main query layer while Appwrite becomes a stronger persisted runtime store
+- keep FastAPI as the main query layer while Appwrite becomes an optional projected runtime store when quota allows
 
 ## Current Appwrite Findings
 

@@ -2,6 +2,8 @@
 
 This runbook documents the temporary operating mode for periods when Appwrite write quotas are exhausted but VNIBB still needs to stay usable during active market windows.
 
+Current status: Appwrite reads are healthy, but Appwrite writes are blocked by the org-level error `limit_databases_writes_exceeded`. Treat this runbook as the live source of truth for the current month only.
+
 ## Goal
 
 - keep dashboards working
@@ -71,6 +73,13 @@ SUPABASE_JWT_SECRET=your-supabase-jwt-secret
 
 Run this immediately after backend/frontend deploy.
 
+CLI verification:
+
+```bash
+bash scripts/oracle/runtime_verify.sh
+BASE_URL=https://api.example.com bash scripts/oracle/runtime_verify.sh
+```
+
 ### Auth and app boot
 
 1. Load the app in a clean browser session.
@@ -113,6 +122,9 @@ Run this immediately after backend/frontend deploy.
 
 ## Next-Month Follow-up
 
+- if Appwrite quota resets or the budget cap is changed, re-enable Appwrite only as an optional projection layer first, not as the immediate primary runtime store
+- start with controlled off-peak backfills for a small set of high-value collections and verify quota behavior before enabling broader mirroring
+- keep `Supabase/Postgres` as the durable source of truth until Appwrite proves stable again under real load
 - decide whether Appwrite remains a read-only projection or is removed from runtime writes completely
 - unify user-state ownership around Supabase IDs only
 - decide whether `dashboard_widgets` remains active or `layout_config` stays canonical

@@ -7,9 +7,12 @@ The current operational picture reflected in recent project context is:
 - frontend deployed on Vercel
 - backend deployed on OCI
 - read-only VNIBB MCP companion deployed alongside the backend on OCI for VniAgent and remote clients
-- Appwrite serving as the primary database and auth provider
-- Supabase (PostgreSQL) retained as fallback database for seeding and population scripts
+- Supabase (PostgreSQL) serving as the primary durable database and dashboard persistence layer this month
+- Supabase auth serving as the active auth provider this month
+- Appwrite retained as a read-only legacy fallback because org-level writes are blocked with `limit_databases_writes_exceeded`
 - Redis used for cache and resilience behavior
+
+This is a temporary earnings-season operating mode for the current month. If Appwrite quota resets cleanly next month, re-enable it only through a controlled projection/backfill path instead of switching production back to Appwrite-first by default.
 
 ## Why operations became a major project theme
 
@@ -31,7 +34,7 @@ At a high level, production looks like:
 2. OCI hosts the backend runtime and the dedicated `vnibb-mcp` sidecar
 3. the backend exposes HTTP and WebSocket surfaces
 4. the `vnibb-mcp` sidecar exposes the read-only MCP HTTP surface for VniAgent and remote clients
-5. Appwrite and cache services back persistence and runtime state
+5. Supabase/Postgres and cache services back persistence and runtime state; Appwrite remains read-only legacy fallback only
 6. upstream market providers feed the service layer
 
 ```text
@@ -44,7 +47,8 @@ VniAgent server context path
   -> apps/api
   -> VNIBB_MCP_URL
   -> vnibb-mcp
-  -> Appwrite
+  -> Supabase/Postgres primary
+  -> Appwrite read-only fallback
 ```
 
 ## Backend Tech Stack
@@ -485,6 +489,7 @@ During an Appwrite write freeze, keep Appwrite configured only for legacy reads 
 - runtime writes should stay disabled with `APPWRITE_WRITE_ENABLED=false`
 - durable state should live in `Postgres/Supabase`
 - dashboards should remain local-first with SQL durable save
+- verify deploys with `bash scripts/oracle/runtime_verify.sh` before treating a rollout as successful
 
 ### Why `CACHE_BACKEND=auto` is acceptable
 
