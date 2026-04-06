@@ -4,6 +4,12 @@ This runbook documents the temporary operating mode for periods when Appwrite wr
 
 Current status: Appwrite reads are healthy, but Appwrite writes are blocked by the org-level error `limit_databases_writes_exceeded`. Treat this runbook as the live source of truth for the current month only.
 
+In this month-long mode, `DATA_BACKEND=hybrid` means:
+
+- writes remain on `Postgres/Supabase`
+- reads prefer `Postgres`
+- Appwrite is used only as a read fallback where the endpoint already supports it
+
 ## Goal
 
 - keep dashboards working
@@ -30,7 +36,7 @@ NEXT_PUBLIC_AUTH_PROVIDER=supabase
 Backend:
 
 ```env
-DATA_BACKEND=postgres
+DATA_BACKEND=hybrid
 APPWRITE_WRITE_ENABLED=false
 ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
 SUPABASE_JWT_SECRET=your-supabase-jwt-secret
@@ -43,9 +49,9 @@ SUPABASE_JWT_SECRET=your-supabase-jwt-secret
 - System dashboard templates:
   `app_kv` in SQL is primary; Appwrite mirror is optional and should stay disabled during quota pressure
 - Quotes and historical prices:
-  Postgres first, `vnstock` gap-fill second, Appwrite only as stale legacy fallback
+  Postgres first, Appwrite read fallback second, `vnstock` freshness/gap-fill third
 - Earnings and financial statements:
-  Postgres first, `vnstock` refresh/gap-fill second
+  Postgres first, Appwrite read fallback second where implemented, `vnstock` refresh/gap-fill third
 - Market indices and world markets:
   live provider first, database fallback second
 
@@ -115,10 +121,10 @@ BASE_URL=https://api.example.com bash scripts/oracle/runtime_verify.sh
 
 ### Guardrail checks
 
-1. Confirm backend env shows `DATA_BACKEND=postgres`.
-2. Confirm backend env shows `APPWRITE_WRITE_ENABLED=false`.
-3. Confirm frontend env shows `NEXT_PUBLIC_AUTH_PROVIDER=supabase`.
-4. Confirm no operator changed production back to Appwrite-first defaults.
+1. Confirm backend env shows `DATA_BACKEND=hybrid`.
+3. Confirm backend env shows `APPWRITE_WRITE_ENABLED=false`.
+4. Confirm frontend env shows `NEXT_PUBLIC_AUTH_PROVIDER=supabase`.
+5. Confirm no operator changed production back to Appwrite-first defaults.
 
 ## Next-Month Follow-up
 

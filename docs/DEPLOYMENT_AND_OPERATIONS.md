@@ -7,7 +7,7 @@ The current operational picture reflected in recent project context is:
 - frontend deployed on Vercel
 - backend deployed on OCI
 - read-only VNIBB MCP companion deployed alongside the backend on OCI for VniAgent and remote clients
-- Supabase (PostgreSQL) serving as the primary durable database and dashboard persistence layer this month
+- Supabase (PostgreSQL) serving as the primary durable database and dashboard persistence layer this month, with Appwrite used only as a read fallback where still helpful
 - Supabase auth serving as the active auth provider this month
 - Appwrite retained as a read-only legacy fallback because org-level writes are blocked with `limit_databases_writes_exceeded`
 - Redis used for cache and resilience behavior
@@ -446,7 +446,7 @@ For the Oracle backend deployment path, the current recommended runtime profile 
 
 ```env
 ENVIRONMENT=production
-DATA_BACKEND=postgres
+DATA_BACKEND=hybrid
 CACHE_BACKEND=auto
 APPWRITE_WRITE_ENABLED=false
 ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
@@ -475,7 +475,7 @@ SKIP_WEBSOCKET_STARTUP=false
 
 ### Safe to keep
 
-- `DATA_BACKEND=postgres`
+- `DATA_BACKEND=hybrid`
 - `CACHE_BACKEND=auto`
 - `APPWRITE_WRITE_ENABLED=false`
 - `VNSTOCK_CALLS_PER_MINUTE=100`

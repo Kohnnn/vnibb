@@ -111,7 +111,7 @@ Follow [docs/oracle_runbook.md](../../docs/oracle_runbook.md) for the Oracle VM 
 ```env
 DATABASE_URL=postgresql+asyncpg://...
 CACHE_BACKEND=auto  # auto|redis|memory|appwrite
-DATA_BACKEND=postgres  # postgres primary; appwrite is optional legacy fallback/projection
+DATA_BACKEND=hybrid  # postgres primary; Appwrite read fallback only when configured
 SUPABASE_JWT_SECRET=your-supabase-jwt-secret
 ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
 APPWRITE_WRITE_ENABLED=false  # keep Appwrite writes frozen unless running a controlled backfill
