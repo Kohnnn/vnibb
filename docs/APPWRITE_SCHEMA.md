@@ -6,6 +6,32 @@
 
 ---
 
+## Education Program Limits
+
+VNIBB runs on the **Appwrite Education Program** which provides the following limits:
+
+| Resource | Limit | Notes |
+|----------|-------|-------|
+| **Bandwidth** | 2 TB/month | Outbound data transfer |
+| **Storage** | 150 GB | Total document storage |
+| **Executions** | 3.5 M/month | Function/API executions |
+| **Monthly Active Users** | 200 K | Authenticated users |
+
+### Operational Considerations
+
+- **Bandwidth budget**: At ~26 collections with ~5-10 attributes each, document reads are lean. Heavy bandwidth consumers are `stock_prices` (historical OHLCV) and `screener_snapshots` (pre-calculated metrics).
+- **Storage headroom**: 150GB accommodates ~2-3 years of daily stock prices for ~1700 symbols plus financial statements, news, and market data.
+- **Execution budget**: 3.5M executions/month ≈ 116K/day or ~1.3K/minute. Backend uses batching and caching to stay well within limits.
+- **MAU ceiling**: 200K monthly active users provides substantial headroom for a research tool. User dashboards and auth sessions are the primary auth consumers.
+
+If limits are approached:
+1. Enable stricter cache TTLs for read-heavy endpoints
+2. Reduce `stock_prices` history depth for older data
+3. Archive `screener_snapshots` to cold storage quarterly
+4. Consider Appwrite Scale plan for production at higher scale
+
+---
+
 ## Entity Relationship Diagram (Mermaid)
 
 ```mermaid
