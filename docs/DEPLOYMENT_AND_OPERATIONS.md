@@ -442,9 +442,10 @@ For the Oracle backend deployment path, the current recommended runtime profile 
 
 ```env
 ENVIRONMENT=production
-DATA_BACKEND=appwrite
+DATA_BACKEND=postgres
 CACHE_BACKEND=auto
-APPWRITE_POPULATE_FORCE_HTTP=1
+APPWRITE_WRITE_ENABLED=false
+ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
 APPWRITE_POPULATE_BATCH_SIZE=500
 APPWRITE_POPULATE_CONCURRENCY=5
 APPWRITE_POPULATE_MAX_ROWS=1000
@@ -470,12 +471,20 @@ SKIP_WEBSOCKET_STARTUP=false
 
 ### Safe to keep
 
-- `DATA_BACKEND=appwrite`
+- `DATA_BACKEND=postgres`
 - `CACHE_BACKEND=auto`
-- `APPWRITE_POPULATE_FORCE_HTTP=1`
+- `APPWRITE_WRITE_ENABLED=false`
 - `VNSTOCK_CALLS_PER_MINUTE=100`
 - `SKIP_SCHEDULER_STARTUP=false`
 - `SKIP_WEBSOCKET_STARTUP=false`
+
+### Appwrite during quota pressure
+
+During an Appwrite write freeze, keep Appwrite configured only for legacy reads or controlled off-peak backfills.
+
+- runtime writes should stay disabled with `APPWRITE_WRITE_ENABLED=false`
+- durable state should live in `Postgres/Supabase`
+- dashboards should remain local-first with SQL durable save
 
 ### Why `CACHE_BACKEND=auto` is acceptable
 

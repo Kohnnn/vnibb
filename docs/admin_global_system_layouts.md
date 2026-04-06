@@ -179,7 +179,7 @@ Recommended fields:
 - published layout JSON should live in Appwrite and be loaded through backend APIs
 
 ## Oracle / Production Environment
-For the current implementation, keep using the existing Appwrite database and add the system templates collection.
+For the current implementation, keep using the existing Appwrite database only as an optional legacy fallback for system-template mirroring. SQL is the primary store during Appwrite quota pressure.
 
 ### Required backend env
 Add these to your Oracle deployment env:
@@ -192,8 +192,9 @@ APPWRITE_DATABASE_ID=your-existing-vnibb-appwrite-database-id
 APPWRITE_SYSTEM_TEMPLATES_COLLECTION_ID=system_dashboard_templates
 
 ADMIN_API_KEY=replace-with-long-random-value
-DATA_BACKEND=appwrite
+DATA_BACKEND=postgres
 CACHE_BACKEND=redis
+APPWRITE_WRITE_ENABLED=false
 ```
 
 ### Frontend env
@@ -203,7 +204,7 @@ The frontend does not need direct collection access. It only needs the normal AP
 NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/api/v1/ws/prices
 NEXT_PUBLIC_ENABLE_REALTIME=true
-NEXT_PUBLIC_AUTH_PROVIDER=appwrite
+NEXT_PUBLIC_AUTH_PROVIDER=supabase
 NEXT_PUBLIC_APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
 NEXT_PUBLIC_APPWRITE_PROJECT_ID=your-appwrite-project-id
 ```
@@ -214,7 +215,9 @@ If auth remains on Supabase temporarily, you can keep:
 NEXT_PUBLIC_AUTH_PROVIDER=supabase
 ```
 
-That does **not** change the recommendation to store global/tenant layout templates in Appwrite.
+That does **not** change the recommendation to keep system-layout APIs backend-mediated.
+
+During the current Appwrite write-freeze mode, the primary template store is SQL `app_kv`, with Appwrite mirroring disabled.
 
 ## What "no backend access anymore" should mean
 After the initial deploy and Appwrite setup:
