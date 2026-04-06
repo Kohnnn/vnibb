@@ -114,7 +114,16 @@ After deploy, admins can save the platform admin key in the web UI and manage lo
 ### Start the stack
 
 ```bash
+git pull --ff-only
 docker compose -f docker-compose.oracle.yml up -d --build
+```
+
+If health checks still show old runtime behavior after env changes, rebuild without cache and force recreation:
+
+```bash
+git pull --ff-only
+docker compose -f docker-compose.oracle.yml build --no-cache api mcp
+docker compose -f docker-compose.oracle.yml up -d --force-recreate api mcp caddy
 ```
 
 ### Verify container health

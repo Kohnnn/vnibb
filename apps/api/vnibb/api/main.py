@@ -106,6 +106,16 @@ def get_cors_headers(request: Request) -> dict[str, str]:
     is_configured_regex_origin = bool(
         origin and configured_pattern and re.match(configured_pattern, origin)
     )
+    allow_headers = ", ".join(
+        [
+            "Content-Type",
+            "Authorization",
+            "X-Requested-With",
+            "X-VNIBB-Client-ID",
+            "X-Admin-Key",
+            "X-Admin-Actor",
+        ]
+    )
 
     # Check if origin is allowed
     if (
@@ -119,7 +129,7 @@ def get_cors_headers(request: Request) -> dict[str, str]:
             "Access-Control-Allow-Origin": origin or settings.cors_origins[0],
             "Access-Control-Allow-Credentials": "true",
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Allow-Headers": allow_headers,
         }
 
     # Default to first allowed origin if no match
@@ -128,7 +138,7 @@ def get_cors_headers(request: Request) -> dict[str, str]:
             "Access-Control-Allow-Origin": settings.cors_origins[0],
             "Access-Control-Allow-Credentials": "true",
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Allow-Headers": allow_headers,
         }
 
     return {}
