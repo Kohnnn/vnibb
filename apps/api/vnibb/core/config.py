@@ -498,8 +498,11 @@ class Settings(BaseSettings):
         if requested == "postgres":
             return "postgres"
 
-        if requested in {"appwrite", "hybrid"}:
+        if requested == "appwrite":
             return "appwrite" if self.is_appwrite_configured else "postgres"
+
+        if requested == "hybrid":
+            return "hybrid" if self.is_appwrite_configured else "postgres"
 
         return "postgres"
 

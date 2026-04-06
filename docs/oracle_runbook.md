@@ -66,7 +66,7 @@ Edit `deployment/env.oracle` and set:
 - `ACME_EMAIL`
 - `DATABASE_URL`
 - `DATABASE_URL_SYNC`
-- `DATA_BACKEND=postgres`
+- `DATA_BACKEND=hybrid`
 - `APPWRITE_WRITE_ENABLED=false` for the current month
 - `ALLOW_ANONYMOUS_DASHBOARD_WRITES=true`
 - `SUPABASE_URL`
@@ -163,7 +163,7 @@ docker compose -f docker-compose.oracle.yml logs caddy --tail=200
 ### What to confirm
 
 - `/live`, `/ready`, `/health/`, and `/api/v1/health` return `200`
-- `/health/` reports `providers.data_backend=postgres`
+- `/health/` reports `providers.data_backend=hybrid`
 - `/health/` reports `providers.appwrite_write_enabled=false`
 - `/health/` reports `providers.allow_anonymous_dashboard_writes=true`
 - `/api/v1/dashboard/` returns `200` when called with `X-VNIBB-Client-ID`

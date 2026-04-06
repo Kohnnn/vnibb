@@ -190,7 +190,8 @@ This is the safest way to get materially better freshness without treating every
 If Appwrite quota resets cleanly next month, re-enable Appwrite writes in a controlled sequence:
 
 1. keep `Postgres/Supabase` as the primary durable store
-2. enable `APPWRITE_WRITE_ENABLED=true` only during controlled off-peak windows
-3. backfill the highest-value collections first instead of turning on all live mirroring at once
-4. verify read paths against Appwrite freshness before expanding the projection scope
-5. if Appwrite shows quota pressure again, switch writes back off immediately without changing the primary source of truth
+2. use `DATA_BACKEND=hybrid` so runtime reads can fall back to Appwrite while writes stay on SQL
+3. enable `APPWRITE_WRITE_ENABLED=true` only during controlled off-peak windows
+4. backfill the highest-value collections first instead of turning on all live mirroring at once
+5. verify read paths against Appwrite freshness before expanding the projection scope
+6. if Appwrite shows quota pressure again, switch writes back off immediately without changing the primary source of truth

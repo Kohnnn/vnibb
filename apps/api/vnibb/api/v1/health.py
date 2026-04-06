@@ -140,10 +140,7 @@ async def detailed_health(db: AsyncSession = Depends(get_db)):
     appwrite_health = await check_appwrite_connectivity(timeout_seconds=2.5)
     health["components"]["appwrite"] = appwrite_health
 
-    if (
-        settings.data_backend in {"appwrite", "hybrid"}
-        and appwrite_health.get("status") != "connected"
-    ):
+    if settings.data_backend == "appwrite" and appwrite_health.get("status") != "connected":
         health["status"] = "degraded"
 
     return health
