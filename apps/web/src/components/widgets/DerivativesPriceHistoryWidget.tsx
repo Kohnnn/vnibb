@@ -122,7 +122,7 @@ export function DerivativesPriceHistoryWidget({
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" />
                       <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} interval={chartData.length > 12 ? Math.max(1, Math.ceil(chartData.length / 8)) - 1 : 0} minTickGap={12} />
                       <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(value) => formatAxisValue(value)} width={56} />
-                      <Tooltip formatter={(value: number | string | undefined) => formatNumber(typeof value === 'number' ? value : Number(value), { decimals: 2 })} />
+                      <Tooltip formatter={(value) => formatNumber(Number(Array.isArray(value) ? value[0] : value), { decimals: 2 })} />
                       <Area type="monotone" dataKey="close" stroke="#38bdf8" fill="rgba(56,189,248,0.18)" strokeWidth={2} />
                     </AreaChart>
                   </ResponsiveContainer>
