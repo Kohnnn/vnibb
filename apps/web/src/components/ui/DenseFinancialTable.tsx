@@ -467,7 +467,7 @@ export function DenseFinancialTable({
                                   borderRadius: '8px',
                                   fontSize: '11px',
                                 }}
-                                formatter={(value: number | undefined) => [defaultFormatter(value), row.label]}
+                                formatter={(value) => [defaultFormatter(Array.isArray(value) ? value[0] : value), row.label]}
                               />
                               <Area type="monotone" dataKey="value" stroke="#38bdf8" strokeWidth={2} fill="rgba(56,189,248,0.18)" />
                             </AreaChart>
