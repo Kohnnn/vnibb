@@ -111,10 +111,10 @@ export const queryKeys = {
     rsGainers: (limit: number, lookbackDays: number) => ['rsGainers', limit, lookbackDays] as const,
     quant: (symbol: string, period: string, metrics: string[], source: string) =>
         ['quant', symbol, period, metrics.join(','), source] as const,
-    gammaExposure: (symbol: string, period: string, source: string) =>
-        ['gammaExposure', symbol, period, source] as const,
-    momentumProfile: (symbol: string, period: string, source: string) =>
-        ['momentumProfile', symbol, period, source] as const,
+    gammaExposure: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+        ['gammaExposure', symbol, period, source, adjustmentMode] as const,
+    momentumProfile: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+        ['momentumProfile', symbol, period, source, adjustmentMode] as const,
     earningsQuality: (symbol: string) => ['earningsQuality', symbol] as const,
     smartMoneyFlow: (symbol: string) => ['smartMoneyFlow', symbol] as const,
     relativeRotation: (symbol: string, lookbackDays: number) =>
@@ -150,6 +150,7 @@ export function useHistoricalPrices(
         endDate: options?.endDate,
         interval: options?.interval,
         source,
+        adjustmentMode: options?.adjustmentMode,
     }
 
     return useQuery({
@@ -1201,6 +1202,7 @@ export function useQuantMetrics(
         period?: api.QuantPeriod;
         metrics?: api.QuantMetric[];
         source?: 'KBS' | 'VCI' | 'DNSE';
+        adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
 ) {
@@ -1208,9 +1210,10 @@ export function useQuantMetrics(
     const period = options?.period || '5Y';
     const metrics = options?.metrics || ['volume_delta'];
     const source = options?.source || preferredSource;
+    const adjustmentMode = options?.adjustmentMode || 'adjusted';
     return useQuery({
-        queryKey: queryKeys.quant(symbol, period, metrics, source),
-        queryFn: () => api.getQuantMetrics(symbol, { period, metrics, source }),
+        queryKey: [...queryKeys.quant(symbol, period, metrics, source), adjustmentMode] as const,
+        queryFn: () => api.getQuantMetrics(symbol, { period, metrics, source, adjustmentMode }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         retry: 2,
@@ -1222,16 +1225,18 @@ export function useGammaExposure(
     options?: {
         period?: api.QuantPeriod;
         source?: 'KBS' | 'VCI' | 'DNSE';
+        adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
 ) {
     const preferredSource = useVnstockSource();
     const period = options?.period || '3Y';
     const source = options?.source || preferredSource;
+    const adjustmentMode = options?.adjustmentMode || 'adjusted';
 
     return useQuery({
-        queryKey: queryKeys.gammaExposure(symbol, period, source),
-        queryFn: () => api.getGammaExposure(symbol, { period, source }),
+        queryKey: queryKeys.gammaExposure(symbol, period, source, adjustmentMode),
+        queryFn: () => api.getGammaExposure(symbol, { period, source, adjustmentMode }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         retry: 2,
@@ -1243,16 +1248,18 @@ export function useMomentumProfile(
     options?: {
         period?: api.QuantPeriod;
         source?: 'KBS' | 'VCI' | 'DNSE';
+        adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
 ) {
     const preferredSource = useVnstockSource();
     const period = options?.period || '3Y';
     const source = options?.source || preferredSource;
+    const adjustmentMode = options?.adjustmentMode || 'adjusted';
 
     return useQuery({
-        queryKey: queryKeys.momentumProfile(symbol, period, source),
-        queryFn: () => api.getMomentumProfile(symbol, { period, source }),
+        queryKey: queryKeys.momentumProfile(symbol, period, source, adjustmentMode),
+        queryFn: () => api.getMomentumProfile(symbol, { period, source, adjustmentMode }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         retry: 2,

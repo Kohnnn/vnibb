@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 import { RefreshCw } from 'lucide-react';
-import { getHistoricalPrices, getQuote } from '@/lib/api';
+import { getCompanyEvents, getHistoricalPrices, getQuote } from '@/lib/api';
+import { buildChartEventMarkers, type ChartEventMarker } from '@/lib/chartEventMarkers';
 import { cn } from '@/lib/utils';
 
 export type AdvancedChartMode = 'candles' | 'line' | 'area';
@@ -141,6 +142,7 @@ export function TradingViewAdvancedChart({
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
   const [points, setPoints] = useState<ChartPoint[]>([]);
+  const [eventMarkers, setEventMarkers] = useState<ChartEventMarker[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adjustmentMode, setAdjustmentMode] = useState<'raw' | 'adjusted'>('adjusted');
@@ -158,7 +160,7 @@ export function TradingViewAdvancedChart({
       setError(null);
 
       try {
-        const [historyResponse, quoteResponse] = await Promise.all([
+        const [historyResponse, quoteResponse, eventsResponse] = await Promise.all([
           getHistoricalPrices(symbol, {
             startDate: dateRange.startDate,
             endDate: dateRange.endDate,
@@ -167,17 +169,20 @@ export function TradingViewAdvancedChart({
             signal: controller.signal,
           }),
           getQuote(symbol, controller.signal).catch(() => null),
+          getCompanyEvents(symbol, { limit: 80 }).catch(() => null),
         ]);
 
         const normalized = normalizePoints((historyResponse?.data || []) as unknown as Array<Record<string, unknown>>);
         const merged = mergeQuote(normalized, quoteResponse?.data ?? null);
         setPoints(merged);
+        setEventMarkers(buildChartEventMarkers(eventsResponse?.data || [], merged, timeframe === '5Y' ? 12 : 8));
       } catch (fetchError) {
         if ((fetchError as Error)?.name === 'AbortError') {
           return;
         }
         setError((fetchError as Error)?.message || 'Failed to load chart data');
         setPoints([]);
+        setEventMarkers([]);
       } finally {
         window.clearTimeout(timeoutId);
         setIsLoading(false);
@@ -190,7 +195,7 @@ export function TradingViewAdvancedChart({
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [adjustmentMode, symbol, dateRange.startDate, dateRange.endDate]);
+  }, [adjustmentMode, symbol, timeframe, dateRange.startDate, dateRange.endDate]);
 
   useEffect(() => {
     if (!containerRef.current || points.length === 0) return;
@@ -307,6 +312,15 @@ export function TradingViewAdvancedChart({
         );
       }
       mainSeriesRef.current = series;
+      series.setMarkers(
+        eventMarkers.map((marker) => ({
+          time: marker.date,
+          position: marker.position,
+          color: marker.color,
+          shape: marker.shape,
+          text: marker.shortLabel,
+        }))
+      );
 
       const volumeSeries = chart.addHistogramSeries({
         color: '#475569',
@@ -347,7 +361,7 @@ export function TradingViewAdvancedChart({
       mainSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, [mode, points, timeframe]);
+  }, [eventMarkers, mode, points, timeframe]);
 
   return (
     <div className={cn('relative h-full w-full', className)} style={{ minHeight: height }}>
@@ -370,6 +384,16 @@ export function TradingViewAdvancedChart({
           </button>
         ))}
       </div>
+
+      {eventMarkers.length > 0 ? (
+        <div className="pointer-events-none absolute bottom-7 left-3 z-10 flex flex-wrap items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-[var(--text-muted)] backdrop-blur">
+          <span>D dividend</span>
+          <span>•</span>
+          <span>S split</span>
+          <span>•</span>
+          <span>R rights</span>
+        </div>
+      ) : null}
 
       {isLoading && (
         <div

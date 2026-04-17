@@ -203,7 +203,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
           <WidgetMeta
             updatedAt={quantQuery.data?.data?.last_data_date || quantQuery.data?.data?.computed_at || regime.updatedAt}
             isFetching={isFetching && hasData}
-            note={`${period} composite view`}
+            note={`${period} composite view · ${(quantQuery.data?.data?.adjustment_mode || 'adjusted')} history`}
             align="right"
           />
         </div>

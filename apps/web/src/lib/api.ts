@@ -1654,6 +1654,7 @@ export interface QuantResponse {
     data: {
         symbol: string
         period: QuantPeriod
+        adjustment_mode?: 'raw' | 'adjusted'
         computed_at: string
         last_data_date?: string | null
         metrics: Record<string, any>
@@ -1671,6 +1672,7 @@ export async function getQuantMetrics(
         period?: QuantPeriod
         metrics?: QuantMetric[]
         source?: 'KBS' | 'VCI' | 'DNSE'
+        adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<QuantResponse> {
     return fetchAPI<QuantResponse>(`/quant/${symbol}`, {
@@ -1678,6 +1680,7 @@ export async function getQuantMetrics(
             period: options?.period ?? '5Y',
             metrics: options?.metrics?.join(','),
             source: options?.source,
+            adjustment_mode: options?.adjustmentMode,
         },
         timeout: 30000,
     })
@@ -1692,6 +1695,7 @@ export interface GammaExposureBand {
 export interface GammaExposurePayload {
     symbol: string;
     period: QuantPeriod;
+    adjustment_mode?: 'raw' | 'adjusted';
     computed_at: string;
     last_data_date?: string | null;
     current_close: number | null;
@@ -1718,6 +1722,7 @@ export interface MomentumPeerPoint {
 export interface MomentumProfilePayload {
     symbol: string;
     period: QuantPeriod;
+    adjustment_mode?: 'raw' | 'adjusted';
     computed_at: string;
     last_data_date?: string | null;
     data_quality_note?: string;
@@ -1832,12 +1837,14 @@ export async function getGammaExposure(
     options?: {
         period?: QuantPeriod;
         source?: 'KBS' | 'VCI' | 'DNSE';
+        adjustmentMode?: 'raw' | 'adjusted';
     }
 ): Promise<GammaExposureResponse> {
     return fetchAPI<GammaExposureResponse>(`/quant/${symbol}/gamma-exposure`, {
         params: {
             period: options?.period ?? '3Y',
             source: options?.source,
+            adjustment_mode: options?.adjustmentMode,
         },
         timeout: 30000,
     });
@@ -1848,12 +1855,14 @@ export async function getMomentumProfile(
     options?: {
         period?: QuantPeriod;
         source?: 'KBS' | 'VCI' | 'DNSE';
+        adjustmentMode?: 'raw' | 'adjusted';
     }
 ): Promise<MomentumProfileResponse> {
     return fetchAPI<MomentumProfileResponse>(`/quant/${symbol}/momentum`, {
         params: {
             period: options?.period ?? '3Y',
             source: options?.source,
+            adjustment_mode: options?.adjustmentMode,
         },
         timeout: 30000,
     });

@@ -143,6 +143,8 @@ Financial statement notes:
 - Financial and statement-style widgets now support `USD` display mode with per-year browser-local USD/VND overrides plus admin-managed yearly defaults.
 - Effective USD/VND precedence is now `local year override -> admin year default -> admin global fallback -> hardcoded fallback`.
 - USD conversion is currently scoped to financial and fundamental statement-style surfaces first; quote and market-wide currency conversion remains a lower-priority roadmap item.
+- Quant endpoints now accept `adjustment_mode=raw|adjusted` so adjusted-history behavior can propagate into frontend risk and quant widgets instead of stopping at chart-only consumers.
+- Main historical chart surfaces now render compact corporate-action markers for dividends, splits, and rights-related actions when those dates are available in the loaded window.
 
 Copilot notes:
 - The VniAgent prompt library is now expected to be opened from within the copilot sidebar. Global prompt actions route into the sidebar instead of a disconnected standalone modal.
