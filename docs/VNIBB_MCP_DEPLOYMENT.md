@@ -49,7 +49,7 @@ Important notes:
 
 - `VNIBB_MCP_URL` is used by the backend so VniAgent can call the MCP sidecar server-side
 - `VNIBB_MCP_SHARED_BEARER_TOKEN` protects remote MCP HTTP access when requests arrive through Caddy
-- the backend and MCP service should share the same runtime data-source env so they read the same primary store; this month that means Supabase/Postgres primary with Appwrite read-only fallback only
+- the backend and MCP service should share the same runtime data-source intent; Appwrite remains the intended VNIBB market corpus, while Supabase/Postgres may temporarily carry write-side bridge responsibilities during quota pressure
 - `MCP_PUBLIC_BIND=127.0.0.1` makes the raw MCP HTTP port reachable on the OCI host outside Docker without exposing it publicly on the internet
 - if you intentionally want a public raw MCP port, change `MCP_PUBLIC_BIND=0.0.0.0` and open the security rule explicitly, but prefer the Caddy-routed `/mcp` endpoint whenever possible
 
