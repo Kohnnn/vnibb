@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     Activity,
     BarChart3,
@@ -16,6 +16,7 @@ import {
 import { useDashboard } from '@/contexts/DashboardContext';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import {
     DASHBOARD_TEMPLATES,
@@ -77,6 +78,13 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
         ) as Record<DashboardTemplateCategory, number>;
     }, []);
 
+    useEffect(() => {
+        if (!isOpen) return;
+        captureAnalyticsEvent(ANALYTICS_EVENTS.appsLibraryOpened, {
+            source: 'apps_library',
+        });
+    }, [isOpen]);
+
     if (!isOpen) return null;
 
     const handleApplyTemplate = (template: DashboardTemplate) => {
@@ -98,6 +106,14 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
         }
 
         setActiveDashboard(dashboard.id);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
+            source: 'apps_library',
+            template_id: template.id,
+            template_name: template.name,
+            template_category: template.category,
+            dashboard_id: dashboard.id,
+            widget_count: template.widgets.length,
+        });
         onClose();
     };
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Settings, 
   Database, 
@@ -14,6 +14,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { Button } from '@/components/ui/button';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { env } from '@/lib/env';
 import { resetDashboardWalkthroughPreference } from '@/lib/userPreferences';
 
@@ -22,7 +23,17 @@ export default function SettingsPage() {
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const [apiUrl, setApiUrl] = useState(env.apiUrl);
 
+  useEffect(() => {
+    captureAnalyticsEvent(ANALYTICS_EVENTS.settingsOpened, {
+      source: 'settings_page',
+      active_tab: 'page',
+    });
+  }, []);
+
   const handleRestartWalkthrough = () => {
+    captureAnalyticsEvent(ANALYTICS_EVENTS.walkthroughRestartRequested, {
+      source: 'settings_page',
+    });
     resetDashboardWalkthroughPreference();
     router.push('/');
   };
@@ -143,7 +154,13 @@ export default function SettingsPage() {
                 {VNSTOCK_SOURCES.map((source) => (
                   <button
                     key={source.value}
-                    onClick={() => setPreferredVnstockSource(source.value)}
+                    onClick={() => {
+                      captureAnalyticsEvent(ANALYTICS_EVENTS.dataSourceChanged, {
+                        previous_source: preferredVnstockSource,
+                        source: source.value,
+                      });
+                      setPreferredVnstockSource(source.value)
+                    }}
                     className={`w-full flex flex-col items-start px-4 py-3 rounded-lg border text-left transition-all ${
                       preferredVnstockSource === source.value
                         ? 'bg-blue-600/10 border-blue-500/50 ring-1 ring-blue-500/20'

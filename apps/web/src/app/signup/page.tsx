@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import Link from 'next/link';
 
 export default function SignupPage() {
@@ -28,23 +29,43 @@ export default function SignupPage() {
         setError(null);
 
         if (password !== confirmPassword) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.authSignupFailed, {
+                method: 'email',
+                error_type: 'password_mismatch',
+            });
             setError("Passwords don't match");
             setLoading(false);
             return;
         }
 
         if (password.length < 6) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.authSignupFailed, {
+                method: 'email',
+                error_type: 'password_too_short',
+            });
             setError("Password must be at least 6 characters");
             setLoading(false);
             return;
         }
 
+        captureAnalyticsEvent(ANALYTICS_EVENTS.authSignupStarted, {
+            method: 'email',
+        });
+
         const { error } = await signUp(email, password);
 
         if (error) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.authSignupFailed, {
+                method: 'email',
+                error_type: error.message,
+            });
             setError(error.message);
             setLoading(false);
         } else {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.authSignupSucceeded, {
+                method: 'email',
+                redirect_path: '/dashboard',
+            });
             setSuccess(true);
             setLoading(false);
             // Redirect to dashboard after 2 seconds
@@ -55,10 +76,17 @@ export default function SignupPage() {
     const handleGoogleSignup = async () => {
         setLoading(true);
         setError(null);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.authSignupStarted, {
+            method: 'google',
+        });
 
         const { error } = await signInWithGoogle();
 
         if (error) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.authSignupFailed, {
+                method: 'google',
+                error_type: error.message,
+            });
             setError(error.message);
             setLoading(false);
         }

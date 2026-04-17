@@ -10,6 +10,7 @@ import {
     Plus, Clock, Maximize2, Sigma
 } from 'lucide-react';
 import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { WidgetPreview } from './WidgetPreview';
@@ -67,6 +68,14 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         setActiveCategory(null);
         setSelectedWidgetTypes([]);
     }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        captureAnalyticsEvent(ANALYTICS_EVENTS.widgetLibraryOpened, {
+            dashboard_id: activeDashboard?.id,
+            tab_id: activeTab?.id,
+        });
+    }, [activeDashboard?.id, activeTab?.id, isOpen]);
 
     // Persistent recent widgets
     const [recentWidgetTypes, setRecentWidgetTypes] = useState<WidgetType[]>(() => {
@@ -132,6 +141,16 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         ].slice(0, 10);
         setRecentWidgetTypes(newRecents);
         localStorage.setItem('vnibb_recent_widgets', JSON.stringify(newRecents));
+
+        if (widgetDefs.length > 1) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.widgetBatchAdded, {
+                source: 'widget_library',
+                dashboard_id: activeDashboard.id,
+                tab_id: activeTab.id,
+                widget_count: widgetDefs.length,
+                widget_types: addedTypes,
+            });
+        }
     }, [activeDashboard, activeTab, addWidget, dashboardEditable, recentWidgetTypes]);
 
     const handleAddWidget = useCallback((widgetDef: any) => {

@@ -7,7 +7,9 @@
 
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { getDashboardClientId } from '@/lib/api';
+import { identifyAnalyticsUser, resetAnalytics } from '@/lib/analytics';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
     authProvider,
@@ -144,6 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [session, setSession] = useState<AuthSession | null>(null);
     const [loading, setLoading] = useState(true);
     const [isDevMode, setIsDevMode] = useState(false);
+    const lastIdentifiedUserIdRef = useRef<string | null>(null);
 
     // Derived state
     const isAdmin = user?.user_metadata?.role === 'admin';
@@ -218,6 +221,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         return () => subscription.unsubscribe();
     }, []);
+
+    useEffect(() => {
+        if (user) {
+            identifyAnalyticsUser({
+                id: user.id,
+                email: user.email,
+                role: typeof user.user_metadata?.role === 'string' ? user.user_metadata.role : user.role,
+                provider: user.provider,
+            });
+            lastIdentifiedUserIdRef.current = user.id;
+            return;
+        }
+
+        if (lastIdentifiedUserIdRef.current) {
+            resetAnalytics({ clientId: getDashboardClientId() });
+            lastIdentifiedUserIdRef.current = null;
+        }
+    }, [user]);
 
     const signIn = async (email: string, password: string) => {
         if (appwriteEnabled) {

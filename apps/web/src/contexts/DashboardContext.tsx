@@ -30,6 +30,7 @@ import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences
 import { useDashboardSync, useLoadFromBackend } from '@/lib/useDashboardSync';
 import { normalizeWidgetType } from '@/data/widgetDefinitions';
 import { autoFitGridItems, compactGridItems, findNextAvailableLayout, getWidgetDefaultLayout, preserveTemplateGridItems } from '@/lib/dashboardLayout';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { getPublishedSystemDashboardTemplates } from '@/lib/api';
 
 // ============================================================================
@@ -2784,6 +2785,14 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     const setActiveDashboard = useCallback((id: string) => {
         dispatch({ type: 'SET_ACTIVE_DASHBOARD', payload: id });
         const dashboard = state.dashboards.find((d) => d.id === id);
+        if (dashboard) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceSwitched, {
+                dashboard_id: dashboard.id,
+                dashboard_name: dashboard.name,
+                folder_id: dashboard.folderId,
+                tab_count: dashboard.tabs.length,
+            });
+        }
         const preferredTabId = getRestoredActiveTabId(dashboard, readStoredDashboardViewState());
         if (preferredTabId) {
             dispatch({ type: 'SET_ACTIVE_TAB', payload: preferredTabId });
@@ -2810,20 +2819,50 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             updatedAt: now,
         };
         dispatch({ type: 'ADD_DASHBOARD', payload: dashboard });
+        captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceCreated, {
+            dashboard_id: dashboard.id,
+            dashboard_name: dashboard.name,
+            folder_id: dashboard.folderId,
+            is_default: dashboard.isDefault,
+        });
         return dashboard;
     }, [state.dashboards.length]);
 
     const updateDashboard = useCallback((id: string, updates: Partial<Dashboard>) => {
+        const dashboard = state.dashboards.find((item) => item.id === id);
         dispatch({ type: 'UPDATE_DASHBOARD', payload: { id, updates } });
-    }, []);
+        if (dashboard && typeof updates.name === 'string' && updates.name.trim() && updates.name !== dashboard.name) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceRenamed, {
+                dashboard_id: id,
+                previous_name: dashboard.name,
+                dashboard_name: updates.name,
+            });
+        }
+        if (dashboard && typeof updates.showGroupLabels === 'boolean' && updates.showGroupLabels !== dashboard.showGroupLabels) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceGroupingToggled, {
+                dashboard_id: id,
+                dashboard_name: dashboard.name,
+                enabled: updates.showGroupLabels,
+            });
+        }
+    }, [state.dashboards]);
 
     const updateDashboardRuntime = useCallback((id: string, updates: Partial<Dashboard>) => {
         dispatch({ type: 'UPDATE_DASHBOARD_RUNTIME', payload: { id, updates } });
     }, []);
 
     const deleteDashboard = useCallback((id: string) => {
+        const dashboard = state.dashboards.find((item) => item.id === id);
         dispatch({ type: 'DELETE_DASHBOARD', payload: id });
-    }, []);
+        if (dashboard) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceDeleted, {
+                dashboard_id: id,
+                dashboard_name: dashboard.name,
+                folder_id: dashboard.folderId,
+                tab_count: dashboard.tabs.length,
+            });
+        }
+    }, [state.dashboards]);
 
     // ========================================================================
     // Folder Actions
@@ -2837,21 +2876,45 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             isExpanded: true,
         };
         dispatch({ type: 'ADD_FOLDER', payload: folder });
+        captureAnalyticsEvent(ANALYTICS_EVENTS.folderCreated, {
+            folder_id: folder.id,
+            folder_name: folder.name,
+        });
         return folder;
     }, [state.folders.length]);
 
     const updateFolder = useCallback((id: string, updates: Partial<DashboardFolder>) => {
+        const folder = state.folders.find((item) => item.id === id);
         dispatch({ type: 'UPDATE_FOLDER', payload: { id, updates } });
-    }, []);
+        if (folder && typeof updates.name === 'string' && updates.name.trim() && updates.name !== folder.name) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.folderRenamed, {
+                folder_id: id,
+                previous_name: folder.name,
+                folder_name: updates.name,
+            });
+        }
+    }, [state.folders]);
 
     const deleteFolder = useCallback((id: string) => {
+        const folder = state.folders.find((item) => item.id === id);
         dispatch({ type: 'DELETE_FOLDER', payload: id });
-    }, []);
+        if (folder) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.folderDeleted, {
+                folder_id: id,
+                folder_name: folder.name,
+            });
+        }
+    }, [state.folders]);
 
     const toggleFolder = useCallback((id: string) => {
         const folder = state.folders.find((f) => f.id === id);
         if (folder) {
             dispatch({ type: 'UPDATE_FOLDER', payload: { id, updates: { isExpanded: !folder.isExpanded } } });
+            captureAnalyticsEvent(ANALYTICS_EVENTS.folderToggled, {
+                folder_id: id,
+                folder_name: folder.name,
+                expanded: !folder.isExpanded,
+            });
         }
     }, [state.folders]);
 
@@ -2861,25 +2924,67 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
     const setActiveTab = useCallback((id: string) => {
         dispatch({ type: 'SET_ACTIVE_TAB', payload: id });
-    }, []);
+        const dashboard = state.dashboards.find((item) => item.id === state.activeDashboardId) || null;
+        const tab = dashboard?.tabs.find((item) => item.id === id) || null;
+        if (dashboard && tab) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.tabSwitched, {
+                dashboard_id: dashboard.id,
+                dashboard_name: dashboard.name,
+                tab_id: tab.id,
+                tab_name: tab.name,
+                widget_count: tab.widgets.length,
+            });
+        }
+    }, [state.activeDashboardId, state.dashboards]);
 
     const createTab = useCallback((dashboardId: string, name: string): DashboardTab => {
         const dashboard = state.dashboards.find((d) => d.id === dashboardId);
         const tab = createDefaultTab(name, dashboard?.tabs.length || 0);
         dispatch({ type: 'ADD_TAB', payload: { dashboardId, tab } });
+        captureAnalyticsEvent(ANALYTICS_EVENTS.tabCreated, {
+            dashboard_id: dashboardId,
+            tab_id: tab.id,
+            tab_name: tab.name,
+            tab_count: (dashboard?.tabs.length || 0) + 1,
+        });
         return tab;
     }, [state.dashboards]);
 
     const updateTab = useCallback((dashboardId: string, tabId: string, updates: Partial<DashboardTab>) => {
+        const dashboard = state.dashboards.find((item) => item.id === dashboardId);
+        const existingTab = dashboard?.tabs.find((item) => item.id === tabId);
         dispatch({ type: 'UPDATE_TAB', payload: { dashboardId, tabId, updates } });
-    }, []);
+        if (existingTab && typeof updates.name === 'string' && updates.name.trim() && updates.name !== existingTab.name) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.tabRenamed, {
+                dashboard_id: dashboardId,
+                tab_id: tabId,
+                previous_name: existingTab.name,
+                tab_name: updates.name,
+            });
+        }
+    }, [state.dashboards]);
 
     const deleteTab = useCallback((dashboardId: string, tabId: string) => {
+        const dashboard = state.dashboards.find((item) => item.id === dashboardId);
+        const tab = dashboard?.tabs.find((item) => item.id === tabId);
         dispatch({ type: 'DELETE_TAB', payload: { dashboardId, tabId } });
-    }, []);
+        if (tab) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.tabDeleted, {
+                dashboard_id: dashboardId,
+                tab_id: tab.id,
+                tab_name: tab.name,
+                widget_count: tab.widgets.length,
+            });
+        }
+    }, [state.dashboards]);
 
     const reorderTabs = useCallback((dashboardId: string, tabs: DashboardTab[]) => {
         dispatch({ type: 'REORDER_TABS', payload: { dashboardId, tabs } });
+        captureAnalyticsEvent(ANALYTICS_EVENTS.tabReordered, {
+            dashboard_id: dashboardId,
+            tab_count: tabs.length,
+            tab_ids: tabs.map((tab) => tab.id),
+        });
     }, []);
 
     const applyTemplate = useCallback((dashboardId: string, tabId: string, templateName: string) => {
@@ -2962,6 +3067,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             },
         };
         dispatch({ type: 'ADD_WIDGET', payload: { dashboardId, tabId, widget } });
+        captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAdded, {
+            dashboard_id: dashboardId,
+            tab_id: tabId,
+            widget_id: widget.id,
+            widget_type: widget.type,
+        });
         return widget;
     }, [state.dashboards]);
 
@@ -2984,8 +3095,19 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     }, []);
 
     const deleteWidget = useCallback((dashboardId: string, tabId: string, widgetId: string) => {
+        const dashboard = state.dashboards.find((item) => item.id === dashboardId);
+        const tab = dashboard?.tabs.find((item) => item.id === tabId);
+        const widget = tab?.widgets.find((item) => item.id === widgetId);
         dispatch({ type: 'DELETE_WIDGET', payload: { dashboardId, tabId, widgetId } });
-    }, []);
+        if (widget) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.widgetRemoved, {
+                dashboard_id: dashboardId,
+                tab_id: tabId,
+                widget_id: widget.id,
+                widget_type: widget.type,
+            });
+        }
+    }, [state.dashboards]);
 
     const updateTabLayout = useCallback((dashboardId: string, tabId: string, widgets: WidgetInstance[]) => {
         dispatch({ type: 'UPDATE_TAB_LAYOUT', payload: { dashboardId, tabId, widgets } });
@@ -3023,6 +3145,13 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         };
 
         dispatch({ type: 'ADD_WIDGET', payload: { dashboardId, tabId, widget: clonedWidget } });
+        captureAnalyticsEvent(ANALYTICS_EVENTS.widgetCloned, {
+            dashboard_id: dashboardId,
+            tab_id: tabId,
+            widget_id: widget.id,
+            widget_type: widget.type,
+            cloned_widget_id: clonedWidget.id,
+        });
         return clonedWidget;
     }, [state.dashboards]);
 
@@ -3057,11 +3186,25 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     // ========================================================================
 
     const moveDashboard = useCallback((dashboardId: string, targetFolderId: string | undefined) => {
+        const dashboard = state.dashboards.find((item) => item.id === dashboardId);
         dispatch({ type: 'MOVE_DASHBOARD', payload: { dashboardId, targetFolderId } });
-    }, []);
+        if (dashboard) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceMoved, {
+                dashboard_id: dashboardId,
+                dashboard_name: dashboard.name,
+                from_folder_id: dashboard.folderId,
+                to_folder_id: targetFolderId,
+            });
+        }
+    }, [state.dashboards]);
 
     const reorderDashboards = useCallback((dashboardIds: string[], folderId: string | undefined) => {
         dispatch({ type: 'REORDER_DASHBOARDS', payload: { dashboardIds, folderId } });
+        captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceReordered, {
+            folder_id: folderId,
+            dashboard_count: dashboardIds.length,
+            dashboard_ids: dashboardIds,
+        });
     }, []);
 
     // ========================================================================

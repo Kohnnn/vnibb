@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { Suspense } from "react";
 import { QueryProvider } from "@/lib/QueryProvider";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { DashboardProvider } from "@/contexts/DashboardContext";
@@ -10,6 +11,7 @@ import { SymbolLinkProvider } from "@/contexts/SymbolLinkContext";
 import { GlobalMarketsSymbolProvider } from "@/contexts/GlobalMarketsSymbolContext";
 import { ThemeProvider, ThemeScript } from "@/contexts/ThemeContext";
 import { CommandPaletteWrapper } from "@/components/CommandPaletteWrapper";
+import { AnalyticsBootstrap } from "@/components/analytics/AnalyticsBootstrap";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -76,6 +78,9 @@ export default function RootLayout({
                     <GlobalMarketsSymbolProvider>
                       <DataSourcesProvider>
                         <UnitProvider>
+                          <Suspense fallback={null}>
+                            <AnalyticsBootstrap />
+                          </Suspense>
                           <main id="main-content">{children}</main>
                           <CommandPaletteWrapper />
                         </UnitProvider>

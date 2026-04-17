@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { toTradingViewSymbol } from '@/lib/tradingView';
 import {
   buildTradingViewRuntimeConfig,
@@ -83,6 +86,7 @@ function TradingViewNativeWidget({
 }: TradingViewNativeWidgetProps) {
   const metadata = getTradingViewWidgetMetadata(widgetType);
   const hostRef = useRef<HTMLDivElement>(null);
+  const hasTrackedLoadRef = useRef(false);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const allowsOverflow = widgetType === 'tradingview_ticker_tag';
@@ -114,10 +118,26 @@ function TradingViewNativeWidget({
     host.innerHTML = '';
     setLoadError(null);
     setIsLoading(true);
+    hasTrackedLoadRef.current = false;
 
     const teardown = () => {
       if (hostRef.current) {
         hostRef.current.innerHTML = '';
+      }
+    };
+
+    const stopLoading = () => {
+      if (!cancelled) {
+        if (!hasTrackedLoadRef.current) {
+          hasTrackedLoadRef.current = true;
+          captureAnalyticsEvent(ANALYTICS_EVENTS.widgetLoaded, {
+            widget_id: id,
+            widget_type: widgetType,
+            widget_title: metadata.name,
+            symbol: resolvedSymbol,
+          });
+        }
+        setIsLoading(false);
       }
     };
 
@@ -127,6 +147,19 @@ function TradingViewNativeWidget({
       widgetNode.style.width = '100%';
       widgetNode.style.height = '100%';
 
+      const frameObserver = new MutationObserver(() => {
+        if (host.querySelector('iframe')) {
+          frameObserver.disconnect();
+          stopLoading();
+        }
+      });
+      frameObserver.observe(host, { childList: true, subtree: true });
+
+      const fallbackTimer = window.setTimeout(() => {
+        frameObserver.disconnect();
+        stopLoading();
+      }, 8000);
+
       const script = document.createElement('script');
       script.async = true;
       script.type = 'text/javascript';
@@ -134,12 +167,14 @@ function TradingViewNativeWidget({
       script.innerHTML = JSON.stringify(runtimeConfig);
       script.addEventListener('error', () => {
         if (!cancelled) {
+          captureAnalyticsEvent(ANALYTICS_EVENTS.widgetLoadFailed, {
+            widget_id: id,
+            widget_type: widgetType,
+            widget_title: metadata.name,
+            symbol: resolvedSymbol,
+            error_type: 'iframe_script_load_failed',
+          });
           setLoadError(new Error(`Failed to load ${metadata.name}`));
-          setIsLoading(false);
-        }
-      }, { once: true });
-      script.addEventListener('load', () => {
-        if (!cancelled) {
           setIsLoading(false);
         }
       }, { once: true });
@@ -149,6 +184,8 @@ function TradingViewNativeWidget({
 
       return () => {
         cancelled = true;
+        frameObserver.disconnect();
+        window.clearTimeout(fallbackTimer);
         teardown();
       };
     }
@@ -167,9 +204,16 @@ function TradingViewNativeWidget({
 
         hostRef.current.innerHTML = '';
         hostRef.current.appendChild(element);
-        setIsLoading(false);
+        window.setTimeout(stopLoading, 600);
       } catch (error) {
         if (!cancelled) {
+          captureAnalyticsEvent(ANALYTICS_EVENTS.widgetLoadFailed, {
+            widget_id: id,
+            widget_type: widgetType,
+            widget_title: metadata.name,
+            symbol: resolvedSymbol,
+            error_type: error instanceof Error ? error.message : 'web_component_load_failed',
+          });
           setLoadError(error as Error);
           setIsLoading(false);
         }
@@ -210,7 +254,16 @@ function TradingViewNativeWidget({
       className={allowsOverflow ? 'overflow-visible' : undefined}
       bodyClassName={allowsOverflow ? 'overflow-visible' : undefined}
     >
-      <div className="h-full min-h-[180px] bg-[var(--bg-primary)]">
+      <div className="relative h-full min-h-[180px] bg-[var(--bg-primary)]">
+        {isLoading ? (
+          <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-center gap-3 bg-[var(--bg-primary)]/92">
+            <WidgetSkeleton variant="chart" />
+            <div className="flex items-center justify-center gap-2 px-4 pb-4 text-[11px] font-medium text-[var(--text-muted)]">
+              <RefreshCw size={12} className="animate-spin" />
+              <span>Loading {metadata.name}…</span>
+            </div>
+          </div>
+        ) : null}
         <div ref={hostRef} className="tradingview-widget-container h-full w-full" />
       </div>
     </WidgetContainer>

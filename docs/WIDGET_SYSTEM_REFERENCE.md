@@ -82,6 +82,15 @@ Recent resize/runtime cleanup covered these widgets in particular:
 - `intraday_trades`
 - `orderbook`
 
+Chart-hosting rule:
+
+- Widgets using `ResponsiveContainer height="100%"` should mount inside an explicit-height host instead of relying on `min-height` alone.
+- `industry_bubble` now uses an explicit chart-height host to avoid silent no-SVG mounts when grid sizing settles late.
+- `orderbook` now renders its cumulative depth chart inside an explicit-height host above the depth table.
+- `relative_rotation` now renders a quadrant chart scaffold even when benchmark-relative data is unavailable, so the widget no longer collapses into a chart-less empty state.
+- TradingView wrappers should show a visible loading overlay while upstream scripts/iframes initialize so slow third-party widgets do not look broken.
+- TradingView quote-table presets should prefer quote-friendly tradable proxies over sparse index-only symbols when the widget needs OHLC/change fields.
+
 ## Financial Widget Rules
 
 - Financial statement and ratio widgets render oldest to newest.
@@ -90,6 +99,12 @@ Recent resize/runtime cleanup covered these widgets in particular:
 - Quarter identities should be canonicalized before display or filtering.
 - Bare year rows should not be fabricated into fake quarter labels.
 - Quarter views should not mix annual rows into quarterly tables/charts.
+
+## Technical / Market Visual Rules
+
+- `technical_summary` now includes a visual signal-distribution gauge alongside the buy/neutral/sell counts.
+- `orderbook` includes both a cumulative depth chart and the existing row-level depth table.
+- `relative_rotation` should prefer rendering the quadrant chart first, then layer metrics and trail details around it.
 
 ## History / Valuation Rules
 
@@ -120,8 +135,11 @@ Template categories:
 
 - `USD` is available for financial and statement-style widgets.
 - User overrides are stored locally by report year.
-- Missing yearly overrides fall back to the admin global default USD/VND rate.
+- Admin runtime config now supports both a global USD/VND fallback and per-year admin defaults.
+- Effective rate precedence is `local year override -> admin year default -> admin global fallback -> hardcoded fallback`.
 - Broader USD conversion for quote and market widgets remains separate roadmap work.
+
+See also: `docs/USD_DISPLAY_ARCHITECTURE.md`.
 
 ## Screener / AI Notes
 

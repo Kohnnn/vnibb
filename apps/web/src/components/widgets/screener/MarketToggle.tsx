@@ -1,6 +1,7 @@
 'use client';
 
 import { memo } from 'react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 
 export type Market = 'ALL' | 'HOSE' | 'HNX' | 'UPCOM';
@@ -23,7 +24,14 @@ function MarketToggleComponent({ value, onChange }: MarketToggleProps) {
       {MARKETS.map(market => (
         <button
           key={market.id}
-          onClick={() => onChange(market.id)}
+          onClick={() => {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+              control_type: 'market_toggle',
+              previous_value: value,
+              value: market.id,
+            })
+            onChange(market.id)
+          }}
           className={cn(
             "px-3 py-1 text-[10px] font-black uppercase tracking-tighter rounded transition-all",
             value === market.id 

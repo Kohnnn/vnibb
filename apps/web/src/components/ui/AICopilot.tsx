@@ -44,6 +44,7 @@ import {
     readStoredAISettings,
     type AISettings,
 } from '@/lib/aiSettings';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
 
 interface Message {
@@ -415,6 +416,18 @@ export function AICopilot({
     }, [isOpen, promptLibraryRequestId]);
 
     useEffect(() => {
+        if (!isPromptLibraryOpen) {
+            return;
+        }
+
+        captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptLibraryOpened, {
+            symbol: currentSymbol,
+            tab_name: activeTabName,
+            widget_context: widgetContext,
+        });
+    }, [activeTabName, currentSymbol, isPromptLibraryOpen, widgetContext]);
+
+    useEffect(() => {
         const syncSettings = () => setAISettings(readStoredAISettings());
 
         window.addEventListener(AI_SETTINGS_UPDATED_EVENT, syncSettings);
@@ -472,10 +485,22 @@ export function AICopilot({
         ]);
     }, [activeTabName, currentSymbol, isOpen, messages.length, sessionKey, widgetContext]);
 
-    const handleSend = async (prompt?: string) => {
+    const handleSend = async (prompt?: string, promptSource: 'typed' | 'suggested' = prompt ? 'suggested' : 'typed') => {
         const messageText = prompt || input.trim();
         if (!messageText) return;
         if (isLoading) return;
+
+        captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptSubmitted, {
+            source: promptSource,
+            symbol: currentSymbol,
+            tab_name: activeTabName,
+            widget_context: widgetContext,
+            provider: aiSettings.provider,
+            mode: aiSettings.mode,
+            model: aiSettings.model,
+            has_attached_document: attachedDocuments.length > 0,
+            attached_document_count: attachedDocuments.length,
+        });
 
         const userMessage: Message = {
             id: Date.now().toString(),
@@ -547,6 +572,17 @@ export function AICopilot({
                 },
                 onDone: (event) => {
                     setCurrentStatus(null);
+                    captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseCompleted, {
+                        symbol: currentSymbol,
+                        tab_name: activeTabName,
+                        widget_context: widgetContext,
+                        provider: event.responseMeta?.provider || runtimeConfig?.provider || aiSettings.provider,
+                        model: event.responseMeta?.model || runtimeConfig?.model || aiSettings.model,
+                        latency_ms: event.responseMeta?.latencyMs,
+                        source_count: event.sources?.length || 0,
+                        artifact_count: event.artifacts?.length || 0,
+                        action_count: event.actions?.length || 0,
+                    });
                     setMessages((prev) => prev.map((msg) =>
                         msg.id === assistantMsgId
                             ? {
@@ -565,6 +601,14 @@ export function AICopilot({
         } catch (error) {
             console.error('VniAgent Error:', error);
             setCurrentStatus(null);
+            captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseFailed, {
+                symbol: currentSymbol,
+                tab_name: activeTabName,
+                widget_context: widgetContext,
+                provider: aiSettings.provider,
+                mode: aiSettings.mode,
+                error_type: error instanceof Error ? error.name || error.message : 'unknown_error',
+            });
             setMessages((prev) => prev.map((msg) =>
                 msg.id === assistantMsgId
                     ? { ...msg, content: `**Error**: Failed to connect to VniAgent service. \n\n${String(error)}` }
@@ -577,6 +621,13 @@ export function AICopilot({
 
     const handleExport = () => {
         if (messages.length === 0) return;
+
+        captureAnalyticsEvent(ANALYTICS_EVENTS.copilotExported, {
+            symbol: currentSymbol,
+            tab_name: activeTabName,
+            widget_context: widgetContext,
+            message_count: messages.length,
+        });
 
         const content = messages.map(m =>
             `### ${m.role.toUpperCase()} (${m.timestamp.toLocaleTimeString()})\n\n${appendSourcesForExport(m)}\n\n---\n`
@@ -594,16 +645,23 @@ export function AICopilot({
     };
 
     const handleNewChat = () => {
-        setMessages([])
-        setInput('')
-        setAttachedDocuments([])
-        setCurrentStatus(null)
-        setShowDetails({})
+        captureAnalyticsEvent(ANALYTICS_EVENTS.copilotNewChatStarted, {
+            symbol: currentSymbol,
+            tab_name: activeTabName,
+            widget_context: widgetContext,
+            previous_message_count: messages.length,
+            attached_document_count: attachedDocuments.length,
+        });
+        setMessages([]);
+        setInput('');
+        setAttachedDocuments([]);
+        setCurrentStatus(null);
+        setShowDetails({});
         if (typeof window !== 'undefined') {
-            window.sessionStorage.removeItem(sessionKey)
+            window.sessionStorage.removeItem(sessionKey);
         }
-        inputRef.current?.focus()
-    }
+        inputRef.current?.focus();
+    };
 
     const toggleDetails = (messageId: string) => {
         setShowDetails((prev) => ({
@@ -620,6 +678,13 @@ export function AICopilot({
             const response = await createCopilotDocumentContext(file);
             setAttachedDocuments((prev) => [...prev, response.document]);
             setCurrentStatus(null);
+            captureAnalyticsEvent(ANALYTICS_EVENTS.copilotDocumentAttached, {
+                symbol: currentSymbol,
+                tab_name: activeTabName,
+                widget_context: widgetContext,
+                file_type: file.type || file.name.split('.').pop() || 'unknown',
+                file_size_bucket: file.size < 250000 ? 'small' : file.size < 1000000 ? 'medium' : 'large',
+            });
         } catch (error) {
             setCurrentStatus(null);
             setMessages((prev) => [
@@ -751,7 +816,7 @@ export function AICopilot({
                                 {suggestedPrompts.map((item, i) => (
                                     <button
                                         key={i}
-                                        onClick={() => handleSend(item.prompt)}
+                                        onClick={() => handleSend(item.prompt, 'suggested')}
                                         className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] bg-[var(--bg-secondary)] rounded-lg hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors border border-transparent hover:border-blue-500/30"
                                     >
                                         <item.icon size={12} className="text-blue-400" />
@@ -917,6 +982,11 @@ export function AICopilot({
                 isOpen={isPromptLibraryOpen}
                 onClose={() => setIsPromptLibraryOpen(false)}
                 onSelectPrompt={(prompt) => {
+                    captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptLibrarySelected, {
+                        symbol: currentSymbol,
+                        tab_name: activeTabName,
+                        widget_context: widgetContext,
+                    });
                     setInput(prompt);
                     window.setTimeout(() => inputRef.current?.focus(), 0);
                 }}

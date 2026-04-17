@@ -48,6 +48,7 @@ import {
     DropdownMenuSubContent
 } from '@/components/ui/dropdown-menu';
 import { isTradingViewWidget, usesTradingViewWidgetSymbol } from '@/lib/tradingViewWidgets';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { exportToCSV, exportToJSON, exportToPNG } from '@/lib/exportWidget';
 
@@ -334,17 +335,74 @@ export function WidgetWrapper({
         return internalData;
     }, [internalData]);
 
+    const trackWidgetAction = (action: string, properties?: Record<string, string | number | boolean | string[] | null | undefined>) => {
+        captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+            action,
+            widget_id: id,
+            widget_type: widgetType,
+            widget_title: title,
+            symbol: displaySymbol,
+            dashboard_id: dashboardId,
+            tab_id: tabId,
+            widget_group: widgetGroup,
+            ...properties,
+        });
+    };
+
+    const trackedParameters = useMemo(() => parameters.map((parameter) => ({
+        ...parameter,
+        onChange: (value: string) => {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                control_type: 'parameter',
+                parameter_id: parameter.id,
+                parameter_label: parameter.label,
+                previous_value: parameter.currentValue,
+                value,
+                widget_id: id,
+                widget_type: widgetType,
+                widget_title: title,
+                symbol: displaySymbol,
+                dashboard_id: dashboardId,
+                tab_id: tabId,
+            });
+            parameter.onChange(value);
+        },
+    })), [dashboardId, displaySymbol, id, parameters, tabId, title, widgetType]);
+
+    const trackedMultiSelectParams = useMemo(() => multiSelectParams.map((parameter) => ({
+        ...parameter,
+        onChange: (values: string[]) => {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                control_type: 'multi_select_parameter',
+                parameter_id: parameter.id,
+                parameter_label: parameter.label,
+                previous_values: parameter.currentValues,
+                values,
+                widget_id: id,
+                widget_type: widgetType,
+                widget_title: title,
+                symbol: displaySymbol,
+                dashboard_id: dashboardId,
+                tab_id: tabId,
+            });
+            parameter.onChange(values);
+        },
+    })), [dashboardId, displaySymbol, id, multiSelectParams, tabId, title, widgetType]);
+
 
 
 
     const handleMaximize = () => {
-        setIsMaximized(!isMaximized);
+        const nextMaximized = !isMaximized;
+        setIsMaximized(nextMaximized);
+        trackWidgetAction(nextMaximized ? 'maximize' : 'restore');
         onMaximize?.();
     };
 
     const handleCollapseToggle = () => {
         const nextCollapsed = !isCollapsed;
         setIsCollapsed(nextCollapsed);
+        trackWidgetAction(nextCollapsed ? 'collapse' : 'expand');
 
         if (!currentWidget) return;
         updateWidget(dashboardId, tabId, id, {
@@ -356,6 +414,7 @@ export function WidgetWrapper({
     };
 
     const handleDuplicate = () => {
+        trackWidgetAction('duplicate');
         cloneWidget(dashboardId, tabId, id);
     };
 
@@ -381,6 +440,11 @@ export function WidgetWrapper({
                 minH: currentWidget.layout.minH,
             },
         });
+        trackWidgetAction('copy_to_dashboard', {
+            target_dashboard_id: targetDashboard.id,
+            target_dashboard_name: targetDashboard.name,
+            target_tab_id: targetTab.id,
+        });
     };
 
     const handleSyncClick = () => {
@@ -389,6 +453,10 @@ export function WidgetWrapper({
 
 
     const handleGroupChange = (newGroup: WidgetGroupId) => {
+        trackWidgetAction('group_change', {
+            previous_group: widgetGroup,
+            next_group: newGroup,
+        });
         setWidgetGroup(newGroup);
         // Persist to dashboard state
         updateWidget(dashboardId, tabId, id, { widgetGroup: newGroup });
@@ -406,6 +474,10 @@ export function WidgetWrapper({
 
     const handleTickerSelect = (newSymbol: string) => {
         if (newSymbol && newSymbol !== displaySymbol) {
+            trackWidgetAction('symbol_change', {
+                previous_symbol: displaySymbol,
+                next_symbol: newSymbol,
+            });
             if (isTradingViewLinkedWidget && currentWidget) {
                 updateWidget(dashboardId, tabId, id, {
                     config: {
@@ -427,6 +499,10 @@ export function WidgetWrapper({
     const handleExport = async (format: 'csv' | 'json' | 'png') => {
         const filename = `${title.replace(/\s+/g, '_')}_${displaySymbol}_${new Date().toISOString().split('T')[0]}`;
         const dataToExport = exportableInternalData || widgetData;
+
+        trackWidgetAction('export', {
+            export_format: format,
+        });
 
         switch (format) {
             case 'csv':
@@ -559,10 +635,10 @@ export function WidgetWrapper({
                     }
                     parameters={
                         <div className="flex items-center gap-1">
-                            {parameters.map((param) => (
+                            {trackedParameters.map((param) => (
                                 <WidgetParameterDropdown key={param.id} parameter={param} />
                             ))}
-                            {multiSelectParams.map((param) => (
+                            {trackedMultiSelectParams.map((param) => (
                                 <WidgetMultiSelectDropdown
                                     key={param.id}
                                     id={param.id}
@@ -576,11 +652,23 @@ export function WidgetWrapper({
                     }
                     isMaximized={isMaximized}
                     onMaximize={handleMaximize}
-                    onRefresh={onRefresh}
-                    onSettings={onSettingsClick}
+                    onRefresh={onRefresh ? () => {
+                        trackWidgetAction('refresh');
+                        onRefresh();
+                    } : undefined}
+                    onSettings={onSettingsClick ? () => {
+                        trackWidgetAction('open_settings');
+                        onSettingsClick();
+                    } : undefined}
                     highlightSettings={isTradingViewWidget(widgetType)}
-                    onCopilot={() => onCopilotClick?.(buildCopilotContext())}
-                    onClose={onRemove}
+                    onCopilot={onCopilotClick ? () => {
+                        trackWidgetAction('open_copilot');
+                        onCopilotClick(buildCopilotContext());
+                    } : undefined}
+                    onClose={onRemove ? () => {
+                        trackWidgetAction('close');
+                        onRemove();
+                    } : undefined}
                     actions={
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>

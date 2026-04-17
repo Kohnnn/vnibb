@@ -17,6 +17,7 @@ import {
 } from '@/lib/api';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { readStoredAISettings } from '@/lib/aiSettings';
 import { CopilotFeedbackBar } from '@/components/ui/CopilotFeedbackBar';
 import { CopilotActionPanel } from '@/components/ui/CopilotActionPanel';
@@ -125,6 +126,11 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
     // Update context when initialContext changes (from widget "Ask AI" button)
     useEffect(() => {
         if (initialContext) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.copilotOpened, {
+                source: 'ai_widget_context',
+                symbol: initialContext.symbol,
+                widget_context: initialContext.widgetType,
+            });
             setContext(initialContext);
             // Auto-suggest based on context
             const welcomeMsg = `I'm looking at **${initialContext.widgetType}** for **${initialContext.symbol}**. How can I help?`;
@@ -145,6 +151,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
 
     const handleStreamResponse = useCallback(async (userMessage: string) => {
         const messageId = `msg-${Date.now()}`;
+        const aiSettings = readStoredAISettings();
 
         // Create abort controller for cancellation
         abortControllerRef.current = new AbortController();
@@ -171,7 +178,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                     context: context || null,
                     history: historyForRequest,
                     settings: {
-                        ...readStoredAISettings(),
+                        ...aiSettings,
                         enableSidebarWorkflowOutputs: true,
                     },
                 },
@@ -199,6 +206,17 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                 },
                 onDone: (event) => {
                     setCurrentStatus(null);
+                    captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseCompleted, {
+                        source: 'ai_widget',
+                        symbol: context?.symbol || DEFAULT_TICKER,
+                        widget_context: context?.widgetType,
+                        provider: event.responseMeta?.provider || aiSettings.provider,
+                        model: event.responseMeta?.model || aiSettings.model,
+                        latency_ms: event.responseMeta?.latencyMs,
+                        source_count: event.sources?.length || 0,
+                        artifact_count: event.artifacts?.length || 0,
+                        action_count: event.actions?.length || 0,
+                    });
                     setMessages(prev => prev.map(m =>
                         m.id === assistantMsgId
                             ? {
@@ -223,6 +241,14 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                 ));
             } else {
                 setCurrentStatus(null);
+                captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseFailed, {
+                    source: 'ai_widget',
+                    symbol: context?.symbol || DEFAULT_TICKER,
+                    widget_context: context?.widgetType,
+                    provider: aiSettings.provider,
+                    mode: aiSettings.mode,
+                    error_type: error.name || error.message || 'widget_chat_failed',
+                });
                 setMessages(prev => prev.map(m =>
                     m.id === assistantMsgId
                         ? { ...m, content: `❌ Error: ${error.message}\n\nPlease try again.`, isStreaming: false }
@@ -235,6 +261,16 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
     const sendMessage = async (content?: string) => {
         const messageText = content || input.trim();
         if (!messageText || isLoading) return;
+
+        const aiSettings = readStoredAISettings();
+        captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptSubmitted, {
+            source: content ? 'quick_prompt' : 'typed',
+            symbol: context?.symbol || DEFAULT_TICKER,
+            widget_context: context?.widgetType,
+            provider: aiSettings.provider,
+            mode: aiSettings.mode,
+            model: aiSettings.model,
+        });
 
         // Add user message
         const userMessage: Message = {
@@ -277,6 +313,12 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
     };
 
     const exportChat = () => {
+        captureAnalyticsEvent(ANALYTICS_EVENTS.copilotExported, {
+            source: 'ai_widget',
+            symbol: context?.symbol || DEFAULT_TICKER,
+            widget_context: context?.widgetType,
+            message_count: messages.length,
+        });
         const chatText = messages
             .map(m => `[${m.role.toUpperCase()}] ${appendSourcesForExport(m)}`)
             .join('\n\n---\n\n');

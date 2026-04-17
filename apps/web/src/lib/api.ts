@@ -46,7 +46,7 @@ function createDashboardClientId(): string {
 }
 
 
-function getDashboardClientId(): string | null {
+export function getDashboardClientId(): string | null {
     if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
         return null
     }
@@ -2161,6 +2161,7 @@ export interface AdminProviderStatusResponse {
 
 export interface UnitRuntimeConfigResponse {
     usd_vnd_default_rate: number;
+    usd_vnd_rates_by_year: Record<string, number>;
     updated_at?: string | null;
 }
 
@@ -2584,11 +2585,15 @@ export async function saveAdminAIRuntimeConfig(
 export async function saveAdminUnitRuntimeConfig(
     adminKey: string,
     usdVndDefaultRate: number,
+    usdVndRatesByYear: Record<string, number> = {},
 ): Promise<UnitRuntimeConfigResponse> {
     return fetchAPI<UnitRuntimeConfigResponse>('/admin/unit-runtime', {
         method: 'PUT',
         headers: { 'X-Admin-Key': adminKey },
-        body: JSON.stringify({ usd_vnd_default_rate: usdVndDefaultRate }),
+        body: JSON.stringify({
+            usd_vnd_default_rate: usdVndDefaultRate,
+            usd_vnd_rates_by_year: usdVndRatesByYear,
+        }),
         timeout: 15000,
     });
 }

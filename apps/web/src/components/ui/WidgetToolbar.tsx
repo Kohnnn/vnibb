@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Settings, Maximize2, Minimize2, Download, X, RefreshCw, Sparkles, Move, Users, Info } from 'lucide-react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { WIDGET_DESCRIPTIONS } from '@/lib/widgetDescriptions';
 import { isTradingViewWidget } from '@/lib/tradingViewWidgets';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -84,6 +85,12 @@ export function WidgetToolbar({
             <PopoverTrigger asChild>
               <button
                 type="button"
+                onClick={() => captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+                  action: 'open_guide',
+                  widget_type: widgetType,
+                  widget_title: title,
+                  symbol,
+                })}
                 className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 title="Widget guide"
                 aria-label={`About ${title}`}

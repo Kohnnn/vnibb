@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { CommandPalette } from './CommandPalette';
 
 export function CommandPaletteWrapper() {
@@ -20,11 +21,20 @@ export function CommandPaletteWrapper() {
         if (!open && isEditableTarget(event.target)) return;
         event.preventDefault();
         event.stopPropagation();
+        if (!open) {
+          captureAnalyticsEvent(ANALYTICS_EVENTS.commandPaletteOpened, { source: 'shortcut' });
+        }
         setOpen((current) => !current);
       }
     };
 
-    const handleOpen = () => setOpen(true);
+    const handleOpen = (event: Event) => {
+      const source = event instanceof CustomEvent && typeof event.detail?.source === 'string'
+        ? event.detail.source
+        : 'external';
+      captureAnalyticsEvent(ANALYTICS_EVENTS.commandPaletteOpened, { source });
+      setOpen(true);
+    };
 
     document.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('vnibb:open-command-palette', handleOpen);

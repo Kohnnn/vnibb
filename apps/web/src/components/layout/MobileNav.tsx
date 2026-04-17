@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Menu, X } from 'lucide-react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { Sidebar } from './Sidebar';
 
 interface MobileNavProps {
@@ -23,7 +24,12 @@ export function MobileNav({
         <>
             {/* Mobile Menu Button - Only visible on mobile */}
             <button
-                onClick={() => setIsOpen(true)}
+                onClick={() => {
+                    captureAnalyticsEvent(ANALYTICS_EVENTS.mobileMenuOpened, {
+                        source: 'mobile_nav_button',
+                    });
+                    setIsOpen(true);
+                }}
                 className="lg:hidden fixed top-4 left-4 z-40 p-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                 aria-label="Open menu"
             >
@@ -40,10 +46,18 @@ export function MobileNav({
                     onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
+                            captureAnalyticsEvent(ANALYTICS_EVENTS.mobileMenuClosed, {
+                                source: 'overlay_keyboard',
+                            });
                             setIsOpen(false);
                         }
                     }}
-                    onClick={() => setIsOpen(false)}
+                    onClick={() => {
+                        captureAnalyticsEvent(ANALYTICS_EVENTS.mobileMenuClosed, {
+                            source: 'overlay_click',
+                        });
+                        setIsOpen(false);
+                    }}
                 />
             )}
 
@@ -57,7 +71,12 @@ export function MobileNav({
             >
                 {/* Close Button */}
                 <button
-                    onClick={() => setIsOpen(false)}
+                    onClick={() => {
+                        captureAnalyticsEvent(ANALYTICS_EVENTS.mobileMenuClosed, {
+                            source: 'close_button',
+                        });
+                        setIsOpen(false);
+                    }}
                     className="absolute top-4 right-4 p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                     aria-label="Close menu"
                 >

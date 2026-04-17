@@ -140,7 +140,8 @@ Financial statement notes:
 - Specific-quarter requests such as `Q1`, `Q2`, `Q3`, and `Q4` are intended to return the matching quarter across years after canonical normalization rather than relying on raw provider text matching.
 - Frontend financial tables now render periods in ascending chronological order and auto-scroll horizontally to the newest visible periods on first open.
 - Current history caps remain intentionally in place for performance; wider default history windows are deferred to a later optimization pass.
-- Financial and statement-style widgets now support `USD` display mode with per-year local USD/VND overrides. Missing years fall back to the admin-defined global default USD/VND rate.
+- Financial and statement-style widgets now support `USD` display mode with per-year browser-local USD/VND overrides plus admin-managed yearly defaults.
+- Effective USD/VND precedence is now `local year override -> admin year default -> admin global fallback -> hardcoded fallback`.
 - USD conversion is currently scoped to financial and fundamental statement-style surfaces first; quote and market-wide currency conversion remains a lower-priority roadmap item.
 
 Copilot notes:

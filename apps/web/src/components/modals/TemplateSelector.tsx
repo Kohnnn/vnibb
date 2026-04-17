@@ -1,8 +1,9 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { X, Activity, BarChart3, Layout, TrendingUp, Search, ChevronRight, Globe2, Sigma, Newspaper } from 'lucide-react';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { DASHBOARD_TEMPLATES, DASHBOARD_TEMPLATE_CATEGORIES, type DashboardTemplate, type DashboardTemplateCategory } from '@/types/dashboard-templates';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -40,6 +41,13 @@ function formatWidgetType(type: string) {
 
 function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: TemplateSelectorProps) {
   const [selectedCategory, setSelectedCategory] = useState<DashboardTemplateCategory | null>(null);
+
+  useEffect(() => {
+    if (!open) return
+    captureAnalyticsEvent(ANALYTICS_EVENTS.templateSelectorOpened, {
+      source: 'template_selector',
+    })
+  }, [open])
 
   const categoryCounts = useMemo(() => {
     return Object.fromEntries(
