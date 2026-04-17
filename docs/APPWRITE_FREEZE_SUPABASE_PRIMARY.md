@@ -1,5 +1,11 @@
 # Appwrite Freeze / Supabase Primary
 
+Historical note: this document captured one temporary month posture during acute Appwrite write-quota pressure.
+
+For the broader architecture direction now being reinforced, prefer:
+
+- `docs/APPWRITE_PRIMARY_SUPABASE_WRITE_BRIDGE.md`
+
 This runbook documents the temporary operating mode for periods when Appwrite write quotas are exhausted but VNIBB still needs to stay usable during active market windows.
 
 Current status: Appwrite reads are healthy, but Appwrite writes are blocked by the org-level error `limit_databases_writes_exceeded`. Treat this runbook as the live source of truth for the current month only.

@@ -694,7 +694,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <div>
                       <h4 className="text-sm font-bold text-[var(--text-primary)]">VniAgent Providers</h4>
                       <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                        VniAgent uses a VNIBB database-first workflow. Market data from your runtime VNIBB database is preferred over internet sources.
+                        VniAgent uses a VNIBB database-first workflow. The Appwrite-backed VNIBB market database stays the intended research corpus, while temporary quota-pressure writes can spill into Supabase without changing that preference.
                       </p>
                     </div>
                     <div className="rounded-full border border-blue-500/30 bg-blue-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-300">
@@ -924,7 +924,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     />
                     <span>
                       <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Prefer VNIBB database</span>
-                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use runtime VNIBB database market data first and only fall back when that data is missing.</span>
+                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use the Appwrite-backed VNIBB market database first and only fall back when that context is missing or temporarily unavailable.</span>
                     </span>
                   </label>
                   <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">

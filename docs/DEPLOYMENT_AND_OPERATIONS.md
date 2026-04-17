@@ -7,12 +7,12 @@ The current operational picture reflected in recent project context is:
 - frontend deployed on Vercel
 - backend deployed on OCI
 - read-only VNIBB MCP companion deployed alongside the backend on OCI for VniAgent and remote clients
-- Supabase (PostgreSQL) serving as the primary durable database and dashboard persistence layer this month, with Appwrite used only as a read fallback where still helpful
+- Appwrite-backed VNIBB market corpus remaining the intended primary research dataset, with Supabase/Postgres handling quota-constrained durable writes and auth this month
 - Supabase auth serving as the active auth provider this month
-- Appwrite retained as a read-only legacy fallback because org-level writes are blocked with `limit_databases_writes_exceeded`
+- Appwrite writes temporarily constrained by `limit_databases_writes_exceeded` for selected runtime paths, which is why Supabase/Postgres is carrying the current write bridge
 - Redis used for cache and resilience behavior
 
-This is a temporary earnings-season operating mode for the current month. If Appwrite quota resets cleanly next month, re-enable it only through a controlled projection/backfill path instead of switching production back to Appwrite-first by default.
+This is a temporary earnings-season operating mode for the current month. Appwrite remains the strategic full-market store; the temporary bridge is about constrained write continuity, not about redefining the long-term market-data owner.
 
 ## Why operations became a major project theme
 
@@ -34,7 +34,7 @@ At a high level, production looks like:
 2. OCI hosts the backend runtime and the dedicated `vnibb-mcp` sidecar
 3. the backend exposes HTTP and WebSocket surfaces
 4. the `vnibb-mcp` sidecar exposes the read-only MCP HTTP surface for VniAgent and remote clients
-5. Supabase/Postgres and cache services back persistence and runtime state; Appwrite remains read-only legacy fallback only
+5. Appwrite-backed market corpus, Supabase/Postgres write/auth bridge, and cache services back persistence and runtime state
 6. upstream market providers feed the service layer
 
 ```text
@@ -47,8 +47,8 @@ VniAgent server context path
   -> apps/api
   -> VNIBB_MCP_URL
   -> vnibb-mcp
-  -> Supabase/Postgres primary
-  -> Appwrite read-only fallback
+  -> Appwrite-backed VNIBB corpus primary
+  -> Supabase/Postgres write-side bridge where quota-constrained runtime paths need it
 ```
 
 ## Backend Tech Stack

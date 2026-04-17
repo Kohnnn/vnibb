@@ -157,7 +157,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         <div className="flex items-center justify-between p-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)]">
           <div className="flex items-center gap-2">
             <BrainCircuit size={16} className="text-cyan-400" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Appwrite-First AI</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">VNIBB Database-First AI</span>
           </div>
           <div className="flex items-center gap-2">
             <WidgetMeta note="AI analysis" isFetching={isLoading} align="right" />

@@ -15,11 +15,12 @@
 
 Current-month source of truth:
 
-- follow `APPWRITE_FREEZE_SUPABASE_PRIMARY.md` first while Appwrite writes are blocked by org quota limits
-- treat older Appwrite rollout/mirroring docs as historical or next-month planning context unless they explicitly say otherwise
+- follow `APPWRITE_PRIMARY_SUPABASE_WRITE_BRIDGE.md` first for the intended Appwrite-primary architecture plus the temporary quota-pressure write bridge
+- treat `APPWRITE_FREEZE_SUPABASE_PRIMARY.md` as the historical temporary runbook that captured one stricter Supabase-primary month posture
 
 - `DEPLOYMENT_AND_OPERATIONS.md`: deployment profile, Oracle runtime guidance, and ops notes
 - `APPWRITE_VNSTOCK_ROLLOUT.md`: Appwrite rollout strategy, schema, and migration history
+- `APPWRITE_PRIMARY_SUPABASE_WRITE_BRIDGE.md`: Appwrite-primary architecture and temporary Supabase write-bridge guidance
 - `APPWRITE_FREEZE_SUPABASE_PRIMARY.md`: Appwrite quota-freeze operating mode and Supabase-primary runbook
 - `AUTO_UPDATE_STRATEGY.md`: automatic update plan, rate-budget strategy, and scheduler model
 - `daily_trading_updater.md`: trading-flow updater behavior and reinforced scheduler notes
@@ -33,6 +34,7 @@ Current-month source of truth:
 - `VNIBB_MCP_DEPLOYMENT.md`: dedicated OCI deployment and smoke-check reference for `vnibb-mcp`
 - `DEVELOPMENT_JOURNAL.md`: maintainer journal and decision history
 - `WIDGET_CATALOG.md`: legacy widget snapshot, useful as historical context only
+- `NEXT_PHASES_EXECUTION_PLAN.md`: execution-ready plan for the next selected product phases
 
 ## TradingView / Global Markets
 
