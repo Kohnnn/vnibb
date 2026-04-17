@@ -42,7 +42,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
     const [exchange, setExchange] = useState<'HOSE' | 'HNX' | 'UPCOM' | 'ALL'>('HOSE');
     const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
     const heatmapRef = useRef<HTMLDivElement>(null);
-    const { setLinkedSymbol } = useWidgetSymbolLink();
+    const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'market_heatmap' });
 
     const {
         data,

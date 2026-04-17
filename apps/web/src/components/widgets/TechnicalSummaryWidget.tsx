@@ -12,6 +12,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import type { Signal, Timeframe } from '@/types/technical';
 
 interface TechnicalSummaryWidgetProps {
@@ -118,7 +119,16 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
             {(['D', 'W', 'M'] as Timeframe[]).map((tf) => (
                 <button
                     key={tf}
-                    onClick={() => setTimeframe(tf)}
+                    onClick={() => {
+                        captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                            control_type: 'technical_summary_timeframe',
+                            previous_value: timeframe,
+                            value: tf,
+                            widget_type: 'technical_summary',
+                            symbol,
+                        })
+                        setTimeframe(tf)
+                    }}
                     className={`px-2 py-0.5 text-[10px] font-medium rounded ${timeframe === tf
                             ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] shadow-sm'
                             : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'

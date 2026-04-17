@@ -236,7 +236,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove }
     } = useComparison(peers, { period });
 
     const { data: peerSuggestions } = usePeers(symbol, 5, !!symbol);
-    const { setLinkedSymbol } = useWidgetSymbolLink();
+    const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'peer_comparison' });
 
     const comparisonData = useMemo(() => {
         if (!compData?.stocks) return {} as Record<string, { name: string; metrics: Record<string, number | null> }>;

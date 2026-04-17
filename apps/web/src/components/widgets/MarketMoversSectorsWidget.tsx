@@ -18,7 +18,7 @@ interface MarketMoversSectorsWidgetProps {
 
 export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove }: MarketMoversSectorsWidgetProps) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorPerformance();
-  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'market_movers_sectors' });
 
   const sectors = data?.data || [];
   const hasData = sectors.length > 0;

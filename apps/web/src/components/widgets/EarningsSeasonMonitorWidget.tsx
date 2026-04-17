@@ -40,7 +40,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove }: Earni
   const [signalFilter, setSignalFilter] = useState<SignalFilter>('ALL');
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [searchQuery, setSearchQuery] = useState('');
-  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'earnings_season_monitor' });
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useEarningsSeason({
     exchange: exchange === 'ALL' ? undefined : exchange,
     limit: 24,

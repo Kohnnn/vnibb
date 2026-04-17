@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Plus, Filter } from 'lucide-react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { FilterPill } from './FilterPill';
 import { cn } from '@/lib/utils';
 
@@ -80,9 +81,13 @@ export interface ActiveFilter {
 interface FilterBarProps {
   filters: ActiveFilter[];
   onChange: (filters: ActiveFilter[]) => void;
+  analyticsContext?: {
+    widgetId: string;
+    symbol?: string;
+  };
 }
 
-export function FilterBar({ filters, onChange }: FilterBarProps) {
+export function FilterBar({ filters, onChange, analyticsContext }: FilterBarProps) {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -102,16 +107,42 @@ export function FilterBar({ filters, onChange }: FilterBarProps) {
   const addFilter = (filterId: string) => {
     const filter = AVAILABLE_FILTERS.find(f => f.id === filterId);
     if (filter) {
+      captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+        control_type: 'screener_filter_add',
+        filter_id: filter.id,
+        value: filter.id,
+        filter_count: filters.length + 1,
+        widget_id: analyticsContext?.widgetId,
+        widget_type: 'screener',
+        symbol: analyticsContext?.symbol,
+      });
       onChange([...filters, { id: filter.id, value: null, displayValue: '' }]);
     }
     setShowAddMenu(false);
   };
 
   const updateFilter = (id: string, value: any, displayValue: string) => {
+    captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+      control_type: 'screener_filter_update',
+      filter_id: id,
+      value: displayValue,
+      filter_count: filters.length,
+      widget_id: analyticsContext?.widgetId,
+      widget_type: 'screener',
+      symbol: analyticsContext?.symbol,
+    });
     onChange(filters.map(f => f.id === id ? { ...f, value, displayValue } : f));
   };
 
   const removeFilter = (id: string) => {
+    captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+      control_type: 'screener_filter_remove',
+      filter_id: id,
+      filter_count: Math.max(0, filters.length - 1),
+      widget_id: analyticsContext?.widgetId,
+      widget_type: 'screener',
+      symbol: analyticsContext?.symbol,
+    });
     onChange(filters.filter(f => f.id !== id));
   };
 
@@ -144,7 +175,16 @@ export function FilterBar({ filters, onChange }: FilterBarProps) {
       {/* Add Filter Button */}
       <div className="relative" ref={ref}>
         <button
-          onClick={() => setShowAddMenu(!showAddMenu)}
+          onClick={() => {
+            const nextOpen = !showAddMenu;
+            captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+              action: nextOpen ? 'open_filter_menu' : 'close_filter_menu',
+              widget_id: analyticsContext?.widgetId,
+              widget_type: 'screener',
+              symbol: analyticsContext?.symbol,
+            });
+            setShowAddMenu(nextOpen);
+          }}
           className={cn(
               "inline-flex items-center gap-1 px-3 h-7 text-[10px] font-bold border border-dashed rounded-full transition-all uppercase tracking-tight",
               showAddMenu 

@@ -50,7 +50,7 @@ function colorClass(color: string) {
 function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sortBy, setSortBy] = useState<'volume' | 'market_cap' | 'change_pct'>('volume');
-  const { setLinkedSymbol } = useWidgetSymbolLink();
+  const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'sector_board' });
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorBoard({
     limit_per_sector: 12,

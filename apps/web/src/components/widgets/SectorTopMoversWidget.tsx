@@ -39,7 +39,7 @@ interface SectorTopMoversWidgetProps {
 function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTopMoversWidgetProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewType, setViewType] = useState<'gainers' | 'losers'>('gainers');
-  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'sector_top_movers' });
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorTopMovers({
     type: viewType,

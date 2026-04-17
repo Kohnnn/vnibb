@@ -46,7 +46,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
   const [topN, setTopN] = useState(10)
   const [hoverTicker, setHoverTicker] = useState<string | null>(null)
   const upperSymbol = symbol?.toUpperCase() || ''
-  const { setLinkedSymbol } = useWidgetSymbolLink()
+  const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'correlation_matrix' })
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useCorrelationMatrix(upperSymbol, {
     days,

@@ -37,6 +37,8 @@ Main files:
 - `apps/web/src/components/widgets/WidgetWrapper.tsx`
 - `apps/web/src/components/ui/WidgetHeader.tsx`
 - `apps/web/src/components/ui/PeriodToggle.tsx`
+- `apps/web/src/hooks/useWidgetSymbolLink.ts`
+- `apps/web/src/components/widgets/ScreenerWidget.tsx`
 
 Current behavior:
 
@@ -83,8 +85,10 @@ Current event families include:
 - widget management: add, batch add, remove, clone, widget settings open/save
 - shared widget chrome: refresh, maximize, collapse, export, settings, close, copy to dashboard, group change, symbol change, guide open, link toggle
 - shared widget controls: period toggles, market toggles, header parameter dropdowns, multi-select widget controls
+- screener workflows: saved screen open/select/save/delete, filter add/update/remove, column customizer open/reset/toggle, view mode changes, sort changes, filter reset, symbol drill-down
 - templates: apps library open, template selector open, workspace template applied
 - symbol flow: symbol search submitted, symbol changed
+- linked-symbol drilldowns: widgets using `useWidgetSymbolLink` now emit a shared analytics event when users jump from a leaderboard, heatmap, matrix, watchlist, or peer widget into another symbol
 - settings: preferences save, settings tab viewed, AI settings save/reset, vnstock source change, unit change, decimal change, USD override update/reset
 - admin settings: layout key save/clear/fail, layout controls toggle, runtime AI save, USD default save, shared prompt add/remove/save
 - copilot: open, prompt library open/select, prompt submit, response complete/fail, export, document attach, feedback submit, new chat
