@@ -15,18 +15,20 @@ import {
   type UnitConfig,
   type UnitDisplay
 } from '@/lib/units'
-import { getPublicUnitRuntimeConfig } from '@/lib/api'
+import { getPublicUnitRuntimeConfig, type UnitRuntimeConfigResponse } from '@/lib/api'
 
 const STORAGE_KEY = 'vnibb_unit_config'
 
 interface UnitContextValue {
   config: UnitConfig
   globalUsdVndDefaultRate: number
+  adminUsdVndRatesByYear: Record<string, number>
   localUsdVndRatesByYear: Record<string, number>
   setUnit: (display: UnitDisplay) => void
   setDecimalPlaces: (places: number) => void
   setUsdVndRate: (year: number, rate: number | null) => void
   clearUsdVndRates: () => void
+  applyAdminUsdRuntimeConfig: (runtime: UnitRuntimeConfigResponse) => void
 }
 
 const UnitContext = createContext<UnitContextValue | null>(null)
@@ -34,6 +36,13 @@ const UnitContext = createContext<UnitContextValue | null>(null)
 function clampDecimals(value: number) {
   if (!Number.isFinite(value)) return DEFAULT_UNIT_CONFIG.decimalPlaces
   return Math.max(0, Math.min(3, Math.round(value)))
+}
+
+function normalizeRuntimeRates(value: unknown): Record<string, number> {
+  return normalizeUnitConfig({
+    display: 'USD',
+    usdVndRatesByYear: value as Record<string, number>,
+  }).usdVndRatesByYear || {}
 }
 
 export function UnitProvider({ children }: { children: ReactNode }) {
@@ -50,15 +59,28 @@ export function UnitProvider({ children }: { children: ReactNode }) {
   const [globalUsdVndDefaultRate, setGlobalUsdVndDefaultRate] = useState(
     DEFAULT_UNIT_CONFIG.usdVndDefaultRate || 25_000
   )
+  const [adminUsdVndRatesByYear, setAdminUsdVndRatesByYear] = useState<Record<string, number>>({})
+
+  const applyAdminUsdRuntimeConfig = useCallback((runtime: UnitRuntimeConfigResponse) => {
+    if (Number.isFinite(runtime.usd_vnd_default_rate) && runtime.usd_vnd_default_rate > 0) {
+      setGlobalUsdVndDefaultRate(runtime.usd_vnd_default_rate)
+    }
+    setAdminUsdVndRatesByYear(normalizeRuntimeRates(runtime.usd_vnd_rates_by_year))
+  }, [])
 
   const config = useMemo(() => {
     const normalized = normalizeUnitConfig(localConfig)
+    const mergedUsdVndRatesByYear = {
+      ...adminUsdVndRatesByYear,
+      ...(normalized.usdVndRatesByYear || {}),
+    }
     return {
       ...normalized,
       currency: normalized.display === 'USD' ? 'USD' : 'VND',
       usdVndDefaultRate: globalUsdVndDefaultRate,
+      usdVndRatesByYear: mergedUsdVndRatesByYear,
     }
-  }, [globalUsdVndDefaultRate, localConfig])
+  }, [adminUsdVndRatesByYear, globalUsdVndDefaultRate, localConfig])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -82,9 +104,7 @@ export function UnitProvider({ children }: { children: ReactNode }) {
       try {
         const runtime = await getPublicUnitRuntimeConfig()
         if (!active) return
-        if (Number.isFinite(runtime.usd_vnd_default_rate) && runtime.usd_vnd_default_rate > 0) {
-          setGlobalUsdVndDefaultRate(runtime.usd_vnd_default_rate)
-        }
+        applyAdminUsdRuntimeConfig(runtime)
       } catch {
         // Keep local defaults if the public runtime endpoint is unavailable.
       }
@@ -94,7 +114,7 @@ export function UnitProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false
     }
-  }, [])
+  }, [applyAdminUsdRuntimeConfig])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -153,13 +173,25 @@ export function UnitProvider({ children }: { children: ReactNode }) {
     () => ({
       config,
       globalUsdVndDefaultRate,
+      adminUsdVndRatesByYear,
       localUsdVndRatesByYear: localConfig.usdVndRatesByYear || {},
       setUnit,
       setDecimalPlaces,
       setUsdVndRate,
       clearUsdVndRates,
+      applyAdminUsdRuntimeConfig,
     }),
-    [clearUsdVndRates, config, globalUsdVndDefaultRate, localConfig.usdVndRatesByYear, setDecimalPlaces, setUnit, setUsdVndRate]
+    [
+      adminUsdVndRatesByYear,
+      applyAdminUsdRuntimeConfig,
+      clearUsdVndRates,
+      config,
+      globalUsdVndDefaultRate,
+      localConfig.usdVndRatesByYear,
+      setDecimalPlaces,
+      setUnit,
+      setUsdVndRate,
+    ]
   )
 
   return <UnitContext.Provider value={value}>{children}</UnitContext.Provider>

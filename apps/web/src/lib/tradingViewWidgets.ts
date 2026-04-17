@@ -20,6 +20,24 @@ const DEFAULT_MARKET_SYMBOLS = [
 
 const DEFAULT_FOREX_CURRENCIES = ['EUR', 'USD', 'JPY', 'GBP', 'CHF', 'AUD', 'CAD', 'NZD'];
 
+const MACRO_RATES_AND_DOLLAR_OVERVIEW_SYMBOLS = [
+  { s: 'CBOT:ZT1!', d: 'US 2Y Note Fut' },
+  { s: 'CBOT:ZN1!', d: 'US 10Y Note Fut' },
+  { s: 'CBOT:ZB1!', d: 'US 30Y Bond Fut' },
+  { s: 'ICEUS:DX1!', d: 'Dollar Index Fut' },
+  { s: 'FX:USDJPY', d: 'USD/JPY' },
+  { s: 'FX:USDCHF', d: 'USD/CHF' },
+] as const;
+
+const MACRO_RATES_AND_DOLLAR_MARKET_DATA_SYMBOLS = [
+  { name: 'CBOT:ZT1!', displayName: 'US 2Y Note Fut' },
+  { name: 'CBOT:ZN1!', displayName: 'US 10Y Note Fut' },
+  { name: 'CBOT:ZB1!', displayName: 'US 30Y Bond Fut' },
+  { name: 'ICEUS:DX1!', displayName: 'Dollar Index Fut' },
+  { name: 'FX:USDJPY', displayName: 'USD/JPY' },
+  { name: 'FX:USDCHF', displayName: 'USD/CHF' },
+] as const;
+
 export type TradingViewNativeWidgetType =
   | 'tradingview_chart'
   | 'tradingview_symbol_overview'
@@ -320,10 +338,10 @@ function buildMarketOverviewTabsPreset(preset: string) {
           title: 'Risk Pulse',
           originalTitle: 'Risk Pulse',
           symbols: [
-            { s: 'TVC:DXY', d: 'US Dollar Index' },
+            { s: 'ICEUS:DX1!', d: 'Dollar Index Fut' },
             { s: 'CBOE:VIX', d: 'VIX' },
             { s: 'BINANCE:BTCUSDT', d: 'Bitcoin' },
-            { s: 'TVC:US10Y', d: 'US 10Y Yield' },
+            { s: 'CBOT:ZN1!', d: 'US 10Y Note Fut' },
           ],
         },
       ];
@@ -369,9 +387,9 @@ function buildMarketOverviewTabsPreset(preset: string) {
           title: 'Rates',
           originalTitle: 'Rates',
           symbols: [
-            { s: 'TVC:US02Y', d: 'US 2Y' },
-            { s: 'TVC:US10Y', d: 'US 10Y' },
-            { s: 'TVC:US30Y', d: 'US 30Y' },
+            { s: 'CBOT:ZT1!', d: 'US 2Y Note Fut' },
+            { s: 'CBOT:ZN1!', d: 'US 10Y Note Fut' },
+            { s: 'CBOT:ZB1!', d: 'US 30Y Bond Fut' },
             { s: 'TVC:DE10Y', d: 'DE 10Y' },
           ],
         },
@@ -395,7 +413,7 @@ function buildMarketOverviewTabsPreset(preset: string) {
             { s: 'NASDAQ:QQQ', d: 'QQQ' },
             { s: 'AMEX:ARKK', d: 'ARKK' },
             { s: 'CBOE:VIX', d: 'VIX' },
-            { s: 'TVC:DXY', d: 'DXY' },
+            { s: 'ICEUS:DX1!', d: 'Dollar Index Fut' },
           ],
         },
       ];
@@ -417,14 +435,7 @@ function buildMarketOverviewTabsPreset(preset: string) {
         {
           title: 'Rates & Dollar',
           originalTitle: 'Rates & Dollar',
-          symbols: [
-            { s: 'TVC:US02Y', d: 'US 2Y Yield' },
-            { s: 'TVC:US10Y', d: 'US 10Y Yield' },
-            { s: 'TVC:US30Y', d: 'US 30Y Yield' },
-            { s: 'TVC:DXY', d: 'US Dollar Index' },
-            { s: 'FX:USDJPY', d: 'USD/JPY' },
-            { s: 'FX:USDCHF', d: 'USD/CHF' },
-          ],
+          symbols: [...MACRO_RATES_AND_DOLLAR_OVERVIEW_SYMBOLS],
         },
         {
           title: 'Commodities',
@@ -478,10 +489,10 @@ function buildMarketDataGroupsPreset(preset: string) {
         {
           name: 'Risk Pulse',
           symbols: [
-            { name: 'TVC:DXY', displayName: 'US Dollar Index' },
+            { name: 'ICEUS:DX1!', displayName: 'Dollar Index Fut' },
             { name: 'CBOE:VIX', displayName: 'VIX' },
             { name: 'BINANCE:BTCUSDT', displayName: 'Bitcoin' },
-            { name: 'TVC:US10Y', displayName: 'US 10Y Yield' },
+            { name: 'CBOT:ZN1!', displayName: 'US 10Y Note Fut' },
           ],
         },
       ];
@@ -552,14 +563,7 @@ function buildMarketDataGroupsPreset(preset: string) {
         },
         {
           name: 'Rates & Dollar',
-          symbols: [
-            { name: 'TVC:US02Y', displayName: 'US 2Y' },
-            { name: 'TVC:US10Y', displayName: 'US 10Y' },
-            { name: 'TVC:US30Y', displayName: 'US 30Y' },
-            { name: 'TVC:DXY', displayName: 'DXY' },
-            { name: 'FX:USDJPY', displayName: 'USD/JPY' },
-            { name: 'FX:USDCHF', displayName: 'USD/CHF' },
-          ],
+          symbols: [...MACRO_RATES_AND_DOLLAR_MARKET_DATA_SYMBOLS],
         },
         {
           name: 'Commodities',

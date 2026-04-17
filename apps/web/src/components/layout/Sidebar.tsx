@@ -29,6 +29,7 @@ import {
     MessageSquareText,
     Lock,
 } from 'lucide-react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
 import type { Dashboard, DashboardFolder } from '@/types/dashboard';
 import { SettingsModal } from '@/components/settings/SettingsModal';
@@ -300,10 +301,24 @@ export function Sidebar({
                 name: withUniqueDashboardName(`${dashboard.name} (Copy)`),
                 folderId: dashboard.folderId,
             });
+            captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceDuplicated, {
+                dashboard_id: dashboard.id,
+                dashboard_name: dashboard.name,
+                folder_id: dashboard.folderId,
+            });
         }
         setContextMenu(null);
         setShowMoveSubmenu(false);
     };
+
+    useEffect(() => {
+        if (!settingsOpen) return;
+        captureAnalyticsEvent(ANALYTICS_EVENTS.settingsOpened, {
+            source: 'sidebar',
+            collapsed,
+            mobile_mode: mobileMode,
+        });
+    }, [collapsed, mobileMode, settingsOpen]);
 
     const submitRename = () => {
         if (!editingId) {
@@ -611,7 +626,14 @@ export function Sidebar({
                     )}
                     {!mobileMode && (
                         <button
-                            onClick={() => onCollapsedChange?.(!collapsed)}
+                            onClick={() => {
+                                const nextCollapsed = !collapsed;
+                                captureAnalyticsEvent(ANALYTICS_EVENTS.sidebarCollapsedToggled, {
+                                    collapsed: nextCollapsed,
+                                    source: 'sidebar_button',
+                                });
+                                onCollapsedChange?.(nextCollapsed);
+                            }}
                             className="p-1 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                         >
                             {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
@@ -697,7 +719,13 @@ export function Sidebar({
                     {collapsed && (
                         <div className="space-y-1">
                             <button
-                                onClick={() => onCollapsedChange?.(false)}
+                                onClick={() => {
+                                    captureAnalyticsEvent(ANALYTICS_EVENTS.sidebarCollapsedToggled, {
+                                        collapsed: false,
+                                        source: 'collapsed_sidebar_button',
+                                    });
+                                    onCollapsedChange?.(false);
+                                }}
                                 className="w-full flex justify-center p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/80 transition-colors"
                                 title="Dashboards"
                             >

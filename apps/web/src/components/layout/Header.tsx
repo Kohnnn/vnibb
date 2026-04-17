@@ -19,6 +19,7 @@ import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useHistoricalPrices, useMarketOverview, useStockQuote } from '@/lib/queries'
 import { probeBackendReadiness } from '@/lib/backendHealth'
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics'
 import type { UnitDisplay } from '@/lib/units'
 import { cn } from '@/lib/utils'
 import {
@@ -252,6 +253,10 @@ export function Header({
   const handleSearch = useCallback(() => {
     const normalized = searchValue.trim().toUpperCase()
     if (normalized) {
+      captureAnalyticsEvent(ANALYTICS_EVENTS.symbolSearchSubmitted, {
+        symbol: normalized,
+        source: 'header_search',
+      })
       onSymbolChange(normalized)
       setSearchValue(normalized)
       setIsSearching(false)
@@ -360,7 +365,9 @@ export function Header({
           <div data-tour="header-tools" className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
           <button
             type="button"
-            onClick={() => window.dispatchEvent(new Event('vnibb:open-command-palette'))}
+            onClick={() => window.dispatchEvent(new CustomEvent('vnibb:open-command-palette', {
+              detail: { source: 'header_button' },
+            }))}
             className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             title="Open command palette (Ctrl+K)"
             aria-label="Open command palette"

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { RefreshCw, Maximize2, Settings, X, Loader2, MoreHorizontal, Link, Link2Off } from 'lucide-react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 
@@ -34,6 +35,16 @@ export function WidgetHeader({
   widgetId,
   showLinkToggle = false,
 }: WidgetHeaderProps) {
+  const trackWidgetAction = (action: string, properties?: Record<string, string | number | boolean | null | undefined>) => {
+    captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+      action,
+      widget_id: widgetId,
+      widget_title: title,
+      symbol,
+      ...properties,
+    })
+  }
+
   return (
     <div className={cn(
       "flex items-center justify-between px-3 py-2",
@@ -81,7 +92,10 @@ export function WidgetHeader({
         {/* Refresh */}
         {onRefresh && !isLoading && (
           <button
-            onClick={onRefresh}
+            onClick={() => {
+              trackWidgetAction('refresh')
+              onRefresh()
+            }}
             className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/80 rounded transition-colors"
             title="Refresh"
           >
@@ -92,7 +106,10 @@ export function WidgetHeader({
         {/* Expand */}
         {onExpand && (
           <button
-            onClick={onExpand}
+            onClick={() => {
+              trackWidgetAction('maximize')
+              onExpand()
+            }}
             className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/80 rounded transition-colors"
             title="Expand"
           >
@@ -103,7 +120,10 @@ export function WidgetHeader({
         {/* Settings */}
         {onSettings && (
           <button
-            onClick={onSettings}
+            onClick={() => {
+              trackWidgetAction('open_settings')
+              onSettings()
+            }}
             className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/80 rounded transition-colors"
             title="Settings"
           >
@@ -114,7 +134,10 @@ export function WidgetHeader({
         {/* Close */}
         {onClose && (
           <button
-            onClick={onClose}
+            onClick={() => {
+              trackWidgetAction('close')
+              onClose()
+            }}
             className="p-1.5 text-[var(--text-muted)] hover:text-red-400 hover:bg-[var(--bg-tertiary)]/80 rounded transition-colors"
             title="Remove widget"
           >
@@ -132,7 +155,14 @@ function LinkToggleButton({ widgetId }: { widgetId: string }) {
 
   return (
     <button
-      onClick={() => toggleWidgetLink(widgetId)}
+      onClick={() => {
+        captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+          action: 'toggle_link',
+          widget_id: widgetId,
+          linked: !isLinked,
+        })
+        toggleWidgetLink(widgetId)
+      }}
       className={cn(
         "p-1.5 rounded transition-colors",
         isLinked 

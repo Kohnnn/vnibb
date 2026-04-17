@@ -4,6 +4,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Settings2, Plus, X, GripVertical } from 'lucide-react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { ManageTabsModal } from '@/components/modals/ManageTabsModal';
 import { useTouchGestures } from '@/hooks/useTouchGestures';
@@ -404,7 +405,14 @@ export function TabBar(_props: TabBarProps) {
                             </button>
 
                             <button
-                                onClick={() => setIsManageModalOpen(true)}
+                                onClick={() => {
+                                    captureAnalyticsEvent(ANALYTICS_EVENTS.tabManagementOpened, {
+                                        dashboard_id: activeDashboard.id,
+                                        dashboard_name: activeDashboard.name,
+                                        tab_count: activeDashboard.tabs.length,
+                                    });
+                                    setIsManageModalOpen(true);
+                                }}
                                 className="hidden shrink-0 rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-secondary)] sm:block"
                                 title="Manage tabs"
                             >

@@ -9,6 +9,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import Link from 'next/link';
 
 function LoginForm() {
@@ -37,13 +38,26 @@ function LoginForm() {
         e.preventDefault();
         setLoading(true);
         setError(null);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginStarted, {
+            method: 'password',
+            redirect_path: redirectTo,
+        });
 
         const { error } = await signIn(email, password);
 
         if (error) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginFailed, {
+                method: 'password',
+                redirect_path: redirectTo,
+                error_type: error.message,
+            });
             setError(error.message);
             setLoading(false);
         } else {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginSucceeded, {
+                method: 'password',
+                redirect_path: redirectTo,
+            });
             router.push(redirectTo);
         }
     };
@@ -52,10 +66,19 @@ function LoginForm() {
         e.preventDefault();
         setLoading(true);
         setError(null);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginStarted, {
+            method: 'magic_link',
+            redirect_path: redirectTo,
+        });
 
         const { error } = await signInWithMagicLink(email);
 
         if (error) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginFailed, {
+                method: 'magic_link',
+                redirect_path: redirectTo,
+                error_type: error.message,
+            });
             setError(error.message);
             setLoading(false);
         } else {
@@ -67,22 +90,47 @@ function LoginForm() {
     const handleGoogleLogin = async () => {
         setLoading(true);
         setError(null);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginStarted, {
+            method: 'google',
+            redirect_path: redirectTo,
+        });
 
         const { error } = await signInWithGoogle();
 
         if (error) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginFailed, {
+                method: 'google',
+                redirect_path: redirectTo,
+                error_type: error.message,
+            });
             setError(error.message);
             setLoading(false);
         }
     };
 
     const handleAdminLogin = () => {
+        captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginStarted, {
+            method: 'admin_dev',
+            redirect_path: redirectTo,
+        });
         signInAsAdmin();
+        captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginSucceeded, {
+            method: 'admin_dev',
+            redirect_path: redirectTo,
+        });
         router.push(redirectTo);
     };
 
     const handleGuestLogin = () => {
+        captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginStarted, {
+            method: 'guest',
+            redirect_path: redirectTo,
+        });
         signInAsGuest();
+        captureAnalyticsEvent(ANALYTICS_EVENTS.authLoginSucceeded, {
+            method: 'guest',
+            redirect_path: redirectTo,
+        });
         router.push(redirectTo);
     };
 

@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RotateCcw, Save, X } from 'lucide-react';
 
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import {
@@ -187,6 +188,13 @@ export function WidgetSettingsModal({
             }
 
             updateWidget(dashboardId, tabId, widgetId, { config: nextConfig });
+            captureAnalyticsEvent(ANALYTICS_EVENTS.widgetSettingsSaved, {
+                dashboard_id: dashboardId,
+                tab_id: tabId,
+                widget_id: widgetId,
+                widget_type: widget.type,
+                refresh_interval: refreshInterval > 0 ? refreshInterval : 0,
+            });
             onClose();
         } catch (saveError) {
             setError(saveError instanceof Error ? saveError.message : 'Invalid JSON configuration');

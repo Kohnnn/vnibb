@@ -9,6 +9,7 @@
 - `WIDGET_SYSTEM_REFERENCE.md`: canonical non-TradingView widget rules and behavior
 - `WIDGET_IMPROVEMENT_ROADMAP.md`: structured priorities, shipped work, and follow-up work
 - `TRADINGVIEW_WIDGET_CATALOG.md`: current TradingView widget coverage and status
+- `POSTHOG_ANALYTICS.md`: frontend analytics setup, event coverage, privacy rules, and env contract
 
 ## Operations And Data
 

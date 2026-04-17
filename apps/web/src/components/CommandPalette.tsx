@@ -29,6 +29,7 @@ import {
   type CommandPaletteSection,
   type RecentSearchEntry,
 } from '@/lib/commandPalette';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
@@ -377,6 +378,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   const handleTickerSelect = (item: SearchTickerResult) => {
     saveRecent(item);
+    captureAnalyticsEvent(ANALYTICS_EVENTS.commandPaletteResultSelected, {
+      source: 'command_palette',
+      result_type: item.type,
+      symbol: item.symbol,
+      exchange: item.exchange,
+      query_length: trimmedSearch.length,
+      section: 'search',
+    });
 
     if (item.type === 'vn_stock') {
       applyVietnamSymbol(item.symbol);
@@ -419,6 +428,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       );
       return;
     }
+
+    captureAnalyticsEvent(ANALYTICS_EVENTS.commandPaletteResultSelected, {
+      source: 'command_palette',
+      result_type: item.type,
+      result_id: item.id,
+      section: item.sectionKey,
+      query_length: trimmedSearch.length,
+      symbol: item.symbol,
+    });
 
     commandActions.actions.get(item.id)?.();
   };

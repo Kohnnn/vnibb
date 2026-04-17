@@ -19,6 +19,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useIndustryBubble } from '@/lib/queries';
 import { formatNumber, formatPercent } from '@/lib/units';
 import { cn } from '@/lib/utils';
@@ -138,12 +139,22 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove }: IndustryBubbleW
                 <span>{data?.sector || 'Sector peers'}</span>
               </div>
 
-              {[5, 10, 20].map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setTopN(value)}
-                  className={cn(
+                {[5, 10, 20].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                        control_type: 'industry_bubble_top_n',
+                        previous_value: topN,
+                        value,
+                        widget_id: id,
+                        widget_type: 'industry_bubble',
+                        symbol: upperSymbol,
+                      })
+                      setTopN(value)
+                    }}
+                    className={cn(
                     'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                     topN === value
                       ? 'bg-blue-600 text-white'
@@ -169,7 +180,17 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove }: IndustryBubbleW
             <label className="flex items-center gap-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
               <SlidersHorizontal size={12} />
               <span>X</span>
-              <select value={xMetric} onChange={(event) => setXMetric(event.target.value)} className="ml-auto bg-transparent text-[var(--text-primary)] outline-none">
+              <select value={xMetric} onChange={(event) => {
+                captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                  control_type: 'industry_bubble_x_metric',
+                  previous_value: xMetric,
+                  value: event.target.value,
+                  widget_id: id,
+                  widget_type: 'industry_bubble',
+                  symbol: upperSymbol,
+                })
+                setXMetric(event.target.value)
+              }} className="ml-auto bg-transparent text-[var(--text-primary)] outline-none">
                 {AXIS_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
@@ -178,7 +199,17 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove }: IndustryBubbleW
             <label className="flex items-center gap-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
               <SlidersHorizontal size={12} />
               <span>Y</span>
-              <select value={yMetric} onChange={(event) => setYMetric(event.target.value)} className="ml-auto bg-transparent text-[var(--text-primary)] outline-none">
+              <select value={yMetric} onChange={(event) => {
+                captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                  control_type: 'industry_bubble_y_metric',
+                  previous_value: yMetric,
+                  value: event.target.value,
+                  widget_id: id,
+                  widget_type: 'industry_bubble',
+                  symbol: upperSymbol,
+                })
+                setYMetric(event.target.value)
+              }} className="ml-auto bg-transparent text-[var(--text-primary)] outline-none">
                 {AXIS_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
@@ -187,7 +218,17 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove }: IndustryBubbleW
             <label className="flex items-center gap-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
               <SlidersHorizontal size={12} />
               <span>Size</span>
-              <select value={sizeMetric} onChange={(event) => setSizeMetric(event.target.value)} className="ml-auto bg-transparent text-[var(--text-primary)] outline-none">
+              <select value={sizeMetric} onChange={(event) => {
+                captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                  control_type: 'industry_bubble_size_metric',
+                  previous_value: sizeMetric,
+                  value: event.target.value,
+                  widget_id: id,
+                  widget_type: 'industry_bubble',
+                  symbol: upperSymbol,
+                })
+                setSizeMetric(event.target.value)
+              }} className="ml-auto bg-transparent text-[var(--text-primary)] outline-none">
                 {SIZE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
@@ -228,9 +269,9 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove }: IndustryBubbleW
                 </div>
               </div>
 
-              <div className="flex min-h-[220px] flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
-                <ChartMountGuard className="flex-1 min-h-[220px]" minHeight={220}>
-                  <ResponsiveContainer width="100%" height="100%">
+              <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
+                <ChartMountGuard className="h-[320px] min-h-[220px]" minHeight={220}>
+                  <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={220}>
                     <ScatterChart margin={{ top: 16, right: 24, bottom: 24, left: 12 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.18)" />
                       <XAxis

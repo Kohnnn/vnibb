@@ -42,6 +42,7 @@ import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
 import { autoFitGridItems, findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import {
@@ -285,19 +286,45 @@ function DashboardContent() {
         setWidgetSettingsState(null);
         setShowAICopilot(false);
         setIsWalkthroughOpen(true);
-    }, [effectiveLeftSidebarWidth, mounted]);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.onboardingWalkthroughStarted, {
+            source: force ? 'manual_restart' : 'auto',
+            dashboard_id: activeDashboard?.id,
+            tab_id: activeTab?.id,
+        });
+    }, [activeDashboard?.id, activeTab?.id, effectiveLeftSidebarWidth, mounted]);
 
     const closeWalkthrough = useCallback(() => {
         markDashboardWalkthroughCompleted();
         setIsWalkthroughOpen(false);
-    }, []);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.onboardingWalkthroughCompleted, {
+            dashboard_id: activeDashboard?.id,
+            tab_id: activeTab?.id,
+        });
+    }, [activeDashboard?.id, activeTab?.id]);
+
+    const openCopilot = useCallback((
+        source: string,
+        contextName?: string,
+        contextData?: Record<string, unknown>,
+    ) => {
+        setCopilotWidgetContext(contextName);
+        setCopilotWidgetData(contextData);
+        setShowAICopilot(true);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.copilotOpened, {
+            source,
+            symbol: stockGlobalSymbol,
+            dashboard_id: activeDashboard?.id,
+            tab_id: activeTab?.id,
+            tab_name: activeTab?.name,
+            widget_context: contextName,
+            widget_type_key: typeof contextData?.widgetTypeKey === 'string' ? contextData.widgetTypeKey : undefined,
+        });
+    }, [activeDashboard?.id, activeTab?.id, activeTab?.name, stockGlobalSymbol]);
 
     const handleOpenGlobalPrompts = useCallback(() => {
-        setCopilotWidgetContext(undefined);
-        setCopilotWidgetData(undefined);
-        setShowAICopilot(true);
+        openCopilot('global_prompts');
         setCopilotPromptLibraryRequestId((current) => current + 1);
-    }, []);
+    }, [openCopilot]);
 
     useEffect(() => {
         if (
@@ -343,12 +370,21 @@ function DashboardContent() {
         const normalizedSymbol = rawSymbol.trim().toUpperCase();
         if (!normalizedSymbol) return;
 
+        if (normalizedSymbol !== stockGlobalSymbol) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.symbolChanged, {
+                from_symbol: stockGlobalSymbol,
+                to_symbol: normalizedSymbol,
+                dashboard_id: activeDashboard?.id,
+                tab_id: activeTab?.id,
+            });
+        }
+
         setStockGlobalSymbol(normalizedSymbol);
         setContextGlobalSymbol(normalizedSymbol);
         if (activeDashboard) {
             updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
         }
-    }, [activeDashboard, setContextGlobalSymbol, setStockGlobalSymbol, updateSyncGroupSymbol]);
+    }, [activeDashboard, activeTab?.id, setContextGlobalSymbol, setStockGlobalSymbol, stockGlobalSymbol, updateSyncGroupSymbol]);
 
     const isSystemFundamentalsTab =
         activeDashboard?.id === MAIN_FUNDAMENTAL_DASHBOARD_ID &&
@@ -561,8 +597,15 @@ function DashboardContent() {
         if (!canEditCurrentDashboard) {
             return;
         }
-        setIsEditing((prev) => !prev);
-    }, [canEditCurrentDashboard]);
+        const nextEditing = !isEditing;
+        setIsEditing(nextEditing);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.layoutAction, {
+            action: 'toggle_edit',
+            enabled: nextEditing,
+            dashboard_id: activeDashboard?.id,
+            tab_id: activeTab?.id,
+        });
+    }, [activeDashboard?.id, activeTab?.id, canEditCurrentDashboard, isEditing]);
 
     useEffect(() => {
         if (!canEditCurrentDashboard && isEditing) {
@@ -595,6 +638,12 @@ function DashboardContent() {
     const handleResetLayout = useCallback(() => {
         if (activeDashboard && activeTab) {
             resetTabLayout(activeDashboard.id, activeTab.id);
+            captureAnalyticsEvent(ANALYTICS_EVENTS.layoutAction, {
+                action: 'reset',
+                dashboard_id: activeDashboard.id,
+                tab_id: activeTab.id,
+                widget_count: activeTab.widgets.length,
+            });
         }
     }, [activeDashboard, activeTab, resetTabLayout]);
 
@@ -618,6 +667,11 @@ function DashboardContent() {
 
             updateTabLayout(activeDashboard.id, tab.id, autoFitGridItems(normalizedWidgets));
         });
+        captureAnalyticsEvent(ANALYTICS_EVENTS.layoutAction, {
+            action: 'autofit',
+            dashboard_id: activeDashboard.id,
+            tab_count: activeDashboard.tabs.length,
+        });
     }, [activeDashboard, updateTabLayout]);
 
     const handleCollapseAll = useCallback(() => {
@@ -630,6 +684,12 @@ function DashboardContent() {
             },
         }));
         updateTabLayout(activeDashboard.id, activeTab.id, updatedWidgets);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.layoutAction, {
+            action: 'collapse_all',
+            dashboard_id: activeDashboard.id,
+            tab_id: activeTab.id,
+            widget_count: activeTab.widgets.length,
+        });
     }, [activeDashboard, activeTab, updateTabLayout]);
 
     const handleExpandAll = useCallback(() => {
@@ -642,6 +702,12 @@ function DashboardContent() {
             },
         }));
         updateTabLayout(activeDashboard.id, activeTab.id, updatedWidgets);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.layoutAction, {
+            action: 'expand_all',
+            dashboard_id: activeDashboard.id,
+            tab_id: activeTab.id,
+            widget_count: activeTab.widgets.length,
+        });
     }, [activeDashboard, activeTab, updateTabLayout]);
 
     const handleWidgetConfigChange = useCallback((
@@ -664,7 +730,14 @@ function DashboardContent() {
     const handleOpenWidgetSettings = useCallback((widgetId: string) => {
         if (!activeTab) return;
         setWidgetSettingsState({ widgetId, tabId: activeTab.id });
-    }, [activeTab]);
+        const widget = activeTab.widgets.find((item) => item.id === widgetId);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.widgetSettingsOpened, {
+            dashboard_id: activeDashboard?.id,
+            tab_id: activeTab.id,
+            widget_id: widgetId,
+            widget_type: widget?.type,
+        });
+    }, [activeDashboard?.id, activeTab]);
 
     const handleApplyTemplate = useCallback((template: DashboardTemplate) => {
         if (!activeDashboard || !activeTab || !canEditCurrentDashboard) return;
@@ -679,6 +752,15 @@ function DashboardContent() {
             });
         });
         setActiveTab(tab.id);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
+            source: 'template_selector',
+            template_id: template.id,
+            template_name: template.name,
+            template_category: template.category,
+            dashboard_id: activeDashboard.id,
+            tab_id: tab.id,
+            widget_count: template.widgets.length,
+        });
     }, [activeDashboard, activeTab, addWidget, canEditCurrentDashboard, createTab, setActiveTab]);
 
     const handleSeedEmptyTab = useCallback((template: DashboardTemplate) => {
@@ -691,6 +773,15 @@ function DashboardContent() {
                 layout: widget.layout,
                 config: widget.config || {},
             });
+        });
+        captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
+            source: 'empty_tab_seed',
+            template_id: template.id,
+            template_name: template.name,
+            template_category: template.category,
+            dashboard_id: activeDashboard.id,
+            tab_id: activeTab.id,
+            widget_count: template.widgets.length,
         });
     }, [activeDashboard, activeTab, addWidget, canEditCurrentDashboard]);
 
@@ -814,9 +905,12 @@ function DashboardContent() {
                     onEditToggle={canEditCurrentDashboard ? handleEditToggle : undefined}
                     isAIOpen={showAICopilot}
                     onAIClick={() => {
-                        setCopilotWidgetContext(undefined);
-                        setCopilotWidgetData(undefined);
-                        setShowAICopilot(!showAICopilot);
+                        if (showAICopilot) {
+                            setShowAICopilot(false);
+                            return;
+                        }
+
+                        openCopilot('header');
                     }}
                     onResetLayout={canEditCurrentDashboard ? handleResetLayout : undefined}
                     onAutoFitLayout={canEditCurrentDashboard ? handleAutoFitLayout : undefined}
@@ -958,9 +1052,7 @@ function DashboardContent() {
                                                         const contextName = typeof context?.widgetType === 'string'
                                                             ? context.widgetType
                                                             : widgetType.replace(/_/g, ' ');
-                                                        setCopilotWidgetContext(contextName);
-                                                        setCopilotWidgetData(context || undefined);
-                                                        setShowAICopilot(true);
+                                                        openCopilot('widget', contextName, context || undefined);
                                                     }}
                                                     onSettingsClick={() => handleOpenWidgetSettings(widget.id)}
                                                     parameters={parameters}

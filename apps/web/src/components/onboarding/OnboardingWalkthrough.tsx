@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, ArrowRight, Check, X } from 'lucide-react'
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics'
 
 type WalkthroughStep = {
   id: string
@@ -91,6 +92,18 @@ export function OnboardingWalkthrough({ open, onComplete }: OnboardingWalkthroug
   }, [open])
 
   const currentStep = steps[stepIndex] ?? FINAL_STEP
+
+  useEffect(() => {
+    if (!open || !currentStep.id) {
+      return
+    }
+
+    captureAnalyticsEvent(ANALYTICS_EVENTS.onboardingWalkthroughStepViewed, {
+      step_id: currentStep.id,
+      step_index: stepIndex,
+      step_title: currentStep.title,
+    })
+  }, [currentStep.id, currentStep.title, open, stepIndex])
 
   useEffect(() => {
     if (!open || !currentStep.selector || typeof window === 'undefined') {

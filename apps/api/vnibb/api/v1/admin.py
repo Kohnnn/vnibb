@@ -34,6 +34,7 @@ router = APIRouter(tags=["Admin"])
 logger = logging.getLogger(__name__)
 
 TABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+YEAR_KEY_RE = re.compile(r"^20\d{2}$")
 TIMESTAMP_CANDIDATES = [
     "updated_at",
     "created_at",
@@ -154,7 +155,38 @@ async def save_unit_runtime_config(data: Any = Body(...)) -> Dict[str, Any]:
             status_code=400, detail="usd_vnd_default_rate must be greater than zero"
         )
 
-    return await unit_runtime_config_service.save_runtime_config(usd_vnd_default_rate=numeric_rate)
+    yearly_rates_raw = data.get("usd_vnd_rates_by_year")
+    if yearly_rates_raw is None:
+        yearly_rates_raw = {}
+    if not isinstance(yearly_rates_raw, dict):
+        raise HTTPException(status_code=400, detail="usd_vnd_rates_by_year must be an object")
+
+    yearly_rates: Dict[str, float] = {}
+    for raw_year, raw_value in yearly_rates_raw.items():
+        year = str(raw_year).strip()
+        if not YEAR_KEY_RE.fullmatch(year):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid USD/VND year key: {raw_year}",
+            )
+        try:
+            numeric_year_rate = float(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"usd_vnd_rates_by_year[{year}] must be numeric",
+            ) from exc
+        if numeric_year_rate <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"usd_vnd_rates_by_year[{year}] must be greater than zero",
+            )
+        yearly_rates[year] = numeric_year_rate
+
+    return await unit_runtime_config_service.save_runtime_config(
+        usd_vnd_default_rate=numeric_rate,
+        usd_vnd_rates_by_year=yearly_rates,
+    )
 
 
 @router.get("/ai-prompts", dependencies=[Depends(require_admin_access)])

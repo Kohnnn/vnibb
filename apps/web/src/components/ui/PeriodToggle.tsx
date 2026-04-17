@@ -1,6 +1,7 @@
 'use client';
 
 import { memo } from 'react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 
 export type Period = 'FY' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'TTM';
@@ -25,7 +26,15 @@ function PeriodToggleComponent({ value, onChange, compact = false, options = EXT
       {options.map(period => (
         <button
           key={period}
-          onClick={() => onChange(period)}
+          onClick={() => {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+              control_type: 'period_toggle',
+              previous_value: value,
+              value: period,
+              options_count: options.length,
+            })
+            onChange(period)
+          }}
           className={cn(
             "rounded font-bold transition-all uppercase",
             compact ? "px-1.5 py-0.5 text-[9px]" : "px-2.5 py-1 text-[10px]",

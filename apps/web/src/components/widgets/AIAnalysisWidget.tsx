@@ -20,6 +20,7 @@ import { CopilotFeedbackBar } from '@/components/ui/CopilotFeedbackBar';
 import { CopilotActionPanel } from '@/components/ui/CopilotActionPanel';
 import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { readStoredAISettings } from '@/lib/aiSettings';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
 
@@ -53,6 +54,16 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
 
   const runAnalysis = useCallback(async () => {
     if (isLoading) return;
+
+    const aiSettings = readStoredAISettings()
+    captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptSubmitted, {
+      source: 'analysis_widget',
+      symbol,
+      widget_context: 'AI Analysis',
+      provider: aiSettings.provider,
+      mode: aiSettings.mode,
+      model: aiSettings.model,
+    })
     
     setIsLoading(true);
     setError(null);
@@ -81,7 +92,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         context,
         history: [],
         settings: {
-          ...readStoredAISettings(),
+          ...aiSettings,
           enableSidebarWorkflowOutputs: true,
         },
       });
@@ -97,6 +108,17 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
           setReasoningLog((prev) => appendReasoningStep(prev, reasoning));
         },
         onDone: (event) => {
+          captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseCompleted, {
+            source: 'analysis_widget',
+            symbol,
+            widget_context: 'AI Analysis',
+            provider: event.responseMeta?.provider || aiSettings.provider,
+            model: event.responseMeta?.model || aiSettings.model,
+            latency_ms: event.responseMeta?.latencyMs,
+            source_count: event.sources?.length || 0,
+            artifact_count: event.artifacts?.length || 0,
+            action_count: event.actions?.length || 0,
+          })
           setSources(event.sources || []);
           setArtifacts(event.artifacts || []);
           setActions(event.actions || []);
@@ -105,6 +127,14 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
       });
     } catch (err: any) {
       console.error('AI Analysis Error:', err);
+      captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseFailed, {
+        source: 'analysis_widget',
+        symbol,
+        widget_context: 'AI Analysis',
+        provider: aiSettings.provider,
+        mode: aiSettings.mode,
+        error_type: err?.name || err?.message || 'analysis_failed',
+      })
       setError(err.message || 'Analysis failed');
     } finally {
       setIsLoading(false);

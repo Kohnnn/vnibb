@@ -362,6 +362,61 @@ async def test_admin_ai_runtime_endpoints_round_trip(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_admin_unit_runtime_endpoints_round_trip(client, monkeypatch):
+    async def fake_get_runtime_config():
+        return {
+            "usd_vnd_default_rate": 25000,
+            "usd_vnd_rates_by_year": {"2024": 24500},
+            "updated_at": None,
+        }
+
+    async def fake_save_runtime_config(*, usd_vnd_default_rate: float, usd_vnd_rates_by_year):
+        return {
+            "usd_vnd_default_rate": usd_vnd_default_rate,
+            "usd_vnd_rates_by_year": usd_vnd_rates_by_year,
+            "updated_at": "2026-04-16T12:00:00+00:00",
+        }
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.admin.unit_runtime_config_service.get_runtime_config",
+        fake_get_runtime_config,
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.admin.unit_runtime_config_service.save_runtime_config",
+        fake_save_runtime_config,
+    )
+
+    get_response = await client.get("/api/v1/admin/unit-runtime")
+    put_response = await client.put(
+        "/api/v1/admin/unit-runtime",
+        json={
+            "usd_vnd_default_rate": 25250,
+            "usd_vnd_rates_by_year": {"2024": 24400, "2025": 25100},
+        },
+    )
+
+    assert get_response.status_code == 200
+    assert get_response.json()["usd_vnd_rates_by_year"] == {"2024": 24500}
+    assert put_response.status_code == 200
+    assert put_response.json()["usd_vnd_default_rate"] == 25250
+    assert put_response.json()["usd_vnd_rates_by_year"] == {"2024": 24400, "2025": 25100}
+
+
+@pytest.mark.asyncio
+async def test_admin_unit_runtime_rejects_invalid_year_map(client):
+    response = await client.put(
+        "/api/v1/admin/unit-runtime",
+        json={
+            "usd_vnd_default_rate": 25000,
+            "usd_vnd_rates_by_year": {"bad": 24500},
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Invalid USD/VND year key: bad" in response.text
+
+
+@pytest.mark.asyncio
 async def test_admin_ai_telemetry_returns_recent_records(client, monkeypatch):
     async def fake_get_recent_records(limit=25):
         return [

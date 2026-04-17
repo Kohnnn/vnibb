@@ -8,6 +8,7 @@ import {
   type CopilotFeedbackRequest,
   type CopilotResponseMeta,
 } from '@/lib/api';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 
 interface CopilotFeedbackBarProps {
@@ -56,6 +57,15 @@ export function CopilotFeedbackBar({
         reasons: vote === 'down' ? selectedReasons : undefined,
       });
       onVoteChange?.(vote);
+      captureAnalyticsEvent(ANALYTICS_EVENTS.copilotFeedbackSubmitted, {
+        surface,
+        vote,
+        provider: responseMeta.provider,
+        model: responseMeta.model,
+        latency_ms: responseMeta.latencyMs,
+        has_notes: notes.trim().length > 0,
+        reason_count: vote === 'down' ? selectedReasons.length : 0,
+      });
       setStatusText(response.matched ? 'Saved' : 'Saved locally for review');
     } catch {
       setStatusText('Feedback failed');

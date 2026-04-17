@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { TrendingUp, TrendingDown, Info } from 'lucide-react';
 import { useFullTechnicalAnalysis } from '@/lib/queries';
 import { Badge } from '@/components/ui/badge';
@@ -50,6 +50,34 @@ function getTrendColor(strength: string): string {
     }
 }
 
+function buildSignalGaugeBackground(buyCount: number, neutralCount: number, sellCount: number): string {
+    const total = buyCount + neutralCount + sellCount;
+    if (total <= 0) {
+        return 'conic-gradient(from 180deg, rgba(100,116,139,0.28) 0 100%)';
+    }
+
+    const segments = [
+        { value: buyCount, color: '#4ade80' },
+        { value: neutralCount, color: '#94a3b8' },
+        { value: sellCount, color: '#f87171' },
+    ];
+
+    let cursor = 0;
+    const stops: string[] = [];
+    for (const segment of segments) {
+        if (segment.value <= 0) continue;
+        const nextCursor = cursor + (segment.value / total) * 100;
+        stops.push(`${segment.color} ${cursor}% ${nextCursor}%`);
+        cursor = nextCursor;
+    }
+
+    if (cursor < 100) {
+        stops.push(`rgba(100,116,139,0.28) ${cursor}% 100%`);
+    }
+
+    return `conic-gradient(from 180deg, ${stops.join(', ')})`;
+}
+
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 
 export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: TechnicalSummaryWidgetProps) {
@@ -69,6 +97,15 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
     const fibonacciLevels = ta?.levels?.fibonacci?.levels
         ? Object.entries(ta.levels.fibonacci.levels)
         : [];
+    const buyCount = signals?.buy_count || 0;
+    const neutralCount = signals?.neutral_count || 0;
+    const sellCount = signals?.sell_count || 0;
+    const totalSignals = Math.max(signals?.total_indicators || 0, buyCount + neutralCount + sellCount, 1);
+    const gaugeBackground = useMemo(
+        () => buildSignalGaugeBackground(buyCount, neutralCount, sellCount),
+        [buyCount, neutralCount, sellCount]
+    );
+    const signalBias = Math.round(((buyCount - sellCount) / totalSignals) * 100);
 
     const timeframeLabel = {
         'D': 'Daily',
@@ -136,24 +173,35 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
                         <Badge variant="outline" className={`text-sm py-0.5 px-3 font-bold border-none ${getSignalBg(overallSignal)} ${getSignalColor(overallSignal)}`}>
                             {overallSignal.replace('_', ' ').toUpperCase()}
                         </Badge>
-                        <div className="flex gap-3 mt-2.5 text-[10px] font-mono">
-                            <div className="flex flex-col items-center">
-                                <span className="text-green-400 font-bold">{signals?.buy_count || 0}</span>
+                        <div className="relative mt-3 flex h-28 w-28 items-center justify-center rounded-full border border-[var(--border-default)]/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]" style={{ background: gaugeBackground }}>
+                            <div className="absolute inset-[14px] rounded-full border border-[var(--border-default)]/60 bg-[var(--bg-secondary)]" />
+                            <div className="relative z-10 flex flex-col items-center">
+                                <span className="text-xl font-black text-[var(--text-primary)]">{totalSignals}</span>
+                                <span className="text-[9px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Signals</span>
+                            </div>
+                        </div>
+                        <div className="mt-3 grid w-full grid-cols-3 gap-2 text-[10px] font-mono">
+                            <div className="flex flex-col items-center rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5">
+                                <span className="text-green-400 font-bold">{buyCount}</span>
                                 <span className="text-[var(--text-muted)]">Buy</span>
                             </div>
-                            <div className="flex flex-col items-center">
-                                <span className="text-[var(--text-secondary)] font-bold">{signals?.neutral_count || 0}</span>
+                            <div className="flex flex-col items-center rounded-md border border-slate-500/20 bg-slate-500/10 px-2 py-1.5">
+                                <span className="text-[var(--text-secondary)] font-bold">{neutralCount}</span>
                                 <span className="text-[var(--text-muted)]">Neutral</span>
                             </div>
-                            <div className="flex flex-col items-center">
-                                <span className="text-red-400 font-bold">{signals?.sell_count || 0}</span>
+                            <div className="flex flex-col items-center rounded-md border border-rose-500/20 bg-rose-500/10 px-2 py-1.5">
+                                <span className="text-red-400 font-bold">{sellCount}</span>
                                 <span className="text-[var(--text-muted)]">Sell</span>
                             </div>
                         </div>
-                        <div className="mt-1.5 text-[9px]">
+                        <div className="mt-2 flex items-center gap-2 text-[9px]">
                             <span className="text-[var(--text-muted)]">Trend Strength: </span>
                             <span className={`${getTrendColor(signals?.trend_strength || '')} font-bold capitalize`}>
                                 {(signals?.trend_strength || 'N/A').replace('_', ' ')}
+                            </span>
+                            <span className="text-[var(--text-muted)]">| Bias:</span>
+                            <span className={signalBias >= 0 ? 'font-bold text-emerald-400' : 'font-bold text-rose-400'}>
+                                {signalBias >= 0 ? '+' : ''}{signalBias}
                             </span>
                         </div>
                     </Card>

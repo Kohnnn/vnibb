@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, Search, Plus, Trash2, MessageSquare, TrendingUp, BarChart, FileText, Sparkles, Layers3, LineChart, Newspaper } from 'lucide-react';
 import { getCopilotPrompts, type PromptTemplate } from '@/lib/api';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 
 type Prompt = PromptTemplate & {
     name: string;
@@ -212,6 +213,16 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
         };
     }, []);
 
+    useEffect(() => {
+        if (!isOpen) return;
+        captureAnalyticsEvent(ANALYTICS_EVENTS.promptLibraryOpened, {
+            symbol,
+            widget_context: widgetContext,
+            widget_type_key: widgetTypeKey,
+            tab_name: activeTabName,
+        });
+    }, [activeTabName, isOpen, symbol, widgetContext, widgetTypeKey]);
+
     // Save prompts to localStorage
     const savePrompts = (newPrompts: Prompt[]) => {
         setPrompts(newPrompts);
@@ -235,16 +246,29 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
         };
 
         savePrompts([...prompts, newPrompt]);
+        captureAnalyticsEvent(ANALYTICS_EVENTS.promptLibraryPromptAdded, {
+            source: 'local',
+            prompt_count: prompts.length + 1,
+        });
         setNewPromptName('');
         setNewPromptContent('');
         setIsAddingNew(false);
     };
 
     const handleDeletePrompt = (id: string) => {
+        captureAnalyticsEvent(ANALYTICS_EVENTS.promptLibraryPromptDeleted, {
+            prompt_count: Math.max(0, prompts.length - 1),
+        });
         savePrompts(prompts.filter(p => p.id !== id));
     };
 
     const handleSelectPrompt = (prompt: Prompt) => {
+        captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptLibrarySelected, {
+            symbol,
+            widget_context: widgetContext,
+            tab_name: activeTabName,
+            source: prompt.source || 'system',
+        });
         onSelectPrompt?.(applyPromptContext(prompt.content, symbol, widgetContext, activeTabName));
         onClose();
     };

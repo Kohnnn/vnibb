@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw, Shield, Sparkles } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AICopilotTelemetryReview } from '@/components/admin/AICopilotTelemetryReview';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -46,6 +47,7 @@ import {
   saveAdminAIRuntimeConfig,
   type ModelOption,
   type PromptTemplate,
+  type UnitRuntimeConfigResponse,
 } from '@/lib/api';
 import {
   clearStoredAISettings,
@@ -64,7 +66,34 @@ interface SettingsModalProps {
 
 type SettingTab = 'general' | 'ai' | 'data' | 'notifications' | 'appearance' | 'admin';
 
+function toRateInputs(ratesByYear?: Record<string, number> | null): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(ratesByYear || {}).map(([year, rate]) => [year, String(rate)])
+  )
+}
+
+function parseUsdRateInputs(
+  inputs: Record<string, string>,
+  years: number[]
+): { rates: Record<string, number>; invalidYear: number | null } {
+  const rates: Record<string, number> = {}
+
+  for (const year of years) {
+    const rawValue = inputs[String(year)]?.trim()
+    if (!rawValue) continue
+
+    const parsed = Number(rawValue)
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return { rates: {}, invalidYear: year }
+    }
+    rates[String(year)] = parsed
+  }
+
+  return { rates, invalidYear: null }
+}
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
+  const hasTrackedOpenRef = useRef(false)
   const [activeTab, setActiveTab] = useState<SettingTab>('general');
   const [defaultTickerInput, setDefaultTickerInput] = useState(DEFAULT_TICKER);
   const [defaultTab, setDefaultTab] = useState<DefaultTabPreference>('overview');
@@ -82,6 +111,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [isAdminUnitRuntimeLoading, setIsAdminUnitRuntimeLoading] = useState(false);
   const [isAdminUnitRuntimeSaving, setIsAdminUnitRuntimeSaving] = useState(false);
   const [usdRateInputs, setUsdRateInputs] = useState<Record<string, string>>({});
+  const [adminUsdRateInputs, setAdminUsdRateInputs] = useState<Record<string, string>>({});
   const [adminOpenRouterConfigured, setAdminOpenRouterConfigured] = useState<boolean | null>(null);
   const [adminOpenRouterReachable, setAdminOpenRouterReachable] = useState<boolean | null>(null);
   const [adminOpenRouterCatalogSource, setAdminOpenRouterCatalogSource] = useState<string | null>(null);
@@ -112,11 +142,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const {
     config: unitConfig,
     globalUsdVndDefaultRate,
+    adminUsdVndRatesByYear,
     localUsdVndRatesByYear,
     setUnit,
     setDecimalPlaces,
     setUsdVndRate,
     clearUsdVndRates,
+    applyAdminUsdRuntimeConfig,
   } = useUnit();
   const { globalSymbol, setGlobalSymbol } = useSymbolLink();
   const { setGlobalSymbol: setWidgetGroupGlobalSymbol } = useWidgetGroups();
@@ -200,13 +232,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     try {
       setIsAdminUnitRuntimeLoading(true)
       const config = await getAdminUnitRuntimeConfig(trimmedKey)
+      applyAdminUsdRuntimeConfig(config)
       setAdminUsdVndDefaultRateInput(String(config.usd_vnd_default_rate || 25000))
+      setAdminUsdRateInputs(toRateInputs(config.usd_vnd_rates_by_year))
     } catch (error) {
       setPreferenceStatus(error instanceof Error ? `Unit runtime load failed: ${error.message}` : 'Unit runtime load failed.')
     } finally {
       setIsAdminUnitRuntimeLoading(false)
     }
-  }, [])
+  }, [applyAdminUsdRuntimeConfig])
 
   useEffect(() => {
     if (isOpen) {
@@ -228,13 +262,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setAiWebSearch(aiSettings.webSearch);
       setAiPreferAppwriteData(aiSettings.preferAppwriteData);
       setAiEnableSidebarWorkflowOutputs(aiSettings.enableSidebarWorkflowOutputs);
-      setUsdRateInputs(
-        Object.fromEntries(
-          Object.entries(localUsdVndRatesByYear).map(([year, rate]) => [year, String(rate)])
-        )
-      )
+      setUsdRateInputs(toRateInputs(localUsdVndRatesByYear))
+      setAdminUsdRateInputs(toRateInputs(adminUsdVndRatesByYear))
     }
-  }, [globalSymbol, isOpen, localUsdVndRatesByYear]);
+  }, [adminUsdVndRatesByYear, globalSymbol, isOpen, localUsdVndRatesByYear]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -258,6 +289,30 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     return () => window.clearTimeout(timeoutId);
   }, [preferenceStatus]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      hasTrackedOpenRef.current = false
+      return
+    }
+
+    if (hasTrackedOpenRef.current) {
+      return
+    }
+
+    hasTrackedOpenRef.current = true
+    captureAnalyticsEvent(ANALYTICS_EVENTS.settingsOpened, {
+      source: 'sidebar_modal',
+      active_tab: activeTab,
+    })
+  }, [activeTab, isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    captureAnalyticsEvent(ANALYTICS_EVENTS.settingsTabViewed, {
+      tab: activeTab,
+    })
+  }, [activeTab, isOpen])
+
   const usdRateYears = useMemo(() => {
     const startYear = 2016
     const endYear = new Date().getFullYear() + 1
@@ -267,6 +322,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   if (!isOpen) return null;
 
   const handleRestartWalkthrough = () => {
+    captureAnalyticsEvent(ANALYTICS_EVENTS.walkthroughRestartRequested, {
+      source: 'settings_modal',
+    })
     resetDashboardWalkthroughPreference();
     onClose();
     window.setTimeout(() => {
@@ -309,6 +367,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const tabLabel =
       DEFAULT_TAB_OPTIONS.find((option) => option.value === nextPreferences.defaultTab)?.label ||
       'Overview';
+    captureAnalyticsEvent(ANALYTICS_EVENTS.preferencesSaved, {
+      default_ticker: nextPreferences.defaultTicker,
+      default_tab: nextPreferences.defaultTab,
+      preferred_dashboard_id: preferredDashboardId,
+      preferred_tab_id: preferredTabId,
+    })
     setPreferenceStatus(`Saved locally: ${nextPreferences.defaultTicker} opens on ${tabLabel}.`);
   };
 
@@ -356,6 +420,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setAiWebSearch(nextSettings.webSearch);
     setAiPreferAppwriteData(nextSettings.preferAppwriteData);
     setAiEnableSidebarWorkflowOutputs(nextSettings.enableSidebarWorkflowOutputs);
+    captureAnalyticsEvent(ANALYTICS_EVENTS.aiSettingsSaved, {
+      provider: nextSettings.provider,
+      mode: nextSettings.mode,
+      model: nextSettings.model,
+      web_search: nextSettings.webSearch,
+      prefer_vnibb_data: nextSettings.preferAppwriteData,
+      sidebar_workflow_outputs: nextSettings.enableSidebarWorkflowOutputs,
+    })
     setPreferenceStatus(
       nextSettings.mode === 'browser_key'
         ? `VniAgent settings saved locally: ${nextSettings.provider} browser key + ${nextSettings.model}.`
@@ -384,6 +456,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setNewSharedPromptLabel('')
     setNewSharedPromptTemplate('')
     setNewSharedPromptCategory('analysis')
+    captureAnalyticsEvent(ANALYTICS_EVENTS.adminPromptDraftAdded, {
+      category: nextPrompt.category,
+      prompt_count: sharedPrompts.length + 1,
+    })
   }
 
   const saveSharedPromptLibrary = async () => {
@@ -399,6 +475,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setSharedPrompts(response.data || [])
       setSharedPromptVersion(response.version || 0)
       setSharedPromptHistory(response.history || [])
+      captureAnalyticsEvent(ANALYTICS_EVENTS.adminPromptLibrarySaved, {
+        version: response.version || 0,
+        prompt_count: response.count,
+      })
       setPreferenceStatus(`Shared VniAgent prompt library saved (${response.count} prompts).`)
     } catch (error) {
       setPreferenceStatus(error instanceof Error ? `Shared VniAgent prompt save failed: ${error.message}` : 'Shared VniAgent prompt save failed.')
@@ -895,6 +975,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     type="button"
                     onClick={() => {
                       const nextSettings = clearStoredAISettings()
+                      captureAnalyticsEvent(ANALYTICS_EVENTS.aiSettingsReset, {
+                        provider: nextSettings.provider,
+                        mode: nextSettings.mode,
+                        model: nextSettings.model,
+                      })
                       setAiProvider(nextSettings.provider)
                       setAiMode(nextSettings.mode)
                       setAiModelInput(nextSettings.model)
@@ -921,7 +1006,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     {(['KBS', 'VCI', 'DNSE'] as VnstockSource[]).map(src => (
                       <button
                         key={src}
-                        onClick={() => setPreferredVnstockSource(src)}
+                        onClick={() => {
+                          captureAnalyticsEvent(ANALYTICS_EVENTS.dataSourceChanged, {
+                            previous_source: preferredVnstockSource,
+                            source: src,
+                          })
+                          setPreferredVnstockSource(src)
+                        }}
                         className={cn(
                           "px-3 py-2 rounded-lg border text-sm transition-all",
                           preferredVnstockSource === src
@@ -942,7 +1033,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     {unitOptions.map(option => (
                       <button
                         key={option.value}
-                        onClick={() => setUnit(option.value)}
+                        onClick={() => {
+                          captureAnalyticsEvent(ANALYTICS_EVENTS.unitDisplayChanged, {
+                            previous_display: unitConfig.display,
+                            display: option.value,
+                          })
+                          setUnit(option.value)
+                        }}
                         className={cn(
                           "px-3 py-2 rounded-lg border text-[11px] font-bold transition-all",
                           unitConfig.display === option.value
@@ -962,7 +1059,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <div>
                       <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-1 uppercase tracking-wider text-[10px]">USD/VND Yearly Overrides</h4>
                       <p className="text-[10px] text-[var(--text-muted)]">
-                        Financial and fundamental widgets convert VND values to USD using the rate for each report year. Missing years fall back to the admin global default rate.
+                        Financial and fundamental widgets convert VND values to USD using the rate for each report year. Missing years fall back to the admin yearly default first, then the admin global default rate.
                       </p>
                       <p className="mt-1 text-[10px] text-cyan-300">Global default: {formatNumber(globalUsdVndDefaultRate, { decimals: 0 })} VND/USD</p>
                     </div>
@@ -986,6 +1083,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             onBlur={() => {
                               const rawValue = usdRateInputs[String(year)]
                               if (!rawValue) {
+                                captureAnalyticsEvent(ANALYTICS_EVENTS.usdRateOverrideUpdated, {
+                                  year,
+                                  mode: 'cleared',
+                                })
                                 setUsdVndRate(year, null)
                                 return
                               }
@@ -994,14 +1095,27 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 setPreferenceStatus(`Invalid USD/VND rate for ${year}. Use a number greater than zero.`)
                                 return
                               }
+                              captureAnalyticsEvent(ANALYTICS_EVENTS.usdRateOverrideUpdated, {
+                                year,
+                                mode: 'saved',
+                              })
                               setUsdVndRate(year, parsed)
                             }}
-                            placeholder={String(globalUsdVndDefaultRate)}
+                            placeholder={String(adminUsdVndRatesByYear[String(year)] || globalUsdVndDefaultRate)}
                             className="mt-2 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
                           />
                           <div className="mt-1 text-[10px] text-[var(--text-muted)]">
-                            {localUsdVndRatesByYear[String(year)] ? 'Local override' : 'Using global default'}
+                            {localUsdVndRatesByYear[String(year)]
+                              ? 'Local override'
+                              : adminUsdVndRatesByYear[String(year)]
+                                ? 'Using admin yearly default'
+                                : 'Using admin global default'}
                           </div>
+                          {!localUsdVndRatesByYear[String(year)] && adminUsdVndRatesByYear[String(year)] ? (
+                            <div className="mt-1 text-[10px] text-cyan-300">
+                              Admin default: {formatNumber(adminUsdVndRatesByYear[String(year)], { decimals: 0 })} VND/USD
+                            </div>
+                          ) : null}
                         </label>
                       ))}
                     </div>
@@ -1009,6 +1123,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <button
                         type="button"
                         onClick={() => {
+                          captureAnalyticsEvent(ANALYTICS_EVENTS.usdRateOverridesReset, {
+                            override_count: Object.keys(localUsdVndRatesByYear).length,
+                          })
                           clearUsdVndRates()
                           setUsdRateInputs({})
                           setPreferenceStatus('Local USD/VND yearly overrides cleared.')
@@ -1027,7 +1144,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     {decimalOptions.map((value) => (
                       <button
                         key={value}
-                        onClick={() => setDecimalPlaces(value)}
+                        onClick={() => {
+                          captureAnalyticsEvent(ANALYTICS_EVENTS.decimalPlacesChanged, {
+                            previous_decimal_places: unitConfig.decimalPlaces,
+                            decimal_places: value,
+                          })
+                          setDecimalPlaces(value)
+                        }}
                         className={cn(
                           "px-3 py-2 rounded-lg border text-[11px] font-bold transition-all",
                           unitConfig.decimalPlaces === value
@@ -1092,6 +1215,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         onClick={async () => {
                           const trimmedKey = adminLayoutKeyInput.trim()
                           if (!trimmedKey) {
+                            captureAnalyticsEvent(ANALYTICS_EVENTS.adminLayoutKeyCleared, {
+                              source: 'empty_save',
+                            })
                             clearAdminLayoutKey()
                             writeAdminLayoutControlsVisible(false)
                             setShowGlobalLayoutControls(false)
@@ -1106,8 +1232,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             await loadAdminUnitRuntimeConfig(trimmedKey)
                             writeAdminLayoutKey(trimmedKey)
                             writeAdminLayoutKeyValidated(true)
+                            captureAnalyticsEvent(ANALYTICS_EVENTS.adminLayoutKeySaved, {
+                              status: 'validated',
+                            })
                             setPreferenceStatus('Admin layout key validated and saved locally.')
                           } catch (error) {
+                            captureAnalyticsEvent(ANALYTICS_EVENTS.adminLayoutKeyValidationFailed, {
+                              error_type: error instanceof Error ? error.message : 'validation_failed',
+                            })
                             clearAdminLayoutKey()
                             writeAdminLayoutKeyValidated(false)
                             writeAdminLayoutControlsVisible(false)
@@ -1125,6 +1257,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <button
                         type="button"
                         onClick={() => {
+                          captureAnalyticsEvent(ANALYTICS_EVENTS.adminLayoutKeyCleared, {
+                            source: 'clear_button',
+                          })
                           clearAdminLayoutKey()
                           writeAdminLayoutKeyValidated(false)
                           writeAdminLayoutControlsVisible(false)
@@ -1156,6 +1291,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         <Switch
                           checked={showGlobalLayoutControls}
                           onCheckedChange={(checked) => {
+                            captureAnalyticsEvent(ANALYTICS_EVENTS.adminLayoutControlsToggled, {
+                              enabled: checked,
+                            })
                             setShowGlobalLayoutControls(checked)
                             writeAdminLayoutControlsVisible(checked)
                             setPreferenceStatus(checked ? 'Global layout controls enabled.' : 'Global layout controls hidden.')
@@ -1241,6 +1379,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                               setIsAdminAiRuntimeSaving(true)
                               const saved = await saveAdminAIRuntimeConfig(trimmedKey, trimmedModel)
                               setAdminAiModelInput(saved.model || trimmedModel)
+                              captureAnalyticsEvent(ANALYTICS_EVENTS.adminAiRuntimeSaved, {
+                                model: saved.model || trimmedModel,
+                              })
                               setPreferenceStatus(`Admin VniAgent model saved: ${saved.model}.`)
                             } catch (error) {
                               setPreferenceStatus(error instanceof Error ? `VniAgent runtime save failed: ${error.message}` : 'VniAgent runtime save failed.')
@@ -1268,36 +1409,80 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
                 {readAdminLayoutKeyValidated() && (
                   <div>
-                    <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Global USD/VND Default</h4>
-                    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
-                      <div className="text-sm font-bold text-[var(--text-primary)]">Default VND per USD rate</div>
-                      <div className="mt-1 text-xs text-[var(--text-muted)]">
-                        Used by financial and fundamental widgets when a user has not supplied a year-specific USD/VND override in this browser.
+                    <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Admin USD/VND Defaults</h4>
+                    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 space-y-4">
+                      <div>
+                        <div className="text-sm font-bold text-[var(--text-primary)]">Global fallback VND per USD rate</div>
+                        <div className="mt-1 text-xs text-[var(--text-muted)]">
+                          Used when neither a browser-local yearly override nor an admin yearly default exists for the report year.
+                        </div>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min="1"
+                          step="0.01"
+                          value={adminUsdVndDefaultRateInput}
+                          onChange={(event) => setAdminUsdVndDefaultRateInput(event.target.value)}
+                          className="mt-4 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                        />
                       </div>
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min="1"
-                        step="0.01"
-                        value={adminUsdVndDefaultRateInput}
-                        onChange={(event) => setAdminUsdVndDefaultRateInput(event.target.value)}
-                        className="mt-4 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
-                      />
+
+                      <div>
+                        <div className="text-sm font-bold text-[var(--text-primary)]">Year-specific admin defaults</div>
+                        <div className="mt-1 text-xs text-[var(--text-muted)]">
+                          These shared yearly defaults apply to everyone unless a user overrides the same year in their own browser.
+                        </div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          {usdRateYears.map((year) => (
+                            <label key={year} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">{year}</div>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                min="1"
+                                step="0.01"
+                                value={adminUsdRateInputs[String(year)] ?? ''}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value
+                                  setAdminUsdRateInputs((prev) => ({ ...prev, [String(year)]: nextValue }))
+                                }}
+                                placeholder={adminUsdVndRatesByYear[String(year)] ? String(adminUsdVndRatesByYear[String(year)]) : 'Use global fallback'}
+                                className="mt-2 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                              />
+                              <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                                {adminUsdVndRatesByYear[String(year)] ? 'Admin yearly default' : 'Using global fallback'}
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={async () => {
                             const trimmedKey = adminLayoutKeyInput.trim()
                             const parsed = Number(adminUsdVndDefaultRateInput)
+                            const { rates: yearlyRates, invalidYear } = parseUsdRateInputs(adminUsdRateInputs, usdRateYears)
                             if (!trimmedKey || !Number.isFinite(parsed) || parsed <= 0) {
                               setPreferenceStatus('Provide a valid admin key and a USD/VND rate greater than zero.')
                               return
                             }
+                            if (invalidYear !== null) {
+                              setPreferenceStatus(`Invalid admin USD/VND rate for ${invalidYear}. Use a number greater than zero.`)
+                              return
+                            }
                             try {
                               setIsAdminUnitRuntimeSaving(true)
-                              const saved = await saveAdminUnitRuntimeConfig(trimmedKey, parsed)
+                              const saved = await saveAdminUnitRuntimeConfig(trimmedKey, parsed, yearlyRates)
+                              applyAdminUsdRuntimeConfig(saved as UnitRuntimeConfigResponse)
                               setAdminUsdVndDefaultRateInput(String(saved.usd_vnd_default_rate))
-                              setPreferenceStatus(`Global USD/VND default saved: ${formatNumber(saved.usd_vnd_default_rate, { decimals: 0 })}.`)
+                              setAdminUsdRateInputs(toRateInputs(saved.usd_vnd_rates_by_year))
+                              captureAnalyticsEvent(ANALYTICS_EVENTS.adminUnitRuntimeSaved, {
+                                usd_vnd_default_rate: saved.usd_vnd_default_rate,
+                                yearly_override_count: Object.keys(saved.usd_vnd_rates_by_year || {}).length,
+                              })
+                              setPreferenceStatus(`Admin USD/VND defaults saved. Global fallback: ${formatNumber(saved.usd_vnd_default_rate, { decimals: 0 })}.`)
                             } catch (error) {
                               setPreferenceStatus(error instanceof Error ? `Unit runtime save failed: ${error.message}` : 'Unit runtime save failed.')
                             } finally {
@@ -1307,7 +1492,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           disabled={isAdminUnitRuntimeSaving || isAdminUnitRuntimeLoading}
                           className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          {isAdminUnitRuntimeSaving ? 'Saving…' : 'Save USD Default'}
+                          {isAdminUnitRuntimeSaving ? 'Saving…' : 'Save Admin USD Defaults'}
                         </button>
                         <button
                           type="button"
@@ -1384,7 +1569,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => setSharedPrompts((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                                  onClick={() => {
+                                    captureAnalyticsEvent(ANALYTICS_EVENTS.adminPromptRemoved, {
+                                      category: prompt.category,
+                                      prompt_count: sharedPrompts.length - 1,
+                                    })
+                                    setSharedPrompts((prev) => prev.filter((_, itemIndex) => itemIndex !== index))
+                                  }}
                                   className="rounded-lg border border-[var(--border-default)] px-3 py-1 text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                                 >
                                   Remove
