@@ -42,7 +42,7 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 17;
+const CURRENT_MIGRATION_VERSION = 18;
 const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
@@ -364,25 +364,37 @@ const OWNERSHIP_TEMPLATE: TemplateWidget[] = [
         type: 'major_shareholders',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 10, h: 6, minW: 8, minH: 4 }
+        layout: { x: 0, y: 0, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'officers_management',
         syncGroupId: 1,
         config: {},
-        layout: { x: 10, y: 0, w: 14, h: 6, minW: 10, minH: 5 }
+        layout: { x: 8, y: 0, w: 8, h: 8, minW: 6, minH: 6 }
+    },
+    {
+        type: 'share_statistics',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 0, w: 8, h: 8, minW: 6, minH: 6 }
+    },
+    {
+        type: 'subsidiaries',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 8, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'foreign_trading',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 6, w: 16, h: 8, minW: 10, minH: 6 }
+        layout: { x: 8, y: 8, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'insider_trading',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 6, w: 8, h: 8, minW: 6, minH: 5 }
+        layout: { x: 16, y: 8, w: 8, h: 8, minW: 6, minH: 6 }
     }
 ];
 
@@ -438,10 +450,10 @@ const MAIN_MACRO_TEMPLATE: TemplateWidget[] = [
 
 const MAIN_DEEP_DIVE_TEMPLATE: TemplateWidget[] = [
     {
-        type: 'ticker_info',
+        type: 'ticker_profile',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 8, h: 6, minW: 6, minH: 5 }
+        layout: { x: 0, y: 0, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'price_chart',
@@ -450,34 +462,34 @@ const MAIN_DEEP_DIVE_TEMPLATE: TemplateWidget[] = [
         layout: { x: 8, y: 0, w: 16, h: 10, minW: 10, minH: 8 }
     },
     {
+        type: 'ticker_info',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 8, w: 8, h: 5, minW: 6, minH: 4 }
+    },
+    {
         type: 'key_metrics',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 6, w: 8, h: 11, minW: 6, minH: 9 }
-    },
-    {
-        type: 'quick_stats',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 17, w: 8, h: 5, minW: 6, minH: 4 }
+        layout: { x: 0, y: 13, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'volume_analysis',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 10, w: 8, h: 8, minW: 6, minH: 6 }
+        layout: { x: 8, y: 10, w: 8, h: 6, minW: 6, minH: 5 }
     },
     {
         type: 'momentum',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 10, w: 8, h: 8, minW: 6, minH: 6 }
+        layout: { x: 16, y: 10, w: 8, h: 6, minW: 6, minH: 5 }
     },
     {
         type: 'unified_financials',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 22, w: 24, h: 14, minW: 16, minH: 12 }
+        layout: { x: 8, y: 16, w: 16, h: 14, minW: 12, minH: 10 }
     },
 ];
 
@@ -561,22 +573,22 @@ const QUANT_COMPARISON_TEMPLATE: TemplateWidget[] = [
 
 const QUANT_MARKET_TEMPLATE: TemplateWidget[] = [
     {
+        type: 'market_overview',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 8, h: 10, minW: 6, minH: 7 }
+    },
+    {
         type: 'market_breadth',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 8, h: 9, minW: 6, minH: 7 }
+        layout: { x: 8, y: 0, w: 8, h: 10, minW: 6, minH: 7 }
     },
     {
-        type: 'rs_ranking',
+        type: 'top_movers',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 0, w: 8, h: 10, minW: 6, minH: 8 }
-    },
-    {
-        type: 'relative_rotation',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 16, y: 0, w: 8, h: 9, minW: 6, minH: 7 }
+        layout: { x: 16, y: 0, w: 8, h: 10, minW: 6, minH: 7 }
     },
     {
         type: 'money_flow_trend',
@@ -654,31 +666,25 @@ const MAIN_TRADING_TEMPLATE: TemplateWidget[] = [
         type: 'transaction_flow',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 12, h: 9, minW: 8, minH: 5 }
-    },
-    {
-        type: 'foreign_trading',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 12, y: 0, w: 12, h: 9, minW: 8, minH: 6 }
+        layout: { x: 0, y: 0, w: 12, h: 10, minW: 8, minH: 6 }
     },
     {
         type: 'orderbook',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 9, w: 8, h: 8, minW: 6, minH: 6 }
+        layout: { x: 12, y: 0, w: 12, h: 10, minW: 8, minH: 6 }
     },
     {
         type: 'intraday_trades',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 9, w: 8, h: 8, minW: 6, minH: 6 }
+        layout: { x: 0, y: 10, w: 12, h: 8, minW: 8, minH: 6 }
     },
     {
         type: 'block_trade',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 9, w: 8, h: 8, minW: 6, minH: 6 }
+        layout: { x: 12, y: 10, w: 12, h: 8, minW: 8, minH: 6 }
     },
 ];
 
@@ -687,64 +693,76 @@ const MAIN_MARKET_TEMPLATE: TemplateWidget[] = [
         type: 'market_overview',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 8, h: 9, minW: 6, minH: 6 }
+        layout: { x: 0, y: 0, w: 8, h: 10, minW: 6, minH: 6 }
     },
     {
         type: 'top_movers',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 0, w: 8, h: 9, minW: 6, minH: 7 }
+        layout: { x: 8, y: 0, w: 8, h: 10, minW: 6, minH: 7 }
     },
     {
         type: 'market_breadth',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 0, w: 8, h: 9, minW: 6, minH: 7 }
+        layout: { x: 16, y: 0, w: 8, h: 10, minW: 6, minH: 7 }
     },
     {
         type: 'market_heatmap',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 9, w: 12, h: 15, minW: 10, minH: 12 }
+        layout: { x: 0, y: 10, w: 12, h: 16, minW: 10, minH: 12 }
     },
     {
         type: 'sector_board',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 9, w: 12, h: 15, minW: 10, minH: 12 }
+        layout: { x: 12, y: 10, w: 12, h: 16, minW: 10, minH: 12 }
     },
     {
         type: 'money_flow_trend',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 24, w: 14, h: 12, minW: 10, minH: 9 }
+        layout: { x: 0, y: 26, w: 12, h: 12, minW: 10, minH: 9 }
     },
     {
         type: 'industry_bubble',
         syncGroupId: 1,
         config: {},
-        layout: { x: 14, y: 24, w: 10, h: 12, minW: 8, minH: 9 }
+        layout: { x: 12, y: 26, w: 12, h: 12, minW: 8, minH: 9 }
     },
 ];
 
 const MAIN_COMPARISON_TEMPLATE: TemplateWidget[] = [
     {
-        type: 'comparison_analysis',
+        type: 'similar_stocks',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 24, h: 10, minW: 12, minH: 8 }
+        layout: { x: 0, y: 0, w: 6, h: 8, minW: 5, minH: 6 }
     },
     {
         type: 'peer_comparison',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 10, w: 16, h: 10, minW: 10, minH: 8 }
+        layout: { x: 6, y: 0, w: 18, h: 10, minW: 10, minH: 8 }
     },
     {
-        type: 'similar_stocks',
+        type: 'correlation_matrix',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 10, w: 8, h: 10, minW: 6, minH: 6 }
+        layout: { x: 0, y: 10, w: 12, h: 10, minW: 8, minH: 8 }
+    },
+    {
+        type: 'industry_bubble',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 10, w: 12, h: 10, minW: 8, minH: 8 }
+    },
+    {
+        type: 'comparison_analysis',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 20, w: 24, h: 10, minW: 12, minH: 8 }
     },
 ];
 
@@ -753,25 +771,25 @@ const MAIN_FUNDAMENTALS_TEMPLATE: TemplateWidget[] = [
         type: 'financial_ratios',
         syncGroupId: 1,
         config: { periodSyncGroup: 'fundamental-core', hidePeriodToggle: true },
-        layout: { x: 0, y: 0, w: 10, h: 18, minW: 8, minH: 14 }
+        layout: { x: 0, y: 0, w: 12, h: 10, minW: 8, minH: 8 }
     },
     {
         type: 'income_statement',
         syncGroupId: 1,
         config: { periodSyncGroup: 'fundamental-core', hidePeriodToggle: true },
-        layout: { x: 10, y: 0, w: 14, h: 18, minW: 10, minH: 14 }
+        layout: { x: 12, y: 0, w: 12, h: 10, minW: 8, minH: 8 }
     },
     {
         type: 'balance_sheet',
         syncGroupId: 1,
         config: { periodSyncGroup: 'fundamental-core', hidePeriodToggle: true },
-        layout: { x: 0, y: 18, w: 14, h: 18, minW: 10, minH: 14 }
+        layout: { x: 0, y: 10, w: 12, h: 10, minW: 8, minH: 8 }
     },
     {
         type: 'cash_flow',
         syncGroupId: 1,
         config: { periodSyncGroup: 'fundamental-core', hidePeriodToggle: true },
-        layout: { x: 14, y: 18, w: 10, h: 18, minW: 8, minH: 14 }
+        layout: { x: 12, y: 10, w: 12, h: 10, minW: 8, minH: 8 }
     },
 ];
 
@@ -780,25 +798,25 @@ const MAIN_NEWS_TEMPLATE: TemplateWidget[] = [
         type: 'news_feed',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 12, h: 10, minW: 8, minH: 7 }
+        layout: { x: 0, y: 0, w: 12, h: 9, minW: 8, minH: 7 }
     },
     {
         type: 'news_corporate_actions',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 0, w: 12, h: 10, minW: 8, minH: 7 }
+        layout: { x: 12, y: 0, w: 12, h: 9, minW: 8, minH: 7 }
     },
     {
         type: 'events_calendar',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 10, w: 12, h: 8, minW: 8, minH: 5 }
+        layout: { x: 0, y: 9, w: 12, h: 9, minW: 8, minH: 6 }
     },
     {
         type: 'market_news',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 10, w: 12, h: 10, minW: 8, minH: 7 }
+        layout: { x: 12, y: 9, w: 12, h: 9, minW: 8, minH: 6 }
     },
 ];
 
@@ -834,31 +852,31 @@ const INITIAL_TECHNICAL_TEMPLATE: TemplateWidget[] = [
         type: 'price_chart',
         syncGroupId: 1,
         config: { timeframe: '1Y', chartType: 'candle' },
-        layout: { x: 0, y: 0, w: 24, h: 12, minW: 12, minH: 8 }
-    },
-    {
-        type: 'macd_crossovers',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 12, w: 8, h: 11, minW: 6, minH: 8 }
-    },
-    {
-        type: 'rsi_seasonal',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 8, y: 12, w: 8, h: 11, minW: 6, minH: 8 }
-    },
-    {
-        type: 'bollinger_squeeze',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 16, y: 12, w: 8, h: 11, minW: 6, minH: 8 }
+        layout: { x: 0, y: 0, w: 24, h: 10, minW: 12, minH: 8 }
     },
     {
         type: 'signal_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 23, w: 24, h: 8, minW: 12, minH: 6 }
+        layout: { x: 0, y: 10, w: 24, h: 8, minW: 12, minH: 6 }
+    },
+    {
+        type: 'volume_analysis',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 18, w: 8, h: 6, minW: 6, minH: 5 }
+    },
+    {
+        type: 'momentum',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 18, w: 8, h: 6, minW: 6, minH: 5 }
+    },
+    {
+        type: 'atr_regime',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 18, w: 8, h: 6, minW: 6, minH: 5 }
     },
 ];
 
@@ -867,7 +885,7 @@ const INITIAL_QUANT_TEMPLATE: TemplateWidget[] = [
         type: 'quant_summary',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 24, h: 10, minW: 10, minH: 8 }
+        layout: { x: 0, y: 0, w: 24, h: 8, minW: 10, minH: 6 }
     },
     {
         type: 'seasonality_heatmap',
@@ -2607,6 +2625,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
                 if (migrationVersion < 17) {
                     dashboards = migrateLegacyWidgetLayoutBounds(dashboards);
+                }
+
+                if (migrationVersion < 18) {
+                    dashboards = refreshSystemDashboardTemplates(dashboards);
                 }
 
                 // Final safety validation for all widgets

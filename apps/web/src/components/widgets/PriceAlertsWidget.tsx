@@ -9,6 +9,7 @@ import { config } from '@/lib/config';
 import { formatTimestamp } from '@/lib/format';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetEmpty } from '@/components/ui/widget-states';
+import { logClientError, logClientWarn } from '@/lib/clientLogger';
 import { fetchStockQuote, quoteQueryKey } from '@/lib/queries';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { useDashboard } from '@/contexts/DashboardContext';
@@ -67,7 +68,7 @@ class NotificationService {
 
     async requestPermission(): Promise<boolean> {
         if (!('Notification' in window)) {
-            console.warn('Browser does not support notifications');
+            logClientWarn('Browser does not support notifications');
             return false;
         }
 
@@ -76,7 +77,7 @@ class NotificationService {
             localStorage.setItem(PERMISSION_KEY, this.permission);
             return this.permission === 'granted';
         } catch (error) {
-            console.error('Failed to request notification permission:', error);
+            logClientError('Failed to request notification permission:', error);
             return false;
         }
     }
@@ -105,7 +106,7 @@ class NotificationService {
 
             return notification;
         } catch (error) {
-            console.error('Failed to show notification:', error);
+            logClientError('Failed to show notification:', error);
             return null;
         }
     }
@@ -323,7 +324,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
 
                 wsRef.current = ws;
             } catch (error) {
-                console.error('WebSocket connection failed:', error);
+                logClientError('WebSocket connection failed:', error);
                 setWsConnected(false);
             }
         };

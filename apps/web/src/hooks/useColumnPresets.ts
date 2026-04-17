@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { logClientError } from '@/lib/clientLogger';
 import { DEFAULT_PRESETS, type ColumnPreset } from '@/types/screener';
 
 const STORAGE_KEY = 'vnibb_screener_presets_v2';
@@ -21,7 +22,7 @@ export function useColumnPresets() {
         const parsed = JSON.parse(savedPresets);
         setPresets([...DEFAULT_PRESETS, ...parsed.filter((p: ColumnPreset) => p.isCustom)]);
       } catch (e) {
-        console.error('Failed to parse saved presets', e);
+        logClientError('Failed to parse saved presets', e);
       }
     }
     

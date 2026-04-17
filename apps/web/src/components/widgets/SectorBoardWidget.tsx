@@ -158,7 +158,7 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
             <ChevronRight size={16} />
           </button>
 
-          <div ref={scrollRef} className="flex h-full overflow-x-auto scrollbar-hide">
+          <div ref={scrollRef} className="flex h-full min-w-full overflow-x-auto scrollbar-hide">
             {isLoading && !hasData ? (
               <div className="mx-auto mt-6 w-full max-w-[560px] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/70 p-3">
                 <WidgetSkeleton lines={8} />
@@ -171,7 +171,7 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
               </div>
             ) : (
               sectors.map((sector) => (
-                <div key={sector.name} className="min-w-[190px] border-r border-[var(--border-subtle)] last:border-r-0">
+                <div key={sector.name} className="min-w-[180px] max-w-[260px] flex-[1_1_220px] border-r border-[var(--border-subtle)] last:border-r-0">
                   <div className="sticky top-0 z-10 border-b border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-2">
                     <div className="break-words whitespace-normal text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
                       {sector.name}

@@ -9,6 +9,7 @@
 
 import React, { Component, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { logClientError } from '@/lib/clientLogger';
 
 interface Props {
   children: ReactNode;
@@ -41,7 +42,7 @@ export class WidgetErrorBoundary extends Component<Props, State> {
     this.setState({ errorInfo });
 
     // Log error for debugging
-    console.error(`Widget error in ${this.props.widgetName || 'Unknown'}:`, error, errorInfo);
+    logClientError(`Widget error in ${this.props.widgetName || 'Unknown'}:`, error, errorInfo);
 
     // Call optional error handler
     this.props.onError?.(error, errorInfo);

@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { config } from '@/lib/config';
+import { logClientError, logClientWarn } from '@/lib/clientLogger';
 
 const WS_URL = config.wsPriceUrl;
 
@@ -175,13 +176,13 @@ export function useWebSocket({
                     return;
                 }
                 if (!config.isDev) {
-                    console.warn('WebSocket encountered error:', err);
+                    logClientWarn('WebSocket encountered error:', err);
                 }
                 ws.close(); // Ensure close is called to trigger onclose for reconnection
             };
 
         } catch (error) {
-            console.error('WebSocket connection initialization failed:', error);
+            logClientError('WebSocket connection initialization failed:', error);
             // Retry after delay even if init failed
             reconnectTimeoutRef.current = setTimeout(() => {
                 if (enabled) connect();

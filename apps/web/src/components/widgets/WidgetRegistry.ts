@@ -529,6 +529,35 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     unified_financials: { w: 24, h: 18, minW: 16, minH: 12 },
 };
 
+Object.assign(defaultWidgetLayouts, {
+    price_chart: { w: 16, h: 10, minW: 10, minH: 8 },
+    key_metrics: { w: 12, h: 8, minW: 8, minH: 6 },
+    share_statistics: { w: 8, h: 8, minW: 6, minH: 6 },
+    screener: { w: 16, h: 10, minW: 12, minH: 8 },
+    major_shareholders: { w: 8, h: 8, minW: 6, minH: 6 },
+    officers_management: { w: 8, h: 8, minW: 6, minH: 6 },
+    insider_trading: { w: 8, h: 8, minW: 6, minH: 6 },
+    foreign_trading: { w: 8, h: 8, minW: 6, minH: 6 },
+    subsidiaries: { w: 8, h: 8, minW: 6, minH: 6 },
+    intraday_trades: { w: 12, h: 8, minW: 8, minH: 6 },
+    transaction_flow: { w: 12, h: 10, minW: 8, minH: 6 },
+    financial_ratios: { w: 12, h: 10, minW: 8, minH: 8 },
+    income_statement: { w: 12, h: 10, minW: 8, minH: 8 },
+    balance_sheet: { w: 12, h: 10, minW: 8, minH: 8 },
+    cash_flow: { w: 12, h: 10, minW: 8, minH: 8 },
+    market_breadth: { w: 8, h: 10, minW: 6, minH: 7 },
+    sector_board: { w: 12, h: 15, minW: 10, minH: 12 },
+    money_flow_trend: { w: 14, h: 12, minW: 10, minH: 9 },
+    quant_summary: { w: 24, h: 8, minW: 10, minH: 6 },
+    relative_rotation: { w: 12, h: 10, minW: 8, minH: 8 },
+    technical_summary: { w: 8, h: 10, minW: 6, minH: 8 },
+    signal_summary: { w: 24, h: 8, minW: 12, minH: 6 },
+    similar_stocks: { w: 6, h: 8, minW: 5, minH: 6 },
+    block_trade: { w: 12, h: 8, minW: 8, minH: 6 },
+    orderbook: { w: 12, h: 8, minW: 8, minH: 6 },
+    market_news: { w: 12, h: 9, minW: 8, minH: 6 },
+} satisfies Partial<Record<WidgetType, { w: number; h: number; minW?: number; minH?: number }>>);
+
 
 // Widget display names
 export const widgetNames: Record<WidgetType, string> = {

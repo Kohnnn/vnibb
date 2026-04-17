@@ -931,10 +931,10 @@ function DashboardContent() {
                                         <Shield className="mt-0.5 h-4 w-4 text-amber-300" />
                                         <div>
                                             <div className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
-                                                Global Layout Controls
+                                                System Dashboard Controls
                                             </div>
                                             <div className="mt-1 text-xs text-[var(--text-secondary)]">
-                                                Admin-only draft/publish controls for the Initial workspace.
+                                                Admin-only draft and publish controls for the current system dashboard.
                                             </div>
                                         </div>
                                     </div>

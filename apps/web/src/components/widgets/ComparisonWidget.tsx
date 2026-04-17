@@ -13,6 +13,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
+import { logClientError } from '@/lib/clientLogger';
 import { 
     ResponsiveContainer, LineChart as ReLineChart, Line, 
     XAxis, YAxis, Tooltip, Legend, CartesianGrid 
@@ -58,7 +59,7 @@ export function ComparisonWidget({ id, initialSymbols = [DEFAULT_TICKER, 'FPT'],
                     setPerfData(json);
                 }
             } catch (e) {
-                console.error("Failed to fetch multi-performance", e);
+                logClientError('Failed to fetch multi-performance', e);
             } finally {
                 setPerfLoading(false);
             }

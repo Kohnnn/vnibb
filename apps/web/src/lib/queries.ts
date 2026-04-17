@@ -7,6 +7,7 @@ import * as api from './api';
 import type { DashboardCreate, WidgetCreate } from '@/types/dashboard';
 import type { AlertSettings } from '@/types/insider';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
+import { logClientError } from './clientLogger';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from './pollingPolicy';
 
 // Helper hook to get the preferred VnStock source
@@ -171,7 +172,7 @@ export function useProfile(symbol: string, enabled = true) {
                 if ((error as Error)?.name === 'AbortError') {
                     throw error;
                 }
-                console.error(`[useProfile] Failed to fetch profile for ${symbol}:`, error);
+                logClientError(`[useProfile] Failed to fetch profile for ${symbol}:`, error);
                 throw error;
             }
         },
@@ -517,7 +518,7 @@ export function useScreenerData(options?: {
                 if ((error as Error)?.name === 'AbortError') {
                     throw error;
                 }
-                console.error(`[useScreenerData] Failed to fetch screener data:`, error);
+                logClientError('[useScreenerData] Failed to fetch screener data:', error);
                 throw error;
             }
         },
@@ -989,7 +990,7 @@ export function useStockQuote(symbol: string, enabled = true) {
                 if ((error as Error)?.name === 'AbortError') {
                     throw error;
                 }
-                console.error(`[useStockQuote] Failed to fetch quote for ${symbol}:`, error);
+                logClientError(`[useStockQuote] Failed to fetch quote for ${symbol}:`, error);
                 throw error;
             }
         },

@@ -22,6 +22,7 @@ import { CopilotArtifactPanel } from '@/components/ui/CopilotArtifactPanel';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { readStoredAISettings } from '@/lib/aiSettings';
+import { logClientError } from '@/lib/clientLogger';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
 
 interface AIAnalysisWidgetProps {
@@ -126,7 +127,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove }: AIAnalysisWidgetPro
         },
       });
     } catch (err: any) {
-      console.error('AI Analysis Error:', err);
+      logClientError('AI Analysis Error:', err);
       captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseFailed, {
         source: 'analysis_widget',
         symbol,

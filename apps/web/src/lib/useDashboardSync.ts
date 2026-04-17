@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { probeBackendReadiness } from '@/lib/backendHealth'
 import * as api from '@/lib/api';
+import { logClientError, logClientInfo } from '@/lib/clientLogger';
 import type { Dashboard, DashboardState } from '@/types/dashboard';
 
 // Debounce delay for auto-save (ms)
@@ -108,9 +109,9 @@ export function useDashboardSync(
         checkBackendHealth().then((available) => {
             isBackendAvailable.current = available;
             if (available) {
-                console.log('[DashboardSync] Backend connected');
+                logClientInfo('[DashboardSync] Backend connected');
             } else {
-                console.log('[DashboardSync] Backend unavailable, using localStorage only');
+                logClientInfo('[DashboardSync] Backend unavailable, using localStorage only');
             }
         });
     }, [enabled]);
@@ -129,7 +130,7 @@ export function useDashboardSync(
                 }
 
                 await api.deleteDashboard(dashboardId);
-                console.log('[DashboardSync] Deleted dashboard from backend:', previousDashboard.name);
+                logClientInfo('[DashboardSync] Deleted dashboard from backend:', previousDashboard.name);
             }
 
             for (const dashboard of dashboards) {
@@ -137,7 +138,7 @@ export function useDashboardSync(
 
                 if (dashboardId) {
                     await api.updateDashboard(dashboardId, toBackendPayload(dashboard));
-                    console.log('[DashboardSync] Synced dashboard:', dashboard.name);
+                    logClientInfo('[DashboardSync] Synced dashboard:', dashboard.name);
                     continue;
                 }
 
@@ -161,7 +162,7 @@ export function useDashboardSync(
                     }
 
                     onDashboardIdReconciled?.(dashboard.id, createdFrontendDashboard);
-                    console.log('[DashboardSync] Created dashboard in backend:', dashboard.name);
+                    logClientInfo('[DashboardSync] Created dashboard in backend:', dashboard.name);
                 } finally {
                     pendingCreateIds.current.delete(dashboard.id);
                 }
@@ -170,7 +171,7 @@ export function useDashboardSync(
             previousDashboards.current = dashboards;
             onSyncSuccess?.();
         } catch (error) {
-            console.error('[DashboardSync] Sync failed:', error);
+            logClientError('[DashboardSync] Sync failed:', error);
             onSyncError?.(error as Error);
         }
     }, [onDashboardIdReconciled, onSyncError, onSyncSuccess]);
@@ -218,7 +219,7 @@ export function useLoadFromBackend(
             try {
                 const isAvailable = await checkBackendHealth();
                 if (!isAvailable) {
-                    console.log('[DashboardSync] Backend unavailable, skipping load');
+                    logClientInfo('[DashboardSync] Backend unavailable, skipping load');
                     return;
                 }
 
@@ -229,10 +230,10 @@ export function useLoadFromBackend(
                     );
 
                     onLoad(frontendDashboards);
-                    console.log('[DashboardSync] Loaded dashboards from backend');
+                    logClientInfo('[DashboardSync] Loaded dashboards from backend');
                 }
             } catch (error) {
-                console.error('[DashboardSync] Failed to load from backend:', error);
+                logClientError('[DashboardSync] Failed to load from backend:', error);
             }
         }
 

@@ -11,6 +11,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { logClientError, logClientInfo } from '@/lib/clientLogger';
 
 export type WebSocketStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -131,7 +132,7 @@ export function useWebSocket({
                 // Attempt reconnection if enabled and not a clean close
                 if (reconnect && event.code !== 1000 && reconnectCount < reconnectAttempts) {
                     const delay = getBackoffDelay(reconnectCount);
-                    console.log(`WebSocket closed. Reconnecting in ${Math.round(delay)}ms... (attempt ${reconnectCount + 1}/${reconnectAttempts})`);
+                    logClientInfo(`WebSocket closed. Reconnecting in ${Math.round(delay)}ms... (attempt ${reconnectCount + 1}/${reconnectAttempts})`);
 
                     reconnectTimeoutRef.current = setTimeout(() => {
                         setReconnectCount(prev => prev + 1);
@@ -145,7 +146,7 @@ export function useWebSocket({
                 onError?.(event);
             };
         } catch (error) {
-            console.error('WebSocket connection error:', error);
+            logClientError('WebSocket connection error:', error);
             setStatus('error');
         }
     }, [url, onMessage, onOpen, onClose, onError, reconnect, reconnectAttempts, reconnectCount, getBackoffDelay, clearReconnectTimeout]);

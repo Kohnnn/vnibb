@@ -117,6 +117,11 @@ For current TradingView-native coverage, use:
 - `Order Book` now includes a cumulative depth chart above the order table.
 - `Relative Rotation` now renders the actual quadrant map and retains a scaffold overlay when the backend cannot provide enough benchmark-relative data.
 - The TradingView `Market Data` macro preset now uses quote-friendly treasury and dollar futures proxies for the rates/dollar rows, which avoids sparse blank cells from unsupported `TVC:` quote-table entries.
+- TradingView settings on shipped system dashboards are now consistently admin-only until Admin Mode is enabled, and the modal shows the effective runtime payload preview plus an official docs link.
+- The site settings `Data` tab now keeps `Currency & FX` visible even when the current display unit is still `VND`, so yearly USD/VND overrides are always discoverable.
+- Widget-library size badges now come from the shared dashboard layout contract instead of stale definition-only defaults.
+- The shipped Fundamental, Technical, and Quant system tabs were rebalanced to reduce whitespace, remove duplicated market widgets, and give statement/order-flow widgets more usable height.
+- `Market Heatmap` now uses live container dimensions for its D3 treemap, and `Sector Board` now expands columns to fill wide layouts more naturally.
 - Broader USD conversion for quote and market widgets is intentionally deferred to the roadmap.
 - Additional widgets now exposed in the widget library:
   - `block_trade`
