@@ -1,4 +1,5 @@
 import html2canvas from 'html2canvas';
+import { logClientError } from '@/lib/clientLogger';
 
 /**
  * Export data to CSV file
@@ -54,7 +55,7 @@ export function exportToJSON(data: any, filename: string) {
 export async function exportToPNG(elementId: string, filename: string) {
   const element = document.getElementById(elementId);
   if (!element) {
-    console.error(`Element with id "${elementId}" not found`);
+    logClientError(`Element with id "${elementId}" not found`);
     return;
   }
   
@@ -68,7 +69,7 @@ export async function exportToPNG(elementId: string, filename: string) {
       if (blob) downloadBlob(blob, `${filename}.png`);
     }, 'image/png');
   } catch (error) {
-    console.error('Failed to export as PNG:', error);
+    logClientError('Failed to export as PNG:', error);
   }
 }
 

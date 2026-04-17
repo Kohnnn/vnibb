@@ -4,6 +4,7 @@
 
 import React, { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { logClientError } from '@/lib/clientLogger';
 
 interface Props {
     children: ReactNode;
@@ -28,7 +29,7 @@ export class WidgetErrorBoundary extends Component<Props, State> {
     }
 
     componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-        console.error('Widget Error:', error, errorInfo);
+        logClientError('Widget Error:', error, errorInfo);
         this.props.onError?.(error, errorInfo);
     }
 

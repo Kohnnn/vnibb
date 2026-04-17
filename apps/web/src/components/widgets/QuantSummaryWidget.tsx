@@ -227,7 +227,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
         ) : (
           <div className="flex h-full flex-col gap-3">
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
-              <div className="flex min-h-[260px] flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+              <div className="flex min-h-[180px] flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Momentum</div>
                 <div className={`mt-1 text-lg font-semibold ${regime.momentum.tone}`}>{regime.momentum.shortLabel}</div>
                 <div className="text-[10px] text-[var(--text-secondary)]">{regime.momentum.label}</div>

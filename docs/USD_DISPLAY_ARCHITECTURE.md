@@ -51,6 +51,13 @@ This means admin defaults now provide shared yearly baselines without taking con
 - `apps/web/src/components/settings/SettingsModal.tsx`: local override UI and admin default editor
 - `apps/web/src/lib/api.ts`: runtime-config request/response types
 
+## Settings Surface
+
+- The site settings `Data` tab now keeps the `Currency & FX` section visible even when the current display unit is `VND`.
+- Users can configure browser-local yearly USD/VND overrides before switching the site into `USD` display mode.
+- The settings UI also shows the loaded admin fallback rate and whether a year is using a local override, an admin yearly default, or the admin global fallback.
+- This section intentionally lives beside decimal places and source preferences so currency, precision, and data-source decisions remain in one site-level control surface.
+
 ## Backend Touchpoints
 
 - `apps/api/vnibb/api/v1/admin.py`: admin/public unit-runtime endpoints

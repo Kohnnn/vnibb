@@ -5,6 +5,7 @@ import { useState, useMemo, useRef, memo } from 'react';
 import { ChevronLeft, Download, LayoutGrid } from 'lucide-react';
 import { hierarchy, treemap } from 'd3-hierarchy';
 import html2canvas from 'html2canvas';
+import { logClientError } from '@/lib/clientLogger';
 import { useMarketHeatmap } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { SectorGroup } from '@/lib/api';
@@ -12,6 +13,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { cn } from '@/lib/utils';
 
 interface MarketHeatmapWidgetProps {
@@ -35,6 +37,23 @@ function getHeatmapColor(change: number): string {
     if (change >= -4) return 'rgb(220, 38, 38)';   // red-600
     if (change <= -6.9) return 'rgb(59, 130, 246)'; // blue-500 (Floor)
     return 'rgb(239, 68, 68)'; // red-500
+}
+
+function buildTreemapLayout(data: unknown, width: number, height: number) {
+    if (!data || width <= 0 || height <= 0) return null;
+
+    const root = hierarchy(data as any)
+        .sum((d: any) => d.value || 0)
+        .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+    const layout = treemap<any>()
+        .size([Math.max(320, Math.floor(width)), Math.max(240, Math.floor(height))])
+        .paddingOuter(6)
+        .paddingTop(28)
+        .paddingInner(3)
+        .round(true);
+
+    return layout(root);
 }
 
 function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmapWidgetProps) {
@@ -92,24 +111,6 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
         };
     }, [data, selectedGroup]);
 
-    const treemapLayout = useMemo(() => {
-        if (!treemapData) return null;
-
-        const root = hierarchy(treemapData)
-            .sum((d: any) => d.value || 0)
-            .sort((a, b) => (b.value || 0) - (a.value || 0));
-
-        // Use standard dimensions, SVG will scale
-        const layout = treemap<any>()
-            .size([900, 560])
-            .paddingOuter(6)
-            .paddingTop(28)
-            .paddingInner(3)
-            .round(true);
-
-        return layout(root);
-    }, [treemapData]);
-
     const handleExport = async () => {
         if (!heatmapRef.current) return;
         try {
@@ -119,7 +120,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
             link.href = canvas.toDataURL();
             link.click();
         } catch (error) {
-            console.error('Heatmap export failed:', error);
+            logClientError('Heatmap export failed:', error);
         }
     };
 
@@ -166,7 +167,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
         </div>
     );
 
-    const hasData = Boolean(treemapLayout && data?.sectors?.length);
+    const hasData = Boolean(treemapData && data?.sectors?.length);
     const isFallback = Boolean(error && hasData);
 
     return (
@@ -187,7 +188,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                         </div>
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
-                    ) : !treemapLayout ? (
+                    ) : !treemapData ? (
                         <div className="mx-auto mt-8 max-w-md">
                             <WidgetEmpty message="Market data unavailable" icon={<LayoutGrid size={18} />} size="compact" />
                         </div>
@@ -212,88 +213,105 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                 </span>
                             </div>
                             <div className="min-h-0 flex-1">
-                            <svg width="100%" height="100%" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet">
-                                {treemapLayout.leaves().map((node: any, i: number) => {
-                                    const width = node.x1 - node.x0;
-                                    const height = node.y1 - node.y0;
-                                    const changePct = node.data.changePct || 0;
-                                    const color = getHeatmapColor(changePct);
-                                    const labelSize = clampLabelSize(width, height);
-                                    const detailSize = Math.max(9, Math.min(12, labelSize - 2));
-                                    const canShowTitle = width > 70 && height > 34;
-                                    const canShowDetail = width > 120 && height > 56;
+                                <ChartSizeBox className="h-full min-h-[280px]" minHeight={280}>
+                                    {({ width: containerWidth, height: containerHeight }) => {
+                                        const treemapLayout = buildTreemapLayout(treemapData, containerWidth, containerHeight);
+                                        if (!treemapLayout) {
+                                            return <div className="h-full w-full" />;
+                                        }
 
-                                    return (
-                                        <g key={i} className="group transition-opacity hover:opacity-100">
-                                            <rect
-                                                x={node.x0}
-                                                y={node.y0}
-                                                width={width}
-                                                height={height}
-                                                fill={color}
-                                                className="cursor-pointer transition-all hover:brightness-110"
-                                                stroke="rgba(255,255,255,0.18)"
-                                                strokeWidth={1}
-                                                rx={8}
-                                                ry={8}
-                                                onClick={() => {
-                                                    if (selectedGroup && node.data.symbol) {
-                                                        setLinkedSymbol(node.data.symbol)
-                                                        return
-                                                    }
-                                                    setSelectedGroup(node.data.sector || node.data.name)
-                                                }}
+                                        return (
+                                            <svg
+                                                width="100%"
+                                                height="100%"
+                                                viewBox={`0 0 ${Math.max(320, Math.floor(containerWidth))} ${Math.max(240, Math.floor(containerHeight))}`}
+                                                preserveAspectRatio="none"
                                             >
-                                                <title>
-                                                    {node.data.symbol || node.data.name}
-                                                    {node.data.sector ? `\nSector: ${node.data.sector}` : ''}
-                                                    {'\n'}Change: {changePct.toFixed(2)}%
-                                                    {'\n'}Value: {((node.data.value || 0) / 1e9).toFixed(1)}B
-                                                    {!selectedGroup && node.data.stockCount ? `\nStocks: ${node.data.stockCount}` : ''}
-                                                </title>
-                                            </rect>
-                                            {canShowTitle && (
-                                                <>
-                                                    <text
-                                                        x={node.x0 + 10}
-                                                        y={node.y0 + 18}
-                                                        textAnchor="start"
-                                                        className="pointer-events-none select-none font-black"
-                                                        fill="rgba(255,255,255,0.96)"
-                                                        style={{ fontSize: labelSize }}
-                                                    >
-                                                        {node.data.symbol || node.data.name}
-                                                    </text>
-                                                    <text
-                                                        x={node.x0 + 10}
-                                                        y={node.y0 + 18 + labelSize + 6}
-                                                        textAnchor="start"
-                                                        className="pointer-events-none select-none font-semibold"
-                                                        fill="rgba(255,255,255,0.86)"
-                                                        style={{ fontSize: detailSize }}
-                                                    >
-                                                        {`${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
-                                                    </text>
-                                                </>
-                                            )}
-                                            {canShowDetail && (
-                                                <text
-                                                    x={node.x0 + 10}
-                                                    y={node.y1 - 12}
-                                                    textAnchor="start"
-                                                    className="pointer-events-none select-none font-medium"
-                                                    fill="rgba(255,255,255,0.78)"
-                                                    style={{ fontSize: 10 }}
-                                                >
-                                                    {selectedGroup
-                                                        ? `${node.data.sector || selectedGroup} • ${((node.data.value || 0) / 1e9).toFixed(1)}B`
-                                                        : `${node.data.stockCount || 0} stocks • ${((node.data.value || 0) / 1e9).toFixed(1)}B`}
-                                                </text>
-                                            )}
-                                        </g>
-                                    );
-                                })}
-                            </svg>
+                                                {treemapLayout.leaves().map((node: any) => {
+                                                    const width = node.x1 - node.x0;
+                                                    const height = node.y1 - node.y0;
+                                                    const changePct = node.data.changePct || 0;
+                                                    const color = getHeatmapColor(changePct);
+                                                    const labelSize = clampLabelSize(width, height);
+                                                    const detailSize = Math.max(9, Math.min(12, labelSize - 2));
+                                                    const canShowTitle = width > 70 && height > 34;
+                                                    const canShowDetail = width > 120 && height > 56;
+                                                    const nodeKey = node.data.symbol || node.data.sector || node.data.name;
+
+                                                    return (
+                                                        <g key={nodeKey} className="group transition-opacity hover:opacity-100">
+                                                            <rect
+                                                                x={node.x0}
+                                                                y={node.y0}
+                                                                width={width}
+                                                                height={height}
+                                                                fill={color}
+                                                                className="cursor-pointer transition-all hover:brightness-110"
+                                                                stroke="rgba(255,255,255,0.18)"
+                                                                strokeWidth={1}
+                                                                rx={8}
+                                                                ry={8}
+                                                                onClick={() => {
+                                                                    if (selectedGroup && node.data.symbol) {
+                                                                        setLinkedSymbol(node.data.symbol)
+                                                                        return
+                                                                    }
+                                                                    setSelectedGroup(node.data.sector || node.data.name)
+                                                                }}
+                                                            >
+                                                                <title>
+                                                                    {node.data.symbol || node.data.name}
+                                                                    {node.data.sector ? `\nSector: ${node.data.sector}` : ''}
+                                                                    {'\n'}Change: {changePct.toFixed(2)}%
+                                                                    {'\n'}Value: {((node.data.value || 0) / 1e9).toFixed(1)}B
+                                                                    {!selectedGroup && node.data.stockCount ? `\nStocks: ${node.data.stockCount}` : ''}
+                                                                </title>
+                                                            </rect>
+                                                            {canShowTitle && (
+                                                                <>
+                                                                    <text
+                                                                        x={node.x0 + 10}
+                                                                        y={node.y0 + 18}
+                                                                        textAnchor="start"
+                                                                        className="pointer-events-none select-none font-black"
+                                                                        fill="rgba(255,255,255,0.96)"
+                                                                        style={{ fontSize: labelSize }}
+                                                                    >
+                                                                        {node.data.symbol || node.data.name}
+                                                                    </text>
+                                                                    <text
+                                                                        x={node.x0 + 10}
+                                                                        y={node.y0 + 18 + labelSize + 6}
+                                                                        textAnchor="start"
+                                                                        className="pointer-events-none select-none font-semibold"
+                                                                        fill="rgba(255,255,255,0.86)"
+                                                                        style={{ fontSize: detailSize }}
+                                                                    >
+                                                                        {`${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
+                                                                    </text>
+                                                                </>
+                                                            )}
+                                                            {canShowDetail && (
+                                                                <text
+                                                                    x={node.x0 + 10}
+                                                                    y={node.y1 - 12}
+                                                                    textAnchor="start"
+                                                                    className="pointer-events-none select-none font-medium"
+                                                                    fill="rgba(255,255,255,0.78)"
+                                                                    style={{ fontSize: 10 }}
+                                                                >
+                                                                    {selectedGroup
+                                                                        ? `${node.data.sector || selectedGroup} • ${((node.data.value || 0) / 1e9).toFixed(1)}B`
+                                                                        : `${node.data.stockCount || 0} stocks • ${((node.data.value || 0) / 1e9).toFixed(1)}B`}
+                                                                </text>
+                                                            )}
+                                                        </g>
+                                                    );
+                                                })}
+                                            </svg>
+                                        );
+                                    }}
+                                </ChartSizeBox>
                             </div>
                         </div>
                     )}

@@ -23,7 +23,7 @@ function formatPct(value: number | null | undefined): string {
 export function MarketBreadthWidget({ id, onRemove }: MarketBreadthWidgetProps) {
   const breadthQuery = useMarketBreadth();
   const rows = useMemo(() => breadthQuery.data?.data ?? [], [breadthQuery.data?.data]);
-  const hasData = rows.some((row) => row.total > 0);
+  const hasData = rows.length > 0;
   const isLoading = breadthQuery.isLoading;
   const isFetching = breadthQuery.isFetching;
   const error = breadthQuery.error;

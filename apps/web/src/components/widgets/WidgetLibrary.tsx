@@ -330,7 +330,10 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                         )}
                                                     </div>
                                                 </div>
-                                                {cat.widgets.map((widget) => (
+                                                {cat.widgets.map((widget) => {
+                                                    const libraryLayout = getWidgetDefaultLayout(widget.type)
+
+                                                    return (
                                                     <div
                                                         key={widget.type}
                                                         className={cn(
@@ -374,7 +377,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                             )}
                                                             <div className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
                                                                 <Maximize2 size={10} className="text-blue-400/60" />
-                                                                {widget.defaultLayout.w}x{widget.defaultLayout.h}
+                                                                {libraryLayout.w}x{libraryLayout.h}
                                                             </div>
                                                         </div>
 
@@ -384,13 +387,13 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[rgba(0,0,0,0.2)] via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                                                             <div className="absolute bottom-1.5 left-2 right-2 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
                                                                 <span className="text-[7px] font-bold text-[var(--text-muted)] bg-[var(--bg-surface)] px-1 rounded">
-                                                                    {widget.defaultLayout.w}×{widget.defaultLayout.h}
+                                                                    {libraryLayout.w}×{libraryLayout.h}
                                                                 </span>
                                                                 <Maximize2 size={10} className="text-blue-400/60" />
                                                             </div>
                                                         </div>
                                                     </div>
-                                                ))}
+                                                )})}
                                             </div>
                                         )}
                                     </div>

@@ -38,6 +38,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetErrorBoundary } from './ErrorBoundary';
 import { MaximizedWidgetPortal } from './MaximizedWidgetPortal';
 import { useProfile } from '@/lib/queries';
+import { logClientError } from '@/lib/clientLogger';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -752,7 +753,7 @@ export function WidgetWrapper({
                         <WidgetHeaderVisibilityProvider hideHeader>
                             <WidgetErrorBoundary
                                 widgetName={title}
-                                onError={(error) => console.error(`Widget ${id} (${title}) crashed:`, error)}
+                                onError={(error) => logClientError(`Widget ${id} (${title}) crashed:`, error)}
                             >
                                 {React.isValidElement(children)
                                     ? React.cloneElement(children as React.ReactElement<any>, {
@@ -777,7 +778,7 @@ export function WidgetWrapper({
             >
                 <WidgetErrorBoundary
                     widgetName={title}
-                    onError={(error) => console.error(`Maximized Widget ${id} (${title}) crashed:`, error)}
+                    onError={(error) => logClientError(`Maximized Widget ${id} (${title}) crashed:`, error)}
                 >
                     {React.isValidElement(children)
                         ? React.cloneElement(children as React.ReactElement<any>, {

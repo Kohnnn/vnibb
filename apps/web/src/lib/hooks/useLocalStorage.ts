@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { logClientError, logClientWarn } from '@/lib/clientLogger';
 
 /**
  * Custom hook for persisting state to localStorage with SSR safety.
@@ -24,7 +25,7 @@ export function useLocalStorage<T>(
                 setStoredValue(parsed);
             }
         } catch (error) {
-            console.warn(`Error reading localStorage key "${key}":`, error);
+            logClientWarn(`Error reading localStorage key "${key}":`, error);
         }
         setIsHydrated(true);
     }, [key]);
@@ -42,9 +43,9 @@ export function useLocalStorage<T>(
             } catch (error) {
                 // Handle storage quota exceeded
                 if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-                    console.error('localStorage quota exceeded. Consider clearing old data.');
+                    logClientError('localStorage quota exceeded. Consider clearing old data.');
                 } else {
-                    console.warn(`Error setting localStorage key "${key}":`, error);
+                    logClientWarn(`Error setting localStorage key "${key}":`, error);
                 }
             }
         },
@@ -59,7 +60,7 @@ export function useLocalStorage<T>(
                 window.localStorage.removeItem(key);
             }
         } catch (error) {
-            console.warn(`Error clearing localStorage key "${key}":`, error);
+            logClientWarn(`Error clearing localStorage key "${key}":`, error);
         }
     }, [key, initialValue]);
 

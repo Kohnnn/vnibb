@@ -28,6 +28,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { logClientError } from '@/lib/clientLogger';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import {
 
@@ -82,7 +83,7 @@ function parseLegacyComparisonSets(): ComparisonSet[] {
         const stored = localStorage.getItem(COMPARISON_SETS_KEY);
         return stored ? JSON.parse(stored) : [];
     } catch (error) {
-        console.error('Failed to load comparison sets:', error);
+        logClientError('Failed to load comparison sets:', error);
         return [];
     }
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { logClientError } from '@/lib/clientLogger';
 import { ChartAnnotation } from '@/types/annotations';
 
 const STORAGE_KEY = 'vnibb_chart_annotations_v1';
@@ -19,7 +20,7 @@ export function useChartAnnotations(symbol: string) {
         const all: any[] = JSON.parse(saved);
         setAnnotations(all.filter(a => a.symbol === symbol) as ChartAnnotation[]);
       } catch (e) {
-        console.error('Failed to parse annotations', e);
+        logClientError('Failed to parse annotations', e);
       }
     }
   }, [symbol]);

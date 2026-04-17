@@ -2,12 +2,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { RotateCcw, Save, X } from 'lucide-react';
+import { ExternalLink, Lock, RotateCcw, Save, X } from 'lucide-react';
 
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import {
+    buildTradingViewRuntimeConfig,
+    buildTradingViewWebComponentAttributes,
     getTradingViewWidgetMetadata,
     getTradingViewDefaultConfig,
     getTradingViewSettingsFields,
@@ -24,6 +26,13 @@ interface WidgetSettingsModalProps {
     dashboardId: string | null;
     tabId: string | null;
 }
+
+const ADMIN_MANAGED_SYSTEM_IDS = new Set([
+    'default-fundamental',
+    'default-technical',
+    'default-quant',
+    'default-global-markets',
+]);
 
 function toListText(value: unknown): string {
     if (!Array.isArray(value)) return '';
@@ -83,6 +92,43 @@ function pruneConfig(config: WidgetConfig): WidgetConfig {
     );
 }
 
+function parseObjectJson(value: string): { parsed: WidgetConfig | null; error: string | null } {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return { parsed: {}, error: null };
+    }
+
+    try {
+        const parsed = JSON.parse(trimmed);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return { parsed: null, error: 'Advanced JSON must be a JSON object.' };
+        }
+        return { parsed: parsed as WidgetConfig, error: null };
+    } catch (jsonError) {
+        return {
+            parsed: null,
+            error: jsonError instanceof Error ? jsonError.message : 'Invalid JSON configuration',
+        };
+    }
+}
+
+function getTradingViewAdvancedConfigHints(type: string | null | undefined): string[] {
+    switch (type) {
+        case 'tradingview_market_overview':
+            return ['Use `tabs` in Advanced JSON to define fully custom Market Overview tab groups beyond the preset selector.'];
+        case 'tradingview_market_data':
+            return ['Use `symbolsGroups` in Advanced JSON to define custom quote-table groups and symbol rows beyond the preset selector.'];
+        case 'tradingview_symbol_overview':
+            return ['Use `symbols` in Advanced JSON for the full Symbol Overview nested structure when you need more than the linked/default symbol.'];
+        case 'tradingview_chart':
+            return ['Use Advanced JSON for richer `studies`, `compareSymbols`, and watchlist payloads that are not modeled as typed controls.'];
+        case 'tradingview_fundamental_data':
+            return ['Use Advanced JSON for custom `fieldGroups` and `columns` combinations after the quick panel preset seeds the baseline layout.'];
+        default:
+            return [];
+    }
+}
+
 export function WidgetSettingsModal({
     isOpen,
     onClose,
@@ -91,7 +137,7 @@ export function WidgetSettingsModal({
     tabId
 }: WidgetSettingsModalProps) {
     const { state, updateWidget } = useDashboard();
-    const { setGlobalMarketsSymbol } = useGlobalMarketsSymbol();
+    const { globalMarketsSymbol, setGlobalMarketsSymbol } = useGlobalMarketsSymbol();
     const [draftConfig, setDraftConfig] = useState<WidgetConfig>({});
     const [advancedConfig, setAdvancedConfig] = useState<string>('{}');
     const [refreshInterval, setRefreshInterval] = useState<number>(0);
@@ -118,10 +164,60 @@ export function WidgetSettingsModal({
         [tradingViewFields]
     );
     const tradingViewMode = isTradingViewWidget(widget?.type);
-    const isAdminManagedGlobalMarketsDashboard = targetDashboard?.id === 'default-global-markets';
-    const isWidgetSettingsReadOnly = Boolean(
-        isAdminManagedGlobalMarketsDashboard && targetDashboard?.adminUnlocked !== true
+    const isAdminManagedSystemDashboard = Boolean(
+        targetDashboard?.id && ADMIN_MANAGED_SYSTEM_IDS.has(targetDashboard.id)
     );
+    const isWidgetSettingsReadOnly = Boolean(
+        isAdminManagedSystemDashboard && targetDashboard?.adminUnlocked !== true
+    );
+    const linkedSymbolEnabled = Boolean(
+        tradingViewMode && widget && usesTradingViewWidgetSymbol(widget.type) && draftConfig.useLinkedSymbol !== false
+    );
+    const advancedConfigState = useMemo(
+        () => parseObjectJson(advancedConfig),
+        [advancedConfig]
+    );
+    const advancedConfigHints = useMemo(
+        () => getTradingViewAdvancedConfigHints(widget?.type),
+        [widget?.type]
+    );
+    const effectivePreviewSymbol = useMemo(() => {
+        if (!widget || !usesTradingViewWidgetSymbol(widget.type)) {
+            return undefined;
+        }
+
+        const configuredSymbol = typeof draftConfig.symbol === 'string' && draftConfig.symbol.trim().length > 0
+            ? draftConfig.symbol.trim()
+            : globalMarketsSymbol;
+
+        return linkedSymbolEnabled ? globalMarketsSymbol : configuredSymbol;
+    }, [draftConfig.symbol, globalMarketsSymbol, linkedSymbolEnabled, widget]);
+    const runtimePreviewConfig = useMemo(() => {
+        if (!widget || !tradingViewMode || !advancedConfigState.parsed) {
+            return null;
+        }
+
+        const previewConfig = pruneConfig({
+            ...advancedConfigState.parsed,
+            ...draftConfig,
+            refreshInterval: refreshInterval > 0 ? refreshInterval : undefined,
+        });
+
+        return buildTradingViewRuntimeConfig(widget.type, previewConfig, effectivePreviewSymbol);
+    }, [advancedConfigState.parsed, draftConfig, effectivePreviewSymbol, refreshInterval, tradingViewMode, widget]);
+    const runtimePreviewAttributes = useMemo(() => {
+        if (!widget || !tradingViewMode || tradingViewMetadata?.format !== 'web_component' || !advancedConfigState.parsed) {
+            return null;
+        }
+
+        const previewConfig = pruneConfig({
+            ...advancedConfigState.parsed,
+            ...draftConfig,
+            refreshInterval: refreshInterval > 0 ? refreshInterval : undefined,
+        });
+
+        return buildTradingViewWebComponentAttributes(widget.type, previewConfig, effectivePreviewSymbol);
+    }, [advancedConfigState.parsed, draftConfig, effectivePreviewSymbol, refreshInterval, tradingViewMetadata?.format, tradingViewMode, widget]);
 
     useEffect(() => {
         if (!isOpen || !widget) {
@@ -162,14 +258,15 @@ export function WidgetSettingsModal({
         if (!widget || !dashboardId || !tabId || !widgetId) return;
 
         if (isWidgetSettingsReadOnly) {
-            setError('Enable Admin Mode in Global Layout Controls before editing Global Markets widget settings.');
+            setError('Enable Admin Mode in System Dashboard Controls before editing this system dashboard widget.');
             return;
         }
 
         try {
-            const parsedAdvancedConfig = advancedConfig.trim().length > 0
-                ? JSON.parse(advancedConfig)
-                : {};
+            const parsedAdvancedConfig = advancedConfigState.parsed;
+            if (!parsedAdvancedConfig) {
+                throw new Error(advancedConfigState.error || 'Invalid JSON configuration');
+            }
 
             const nextConfig = pruneConfig({
                 ...parsedAdvancedConfig,
@@ -211,11 +308,23 @@ export function WidgetSettingsModal({
                         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
                             Settings: <span className="text-blue-400">{tradingViewMetadata?.name || widget.type}</span>
                         </h2>
-                        {tradingViewMode ? (
-                            <div className="mt-1 inline-flex items-center gap-2 rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-200">
-                                TradingView Native
-                            </div>
-                        ) : null}
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                            {tradingViewMode ? (
+                                <>
+                                    <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-200">
+                                        TradingView Native
+                                    </div>
+                                    <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                                        Format: {tradingViewMetadata?.format === 'web_component' ? 'Web Component' : 'Iframe'}
+                                    </div>
+                                    {widget && usesTradingViewWidgetSymbol(widget.type) ? (
+                                        <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                                            Symbol: {linkedSymbolEnabled ? 'Linked' : 'Widget'}
+                                        </div>
+                                    ) : null}
+                                </>
+                            ) : null}
+                        </div>
                     </div>
                     <button
                         onClick={onClose}
@@ -227,11 +336,11 @@ export function WidgetSettingsModal({
                 </div>
 
                 <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh]">
-                    {isAdminManagedGlobalMarketsDashboard ? (
+                    {isAdminManagedSystemDashboard ? (
                         <div className={`rounded-lg border px-4 py-3 text-xs ${isWidgetSettingsReadOnly ? 'border-amber-500/20 bg-amber-500/8 text-amber-100/85' : 'border-blue-500/20 bg-blue-500/8 text-blue-100/85'}`}>
                             {isWidgetSettingsReadOnly
-                                ? 'This Global Markets widget is part of an admin-managed system dashboard. Enable Admin Mode to edit settings, then use Save Draft or Publish Global in the floating admin controls.'
-                                : 'You are editing an admin-managed Global Markets widget. Save changes here, then use Save Draft or Publish Global in the floating admin controls to ship them.'}
+                                ? 'This widget belongs to an admin-managed system dashboard. System dashboards are admin-only. Enable Admin Mode in System Dashboard Controls to edit the draft.'
+                                : 'You are editing the admin draft for a system dashboard. Save changes here, then use Save Draft or Publish Global in System Dashboard Controls to ship them.'}
                         </div>
                     ) : null}
                     <fieldset disabled={isWidgetSettingsReadOnly} className={isWidgetSettingsReadOnly ? 'space-y-6 opacity-60' : 'space-y-6'}>
@@ -258,10 +367,25 @@ export function WidgetSettingsModal({
                     {tradingViewMode && tradingViewFields.length > 0 ? (
                         <div className="space-y-4 border-t border-[var(--border-default)] pt-6">
                             <div>
-                                <div className="text-sm font-medium text-[var(--text-secondary)]">TradingView Settings</div>
-                                <p className="mt-1 text-xs text-[var(--text-muted)]">
-                                    These controls are mapped from the TradingView widget settings surface. Advanced JSON remains available for nested objects and edge-case options.
-                                </p>
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <div className="text-sm font-medium text-[var(--text-secondary)]">TradingView Settings</div>
+                                        <p className="mt-1 text-xs text-[var(--text-muted)]">
+                                            These controls are mapped from the TradingView widget settings surface. Presets may expand into nested runtime payloads shown in the preview below.
+                                        </p>
+                                    </div>
+                                    {tradingViewMetadata?.docsUrl ? (
+                                        <a
+                                            href={tradingViewMetadata.docsUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-medium text-blue-300 transition-colors hover:text-blue-200"
+                                        >
+                                            <ExternalLink size={13} />
+                                            Official Docs
+                                        </a>
+                                    ) : null}
+                                </div>
                             </div>
                             <div className="space-y-3">
                                 {tradingViewSections.map(({ section, fields }) => (
@@ -287,6 +411,7 @@ export function WidgetSettingsModal({
                                                                 type="checkbox"
                                                                 checked={Boolean(draftConfig[field.key])}
                                                                 onChange={(event) => handleConfigValueChange(field.key, event.target.checked)}
+                                                                disabled={field.key === 'useLinkedSymbol' && !usesTradingViewWidgetSymbol(widget?.type)}
                                                                 className="h-4 w-4 rounded border-[var(--border-default)] bg-[var(--bg-primary)] text-blue-500 focus:ring-blue-500"
                                                             />
                                                         </label>
@@ -301,6 +426,7 @@ export function WidgetSettingsModal({
                                                                 id={fieldId}
                                                                 value={String(draftConfig[field.key] ?? '')}
                                                                 onChange={(event) => handleConfigValueChange(field.key, event.target.value)}
+                                                                disabled={field.key === 'symbol' && linkedSymbolEnabled}
                                                                 className="w-full bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
                                                             >
                                                                 <option value="">Default</option>
@@ -308,7 +434,12 @@ export function WidgetSettingsModal({
                                                                     <option key={option.value} value={option.value}>{option.label}</option>
                                                                 ))}
                                                             </select>
-                                                            {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                                            <div className="space-y-1">
+                                                                {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                                                {field.key === 'symbol' && linkedSymbolEnabled ? (
+                                                                    <p className="text-xs text-amber-300">Linked Symbol is enabled, so this widget will follow the shared Global Markets symbol until Link Symbol is turned off.</p>
+                                                                ) : null}
+                                                            </div>
                                                         </label>
                                                     );
                                                 }
@@ -321,6 +452,7 @@ export function WidgetSettingsModal({
                                                                 id={fieldId}
                                                                 value={toListText(draftConfig[field.key])}
                                                                 onChange={(event) => handleConfigValueChange(field.key, parseListText(event.target.value))}
+                                                                disabled={field.key === 'symbol' && linkedSymbolEnabled}
                                                                 className="w-full bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500 resize-y"
                                                                 rows={field.rows || 4}
                                                                 placeholder={field.placeholder || 'One item per line'}
@@ -364,10 +496,16 @@ export function WidgetSettingsModal({
                                                             step={field.step}
                                                             value={String(draftConfig[field.key] ?? '')}
                                                             onChange={(event) => handleConfigValueChange(field.key, field.type === 'number' ? Number(event.target.value) : event.target.value)}
+                                                            disabled={field.key === 'symbol' && linkedSymbolEnabled}
                                                             className="w-full bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
                                                             placeholder={field.placeholder}
                                                         />
-                                                        {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                                        <div className="space-y-1">
+                                                            {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
+                                                            {field.key === 'symbol' && linkedSymbolEnabled ? (
+                                                                <p className="text-xs text-amber-300">Linked Symbol is enabled, so this widget will follow the shared Global Markets symbol until Link Symbol is turned off.</p>
+                                                            ) : null}
+                                                        </div>
                                                     </label>
                                                 );
                                             })}
@@ -406,10 +544,50 @@ export function WidgetSettingsModal({
                         {error ? <p className="text-xs text-red-400">{error}</p> : null}
                         <p className="text-xs text-[var(--text-muted)]">
                             {tradingViewMode
-                                ? 'This JSON is merged with the typed controls above. Nested TradingView options belong here.'
+                                ? 'This JSON is merged first, then the typed controls above win on the same keys. Use it for nested TradingView payloads and doc-only edge cases.'
                                 : 'Edit widget-specific properties directly.'}
                         </p>
+                        {tradingViewMode && advancedConfigHints.length > 0 ? (
+                            <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]/60 px-3 py-2 text-xs text-[var(--text-secondary)]">
+                                {advancedConfigHints.map((hint) => (
+                                    <div key={hint}>{hint}</div>
+                                ))}
+                            </div>
+                        ) : null}
                     </div>
+
+                    {tradingViewMode ? (
+                        <div className="border-t border-[var(--border-default)] pt-6 space-y-3">
+                            <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
+                                <Lock size={14} className="text-blue-300" />
+                                Runtime Payload Preview
+                            </div>
+                            <p className="text-xs text-[var(--text-muted)]">
+                                This shows the final TradingView payload after linked-symbol overrides, presets, and runtime transforms are applied.
+                            </p>
+                            {advancedConfigState.error ? (
+                                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                                    Fix Advanced JSON to preview the final runtime payload: {advancedConfigState.error}
+                                </div>
+                            ) : runtimePreviewConfig ? (
+                                <textarea
+                                    readOnly
+                                    value={JSON.stringify(runtimePreviewConfig, null, 2)}
+                                    className="h-44 w-full resize-none rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 text-xs font-mono text-[var(--text-secondary)] focus:outline-none"
+                                />
+                            ) : null}
+                            {runtimePreviewAttributes ? (
+                                <div className="space-y-2">
+                                    <div className="text-xs font-medium text-[var(--text-secondary)]">Web Component Attributes</div>
+                                    <textarea
+                                        readOnly
+                                        value={JSON.stringify(runtimePreviewAttributes, null, 2)}
+                                        className="h-32 w-full resize-none rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 text-xs font-mono text-[var(--text-secondary)] focus:outline-none"
+                                    />
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
                     </fieldset>
                 </div>
 

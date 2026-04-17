@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { config } from '@/lib/config';
+import { logClientError } from '@/lib/clientLogger';
 
 interface SyncStatus {
   isRunning: boolean;
@@ -37,7 +38,7 @@ export function useSyncStatus() {
           ...data,
         }));
       } catch (e) {
-        console.error('Failed to parse sync status:', e);
+        logClientError('Failed to parse sync status:', e);
       }
     };
 

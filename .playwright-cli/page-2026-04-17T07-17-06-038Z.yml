@@ -1,0 +1,1696 @@
+- generic [active] [ref=e1]:
+  - link "Skip to main content" [ref=e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - main [ref=e3]:
+    - generic "Dashboard workspace" [ref=e4]:
+      - button "Open menu" [ref=e5]:
+        - img [ref=e6]
+      - generic [ref=e7]:
+        - button "Close menu" [ref=e8]:
+          - img [ref=e9]
+        - complementary [ref=e12]:
+          - link "VNIBB" [ref=e14] [cursor=pointer]:
+            - /url: /
+            - generic [ref=e15]: VNIBB
+          - generic [ref=e17]:
+            - generic [ref=e18]:
+              - generic [ref=e19]: Customize
+              - button "Templates" [ref=e20]:
+                - img [ref=e21]
+                - generic [ref=e23]: Templates
+              - button "Widgets" [ref=e24]:
+                - img [ref=e25]
+                - generic [ref=e27]: Widgets
+              - button "Prompts" [ref=e28]:
+                - img [ref=e29]
+                - generic [ref=e31]: Prompts
+            - generic [ref=e32]: Initial Workspaces
+            - generic [ref=e33]:
+              - button "Initial System 4" [ref=e34] [cursor=pointer]:
+                - img [ref=e35]
+                - generic [ref=e37]: Initial
+                - generic [ref=e38]:
+                  - img [ref=e39]
+                  - text: System
+                - generic [ref=e42]: "4"
+                - img [ref=e43]
+              - generic [ref=e45]:
+                - button "Fundamental" [ref=e46] [cursor=pointer]:
+                  - img [ref=e47]
+                  - generic [ref=e50]: Fundamental
+                - button "Technical" [ref=e51] [cursor=pointer]:
+                  - img [ref=e52]
+                  - generic [ref=e55]: Technical
+                - button "Quant" [ref=e56] [cursor=pointer]:
+                  - img [ref=e57]
+                  - generic [ref=e60]: Quant
+                - button "Global Markets" [ref=e61] [cursor=pointer]:
+                  - img [ref=e62]
+                  - generic [ref=e65]: Global Markets
+            - generic [ref=e66]:
+              - heading "Custom Workspaces" [level=3] [ref=e67]
+              - button [ref=e69]:
+                - img [ref=e70]
+          - generic [ref=e71]:
+            - button "Settings" [ref=e72]:
+              - img [ref=e73]
+              - generic [ref=e77]: Settings
+            - generic [ref=e78]: v1.0.0
+      - main [ref=e79]:
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - img [ref=e84]
+            - textbox "Search symbol" [ref=e87]:
+              - /placeholder: Search symbol or press Ctrl+K
+              - text: VCI
+          - generic [ref=e88]:
+            - button "Open command palette" [ref=e89]:
+              - img [ref=e90]
+              - generic [ref=e92]: Ctrl+K
+            - button "Open VniAgent" [ref=e93]:
+              - img [ref=e94]
+              - generic [ref=e97]: VniAgent
+            - button "Display settings" [ref=e99]:
+              - img [ref=e100]
+            - button [ref=e105]:
+              - img [ref=e106]
+            - button [ref=e109]:
+              - img [ref=e110]
+        - generic [ref=e115]:
+          - button "Fundamentals ⌘1" [ref=e116] [cursor=pointer]:
+            - generic [ref=e117]:
+              - generic [ref=e118]: Fundamentals
+              - generic [ref=e119]: ⌘1
+            - button "Close tab" [ref=e120]:
+              - img [ref=e121]
+          - button "Overview ⌘2" [ref=e124] [cursor=pointer]:
+            - generic [ref=e125]:
+              - generic [ref=e126]: Overview
+              - generic [ref=e127]: ⌘2
+          - button "Ownership ⌘3" [ref=e128] [cursor=pointer]:
+            - generic [ref=e129]:
+              - generic [ref=e130]: Ownership
+              - generic [ref=e131]: ⌘3
+          - button "Comparison ⌘4" [ref=e132] [cursor=pointer]:
+            - generic [ref=e133]:
+              - generic [ref=e134]: Comparison
+              - generic [ref=e135]: ⌘4
+          - button "News & Events ⌘5" [ref=e136] [cursor=pointer]:
+            - generic [ref=e137]:
+              - generic [ref=e138]: News & Events
+              - generic [ref=e139]: ⌘5
+        - generic [ref=e143]:
+          - generic [ref=e145]:
+            - generic [ref=e146]:
+              - generic [ref=e147]: Financial Period View
+              - generic [ref=e148]: Syncs Financial Ratios, Income Statement, Balance Sheet, and Cash Flow for VCI.
+            - generic [ref=e149]:
+              - button "FY" [ref=e150]
+              - button "Q" [ref=e151]
+              - button "TTM" [ref=e152]
+          - generic [ref=e154]:
+            - generic [ref=e156]:
+              - generic [ref=e157]:
+                - generic [ref=e158]:
+                  - 'button "Widget Group: Global" [ref=e160]':
+                    - img [ref=e161]
+                  - generic "Financial Ratios" [ref=e166]
+                  - button "About Financial Ratios" [ref=e168]:
+                    - img [ref=e169]
+                - generic [ref=e173]:
+                  - button "VniAgent" [ref=e174]:
+                    - img [ref=e175]
+                  - button "Widget settings" [ref=e178]:
+                    - img [ref=e179]
+                  - button "Maximize" [ref=e182]:
+                    - img [ref=e183]
+                  - button [ref=e189]:
+                    - img [ref=e190]
+              - generic [ref=e197]:
+                - generic [ref=e199]:
+                  - generic "Updated 02:17:05 PM" [ref=e200]:
+                    - img [ref=e201]
+                    - generic [ref=e204]: Updated 2026-04-17 14:17
+                  - generic [ref=e205]: Annual · newest on right
+                - generic [ref=e207]:
+                  - table [ref=e209]:
+                    - rowgroup [ref=e210]:
+                      - row "Metric 2020 2021 2022 2023 2024 2025" [ref=e211]:
+                        - columnheader "Metric" [ref=e212]
+                        - columnheader "2020" [ref=e213] [cursor=pointer]:
+                          - generic [ref=e214]: "2020"
+                        - columnheader "2021" [ref=e215] [cursor=pointer]:
+                          - generic [ref=e216]: "2021"
+                        - columnheader "2022" [ref=e217] [cursor=pointer]:
+                          - generic [ref=e218]: "2022"
+                        - columnheader "2023" [ref=e219] [cursor=pointer]:
+                          - generic [ref=e220]: "2023"
+                        - columnheader "2024" [ref=e221] [cursor=pointer]:
+                          - generic [ref=e222]: "2024"
+                        - columnheader "2025" [ref=e223] [cursor=pointer]:
+                          - generic [ref=e224]: "2025"
+                    - rowgroup [ref=e225]:
+                      - row "▾ Valuation" [ref=e226]:
+                        - cell "▾ Valuation" [ref=e227]:
+                          - button "▾ Valuation" [ref=e228]:
+                            - generic [ref=e229]: ▾
+                            - generic [ref=e230]: Valuation
+                        - cell [ref=e231]
+                        - cell [ref=e232]
+                        - cell [ref=e233]
+                        - cell [ref=e234]
+                        - cell [ref=e235]
+                        - cell [ref=e236]
+                      - row "Toggle P/E trend chart 40.35 20.70 -48.7% 9.94 -52.0% 37.94 +281.7% 18.22 -52.0% 18.96 +4.1%" [ref=e237]:
+                        - cell "Toggle P/E trend chart" [ref=e238]:
+                          - button "Toggle P/E trend chart" [ref=e239]:
+                            - generic [ref=e240]: P/E
+                            - generic [ref=e241]: Chart
+                        - cell "40.35" [ref=e242]
+                        - cell "20.70 -48.7%" [ref=e243]:
+                          - text: "20.70"
+                          - generic [ref=e244]: "-48.7%"
+                        - cell "9.94 -52.0%" [ref=e245]:
+                          - text: "9.94"
+                          - generic [ref=e246]: "-52.0%"
+                        - cell "37.94 +281.7%" [ref=e247]:
+                          - text: "37.94"
+                          - generic [ref=e248]: +281.7%
+                        - cell "18.22 -52.0%" [ref=e249]:
+                          - text: "18.22"
+                          - generic [ref=e250]: "-52.0%"
+                        - cell "18.96 +4.1%" [ref=e251]:
+                          - text: "18.96"
+                          - generic [ref=e252]: +4.1%
+                      - row "Toggle P/B trend chart 6.86 4.74 -30.9% 1.56 -67.1% 2.54 +62.8% 1.84 -27.6% 1.67 -9.2%" [ref=e253]:
+                        - cell "Toggle P/B trend chart" [ref=e254]:
+                          - button "Toggle P/B trend chart" [ref=e255]:
+                            - generic [ref=e256]: P/B
+                            - generic [ref=e257]: Chart
+                        - cell "6.86" [ref=e258]
+                        - cell "4.74 -30.9%" [ref=e259]:
+                          - text: "4.74"
+                          - generic [ref=e260]: "-30.9%"
+                        - cell "1.56 -67.1%" [ref=e261]:
+                          - text: "1.56"
+                          - generic [ref=e262]: "-67.1%"
+                        - cell "2.54 +62.8%" [ref=e263]:
+                          - text: "2.54"
+                          - generic [ref=e264]: +62.8%
+                        - cell "1.84 -27.6%" [ref=e265]:
+                          - text: "1.84"
+                          - generic [ref=e266]: "-27.6%"
+                        - cell "1.67 -9.2%" [ref=e267]:
+                          - text: "1.67"
+                          - generic [ref=e268]: "-9.2%"
+                      - row "Toggle P/S trend chart 0.02 0.01 -53.3% 3.21 7.56 +135.5% 6.45 -14.7% 6.03 -6.5%" [ref=e269]:
+                        - cell "Toggle P/S trend chart" [ref=e270]:
+                          - button "Toggle P/S trend chart" [ref=e271]:
+                            - generic [ref=e272]: P/S
+                            - generic [ref=e273]: Chart
+                        - cell "0.02" [ref=e274]
+                        - cell "0.01 -53.3%" [ref=e275]:
+                          - text: "0.01"
+                          - generic [ref=e276]: "-53.3%"
+                        - cell "3.21" [ref=e277]
+                        - cell "7.56 +135.5%" [ref=e278]:
+                          - text: "7.56"
+                          - generic [ref=e279]: +135.5%
+                        - cell "6.45 -14.7%" [ref=e280]:
+                          - text: "6.45"
+                          - generic [ref=e281]: "-14.7%"
+                        - cell "6.03 -6.5%" [ref=e282]:
+                          - text: "6.03"
+                          - generic [ref=e283]: "-6.5%"
+                      - row "Toggle EV/Sales trend chart 1.21 1.42 +17.8% 0.01 -99.3% 0.01 +27.7% 0.01 -33.1% 0.01 -25.8%" [ref=e284]:
+                        - cell "Toggle EV/Sales trend chart" [ref=e285]:
+                          - button "Toggle EV/Sales trend chart" [ref=e286]:
+                            - generic [ref=e287]: EV/Sales
+                            - generic [ref=e288]: Chart
+                        - cell "1.21" [ref=e289]
+                        - cell "1.42 +17.8%" [ref=e290]:
+                          - text: "1.42"
+                          - generic [ref=e291]: +17.8%
+                        - cell "0.01 -99.3%" [ref=e292]:
+                          - text: "0.01"
+                          - generic [ref=e293]: "-99.3%"
+                        - cell "0.01 +27.7%" [ref=e294]:
+                          - text: "0.01"
+                          - generic [ref=e295]: +27.7%
+                        - cell "0.01 -33.1%" [ref=e296]:
+                          - text: "0.01"
+                          - generic [ref=e297]: "-33.1%"
+                        - cell "0.01 -25.8%" [ref=e298]:
+                          - text: "0.01"
+                          - generic [ref=e299]: "-25.8%"
+                      - row "Toggle EV/EBITDA trend chart — — 8.42 23.54 +179.6% 16.99 -27.8% 17.53 +3.2%" [ref=e300]:
+                        - cell "Toggle EV/EBITDA trend chart" [ref=e301]:
+                          - button "Toggle EV/EBITDA trend chart" [ref=e302]:
+                            - generic [ref=e303]: EV/EBITDA
+                            - generic [ref=e304]: Chart
+                        - cell "—" [ref=e305]
+                        - cell "—" [ref=e306]
+                        - cell "8.42" [ref=e307]
+                        - cell "23.54 +179.6%" [ref=e308]:
+                          - text: "23.54"
+                          - generic [ref=e309]: +179.6%
+                        - cell "16.99 -27.8%" [ref=e310]:
+                          - text: "16.99"
+                          - generic [ref=e311]: "-27.8%"
+                        - cell "17.53 +3.2%" [ref=e312]:
+                          - text: "17.53"
+                          - generic [ref=e313]: +3.2%
+                      - row "Toggle PEG Ratio trend chart — 0.22 — — 0.21 0.40 +87.1%" [ref=e314]:
+                        - cell "Toggle PEG Ratio trend chart" [ref=e315]:
+                          - button "Toggle PEG Ratio trend chart" [ref=e316]:
+                            - generic [ref=e317]: PEG Ratio
+                            - generic [ref=e318]: Chart
+                        - cell "—" [ref=e319]
+                        - cell "0.22" [ref=e320]
+                        - cell "—" [ref=e321]
+                        - cell "—" [ref=e322]
+                        - cell "0.21" [ref=e323]
+                        - cell "0.40 +87.1%" [ref=e324]:
+                          - text: "0.40"
+                          - generic [ref=e325]: +87.1%
+                      - row "Liquidity" [ref=e326]:
+                        - cell "Liquidity" [ref=e327]:
+                          - generic [ref=e329]: Liquidity
+                        - cell [ref=e330]
+                        - cell [ref=e331]
+                        - cell [ref=e332]
+                        - cell [ref=e333]
+                        - cell [ref=e334]
+                        - cell [ref=e335]
+                      - row "Toggle Current Ratio trend chart 2.23 1.72 -22.6% 1.89 +9.7% 1.81 -4.2% 2.03 +12.2% 2.07 +2.0%" [ref=e336]:
+                        - cell "Toggle Current Ratio trend chart" [ref=e337]:
+                          - button "Toggle Current Ratio trend chart" [ref=e338]:
+                            - generic [ref=e339]: Current Ratio
+                            - generic [ref=e340]: Chart
+                        - cell "2.23" [ref=e341]
+                        - cell "1.72 -22.6%" [ref=e342]:
+                          - text: "1.72"
+                          - generic [ref=e343]: "-22.6%"
+                        - cell "1.89 +9.7%" [ref=e344]:
+                          - text: "1.89"
+                          - generic [ref=e345]: +9.7%
+                        - cell "1.81 -4.2%" [ref=e346]:
+                          - text: "1.81"
+                          - generic [ref=e347]: "-4.2%"
+                        - cell "2.03 +12.2%" [ref=e348]:
+                          - text: "2.03"
+                          - generic [ref=e349]: +12.2%
+                        - cell "2.07 +2.0%" [ref=e350]:
+                          - text: "2.07"
+                          - generic [ref=e351]: +2.0%
+                      - row "Toggle Quick Ratio trend chart 2.23 1.72 -22.6% 1.89 +9.7% 1.81 -4.0% 2.03 +12.0% 2.07 +1.9%" [ref=e352]:
+                        - cell "Toggle Quick Ratio trend chart" [ref=e353]:
+                          - button "Toggle Quick Ratio trend chart" [ref=e354]:
+                            - generic [ref=e355]: Quick Ratio
+                            - generic [ref=e356]: Chart
+                        - cell "2.23" [ref=e357]
+                        - cell "1.72 -22.6%" [ref=e358]:
+                          - text: "1.72"
+                          - generic [ref=e359]: "-22.6%"
+                        - cell "1.89 +9.7%" [ref=e360]:
+                          - text: "1.89"
+                          - generic [ref=e361]: +9.7%
+                        - cell "1.81 -4.0%" [ref=e362]:
+                          - text: "1.81"
+                          - generic [ref=e363]: "-4.0%"
+                        - cell "2.03 +12.0%" [ref=e364]:
+                          - text: "2.03"
+                          - generic [ref=e365]: +12.0%
+                        - cell "2.07 +1.9%" [ref=e366]:
+                          - text: "2.07"
+                          - generic [ref=e367]: +1.9%
+                      - row "Toggle Cash Ratio trend chart 0.17 0.12 -31.6% 0.46 +290.8% 0.08 -82.6% 0.36 +350.0% 0.19 -47.2%" [ref=e368]:
+                        - cell "Toggle Cash Ratio trend chart" [ref=e369]:
+                          - button "Toggle Cash Ratio trend chart" [ref=e370]:
+                            - generic [ref=e371]: Cash Ratio
+                            - generic [ref=e372]: Chart
+                        - cell "0.17" [ref=e373]
+                        - cell "0.12 -31.6%" [ref=e374]:
+                          - text: "0.12"
+                          - generic [ref=e375]: "-31.6%"
+                        - cell "0.46 +290.8%" [ref=e376]:
+                          - text: "0.46"
+                          - generic [ref=e377]: +290.8%
+                        - cell "0.08 -82.6%" [ref=e378]:
+                          - text: "0.08"
+                          - generic [ref=e379]: "-82.6%"
+                        - cell "0.36 +350.0%" [ref=e380]:
+                          - text: "0.36"
+                          - generic [ref=e381]: +350.0%
+                        - cell "0.19 -47.2%" [ref=e382]:
+                          - text: "0.19"
+                          - generic [ref=e383]: "-47.2%"
+                      - row "Efficiency" [ref=e384]:
+                        - cell "Efficiency" [ref=e385]:
+                          - generic [ref=e387]: Efficiency
+                        - cell [ref=e388]
+                        - cell [ref=e389]
+                        - cell [ref=e390]
+                        - cell [ref=e391]
+                        - cell [ref=e392]
+                        - cell [ref=e393]
+                      - row "Toggle Asset Turnover trend chart 0.21 0.22 +8.0% 0.22 -0.6% 0.14 -35.3% 0.14 -3.0% 0.14 -0.5%" [ref=e394]:
+                        - cell "Toggle Asset Turnover trend chart" [ref=e395]:
+                          - button "Toggle Asset Turnover trend chart" [ref=e396]:
+                            - generic [ref=e397]: Asset Turnover
+                            - generic [ref=e398]: Chart
+                        - cell "0.21" [ref=e399]
+                        - cell "0.22 +8.0%" [ref=e400]:
+                          - text: "0.22"
+                          - generic [ref=e401]: +8.0%
+                        - cell "0.22 -0.6%" [ref=e402]:
+                          - text: "0.22"
+                          - generic [ref=e403]: "-0.6%"
+                        - cell "0.14 -35.3%" [ref=e404]:
+                          - text: "0.14"
+                          - generic [ref=e405]: "-35.3%"
+                        - cell "0.14 -3.0%" [ref=e406]:
+                          - text: "0.14"
+                          - generic [ref=e407]: "-3.0%"
+                        - cell "0.14 -0.5%" [ref=e408]:
+                          - text: "0.14"
+                          - generic [ref=e409]: "-0.5%"
+                      - row "Toggle Receivables Turnover trend chart 7.80 14.62 +87.5% 15.58 +6.5% 4.07 -73.9% 4.62 +13.4% 10.37 +124.7%" [ref=e410]:
+                        - cell "Toggle Receivables Turnover trend chart" [ref=e411]:
+                          - button "Toggle Receivables Turnover trend chart" [ref=e412]:
+                            - generic [ref=e413]: Receivables Turnover
+                            - generic [ref=e414]: Chart
+                        - cell "7.80" [ref=e415]
+                        - cell "14.62 +87.5%" [ref=e416]:
+                          - text: "14.62"
+                          - generic [ref=e417]: +87.5%
+                        - cell "15.58 +6.5%" [ref=e418]:
+                          - text: "15.58"
+                          - generic [ref=e419]: +6.5%
+                        - cell "4.07 -73.9%" [ref=e420]:
+                          - text: "4.07"
+                          - generic [ref=e421]: "-73.9%"
+                        - cell "4.62 +13.4%" [ref=e422]:
+                          - text: "4.62"
+                          - generic [ref=e423]: +13.4%
+                        - cell "10.37 +124.7%" [ref=e424]:
+                          - text: "10.37"
+                          - generic [ref=e425]: +124.7%
+                      - row "▾ Profitability" [ref=e426]:
+                        - cell "▾ Profitability" [ref=e427]:
+                          - button "▾ Profitability" [ref=e428]:
+                            - generic [ref=e429]: ▾
+                            - generic [ref=e430]: Profitability
+                        - cell [ref=e431]
+                        - cell [ref=e432]
+                        - cell [ref=e433]
+                        - cell [ref=e434]
+                        - cell [ref=e435]
+                        - cell [ref=e436]
+                      - row "Toggle Gross Margin trend chart — — 55.69% 56.98% +2.3% 53.53% -6.1% 51.99% -2.9%" [ref=e437]:
+                        - cell "Toggle Gross Margin trend chart" [ref=e438]:
+                          - button "Toggle Gross Margin trend chart" [ref=e439]:
+                            - generic [ref=e440]: Gross Margin
+                            - generic [ref=e441]: Chart
+                        - cell "—" [ref=e442]
+                        - cell "—" [ref=e443]
+                        - cell "55.69%" [ref=e444]
+                        - cell "56.98% +2.3%" [ref=e445]:
+                          - text: 56.98%
+                          - generic [ref=e446]: +2.3%
+                        - cell "53.53% -6.1%" [ref=e447]:
+                          - text: 53.53%
+                          - generic [ref=e448]: "-6.1%"
+                        - cell "51.99% -2.9%" [ref=e449]:
+                          - text: 51.99%
+                          - generic [ref=e450]: "-2.9%"
+                      - row "Toggle Operating Margin trend chart 54.95% 49.93% -9.1% 32.19% -35.5% 23.05% -28.4% 29.40% +27.5% 32.40% +10.2%" [ref=e451]:
+                        - cell "Toggle Operating Margin trend chart" [ref=e452]:
+                          - button "Toggle Operating Margin trend chart" [ref=e453]:
+                            - generic [ref=e454]: Operating Margin
+                            - generic [ref=e455]: Chart
+                        - cell "54.95%" [ref=e456]
+                        - cell "49.93% -9.1%" [ref=e457]:
+                          - text: 49.93%
+                          - generic [ref=e458]: "-9.1%"
+                        - cell "32.19% -35.5%" [ref=e459]:
+                          - text: 32.19%
+                          - generic [ref=e460]: "-35.5%"
+                        - cell "23.05% -28.4%" [ref=e461]:
+                          - text: 23.05%
+                          - generic [ref=e462]: "-28.4%"
+                        - cell "29.40% +27.5%" [ref=e463]:
+                          - text: 29.40%
+                          - generic [ref=e464]: +27.5%
+                        - cell "32.40% +10.2%" [ref=e465]:
+                          - text: 32.40%
+                          - generic [ref=e466]: +10.2%
+                      - row "Toggle Net Margin trend chart — — 27.53% 19.90% -27.7% 24.64% +23.8% 26.95% +9.4%" [ref=e467]:
+                        - cell "Toggle Net Margin trend chart" [ref=e468]:
+                          - button "Toggle Net Margin trend chart" [ref=e469]:
+                            - generic [ref=e470]: Net Margin
+                            - generic [ref=e471]: Chart
+                        - cell "—" [ref=e472]
+                        - cell "—" [ref=e473]
+                        - cell "27.53%" [ref=e474]
+                        - cell "19.90% -27.7%" [ref=e475]:
+                          - text: 19.90%
+                          - generic [ref=e476]: "-27.7%"
+                        - cell "24.64% +23.8%" [ref=e477]:
+                          - text: 24.64%
+                          - generic [ref=e478]: +23.8%
+                        - cell "26.95% +9.4%" [ref=e479]:
+                          - text: 26.95%
+                          - generic [ref=e480]: +9.4%
+                      - row "Toggle ROE trend chart 17.01% 22.91% +34.7% 13.33% -41.8% 7.09% -46.8% 8.97% +26.5% 8.67% -3.3%" [ref=e481]:
+                        - cell "Toggle ROE trend chart" [ref=e482]:
+                          - button "Toggle ROE trend chart" [ref=e483]:
+                            - generic [ref=e484]: ROE
+                            - generic [ref=e485]: Chart
+                        - cell "17.01%" [ref=e486]
+                        - cell "22.91% +34.7%" [ref=e487]:
+                          - text: 22.91%
+                          - generic [ref=e488]: +34.7%
+                        - cell "13.33% -41.8%" [ref=e489]:
+                          - text: 13.33%
+                          - generic [ref=e490]: "-41.8%"
+                        - cell "7.09% -46.8%" [ref=e491]:
+                          - text: 7.09%
+                          - generic [ref=e492]: "-46.8%"
+                        - cell "8.97% +26.5%" [ref=e493]:
+                          - text: 8.97%
+                          - generic [ref=e494]: +26.5%
+                        - cell "8.67% -3.3%" [ref=e495]:
+                          - text: 8.67%
+                          - generic [ref=e496]: "-3.3%"
+                      - row "Toggle ROA trend chart 9.17% 9.01% -1.8% 5.63% -37.5% 3.12% -44.6% 4.15% +33.0% 4.29% +3.4%" [ref=e497]:
+                        - cell "Toggle ROA trend chart" [ref=e498]:
+                          - button "Toggle ROA trend chart" [ref=e499]:
+                            - generic [ref=e500]: ROA
+                            - generic [ref=e501]: Chart
+                        - cell "9.17%" [ref=e502]
+                        - cell "9.01% -1.8%" [ref=e503]:
+                          - text: 9.01%
+                          - generic [ref=e504]: "-1.8%"
+                        - cell "5.63% -37.5%" [ref=e505]:
+                          - text: 5.63%
+                          - generic [ref=e506]: "-37.5%"
+                        - cell "3.12% -44.6%" [ref=e507]:
+                          - text: 3.12%
+                          - generic [ref=e508]: "-44.6%"
+                        - cell "4.15% +33.0%" [ref=e509]:
+                          - text: 4.15%
+                          - generic [ref=e510]: +33.0%
+                        - cell "4.29% +3.4%" [ref=e511]:
+                          - text: 4.29%
+                          - generic [ref=e512]: +3.4%
+                      - row "Leverage" [ref=e513]:
+                        - cell "Leverage" [ref=e514]:
+                          - generic [ref=e516]: Leverage
+                        - cell [ref=e517]
+                        - cell [ref=e518]
+                        - cell [ref=e519]
+                        - cell [ref=e520]
+                        - cell [ref=e521]
+                        - cell [ref=e522]
+                      - row "Toggle Debt/Equity trend chart — — 32.75 2.05 -93.8% 0.50 -75.4% 0.81 +61.7%" [ref=e523]:
+                        - cell "Toggle Debt/Equity trend chart" [ref=e524]:
+                          - button "Toggle Debt/Equity trend chart" [ref=e525]:
+                            - generic [ref=e526]: Debt/Equity
+                            - generic [ref=e527]: Chart
+                        - cell "—" [ref=e528]
+                        - cell "—" [ref=e529]
+                        - cell "32.75" [ref=e530]
+                        - cell "2.05 -93.8%" [ref=e531]:
+                          - text: "2.05"
+                          - generic [ref=e532]: "-93.8%"
+                        - cell "0.50 -75.4%" [ref=e533]:
+                          - text: "0.50"
+                          - generic [ref=e534]: "-75.4%"
+                        - cell "0.81 +61.7%" [ref=e535]:
+                          - text: "0.81"
+                          - generic [ref=e536]: +61.7%
+                      - row "Toggle Debt/Assets trend chart 46.06% 60.68% +31.7% 54.39% -10.4% 57.28% +5.3% 51.32% -10.4% 49.98% -2.6%" [ref=e537]:
+                        - cell "Toggle Debt/Assets trend chart" [ref=e538]:
+                          - button "Toggle Debt/Assets trend chart" [ref=e539]:
+                            - generic [ref=e540]: Debt/Assets
+                            - generic [ref=e541]: Chart
+                        - cell "46.06%" [ref=e542]
+                        - cell "60.68% +31.7%" [ref=e543]:
+                          - text: 60.68%
+                          - generic [ref=e544]: +31.7%
+                        - cell "54.39% -10.4%" [ref=e545]:
+                          - text: 54.39%
+                          - generic [ref=e546]: "-10.4%"
+                        - cell "57.28% +5.3%" [ref=e547]:
+                          - text: 57.28%
+                          - generic [ref=e548]: +5.3%
+                        - cell "51.32% -10.4%" [ref=e549]:
+                          - text: 51.32%
+                          - generic [ref=e550]: "-10.4%"
+                        - cell "49.98% -2.6%" [ref=e551]:
+                          - text: 49.98%
+                          - generic [ref=e552]: "-2.6%"
+                      - row "Toggle Equity Multiplier trend chart 1.85 2.54 +37.2% 2.19 -13.8% 2.34 +6.8% 2.05 -12.2% 2.00 -2.7%" [ref=e553]:
+                        - cell "Toggle Equity Multiplier trend chart" [ref=e554]:
+                          - button "Toggle Equity Multiplier trend chart" [ref=e555]:
+                            - generic [ref=e556]: Equity Multiplier
+                            - generic [ref=e557]: Chart
+                        - cell "1.85" [ref=e558]
+                        - cell "2.54 +37.2%" [ref=e559]:
+                          - text: "2.54"
+                          - generic [ref=e560]: +37.2%
+                        - cell "2.19 -13.8%" [ref=e561]:
+                          - text: "2.19"
+                          - generic [ref=e562]: "-13.8%"
+                        - cell "2.34 +6.8%" [ref=e563]:
+                          - text: "2.34"
+                          - generic [ref=e564]: +6.8%
+                        - cell "2.05 -12.2%" [ref=e565]:
+                          - text: "2.05"
+                          - generic [ref=e566]: "-12.2%"
+                        - cell "2.00 -2.7%" [ref=e567]:
+                          - text: "2.00"
+                          - generic [ref=e568]: "-2.7%"
+                      - row "Coverage" [ref=e569]:
+                        - cell "Coverage" [ref=e570]:
+                          - generic [ref=e572]: Coverage
+                        - cell [ref=e573]
+                        - cell [ref=e574]
+                        - cell [ref=e575]
+                        - cell [ref=e576]
+                        - cell [ref=e577]
+                        - cell [ref=e578]
+                      - row "Toggle Debt Service Coverage trend chart 0.15 0.15 +4.3% 0.06 -61.5% 0.03 -48.7% 0.04 +39.5% 0.04 +3.5%" [ref=e579]:
+                        - cell "Toggle Debt Service Coverage trend chart" [ref=e580]:
+                          - button "Toggle Debt Service Coverage trend chart" [ref=e581]:
+                            - generic [ref=e582]: Debt Service Coverage
+                            - generic [ref=e583]: Chart
+                        - cell "0.15" [ref=e584]
+                        - cell "0.15 +4.3%" [ref=e585]:
+                          - text: "0.15"
+                          - generic [ref=e586]: +4.3%
+                        - cell "0.06 -61.5%" [ref=e587]:
+                          - text: "0.06"
+                          - generic [ref=e588]: "-61.5%"
+                        - cell "0.03 -48.7%" [ref=e589]:
+                          - text: "0.03"
+                          - generic [ref=e590]: "-48.7%"
+                        - cell "0.04 +39.5%" [ref=e591]:
+                          - text: "0.04"
+                          - generic [ref=e592]: +39.5%
+                        - cell "0.04 +3.5%" [ref=e593]:
+                          - text: "0.04"
+                          - generic [ref=e594]: +3.5%
+                      - row "Operating cash flow" [ref=e595]:
+                        - cell "Operating cash flow" [ref=e596]:
+                          - generic [ref=e598]: Operating cash flow
+                        - cell [ref=e599]
+                        - cell [ref=e600]
+                        - cell [ref=e601]
+                        - cell [ref=e602]
+                        - cell [ref=e603]
+                        - cell [ref=e604]
+                      - row "Toggle OCF/Debt trend chart -0.15 -0.37 -151.0% 0.48 +230.0% -0.44 -191.2% -0.25 +43.7% -0.49 -97.0%" [ref=e605]:
+                        - cell "Toggle OCF/Debt trend chart" [ref=e606]:
+                          - button "Toggle OCF/Debt trend chart" [ref=e607]:
+                            - generic [ref=e608]: OCF/Debt
+                            - generic [ref=e609]: Chart
+                        - cell "-0.15" [ref=e610]
+                        - cell "-0.37 -151.0%" [ref=e611]:
+                          - text: "-0.37"
+                          - generic [ref=e612]: "-151.0%"
+                        - cell "0.48 +230.0%" [ref=e613]:
+                          - text: "0.48"
+                          - generic [ref=e614]: +230.0%
+                        - cell "-0.44 -191.2%" [ref=e615]:
+                          - text: "-0.44"
+                          - generic [ref=e616]: "-191.2%"
+                        - cell "-0.25 +43.7%" [ref=e617]:
+                          - text: "-0.25"
+                          - generic [ref=e618]: +43.7%
+                        - cell "-0.49 -97.0%" [ref=e619]:
+                          - text: "-0.49"
+                          - generic [ref=e620]: "-97.0%"
+                      - row "Toggle FCF Yield trend chart -18.87% -1.21% -541.7% 7.39% +100.1% -8.49% -214.9% 12.75% +250.2% -4.93% -138.7%" [ref=e621]:
+                        - cell "Toggle FCF Yield trend chart" [ref=e622]:
+                          - button "Toggle FCF Yield trend chart" [ref=e623]:
+                            - generic [ref=e624]: FCF Yield
+                            - generic [ref=e625]: Chart
+                        - cell "-18.87%" [ref=e626]
+                        - cell "-1.21% -541.7%" [ref=e627]:
+                          - text: "-1.21%"
+                          - generic [ref=e628]: "-541.7%"
+                        - cell "7.39% +100.1%" [ref=e629]:
+                          - text: 7.39%
+                          - generic [ref=e630]: +100.1%
+                        - cell "-8.49% -214.9%" [ref=e631]:
+                          - text: "-8.49%"
+                          - generic [ref=e632]: "-214.9%"
+                        - cell "12.75% +250.2%" [ref=e633]:
+                          - text: 12.75%
+                          - generic [ref=e634]: +250.2%
+                        - cell "-4.93% -138.7%" [ref=e635]:
+                          - text: "-4.93%"
+                          - generic [ref=e636]: "-138.7%"
+                      - row "Toggle OCF/Sales trend chart -33.04% -1.01% -206.1% 1.19% +217.2% -1.76% -248.6% -91.57% +48.0% -1.77% -92.8%" [ref=e637]:
+                        - cell "Toggle OCF/Sales trend chart" [ref=e638]:
+                          - button "Toggle OCF/Sales trend chart" [ref=e639]:
+                            - generic [ref=e640]: OCF/Sales
+                            - generic [ref=e641]: Chart
+                        - cell "-33.04%" [ref=e642]
+                        - cell "-1.01% -206.1%" [ref=e643]:
+                          - text: "-1.01%"
+                          - generic [ref=e644]: "-206.1%"
+                        - cell "1.19% +217.2%" [ref=e645]:
+                          - text: 1.19%
+                          - generic [ref=e646]: +217.2%
+                        - cell "-1.76% -248.6%" [ref=e647]:
+                          - text: "-1.76%"
+                          - generic [ref=e648]: "-248.6%"
+                        - cell "-91.57% +48.0%" [ref=e649]:
+                          - text: "-91.57%"
+                          - generic [ref=e650]: +48.0%
+                        - cell "-1.77% -92.8%" [ref=e651]:
+                          - text: "-1.77%"
+                          - generic [ref=e652]: "-92.8%"
+                      - row "Growth" [ref=e653]:
+                        - cell "Growth" [ref=e654]:
+                          - generic [ref=e656]: Growth
+                        - cell [ref=e657]
+                        - cell [ref=e658]
+                        - cell [ref=e659]
+                        - cell [ref=e660]
+                        - cell [ref=e661]
+                        - cell [ref=e662]
+                      - row "Toggle Revenue Growth trend chart — 114.33% -14.86% -113.0% -21.66% -45.8% 49.47% +328.3% 34.76% -29.7%" [ref=e663]:
+                        - cell "Toggle Revenue Growth trend chart" [ref=e664]:
+                          - button "Toggle Revenue Growth trend chart" [ref=e665]:
+                            - generic [ref=e666]: Revenue Growth
+                            - generic [ref=e667]: Chart
+                        - cell "—" [ref=e668]
+                        - cell "114.33%" [ref=e669]
+                        - cell "-14.86% -113.0%" [ref=e670]:
+                          - text: "-14.86%"
+                          - generic [ref=e671]: "-113.0%"
+                        - cell "-21.66% -45.8%" [ref=e672]:
+                          - text: "-21.66%"
+                          - generic [ref=e673]: "-45.8%"
+                        - cell "49.47% +328.3%" [ref=e674]:
+                          - text: 49.47%
+                          - generic [ref=e675]: +328.3%
+                        - cell "34.76% -29.7%" [ref=e676]:
+                          - text: 34.76%
+                          - generic [ref=e677]: "-29.7%"
+                      - row "Toggle Earnings Growth trend chart — 94.91% -42.02% -144.3% -43.39% -3.3% 85.14% +296.2% 47.36% -44.4%" [ref=e678]:
+                        - cell "Toggle Earnings Growth trend chart" [ref=e679]:
+                          - button "Toggle Earnings Growth trend chart" [ref=e680]:
+                            - generic [ref=e681]: Earnings Growth
+                            - generic [ref=e682]: Chart
+                        - cell "—" [ref=e683]
+                        - cell "94.91%" [ref=e684]
+                        - cell "-42.02% -144.3%" [ref=e685]:
+                          - text: "-42.02%"
+                          - generic [ref=e686]: "-144.3%"
+                        - cell "-43.39% -3.3%" [ref=e687]:
+                          - text: "-43.39%"
+                          - generic [ref=e688]: "-3.3%"
+                        - cell "85.14% +296.2%" [ref=e689]:
+                          - text: 85.14%
+                          - generic [ref=e690]: +296.2%
+                        - cell "47.36% -44.4%" [ref=e691]:
+                          - text: 47.36%
+                          - generic [ref=e692]: "-44.4%"
+                      - row "Dividend" [ref=e693]:
+                        - cell "Dividend" [ref=e694]:
+                          - generic [ref=e696]: Dividend
+                        - cell [ref=e697]
+                        - cell [ref=e698]
+                        - cell [ref=e699]
+                        - cell [ref=e700]
+                        - cell [ref=e701]
+                        - cell [ref=e702]
+                      - row "Toggle Dividend Yield trend chart 1.33% 2.35% +77.4% 3.00% +27.5% 100.00% -66.7% 100.00% +0.0% 100.00% +0.0%" [ref=e703]:
+                        - cell "Toggle Dividend Yield trend chart" [ref=e704]:
+                          - button "Toggle Dividend Yield trend chart" [ref=e705]:
+                            - generic [ref=e706]: Dividend Yield
+                            - generic [ref=e707]: Chart
+                        - cell "1.33%" [ref=e708]
+                        - cell "2.35% +77.4%" [ref=e709]:
+                          - text: 2.35%
+                          - generic [ref=e710]: +77.4%
+                        - cell "3.00% +27.5%" [ref=e711]:
+                          - text: 3.00%
+                          - generic [ref=e712]: +27.5%
+                        - cell "100.00% -66.7%" [ref=e713]:
+                          - text: 100.00%
+                          - generic [ref=e714]: "-66.7%"
+                        - cell "100.00% +0.0%" [ref=e715]:
+                          - text: 100.00%
+                          - generic [ref=e716]: +0.0%
+                        - cell "100.00% +0.0%" [ref=e717]:
+                          - text: 100.00%
+                          - generic [ref=e718]: +0.0%
+                      - row "Toggle Payout Ratio trend chart 53.54% 48.72% -9.0% 0.00% -100.0% 106.14% 19.52% -81.6% 13.37% -31.5%" [ref=e719]:
+                        - cell "Toggle Payout Ratio trend chart" [ref=e720]:
+                          - button "Toggle Payout Ratio trend chart" [ref=e721]:
+                            - generic [ref=e722]: Payout Ratio
+                            - generic [ref=e723]: Chart
+                        - cell "53.54%" [ref=e724]
+                        - cell "48.72% -9.0%" [ref=e725]:
+                          - text: 48.72%
+                          - generic [ref=e726]: "-9.0%"
+                        - cell "0.00% -100.0%" [ref=e727]:
+                          - text: 0.00%
+                          - generic [ref=e728]: "-100.0%"
+                        - cell "106.14%" [ref=e729]
+                        - cell "19.52% -81.6%" [ref=e730]:
+                          - text: 19.52%
+                          - generic [ref=e731]: "-81.6%"
+                        - cell "13.37% -31.5%" [ref=e732]:
+                          - text: 13.37%
+                          - generic [ref=e733]: "-31.5%"
+                  - generic [ref=e734]: "Note: Ratio history by FY. First available period is the base period; missing ratios render as —."
+            - generic [ref=e736]:
+              - generic [ref=e737]:
+                - generic [ref=e738]:
+                  - 'button "Widget Group: Global" [ref=e740]':
+                    - img [ref=e741]
+                  - generic "Income Statement" [ref=e746]
+                - generic [ref=e749]:
+                  - button "VniAgent" [ref=e750]:
+                    - img [ref=e751]
+                  - button "Widget settings" [ref=e754]:
+                    - img [ref=e755]
+                  - button "Maximize" [ref=e758]:
+                    - img [ref=e759]
+                  - button [ref=e765]:
+                    - img [ref=e766]
+              - generic [ref=e773]:
+                - generic [ref=e775]:
+                  - generic "Updated 02:17:05 PM" [ref=e776]:
+                    - img [ref=e777]
+                    - generic [ref=e780]: Updated 2026-04-17 14:17
+                  - generic [ref=e781]: Annual · newest on right
+                  - generic [ref=e782]:
+                    - img [ref=e783]
+                    - text: Income statement
+                - generic [ref=e788]:
+                  - table [ref=e790]:
+                    - rowgroup [ref=e791]:
+                      - row "Metric 2020 2021 2022 2023 2024 2025" [ref=e792]:
+                        - columnheader "Metric" [ref=e793]
+                        - columnheader "2020" [ref=e794] [cursor=pointer]:
+                          - generic [ref=e795]: "2020"
+                        - columnheader "2021" [ref=e796] [cursor=pointer]:
+                          - generic [ref=e797]: "2021"
+                        - columnheader "2022" [ref=e798] [cursor=pointer]:
+                          - generic [ref=e799]: "2022"
+                        - columnheader "2023" [ref=e800] [cursor=pointer]:
+                          - generic [ref=e801]: "2023"
+                        - columnheader "2024" [ref=e802] [cursor=pointer]:
+                          - generic [ref=e803]: "2024"
+                        - columnheader "2025" [ref=e804] [cursor=pointer]:
+                          - generic [ref=e805]: "2025"
+                    - rowgroup [ref=e806]:
+                      - row "▾ Profitability" [ref=e807]:
+                        - cell "▾ Profitability" [ref=e808]:
+                          - button "▾ Profitability" [ref=e809]:
+                            - generic [ref=e810]: ▾
+                            - generic [ref=e811]: Profitability
+                        - cell [ref=e812]
+                        - cell [ref=e813]
+                        - cell [ref=e814]
+                        - cell [ref=e815]
+                        - cell [ref=e816]
+                        - cell [ref=e817]
+                      - row "Toggle Revenue trend chart 1,729.59 3,707.07 +114.3% 3,156.24 -14.9% 2,472.46 -21.7% 3,695.53 +49.5% 4,980.20 +34.8%" [ref=e818]:
+                        - cell "Toggle Revenue trend chart" [ref=e819]:
+                          - button "Toggle Revenue trend chart" [ref=e820]:
+                            - generic [ref=e821]: Revenue
+                            - generic [ref=e822]: Chart
+                        - cell "1,729.59" [ref=e823]
+                        - cell "3,707.07 +114.3%" [ref=e824]:
+                          - text: 3,707.07
+                          - generic [ref=e825]: +114.3%
+                        - cell "3,156.24 -14.9%" [ref=e826]:
+                          - text: 3,156.24
+                          - generic [ref=e827]: "-14.9%"
+                        - cell "2,472.46 -21.7%" [ref=e828]:
+                          - text: 2,472.46
+                          - generic [ref=e829]: "-21.7%"
+                        - cell "3,695.53 +49.5%" [ref=e830]:
+                          - text: 3,695.53
+                          - generic [ref=e831]: +49.5%
+                        - cell "4,980.20 +34.8%" [ref=e832]:
+                          - text: 4,980.20
+                          - generic [ref=e833]: +34.8%
+                      - row "Toggle Cost of Revenue trend chart -522.00 -1,326.13 -154.0% -1,398.53 -5.5% -1,063.60 +23.9% -1,717.40 -61.5% -2,390.98 -39.2%" [ref=e834]:
+                        - cell "Toggle Cost of Revenue trend chart" [ref=e835]:
+                          - button "Toggle Cost of Revenue trend chart" [ref=e836]:
+                            - generic [ref=e837]: Cost of Revenue
+                            - generic [ref=e838]: Chart
+                        - cell "-522.00" [ref=e839]
+                        - cell "-1,326.13 -154.0%" [ref=e840]:
+                          - text: "-1,326.13"
+                          - generic [ref=e841]: "-154.0%"
+                        - cell "-1,398.53 -5.5%" [ref=e842]:
+                          - text: "-1,398.53"
+                          - generic [ref=e843]: "-5.5%"
+                        - cell "-1,063.60 +23.9%" [ref=e844]:
+                          - text: "-1,063.60"
+                          - generic [ref=e845]: +23.9%
+                        - cell "-1,717.40 -61.5%" [ref=e846]:
+                          - text: "-1,717.40"
+                          - generic [ref=e847]: "-61.5%"
+                        - cell "-2,390.98 -39.2%" [ref=e848]:
+                          - text: "-2,390.98"
+                          - generic [ref=e849]: "-39.2%"
+                      - row "Toggle Gross Profit trend chart 1,207.59 2,380.93 +97.2% 1,757.71 -26.2% 1,408.86 -19.8% 1,978.12 +40.4% 2,589.22 +30.9%" [ref=e850]:
+                        - cell "Toggle Gross Profit trend chart" [ref=e851]:
+                          - button "Toggle Gross Profit trend chart" [ref=e852]:
+                            - generic [ref=e853]: Gross Profit
+                            - generic [ref=e854]: Chart
+                        - cell "1,207.59" [ref=e855]
+                        - cell "2,380.93 +97.2%" [ref=e856]:
+                          - text: 2,380.93
+                          - generic [ref=e857]: +97.2%
+                        - cell "1,757.71 -26.2%" [ref=e858]:
+                          - text: 1,757.71
+                          - generic [ref=e859]: "-26.2%"
+                        - cell "1,408.86 -19.8%" [ref=e860]:
+                          - text: 1,408.86
+                          - generic [ref=e861]: "-19.8%"
+                        - cell "1,978.12 +40.4%" [ref=e862]:
+                          - text: 1,978.12
+                          - generic [ref=e863]: +40.4%
+                        - cell "2,589.22 +30.9%" [ref=e864]:
+                          - text: 2,589.22
+                          - generic [ref=e865]: +30.9%
+                      - row "Toggle Operating Income trend chart 950.42 1,850.85 +94.7% 1,016.04 -45.1% 570.01 -43.9% 1,086.55 +90.6% 1,613.80 +48.5%" [ref=e866]:
+                        - cell "Toggle Operating Income trend chart" [ref=e867]:
+                          - button "Toggle Operating Income trend chart" [ref=e868]:
+                            - generic [ref=e869]: Operating Income
+                            - generic [ref=e870]: Chart
+                        - cell "950.42" [ref=e871]
+                        - cell "1,850.85 +94.7%" [ref=e872]:
+                          - text: 1,850.85
+                          - generic [ref=e873]: +94.7%
+                        - cell "1,016.04 -45.1%" [ref=e874]:
+                          - text: 1,016.04
+                          - generic [ref=e875]: "-45.1%"
+                        - cell "570.01 -43.9%" [ref=e876]:
+                          - text: "570.01"
+                          - generic [ref=e877]: "-43.9%"
+                        - cell "1,086.55 +90.6%" [ref=e878]:
+                          - text: 1,086.55
+                          - generic [ref=e879]: +90.6%
+                        - cell "1,613.80 +48.5%" [ref=e880]:
+                          - text: 1,613.80
+                          - generic [ref=e881]: +48.5%
+                      - row "Toggle Pre-tax Profit trend chart 951.04 1,850.59 +94.6% 1,059.74 -42.7% 570.14 -46.2% 1,089.34 +91.1% 1,629.22 +49.6%" [ref=e882]:
+                        - cell "Toggle Pre-tax Profit trend chart" [ref=e883]:
+                          - button "Toggle Pre-tax Profit trend chart" [ref=e884]:
+                            - generic [ref=e885]: Pre-tax Profit
+                            - generic [ref=e886]: Chart
+                        - cell "951.04" [ref=e887]
+                        - cell "1,850.59 +94.6%" [ref=e888]:
+                          - text: 1,850.59
+                          - generic [ref=e889]: +94.6%
+                        - cell "1,059.74 -42.7%" [ref=e890]:
+                          - text: 1,059.74
+                          - generic [ref=e891]: "-42.7%"
+                        - cell "570.14 -46.2%" [ref=e892]:
+                          - text: "570.14"
+                          - generic [ref=e893]: "-46.2%"
+                        - cell "1,089.34 +91.1%" [ref=e894]:
+                          - text: 1,089.34
+                          - generic [ref=e895]: +91.1%
+                        - cell "1,629.22 +49.6%" [ref=e896]:
+                          - text: 1,629.22
+                          - generic [ref=e897]: +49.6%
+                      - row "Toggle Tax Expense trend chart -182.13 -351.87 -93.2% -190.76 +45.8% -78.23 +59.0% -178.64 -128.3% -287.27 -60.8%" [ref=e898]:
+                        - cell "Toggle Tax Expense trend chart" [ref=e899]:
+                          - button "Toggle Tax Expense trend chart" [ref=e900]:
+                            - generic [ref=e901]: Tax Expense
+                            - generic [ref=e902]: Chart
+                        - cell "-182.13" [ref=e903]
+                        - cell "-351.87 -93.2%" [ref=e904]:
+                          - text: "-351.87"
+                          - generic [ref=e905]: "-93.2%"
+                        - cell "-190.76 +45.8%" [ref=e906]:
+                          - text: "-190.76"
+                          - generic [ref=e907]: +45.8%
+                        - cell "-78.23 +59.0%" [ref=e908]:
+                          - text: "-78.23"
+                          - generic [ref=e909]: +59.0%
+                        - cell "-178.64 -128.3%" [ref=e910]:
+                          - text: "-178.64"
+                          - generic [ref=e911]: "-128.3%"
+                        - cell "-287.27 -60.8%" [ref=e912]:
+                          - text: "-287.27"
+                          - generic [ref=e913]: "-60.8%"
+                      - row "Toggle Net Income trend chart 768.91 1,498.72 +94.9% 868.98 -42.0% 491.90 -43.4% 910.69 +85.1% 1,341.95 +47.4%" [ref=e914]:
+                        - cell "Toggle Net Income trend chart" [ref=e915]:
+                          - button "Toggle Net Income trend chart" [ref=e916]:
+                            - generic [ref=e917]: Net Income
+                            - generic [ref=e918]: Chart
+                        - cell "768.91" [ref=e919]
+                        - cell "1,498.72 +94.9%" [ref=e920]:
+                          - text: 1,498.72
+                          - generic [ref=e921]: +94.9%
+                        - cell "868.98 -42.0%" [ref=e922]:
+                          - text: "868.98"
+                          - generic [ref=e923]: "-42.0%"
+                        - cell "491.90 -43.4%" [ref=e924]:
+                          - text: "491.90"
+                          - generic [ref=e925]: "-43.4%"
+                        - cell "910.69 +85.1%" [ref=e926]:
+                          - text: "910.69"
+                          - generic [ref=e927]: +85.1%
+                        - cell "1,341.95 +47.4%" [ref=e928]:
+                          - text: 1,341.95
+                          - generic [ref=e929]: +47.4%
+                      - row "▾ Expenses & Other" [ref=e930]:
+                        - cell "▾ Expenses & Other" [ref=e931]:
+                          - button "▾ Expenses & Other" [ref=e932]:
+                            - generic [ref=e933]: ▾
+                            - generic [ref=e934]: Expenses & Other
+                        - cell [ref=e935]
+                        - cell [ref=e936]
+                        - cell [ref=e937]
+                        - cell [ref=e938]
+                        - cell [ref=e939]
+                        - cell [ref=e940]
+                      - row "Toggle SG&A trend chart -72.41 -187.86 -159.5% -76.77 +59.1% -122.39 -59.4% -144.70 -18.2% -144.89 -0.1%" [ref=e941]:
+                        - cell "Toggle SG&A trend chart" [ref=e942]:
+                          - button "Toggle SG&A trend chart" [ref=e943]:
+                            - generic [ref=e944]: SG&A
+                            - generic [ref=e945]: Chart
+                        - cell "-72.41" [ref=e946]
+                        - cell "-187.86 -159.5%" [ref=e947]:
+                          - text: "-187.86"
+                          - generic [ref=e948]: "-159.5%"
+                        - cell "-76.77 +59.1%" [ref=e949]:
+                          - text: "-76.77"
+                          - generic [ref=e950]: +59.1%
+                        - cell "-122.39 -59.4%" [ref=e951]:
+                          - text: "-122.39"
+                          - generic [ref=e952]: "-59.4%"
+                        - cell "-144.70 -18.2%" [ref=e953]:
+                          - text: "-144.70"
+                          - generic [ref=e954]: "-18.2%"
+                        - cell "-144.89 -0.1%" [ref=e955]:
+                          - text: "-144.89"
+                          - generic [ref=e956]: "-0.1%"
+                      - row "Toggle R&D trend chart — — — — — —" [ref=e957]:
+                        - cell "Toggle R&D trend chart" [ref=e958]:
+                          - button "Toggle R&D trend chart" [ref=e959]:
+                            - generic [ref=e960]: R&D
+                            - generic [ref=e961]: Chart
+                        - cell "—" [ref=e962]
+                        - cell "—" [ref=e963]
+                        - cell "—" [ref=e964]
+                        - cell "—" [ref=e965]
+                        - cell "—" [ref=e966]
+                        - cell "—" [ref=e967]
+                      - row "Toggle Depreciation trend chart 10.63 7.50 -29.5% 9.65 +28.7% 9.68 +0.3% 10.75 +11.1% 14.43 +34.2%" [ref=e968]:
+                        - cell "Toggle Depreciation trend chart" [ref=e969]:
+                          - button "Toggle Depreciation trend chart" [ref=e970]:
+                            - generic [ref=e971]: Depreciation
+                            - generic [ref=e972]: Chart
+                        - cell "10.63" [ref=e973]
+                        - cell "7.50 -29.5%" [ref=e974]:
+                          - text: "7.50"
+                          - generic [ref=e975]: "-29.5%"
+                        - cell "9.65 +28.7%" [ref=e976]:
+                          - text: "9.65"
+                          - generic [ref=e977]: +28.7%
+                        - cell "9.68 +0.3%" [ref=e978]:
+                          - text: "9.68"
+                          - generic [ref=e979]: +0.3%
+                        - cell "10.75 +11.1%" [ref=e980]:
+                          - text: "10.75"
+                          - generic [ref=e981]: +11.1%
+                        - cell "14.43 +34.2%" [ref=e982]:
+                          - text: "14.43"
+                          - generic [ref=e983]: +34.2%
+                      - row "Toggle Interest Expense trend chart -173.51 -330.78 -90.6% -477.36 -44.3% -562.55 -17.8% -764.12 -35.8% -801.90 -4.9%" [ref=e984]:
+                        - cell "Toggle Interest Expense trend chart" [ref=e985]:
+                          - button "Toggle Interest Expense trend chart" [ref=e986]:
+                            - generic [ref=e987]: Interest Expense
+                            - generic [ref=e988]: Chart
+                        - cell "-173.51" [ref=e989]
+                        - cell "-330.78 -90.6%" [ref=e990]:
+                          - text: "-330.78"
+                          - generic [ref=e991]: "-90.6%"
+                        - cell "-477.36 -44.3%" [ref=e992]:
+                          - text: "-477.36"
+                          - generic [ref=e993]: "-44.3%"
+                        - cell "-562.55 -17.8%" [ref=e994]:
+                          - text: "-562.55"
+                          - generic [ref=e995]: "-17.8%"
+                        - cell "-764.12 -35.8%" [ref=e996]:
+                          - text: "-764.12"
+                          - generic [ref=e997]: "-35.8%"
+                        - cell "-801.90 -4.9%" [ref=e998]:
+                          - text: "-801.90"
+                          - generic [ref=e999]: "-4.9%"
+                      - row "Toggle Other Income trend chart 0.00 -0.34 -0.85 -151.2% -0.00 +99.5% -0.31 -2.01 -552.4%" [ref=e1000]:
+                        - cell "Toggle Other Income trend chart" [ref=e1001]:
+                          - button "Toggle Other Income trend chart" [ref=e1002]:
+                            - generic [ref=e1003]: Other Income
+                            - generic [ref=e1004]: Chart
+                        - cell "0.00" [ref=e1005]
+                        - cell "-0.34" [ref=e1006]
+                        - cell "-0.85 -151.2%" [ref=e1007]:
+                          - text: "-0.85"
+                          - generic [ref=e1008]: "-151.2%"
+                        - cell "-0.00 +99.5%" [ref=e1009]:
+                          - text: "-0.00"
+                          - generic [ref=e1010]: +99.5%
+                        - cell "-0.31" [ref=e1011]
+                        - cell "-2.01 -552.4%" [ref=e1012]:
+                          - text: "-2.01"
+                          - generic [ref=e1013]: "-552.4%"
+                      - row "Per-share" [ref=e1014]:
+                        - cell "Per-share" [ref=e1015]:
+                          - generic [ref=e1017]: Per-share
+                        - cell [ref=e1018]
+                        - cell [ref=e1019]
+                        - cell [ref=e1020]
+                        - cell [ref=e1021]
+                        - cell [ref=e1022]
+                        - cell [ref=e1023]
+                      - row "Toggle EPS trend chart — — 2,340.03 1,126.71 -51.9% 1,822.21 +61.7% 1,862.23 +2.2%" [ref=e1024]:
+                        - cell "Toggle EPS trend chart" [ref=e1025]:
+                          - button "Toggle EPS trend chart" [ref=e1026]:
+                            - generic [ref=e1027]: EPS
+                            - generic [ref=e1028]: Chart
+                        - cell "—" [ref=e1029]
+                        - cell "—" [ref=e1030]
+                        - cell "2,340.03" [ref=e1031]
+                        - cell "1,126.71 -51.9%" [ref=e1032]:
+                          - text: 1,126.71
+                          - generic [ref=e1033]: "-51.9%"
+                        - cell "1,822.21 +61.7%" [ref=e1034]:
+                          - text: 1,822.21
+                          - generic [ref=e1035]: +61.7%
+                        - cell "1,862.23 +2.2%" [ref=e1036]:
+                          - text: 1,862.23
+                          - generic [ref=e1037]: +2.2%
+                  - generic [ref=e1038]: "Note: Values in Billions VND except Per Share Values • Reporting Standard: VAS • First available period is the base period"
+            - generic [ref=e1040]:
+              - generic [ref=e1041]:
+                - generic [ref=e1042]:
+                  - 'button "Widget Group: Global" [ref=e1044]':
+                    - img [ref=e1045]
+                  - generic "Balance Sheet" [ref=e1050]
+                - generic [ref=e1053]:
+                  - button "VniAgent" [ref=e1054]:
+                    - img [ref=e1055]
+                  - button "Widget settings" [ref=e1058]:
+                    - img [ref=e1059]
+                  - button "Maximize" [ref=e1062]:
+                    - img [ref=e1063]
+                  - button [ref=e1069]:
+                    - img [ref=e1070]
+              - generic [ref=e1077]:
+                - generic [ref=e1079]:
+                  - generic "Updated 02:17:05 PM" [ref=e1080]:
+                    - img [ref=e1081]
+                    - generic [ref=e1084]: Updated 2026-04-17 14:17
+                  - generic [ref=e1085]: Annual · newest on right
+                  - generic [ref=e1086]:
+                    - img [ref=e1087]
+                    - text: Balance sheet
+                - generic [ref=e1092]:
+                  - table [ref=e1094]:
+                    - rowgroup [ref=e1095]:
+                      - row "Metric 2020 2021 2022 2023 2024 2025" [ref=e1096]:
+                        - columnheader "Metric" [ref=e1097]
+                        - columnheader "2020" [ref=e1098] [cursor=pointer]:
+                          - generic [ref=e1099]: "2020"
+                        - columnheader "2021" [ref=e1100] [cursor=pointer]:
+                          - generic [ref=e1101]: "2021"
+                        - columnheader "2022" [ref=e1102] [cursor=pointer]:
+                          - generic [ref=e1103]: "2022"
+                        - columnheader "2023" [ref=e1104] [cursor=pointer]:
+                          - generic [ref=e1105]: "2023"
+                        - columnheader "2024" [ref=e1106] [cursor=pointer]:
+                          - generic [ref=e1107]: "2024"
+                        - columnheader "2025" [ref=e1108] [cursor=pointer]:
+                          - generic [ref=e1109]: "2025"
+                    - rowgroup [ref=e1110]:
+                      - row "▾ Assets" [ref=e1111]:
+                        - cell "▾ Assets" [ref=e1112]:
+                          - button "▾ Assets" [ref=e1113]:
+                            - generic [ref=e1114]: ▾
+                            - generic [ref=e1115]: Assets
+                        - cell [ref=e1116]
+                        - cell [ref=e1117]
+                        - cell [ref=e1118]
+                        - cell [ref=e1119]
+                        - cell [ref=e1120]
+                        - cell [ref=e1121]
+                      - row "Toggle Total Assets trend chart 8,382.41 16,636.26 +98.5% 14,242.75 -14.4% 17,255.13 +21.2% 26,592.12 +54.1% 36,005.86 +35.4%" [ref=e1122]:
+                        - cell "Toggle Total Assets trend chart" [ref=e1123]:
+                          - button "Toggle Total Assets trend chart" [ref=e1124]:
+                            - generic [ref=e1125]: Total Assets
+                            - generic [ref=e1126]: Chart
+                        - cell "8,382.41" [ref=e1127]
+                        - cell "16,636.26 +98.5%" [ref=e1128]:
+                          - text: 16,636.26
+                          - generic [ref=e1129]: +98.5%
+                        - cell "14,242.75 -14.4%" [ref=e1130]:
+                          - text: 14,242.75
+                          - generic [ref=e1131]: "-14.4%"
+                        - cell "17,255.13 +21.2%" [ref=e1132]:
+                          - text: 17,255.13
+                          - generic [ref=e1133]: +21.2%
+                        - cell "26,592.12 +54.1%" [ref=e1134]:
+                          - text: 26,592.12
+                          - generic [ref=e1135]: +54.1%
+                        - cell "36,005.86 +35.4%" [ref=e1136]:
+                          - text: 36,005.86
+                          - generic [ref=e1137]: +35.4%
+                      - row "Toggle Current Assets trend chart 8,312.17 16,568.97 +99.3% 14,157.69 -14.6% 17,174.45 +21.3% 26,491.84 +54.3% 35,868.91 +35.4%" [ref=e1138]:
+                        - cell "Toggle Current Assets trend chart" [ref=e1139]:
+                          - button "Toggle Current Assets trend chart" [ref=e1140]:
+                            - generic [ref=e1141]: Current Assets
+                            - generic [ref=e1142]: Chart
+                        - cell "8,312.17" [ref=e1143]
+                        - cell "16,568.97 +99.3%" [ref=e1144]:
+                          - text: 16,568.97
+                          - generic [ref=e1145]: +99.3%
+                        - cell "14,157.69 -14.6%" [ref=e1146]:
+                          - text: 14,157.69
+                          - generic [ref=e1147]: "-14.6%"
+                        - cell "17,174.45 +21.3%" [ref=e1148]:
+                          - text: 17,174.45
+                          - generic [ref=e1149]: +21.3%
+                        - cell "26,491.84 +54.3%" [ref=e1150]:
+                          - text: 26,491.84
+                          - generic [ref=e1151]: +54.3%
+                        - cell "35,868.91 +35.4%" [ref=e1152]:
+                          - text: 35,868.91
+                          - generic [ref=e1153]: +35.4%
+                      - row "Toggle Fixed Assets trend chart 14.38 13.16 -8.5% 23.50 +78.6% 23.43 -0.3% 37.27 +59.1% 75.27 +102.0%" [ref=e1154]:
+                        - cell "Toggle Fixed Assets trend chart" [ref=e1155]:
+                          - button "Toggle Fixed Assets trend chart" [ref=e1156]:
+                            - generic [ref=e1157]: Fixed Assets
+                            - generic [ref=e1158]: Chart
+                        - cell "14.38" [ref=e1159]
+                        - cell "13.16 -8.5%" [ref=e1160]:
+                          - text: "13.16"
+                          - generic [ref=e1161]: "-8.5%"
+                        - cell "23.50 +78.6%" [ref=e1162]:
+                          - text: "23.50"
+                          - generic [ref=e1163]: +78.6%
+                        - cell "23.43 -0.3%" [ref=e1164]:
+                          - text: "23.43"
+                          - generic [ref=e1165]: "-0.3%"
+                        - cell "37.27 +59.1%" [ref=e1166]:
+                          - text: "37.27"
+                          - generic [ref=e1167]: +59.1%
+                        - cell "75.27 +102.0%" [ref=e1168]:
+                          - text: "75.27"
+                          - generic [ref=e1169]: +102.0%
+                      - row "Toggle Cash trend chart 642.51 1,131.75 +76.1% 3,423.50 +202.5% 787.90 -77.0% 4,743.77 +502.1% 3,213.69 -32.3%" [ref=e1170]:
+                        - cell "Toggle Cash trend chart" [ref=e1171]:
+                          - button "Toggle Cash trend chart" [ref=e1172]:
+                            - generic [ref=e1173]: Cash
+                            - generic [ref=e1174]: Chart
+                        - cell "642.51" [ref=e1175]
+                        - cell "1,131.75 +76.1%" [ref=e1176]:
+                          - text: 1,131.75
+                          - generic [ref=e1177]: +76.1%
+                        - cell "3,423.50 +202.5%" [ref=e1178]:
+                          - text: 3,423.50
+                          - generic [ref=e1179]: +202.5%
+                        - cell "787.90 -77.0%" [ref=e1180]:
+                          - text: "787.90"
+                          - generic [ref=e1181]: "-77.0%"
+                        - cell "4,743.77 +502.1%" [ref=e1182]:
+                          - text: 4,743.77
+                          - generic [ref=e1183]: +502.1%
+                        - cell "3,213.69 -32.3%" [ref=e1184]:
+                          - text: 3,213.69
+                          - generic [ref=e1185]: "-32.3%"
+                      - row "Toggle Inventory trend chart 0.00 0.00 0.00 0.00 0.00 0.00" [ref=e1186]:
+                        - cell "Toggle Inventory trend chart" [ref=e1187]:
+                          - button "Toggle Inventory trend chart" [ref=e1188]:
+                            - generic [ref=e1189]: Inventory
+                            - generic [ref=e1190]: Chart
+                        - cell "0.00" [ref=e1191]
+                        - cell "0.00" [ref=e1192]
+                        - cell "0.00" [ref=e1193]
+                        - cell "0.00" [ref=e1194]
+                        - cell "0.00" [ref=e1195]
+                        - cell "0.00" [ref=e1196]
+                      - row "Toggle Accounts Receivable trend chart 221.80 285.21 +28.6% 120.09 -57.9% 1,094.49 +811.4% 506.86 -53.7% 453.43 -10.5%" [ref=e1197]:
+                        - cell "Toggle Accounts Receivable trend chart" [ref=e1198]:
+                          - button "Toggle Accounts Receivable trend chart" [ref=e1199]:
+                            - generic [ref=e1200]: Accounts Receivable
+                            - generic [ref=e1201]: Chart
+                        - cell "221.80" [ref=e1202]
+                        - cell "285.21 +28.6%" [ref=e1203]:
+                          - text: "285.21"
+                          - generic [ref=e1204]: +28.6%
+                        - cell "120.09 -57.9%" [ref=e1205]:
+                          - text: "120.09"
+                          - generic [ref=e1206]: "-57.9%"
+                        - cell "1,094.49 +811.4%" [ref=e1207]:
+                          - text: 1,094.49
+                          - generic [ref=e1208]: +811.4%
+                        - cell "506.86 -53.7%" [ref=e1209]:
+                          - text: "506.86"
+                          - generic [ref=e1210]: "-53.7%"
+                        - cell "453.43 -10.5%" [ref=e1211]:
+                          - text: "453.43"
+                          - generic [ref=e1212]: "-10.5%"
+                      - row "▾ Liabilities" [ref=e1213]:
+                        - cell "▾ Liabilities" [ref=e1214]:
+                          - button "▾ Liabilities" [ref=e1215]:
+                            - generic [ref=e1216]: ▾
+                            - generic [ref=e1217]: Liabilities
+                        - cell [ref=e1218]
+                        - cell [ref=e1219]
+                        - cell [ref=e1220]
+                        - cell [ref=e1221]
+                        - cell [ref=e1222]
+                        - cell [ref=e1223]
+                      - row "Toggle Total Liabilities trend chart 3,860.92 10,094.40 +161.5% 7,747.28 -23.3% 9,883.91 +27.6% 13,647.82 +38.1% 17,995.97 +31.9%" [ref=e1224]:
+                        - cell "Toggle Total Liabilities trend chart" [ref=e1225]:
+                          - button "Toggle Total Liabilities trend chart" [ref=e1226]:
+                            - generic [ref=e1227]: Total Liabilities
+                            - generic [ref=e1228]: Chart
+                        - cell "3,860.92" [ref=e1229]
+                        - cell "10,094.40 +161.5%" [ref=e1230]:
+                          - text: 10,094.40
+                          - generic [ref=e1231]: +161.5%
+                        - cell "7,747.28 -23.3%" [ref=e1232]:
+                          - text: 7,747.28
+                          - generic [ref=e1233]: "-23.3%"
+                        - cell "9,883.91 +27.6%" [ref=e1234]:
+                          - text: 9,883.91
+                          - generic [ref=e1235]: +27.6%
+                        - cell "13,647.82 +38.1%" [ref=e1236]:
+                          - text: 13,647.82
+                          - generic [ref=e1237]: +38.1%
+                        - cell "17,995.97 +31.9%" [ref=e1238]:
+                          - text: 17,995.97
+                          - generic [ref=e1239]: +31.9%
+                      - row "Toggle Current Liab. trend chart 3,733.86 9,615.48 +157.5% 7,487.46 -22.1% 9,465.77 +26.4% 13,038.47 +37.7% 17,325.12 +32.9%" [ref=e1240]:
+                        - cell "Toggle Current Liab. trend chart" [ref=e1241]:
+                          - button "Toggle Current Liab. trend chart" [ref=e1242]:
+                            - generic [ref=e1243]: Current Liab.
+                            - generic [ref=e1244]: Chart
+                        - cell "3,733.86" [ref=e1245]
+                        - cell "9,615.48 +157.5%" [ref=e1246]:
+                          - text: 9,615.48
+                          - generic [ref=e1247]: +157.5%
+                        - cell "7,487.46 -22.1%" [ref=e1248]:
+                          - text: 7,487.46
+                          - generic [ref=e1249]: "-22.1%"
+                        - cell "9,465.77 +26.4%" [ref=e1250]:
+                          - text: 9,465.77
+                          - generic [ref=e1251]: +26.4%
+                        - cell "13,038.47 +37.7%" [ref=e1252]:
+                          - text: 13,038.47
+                          - generic [ref=e1253]: +37.7%
+                        - cell "17,325.12 +32.9%" [ref=e1254]:
+                          - text: 17,325.12
+                          - generic [ref=e1255]: +32.9%
+                      - row "Toggle Long-term Liab. trend chart 127.06 478.92 +276.9% 259.82 -45.7% 418.13 +60.9% 609.35 +45.7% 670.85 +10.1%" [ref=e1256]:
+                        - cell "Toggle Long-term Liab. trend chart" [ref=e1257]:
+                          - button "Toggle Long-term Liab. trend chart" [ref=e1258]:
+                            - generic [ref=e1259]: Long-term Liab.
+                            - generic [ref=e1260]: Chart
+                        - cell "127.06" [ref=e1261]
+                        - cell "478.92 +276.9%" [ref=e1262]:
+                          - text: "478.92"
+                          - generic [ref=e1263]: +276.9%
+                        - cell "259.82 -45.7%" [ref=e1264]:
+                          - text: "259.82"
+                          - generic [ref=e1265]: "-45.7%"
+                        - cell "418.13 +60.9%" [ref=e1266]:
+                          - text: "418.13"
+                          - generic [ref=e1267]: +60.9%
+                        - cell "609.35 +45.7%" [ref=e1268]:
+                          - text: "609.35"
+                          - generic [ref=e1269]: +45.7%
+                        - cell "670.85 +10.1%" [ref=e1270]:
+                          - text: "670.85"
+                          - generic [ref=e1271]: +10.1%
+                      - row "Toggle Short-term Debt trend chart 2,696.13 6,362.68 +136.0% 6,326.21 -0.6% 8,979.28 +41.9% 12,573.86 +40.0% 16,064.55 +27.8%" [ref=e1272]:
+                        - cell "Toggle Short-term Debt trend chart" [ref=e1273]:
+                          - button "Toggle Short-term Debt trend chart" [ref=e1274]:
+                            - generic [ref=e1275]: Short-term Debt
+                            - generic [ref=e1276]: Chart
+                        - cell "2,696.13" [ref=e1277]
+                        - cell "6,362.68 +136.0%" [ref=e1278]:
+                          - text: 6,362.68
+                          - generic [ref=e1279]: +136.0%
+                        - cell "6,326.21 -0.6%" [ref=e1280]:
+                          - text: 6,326.21
+                          - generic [ref=e1281]: "-0.6%"
+                        - cell "8,979.28 +41.9%" [ref=e1282]:
+                          - text: 8,979.28
+                          - generic [ref=e1283]: +41.9%
+                        - cell "12,573.86 +40.0%" [ref=e1284]:
+                          - text: 12,573.86
+                          - generic [ref=e1285]: +40.0%
+                        - cell "16,064.55 +27.8%" [ref=e1286]:
+                          - text: 16,064.55
+                          - generic [ref=e1287]: +27.8%
+                      - row "Toggle Long-term Debt trend chart 0.00 0.00 0.00 0.00 0.00 0.00" [ref=e1288]:
+                        - cell "Toggle Long-term Debt trend chart" [ref=e1289]:
+                          - button "Toggle Long-term Debt trend chart" [ref=e1290]:
+                            - generic [ref=e1291]: Long-term Debt
+                            - generic [ref=e1292]: Chart
+                        - cell "0.00" [ref=e1293]
+                        - cell "0.00" [ref=e1294]
+                        - cell "0.00" [ref=e1295]
+                        - cell "0.00" [ref=e1296]
+                        - cell "0.00" [ref=e1297]
+                        - cell "0.00" [ref=e1298]
+                      - row "Equity" [ref=e1299]:
+                        - cell "Equity" [ref=e1300]:
+                          - generic [ref=e1302]: Equity
+                        - cell [ref=e1303]
+                        - cell [ref=e1304]
+                        - cell [ref=e1305]
+                        - cell [ref=e1306]
+                        - cell [ref=e1307]
+                        - cell [ref=e1308]
+                      - row "Toggle Total Equity trend chart 4,521.49 6,541.86 +44.7% 6,495.47 -0.7% 7,371.23 +13.5% 12,944.31 +75.6% 18,009.90 +39.1%" [ref=e1309]:
+                        - cell "Toggle Total Equity trend chart" [ref=e1310]:
+                          - button "Toggle Total Equity trend chart" [ref=e1311]:
+                            - generic [ref=e1312]: Total Equity
+                            - generic [ref=e1313]: Chart
+                        - cell "4,521.49" [ref=e1314]
+                        - cell "6,541.86 +44.7%" [ref=e1315]:
+                          - text: 6,541.86
+                          - generic [ref=e1316]: +44.7%
+                        - cell "6,495.47 -0.7%" [ref=e1317]:
+                          - text: 6,495.47
+                          - generic [ref=e1318]: "-0.7%"
+                        - cell "7,371.23 +13.5%" [ref=e1319]:
+                          - text: 7,371.23
+                          - generic [ref=e1320]: +13.5%
+                        - cell "12,944.31 +75.6%" [ref=e1321]:
+                          - text: 12,944.31
+                          - generic [ref=e1322]: +75.6%
+                        - cell "18,009.90 +39.1%" [ref=e1323]:
+                          - text: 18,009.90
+                          - generic [ref=e1324]: +39.1%
+                      - row "Toggle Retained Earnings trend chart 1,572.52 1,241.12 -21.1% 800.25 -35.5% 1,307.50 +63.4% 796.73 -39.1% 1,534.11 +92.6%" [ref=e1325]:
+                        - cell "Toggle Retained Earnings trend chart" [ref=e1326]:
+                          - button "Toggle Retained Earnings trend chart" [ref=e1327]:
+                            - generic [ref=e1328]: Retained Earnings
+                            - generic [ref=e1329]: Chart
+                        - cell "1,572.52" [ref=e1330]
+                        - cell "1,241.12 -21.1%" [ref=e1331]:
+                          - text: 1,241.12
+                          - generic [ref=e1332]: "-21.1%"
+                        - cell "800.25 -35.5%" [ref=e1333]:
+                          - text: "800.25"
+                          - generic [ref=e1334]: "-35.5%"
+                        - cell "1,307.50 +63.4%" [ref=e1335]:
+                          - text: 1,307.50
+                          - generic [ref=e1336]: +63.4%
+                        - cell "796.73 -39.1%" [ref=e1337]:
+                          - text: "796.73"
+                          - generic [ref=e1338]: "-39.1%"
+                        - cell "1,534.11 +92.6%" [ref=e1339]:
+                          - text: 1,534.11
+                          - generic [ref=e1340]: +92.6%
+                  - generic [ref=e1341]: "Note: Values in Billions VND except Per Share Values • Reporting Standard: VAS • First available period is the base period"
+            - generic [ref=e1343]:
+              - generic [ref=e1344]:
+                - generic [ref=e1345]:
+                  - 'button "Widget Group: Global" [ref=e1347]':
+                    - img [ref=e1348]
+                  - generic "Cash Flow" [ref=e1353]
+                - generic [ref=e1356]:
+                  - button "VniAgent" [ref=e1357]:
+                    - img [ref=e1358]
+                  - button "Widget settings" [ref=e1361]:
+                    - img [ref=e1362]
+                  - button "Maximize" [ref=e1365]:
+                    - img [ref=e1366]
+                  - button [ref=e1372]:
+                    - img [ref=e1373]
+              - generic [ref=e1380]:
+                - generic [ref=e1382]:
+                  - generic "Updated 02:17:05 PM" [ref=e1383]:
+                    - img [ref=e1384]
+                    - generic [ref=e1387]: Updated 2026-04-17 14:17
+                  - generic [ref=e1388]: Annual · newest on right
+                  - generic [ref=e1389]:
+                    - img [ref=e1390]
+                    - text: Cash flow
+                - generic [ref=e1395]:
+                  - table [ref=e1397]:
+                    - rowgroup [ref=e1398]:
+                      - row "Metric 2020 2021 2022 2023 2024 2025" [ref=e1399]:
+                        - columnheader "Metric" [ref=e1400]
+                        - columnheader "2020" [ref=e1401] [cursor=pointer]:
+                          - generic [ref=e1402]: "2020"
+                        - columnheader "2021" [ref=e1403] [cursor=pointer]:
+                          - generic [ref=e1404]: "2021"
+                        - columnheader "2022" [ref=e1405] [cursor=pointer]:
+                          - generic [ref=e1406]: "2022"
+                        - columnheader "2023" [ref=e1407] [cursor=pointer]:
+                          - generic [ref=e1408]: "2023"
+                        - columnheader "2024" [ref=e1409] [cursor=pointer]:
+                          - generic [ref=e1410]: "2024"
+                        - columnheader "2025" [ref=e1411] [cursor=pointer]:
+                          - generic [ref=e1412]: "2025"
+                    - rowgroup [ref=e1413]:
+                      - row "Operating details" [ref=e1414]:
+                        - cell "Operating details" [ref=e1415]:
+                          - generic [ref=e1417]: Operating details
+                        - cell [ref=e1418]
+                        - cell [ref=e1419]
+                        - cell [ref=e1420]
+                        - cell [ref=e1421]
+                        - cell [ref=e1422]
+                        - cell [ref=e1423]
+                      - row "Toggle Operating CF trend chart -571.54 -3,750.01 -556.1% 3,741.89 +199.8% -4,355.55 -216.4% -3,384.05 +22.3% -8,790.74 -159.8%" [ref=e1424]:
+                        - cell "Toggle Operating CF trend chart" [ref=e1425]:
+                          - button "Toggle Operating CF trend chart" [ref=e1426]:
+                            - generic [ref=e1427]: Operating CF
+                            - generic [ref=e1428]: Chart
+                        - cell "-571.54" [ref=e1429]
+                        - cell "-3,750.01 -556.1%" [ref=e1430]:
+                          - text: "-3,750.01"
+                          - generic [ref=e1431]: "-556.1%"
+                        - cell "3,741.89 +199.8%" [ref=e1432]:
+                          - text: 3,741.89
+                          - generic [ref=e1433]: +199.8%
+                        - cell "-4,355.55 -216.4%" [ref=e1434]:
+                          - text: "-4,355.55"
+                          - generic [ref=e1435]: "-216.4%"
+                        - cell "-3,384.05 +22.3%" [ref=e1436]:
+                          - text: "-3,384.05"
+                          - generic [ref=e1437]: +22.3%
+                        - cell "-8,790.74 -159.8%" [ref=e1438]:
+                          - text: "-8,790.74"
+                          - generic [ref=e1439]: "-159.8%"
+                      - row "Toggle Depreciation trend chart 10.63 7.50 -29.5% 9.65 +28.7% 9.68 +0.3% 10.75 +11.1% 14.43 +34.2%" [ref=e1440]:
+                        - cell "Toggle Depreciation trend chart" [ref=e1441]:
+                          - button "Toggle Depreciation trend chart" [ref=e1442]:
+                            - generic [ref=e1443]: Depreciation
+                            - generic [ref=e1444]: Chart
+                        - cell "10.63" [ref=e1445]
+                        - cell "7.50 -29.5%" [ref=e1446]:
+                          - text: "7.50"
+                          - generic [ref=e1447]: "-29.5%"
+                        - cell "9.65 +28.7%" [ref=e1448]:
+                          - text: "9.65"
+                          - generic [ref=e1449]: +28.7%
+                        - cell "9.68 +0.3%" [ref=e1450]:
+                          - text: "9.68"
+                          - generic [ref=e1451]: +0.3%
+                        - cell "10.75 +11.1%" [ref=e1452]:
+                          - text: "10.75"
+                          - generic [ref=e1453]: +11.1%
+                        - cell "14.43 +34.2%" [ref=e1454]:
+                          - text: "14.43"
+                          - generic [ref=e1455]: +34.2%
+                      - row "Investing details" [ref=e1456]:
+                        - cell "Investing details" [ref=e1457]:
+                          - generic [ref=e1459]: Investing details
+                        - cell [ref=e1460]
+                        - cell [ref=e1461]
+                        - cell [ref=e1462]
+                        - cell [ref=e1463]
+                        - cell [ref=e1464]
+                        - cell [ref=e1465]
+                      - row "Toggle Investing CF trend chart -13.32 -6.43 +51.7% -21.69 -237.4% -7.90 +63.6% -31.30 -296.3% -57.06 -82.3%" [ref=e1466]:
+                        - cell "Toggle Investing CF trend chart" [ref=e1467]:
+                          - button "Toggle Investing CF trend chart" [ref=e1468]:
+                            - generic [ref=e1469]: Investing CF
+                            - generic [ref=e1470]: Chart
+                        - cell "-13.32" [ref=e1471]
+                        - cell "-6.43 +51.7%" [ref=e1472]:
+                          - text: "-6.43"
+                          - generic [ref=e1473]: +51.7%
+                        - cell "-21.69 -237.4%" [ref=e1474]:
+                          - text: "-21.69"
+                          - generic [ref=e1475]: "-237.4%"
+                        - cell "-7.90 +63.6%" [ref=e1476]:
+                          - text: "-7.90"
+                          - generic [ref=e1477]: +63.6%
+                        - cell "-31.30 -296.3%" [ref=e1478]:
+                          - text: "-31.30"
+                          - generic [ref=e1479]: "-296.3%"
+                        - cell "-57.06 -82.3%" [ref=e1480]:
+                          - text: "-57.06"
+                          - generic [ref=e1481]: "-82.3%"
+                      - row "Toggle CapEx trend chart -13.82 -6.43 +53.5% -22.38 -248.1% -7.90 +64.7% -31.30 -296.3% -59.61 -90.4%" [ref=e1482]:
+                        - cell "Toggle CapEx trend chart" [ref=e1483]:
+                          - button "Toggle CapEx trend chart" [ref=e1484]:
+                            - generic [ref=e1485]: CapEx
+                            - generic [ref=e1486]: Chart
+                        - cell "-13.82" [ref=e1487]
+                        - cell "-6.43 +53.5%" [ref=e1488]:
+                          - text: "-6.43"
+                          - generic [ref=e1489]: +53.5%
+                        - cell "-22.38 -248.1%" [ref=e1490]:
+                          - text: "-22.38"
+                          - generic [ref=e1491]: "-248.1%"
+                        - cell "-7.90 +64.7%" [ref=e1492]:
+                          - text: "-7.90"
+                          - generic [ref=e1493]: +64.7%
+                        - cell "-31.30 -296.3%" [ref=e1494]:
+                          - text: "-31.30"
+                          - generic [ref=e1495]: "-296.3%"
+                        - cell "-59.61 -90.4%" [ref=e1496]:
+                          - text: "-59.61"
+                          - generic [ref=e1497]: "-90.4%"
+                      - row "Financing details" [ref=e1498]:
+                        - cell "Financing details" [ref=e1499]:
+                          - generic [ref=e1501]: Financing details
+                        - cell [ref=e1502]
+                        - cell [ref=e1503]
+                        - cell [ref=e1504]
+                        - cell [ref=e1505]
+                        - cell [ref=e1506]
+                        - cell [ref=e1507]
+                      - row "Toggle Financing CF trend chart 432.86 4,245.68 +880.8% -1,428.44 -133.6% 1,727.85 +221.0% 7,371.23 +326.6% 7,317.72 -0.7%" [ref=e1508]:
+                        - cell "Toggle Financing CF trend chart" [ref=e1509]:
+                          - button "Toggle Financing CF trend chart" [ref=e1510]:
+                            - generic [ref=e1511]: Financing CF
+                            - generic [ref=e1512]: Chart
+                        - cell "432.86" [ref=e1513]
+                        - cell "4,245.68 +880.8%" [ref=e1514]:
+                          - text: 4,245.68
+                          - generic [ref=e1515]: +880.8%
+                        - cell "-1,428.44 -133.6%" [ref=e1516]:
+                          - text: "-1,428.44"
+                          - generic [ref=e1517]: "-133.6%"
+                        - cell "1,727.85 +221.0%" [ref=e1518]:
+                          - text: 1,727.85
+                          - generic [ref=e1519]: +221.0%
+                        - cell "7,371.23 +326.6%" [ref=e1520]:
+                          - text: 7,371.23
+                          - generic [ref=e1521]: +326.6%
+                        - cell "7,317.72 -0.7%" [ref=e1522]:
+                          - text: 7,317.72
+                          - generic [ref=e1523]: "-0.7%"
+                      - row "Toggle Dividends Paid trend chart -411.64 -730.12 -77.4% 0.00 +100.0% -522.12 -177.80 +65.9% -179.47 -0.9%" [ref=e1524]:
+                        - cell "Toggle Dividends Paid trend chart" [ref=e1525]:
+                          - button "Toggle Dividends Paid trend chart" [ref=e1526]:
+                            - generic [ref=e1527]: Dividends Paid
+                            - generic [ref=e1528]: Chart
+                        - cell "-411.64" [ref=e1529]
+                        - cell "-730.12 -77.4%" [ref=e1530]:
+                          - text: "-730.12"
+                          - generic [ref=e1531]: "-77.4%"
+                        - cell "0.00 +100.0%" [ref=e1532]:
+                          - text: "0.00"
+                          - generic [ref=e1533]: +100.0%
+                        - cell "-522.12" [ref=e1534]
+                        - cell "-177.80 +65.9%" [ref=e1535]:
+                          - text: "-177.80"
+                          - generic [ref=e1536]: +65.9%
+                        - cell "-179.47 -0.9%" [ref=e1537]:
+                          - text: "-179.47"
+                          - generic [ref=e1538]: "-0.9%"
+                      - row "Toggle Debt Repayment trend chart -6,233.94 -11,629.27 -86.5% -16,579.49 -42.6% -18,096.04 -9.1% -24,737.63 -36.7% -35,809.27 -44.8%" [ref=e1539]:
+                        - cell "Toggle Debt Repayment trend chart" [ref=e1540]:
+                          - button "Toggle Debt Repayment trend chart" [ref=e1541]:
+                            - generic [ref=e1542]: Debt Repayment
+                            - generic [ref=e1543]: Chart
+                        - cell "-6,233.94" [ref=e1544]
+                        - cell "-11,629.27 -86.5%" [ref=e1545]:
+                          - text: "-11,629.27"
+                          - generic [ref=e1546]: "-86.5%"
+                        - cell "-16,579.49 -42.6%" [ref=e1547]:
+                          - text: "-16,579.49"
+                          - generic [ref=e1548]: "-42.6%"
+                        - cell "-18,096.04 -9.1%" [ref=e1549]:
+                          - text: "-18,096.04"
+                          - generic [ref=e1550]: "-9.1%"
+                        - cell "-24,737.63 -36.7%" [ref=e1551]:
+                          - text: "-24,737.63"
+                          - generic [ref=e1552]: "-36.7%"
+                        - cell "-35,809.27 -44.8%" [ref=e1553]:
+                          - text: "-35,809.27"
+                          - generic [ref=e1554]: "-44.8%"
+                      - row "Summary" [ref=e1555]:
+                        - cell "Summary" [ref=e1556]:
+                          - generic [ref=e1558]: Summary
+                        - cell [ref=e1559]
+                        - cell [ref=e1560]
+                        - cell [ref=e1561]
+                        - cell [ref=e1562]
+                        - cell [ref=e1563]
+                        - cell [ref=e1564]
+                      - row "Toggle Free Cash Flow trend chart -585.36 -3,756.44 -541.7% 3,719.51 +199.0% -4,363.45 -217.3% -3,415.35 +21.7% -8,850.34 -159.1%" [ref=e1565]:
+                        - cell "Toggle Free Cash Flow trend chart" [ref=e1566]:
+                          - button "Toggle Free Cash Flow trend chart" [ref=e1567]:
+                            - generic [ref=e1568]: Free Cash Flow
+                            - generic [ref=e1569]: Chart
+                        - cell "-585.36" [ref=e1570]
+                        - cell "-3,756.44 -541.7%" [ref=e1571]:
+                          - text: "-3,756.44"
+                          - generic [ref=e1572]: "-541.7%"
+                        - cell "3,719.51 +199.0%" [ref=e1573]:
+                          - text: 3,719.51
+                          - generic [ref=e1574]: +199.0%
+                        - cell "-4,363.45 -217.3%" [ref=e1575]:
+                          - text: "-4,363.45"
+                          - generic [ref=e1576]: "-217.3%"
+                        - cell "-3,415.35 +21.7%" [ref=e1577]:
+                          - text: "-3,415.35"
+                          - generic [ref=e1578]: +21.7%
+                        - cell "-8,850.34 -159.1%" [ref=e1579]:
+                          - text: "-8,850.34"
+                          - generic [ref=e1580]: "-159.1%"
+                      - row "Toggle Net Change in Cash trend chart -152.00 489.24 +421.9% 2,291.75 +368.4% -2,635.60 -215.0% 3,955.87 +250.1% -1,530.08 -138.7%" [ref=e1581]:
+                        - cell "Toggle Net Change in Cash trend chart" [ref=e1582]:
+                          - button "Toggle Net Change in Cash trend chart" [ref=e1583]:
+                            - generic [ref=e1584]: Net Change in Cash
+                            - generic [ref=e1585]: Chart
+                        - cell "-152.00" [ref=e1586]
+                        - cell "489.24 +421.9%" [ref=e1587]:
+                          - text: "489.24"
+                          - generic [ref=e1588]: +421.9%
+                        - cell "2,291.75 +368.4%" [ref=e1589]:
+                          - text: 2,291.75
+                          - generic [ref=e1590]: +368.4%
+                        - cell "-2,635.60 -215.0%" [ref=e1591]:
+                          - text: "-2,635.60"
+                          - generic [ref=e1592]: "-215.0%"
+                        - cell "3,955.87 +250.1%" [ref=e1593]:
+                          - text: 3,955.87
+                          - generic [ref=e1594]: +250.1%
+                        - cell "-1,530.08 -138.7%" [ref=e1595]:
+                          - text: "-1,530.08"
+                          - generic [ref=e1596]: "-138.7%"
+                  - generic [ref=e1597]: "Note: Values in Billions VND except Per Share Values • Reporting Standard: VAS • First available period is the base period"
+  - alert [ref=e1598]
