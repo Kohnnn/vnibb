@@ -7,7 +7,9 @@ import pandas as pd
 import pytest
 
 from vnibb.api.v1 import quant
+from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.models.stock import Stock, StockPrice
+from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
 
 
 def _build_price_frame(rows: int = 120) -> pd.DataFrame:
@@ -104,6 +106,50 @@ async def test_quant_endpoint_returns_requested_metrics(client, monkeypatch):
     assert "gap_fill_rate_pct" in metrics["gap_stats"]
     assert "current_state" in metrics["macd_crossovers"]
     assert payload["meta"]["count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_quant_endpoint_passes_adjustment_mode_to_frame_loader(client, monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_load_quant_frame_with_warning(*, adjustment_mode, **_kwargs):
+        captured["adjustment_mode"] = adjustment_mode
+        return _build_price_frame(180), None
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_quant_frame_with_warning", fake_load_quant_frame_with_warning
+    )
+
+    response = await client.get(
+        "/api/v1/quant/VNM",
+        params={"metrics": "sortino", "period": "1Y", "adjustment_mode": "adjusted"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["adjustment_mode"] == "adjusted"
+    assert captured["adjustment_mode"] == "adjusted"
+
+
+@pytest.mark.asyncio
+async def test_quant_alias_endpoints_forward_adjustment_mode(client, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    async def fake_alias_response(**kwargs):
+        calls.append(kwargs)
+        return StandardResponse(data={"ok": True}, meta=MetaData(count=1))
+
+    monkeypatch.setattr("vnibb.api.v1.quant._get_quant_metric_alias_response", fake_alias_response)
+
+    for endpoint in [
+        "/api/v1/quant/VNM/seasonality",
+        "/api/v1/quant/VNM/sortino-monthly",
+        "/api/v1/quant/VNM/parkinson-volatility",
+        "/api/v1/quant/VNM/drawdown-recovery",
+    ]:
+        response = await client.get(endpoint, params={"adjustment_mode": "adjusted"})
+        assert response.status_code == 200
+        assert calls[-1]["adjustment_mode"] == "adjusted"
 
 
 @pytest.mark.asyncio
@@ -388,6 +434,68 @@ async def test_load_price_frame_refreshes_stale_db_rows_with_provider_data(
 
 
 @pytest.mark.asyncio
+async def test_load_price_frame_applies_adjustments_for_quant_history(test_db, monkeypatch):
+    async def fake_load_historical_from_db(*_args, **_kwargs):
+        return [
+            EquityHistoricalData(
+                symbol="VNM",
+                time=date(2026, 1, 2),
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.0,
+                volume=1_000_000,
+                raw_close=100.0,
+                adjustment_mode="raw",
+                adjustment_applied=False,
+            )
+        ]
+
+    async def fake_load_recent_cache(*_args, **_kwargs):
+        return []
+
+    async def fake_load_appwrite(*_args, **_kwargs):
+        return []
+
+    async def fake_load_actions(*_args, **_kwargs):
+        return [
+            {
+                "effective_date": date(2026, 1, 6),
+                "action_category": "dividend",
+                "action_subtype": "cash_dividend",
+                "cash_amount_per_share": 10.0,
+                "share_ratio": None,
+                "percent_ratio": None,
+            }
+        ]
+
+    async def fake_fetch(_params):
+        return []
+
+    monkeypatch.setattr("vnibb.api.v1.quant._load_historical_from_db", fake_load_historical_from_db)
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_historical_from_recent_cache", fake_load_recent_cache
+    )
+    monkeypatch.setattr("vnibb.api.v1.quant._load_historical_from_appwrite", fake_load_appwrite)
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_corporate_actions_for_adjustment", fake_load_actions
+    )
+    monkeypatch.setattr(quant.VnstockEquityHistoricalFetcher, "fetch", fake_fetch)
+
+    frame = await quant._load_price_frame(
+        db=test_db,
+        symbol="VNM",
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 10),
+        source="KBS",
+        adjustment_mode="adjusted",
+    )
+
+    assert frame["close"].tolist() == [90.0]
+    assert frame["open"].tolist() == [90.0]
+
+
+@pytest.mark.asyncio
 async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_db, monkeypatch):
     async def fake_load_price_frame(*_args, **_kwargs):
         return pd.DataFrame(
@@ -424,6 +532,7 @@ async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_d
         end_date=date(2026, 3, 21),
         source="KBS",
         period="1Y",
+        adjustment_mode="raw",
     )
 
     assert frame["close"].tolist()[-1] == 103.2

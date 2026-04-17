@@ -13,6 +13,13 @@ from pydantic import BaseModel
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from vnibb.api.v1.equity import (
+    _apply_corporate_action_adjustments,
+    _load_corporate_actions_for_adjustment,
+    _load_historical_from_appwrite,
+    _load_historical_from_db,
+    _load_historical_from_recent_cache,
+)
 from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
@@ -22,6 +29,7 @@ from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.trading import ForeignTrading
 from vnibb.providers.vnstock.equity_historical import (
+    EquityHistoricalData,
     EquityHistoricalQueryParams,
     VnstockEquityHistoricalFetcher,
 )
@@ -101,6 +109,7 @@ VN30_SYMBOLS = tuple(
 class QuantResponseData(BaseModel):
     symbol: str
     period: str
+    adjustment_mode: str = "raw"
     computed_at: datetime
     last_data_date: datetime | None = None
     metrics: Dict[str, Any]
@@ -246,6 +255,94 @@ def _merge_warnings(*warnings: str | None) -> str | None:
     return " ".join(parts) if parts else None
 
 
+def _normalize_adjustment_mode(value: str | None) -> str:
+    normalized = str(value or "raw").strip().lower() or "raw"
+    return "adjusted" if normalized == "adjusted" else "raw"
+
+
+def _normalize_provider_history_rows(
+    rows: list[EquityHistoricalData],
+    *,
+    adjustment_mode: str,
+) -> list[EquityHistoricalData]:
+    normalized_mode = _normalize_adjustment_mode(adjustment_mode)
+    normalized_rows: list[EquityHistoricalData] = []
+
+    for row in rows:
+        if hasattr(row, "model_copy"):
+            normalized_rows.append(
+                row.model_copy(
+                    update={
+                        "raw_close": row.raw_close if row.raw_close is not None else row.close,
+                        "adjustment_mode": normalized_mode,
+                        "adjustment_applied": bool(
+                            normalized_mode == "adjusted" and row.adjusted_close not in (None, 0)
+                        ),
+                    }
+                )
+            )
+            continue
+
+        raw_close = getattr(row, "raw_close", None)
+        close = getattr(row, "close", None)
+        adjusted_close = getattr(row, "adjusted_close", None)
+        normalized_rows.append(
+            EquityHistoricalData(
+                symbol=str(getattr(row, "symbol", "") or "").upper(),
+                time=getattr(row, "time"),
+                open=float(getattr(row, "open")),
+                high=float(getattr(row, "high")),
+                low=float(getattr(row, "low")),
+                close=float(close),
+                volume=int(getattr(row, "volume") or 0),
+                value=getattr(row, "value", None),
+                raw_close=float(raw_close) if raw_close is not None else float(close),
+                adjusted_close=float(adjusted_close) if adjusted_close is not None else None,
+                adjustment_mode=normalized_mode,
+                adjustment_applied=bool(
+                    normalized_mode == "adjusted" and adjusted_close not in (None, 0)
+                ),
+            )
+        )
+
+    return normalized_rows
+
+
+def _merge_historical_rows(*collections: list[EquityHistoricalData]) -> list[EquityHistoricalData]:
+    by_time: dict[date, EquityHistoricalData] = {}
+    for collection in collections:
+        for row in collection:
+            by_time[row.time] = row
+    return [by_time[key] for key in sorted(by_time)]
+
+
+def _historical_rows_to_frame(rows: list[EquityHistoricalData]) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
+
+    frame = pd.DataFrame(
+        [
+            {
+                "time": row.time,
+                "open": row.open,
+                "high": row.high,
+                "low": row.low,
+                "close": row.close,
+                "volume": row.volume,
+            }
+            for row in rows
+        ]
+    )
+    frame["time"] = pd.to_datetime(frame["time"], errors="coerce")
+    if frame["time"].dt.tz is not None:
+        frame["time"] = frame["time"].dt.tz_localize(None)
+    for col in ["open", "high", "low", "close", "volume"]:
+        frame[col] = pd.to_numeric(frame[col], errors="coerce")
+    frame = frame.dropna(subset=["time", "close"]).sort_values("time")
+    frame = frame.drop_duplicates(subset=["time"], keep="last")
+    return frame.reset_index(drop=True)
+
+
 async def _merge_latest_quote_into_frame(
     frame: pd.DataFrame,
     *,
@@ -315,6 +412,7 @@ async def _load_quant_frame_with_warning(
     end_date: date,
     source: str,
     period: str,
+    adjustment_mode: str,
 ) -> tuple[pd.DataFrame, str | None]:
     frame = await _load_price_frame(
         db=db,
@@ -322,6 +420,7 @@ async def _load_quant_frame_with_warning(
         start_date=start_date,
         end_date=end_date,
         source=source,
+        adjustment_mode=adjustment_mode,
     )
     frame, latest_quote_warning = await _merge_latest_quote_into_frame(
         frame,
@@ -394,6 +493,7 @@ async def _get_quant_metric_alias_response(
     metric_name: str,
     period: str,
     source: str,
+    adjustment_mode: str,
     db: AsyncSession,
 ) -> StandardResponse[Dict[str, Any]]:
     symbol_upper = symbol.upper().strip()
@@ -423,6 +523,7 @@ async def _get_quant_metric_alias_response(
         end_date=end_date,
         source=source,
         period=period_upper,
+        adjustment_mode=adjustment_mode,
     )
     last_data_timestamp = _resolve_frame_last_timestamp(frame)
 
@@ -433,6 +534,7 @@ async def _get_quant_metric_alias_response(
             data={
                 "symbol": symbol_upper,
                 "period": period_upper,
+                "adjustment_mode": _normalize_adjustment_mode(adjustment_mode),
                 "metric": canonical_metric,
                 "computed_at": last_data_timestamp or datetime.utcnow(),
                 "last_data_date": last_data_timestamp,
@@ -460,6 +562,7 @@ async def _get_quant_metric_alias_response(
             data={
                 "symbol": symbol_upper,
                 "period": period_upper,
+                "adjustment_mode": _normalize_adjustment_mode(adjustment_mode),
                 "metric": canonical_metric,
                 "computed_at": last_data_timestamp or datetime.utcnow(),
                 "last_data_date": last_data_timestamp,
@@ -477,6 +580,7 @@ async def _get_quant_metric_alias_response(
     response_payload: Dict[str, Any] = {
         "symbol": symbol_upper,
         "period": period_upper,
+        "adjustment_mode": _normalize_adjustment_mode(adjustment_mode),
         "metric": canonical_metric,
         "computed_at": last_data_timestamp or datetime.utcnow(),
         "last_data_date": last_data_timestamp,
@@ -684,49 +788,29 @@ async def _load_price_frame(
     start_date: date,
     end_date: date,
     source: str,
+    adjustment_mode: str = "raw",
 ) -> pd.DataFrame:
-    def _provider_frame_from_rows(provider_rows: list[Any]) -> pd.DataFrame:
-        return pd.DataFrame(
-            [
-                {
-                    "time": row.time,
-                    "open": row.open,
-                    "high": row.high,
-                    "low": row.low,
-                    "close": row.close,
-                    "volume": row.volume,
-                }
-                for row in provider_rows
-            ]
-        )
-
-    stmt = (
-        select(
-            StockPrice.time,
-            StockPrice.open,
-            StockPrice.high,
-            StockPrice.low,
-            StockPrice.close,
-            StockPrice.volume,
-        )
-        .where(
-            StockPrice.symbol == symbol,
-            StockPrice.interval == "1D",
-            StockPrice.time >= start_date,
-            StockPrice.time <= end_date,
-        )
-        .order_by(StockPrice.time.asc())
+    normalized_mode = _normalize_adjustment_mode(adjustment_mode)
+    corporate_actions = (
+        await _load_corporate_actions_for_adjustment(db, symbol, start_date, end_date)
+        if normalized_mode == "adjusted"
+        else []
     )
 
     try:
-        result = await db.execute(stmt)
-        rows = result.all()
+        rows = await _load_historical_from_db(
+            db=db,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            interval="1D",
+            adjustment_mode="raw",
+        )
     except Exception as exc:
         await _rollback_after_query_error(db, f"Quant price frame query for {symbol}")
         if _is_failed_transaction_error(exc):
             logger.warning(
-                "Quant price frame query hit an aborted transaction for %s; "
-                "falling back to provider data: %s",
+                "Quant price frame query hit an aborted transaction for %s; falling back to cached/provider data: %s",
                 symbol,
                 exc,
             )
@@ -734,12 +818,31 @@ async def _load_price_frame(
             logger.warning("Quant price frame query failed for %s: %s", symbol, exc)
         rows = []
 
-    frame = (
-        pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
-        if rows
-        else pd.DataFrame()
-    )
+    use_appwrite_data = settings.is_appwrite_configured and settings.resolved_data_backend in {
+        "appwrite",
+        "hybrid",
+    }
+    if not rows:
+        recent_cache_rows = await _load_historical_from_recent_cache(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            interval="1D",
+            adjustment_mode="raw",
+        )
+        rows = _merge_historical_rows(rows, recent_cache_rows)
 
+    if not rows and use_appwrite_data:
+        appwrite_rows = await _load_historical_from_appwrite(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            interval="1D",
+            adjustment_mode="raw",
+        )
+        rows = _merge_historical_rows(rows, appwrite_rows)
+
+    frame = _historical_rows_to_frame(rows)
     latest_db_timestamp = _resolve_frame_last_timestamp(frame)
     needs_provider_refresh = frame.empty
     provider_start_date = start_date
@@ -765,24 +868,17 @@ async def _load_price_frame(
             logger.warning("Quant fallback fetch failed for %s: %s", symbol, exc)
             provider_rows = []
 
-        provider_frame = _provider_frame_from_rows(provider_rows)
-        if frame.empty:
-            frame = provider_frame
-        elif not provider_frame.empty:
-            frame = pd.concat([frame, provider_frame], ignore_index=True)
+        normalized_provider_rows = _normalize_provider_history_rows(
+            provider_rows,
+            adjustment_mode="raw",
+        )
+        rows = _merge_historical_rows(rows, normalized_provider_rows)
 
-    if frame.empty:
-        return frame
+    if not rows:
+        return _historical_rows_to_frame(rows)
 
-    frame["time"] = pd.to_datetime(frame["time"], errors="coerce")
-    if frame["time"].dt.tz is not None:
-        frame["time"] = frame["time"].dt.tz_localize(None)
-    for col in ["open", "high", "low", "close", "volume"]:
-        frame[col] = pd.to_numeric(frame[col], errors="coerce")
-
-    frame = frame.dropna(subset=["time", "close"]).sort_values("time")
-    frame = frame.drop_duplicates(subset=["time"], keep="last")
-    return frame.reset_index(drop=True)
+    rows = _apply_corporate_action_adjustments(rows, corporate_actions, normalized_mode)
+    return _historical_rows_to_frame(rows)
 
 
 def _compute_volume_delta(frame: pd.DataFrame) -> Dict[str, Any]:
@@ -1502,6 +1598,7 @@ async def get_gamma_exposure_proxy(
     payload: Dict[str, Any] = {
         "symbol": symbol_upper,
         "period": period_upper,
+        "adjustment_mode": _normalize_adjustment_mode(adjustment_mode),
         "computed_at": datetime.utcnow(),
         "last_data_date": last_data_timestamp,
         "current_close": current_close,
@@ -1523,6 +1620,7 @@ async def get_momentum_profile(
     symbol: str,
     period: str = Query(default="3Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """Classic 12-1 momentum profile with peer ranking snapshot."""
@@ -1540,6 +1638,7 @@ async def get_momentum_profile(
         end_date=end_date,
         source=source,
         period=period_upper,
+        adjustment_mode=adjustment_mode,
     )
 
     closes = pd.to_numeric(frame.get("close"), errors="coerce").dropna().tolist()
@@ -1585,6 +1684,7 @@ async def get_momentum_profile(
             data={
                 "symbol": symbol_upper,
                 "period": period_upper,
+                "adjustment_mode": _normalize_adjustment_mode(adjustment_mode),
                 "computed_at": datetime.utcnow(),
                 "last_data_date": last_data_timestamp,
                 "returns_pct": {},
@@ -2165,6 +2265,7 @@ async def get_volume_flow_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2172,6 +2273,7 @@ async def get_volume_flow_metric(
         metric_name="volume-flow",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2181,6 +2283,7 @@ async def get_seasonality_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2188,6 +2291,7 @@ async def get_seasonality_metric(
         metric_name="seasonality",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2197,6 +2301,7 @@ async def get_rsi_seasonal_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2204,6 +2309,7 @@ async def get_rsi_seasonal_metric(
         metric_name="rsi-seasonal",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2213,6 +2319,7 @@ async def get_bollinger_squeeze_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2220,6 +2327,7 @@ async def get_bollinger_squeeze_metric(
         metric_name="bollinger-squeeze",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2229,6 +2337,7 @@ async def get_atr_regime_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2236,6 +2345,7 @@ async def get_atr_regime_metric(
         metric_name="atr-regime",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2245,6 +2355,7 @@ async def get_sortino_monthly_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2252,6 +2363,7 @@ async def get_sortino_monthly_metric(
         metric_name="sortino-monthly",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2261,6 +2373,7 @@ async def get_macd_crossover_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2268,6 +2381,7 @@ async def get_macd_crossover_metric(
         metric_name="macd-crossover",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2277,6 +2391,7 @@ async def get_parkinson_volatility_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2284,6 +2399,7 @@ async def get_parkinson_volatility_metric(
         metric_name="parkinson-volatility",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2293,6 +2409,7 @@ async def get_ema_respect_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2300,6 +2417,7 @@ async def get_ema_respect_metric(
         metric_name="ema-respect",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2309,6 +2427,7 @@ async def get_drawdown_recovery_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2316,6 +2435,7 @@ async def get_drawdown_recovery_metric(
         metric_name="drawdown-recovery",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2325,6 +2445,7 @@ async def get_gap_analysis_metric(
     symbol: str,
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     return await _get_quant_metric_alias_response(
@@ -2332,6 +2453,7 @@ async def get_gap_analysis_metric(
         metric_name="gap-analysis",
         period=period,
         source=source,
+        adjustment_mode=adjustment_mode,
         db=db,
     )
 
@@ -2349,6 +2471,7 @@ async def get_quant_metrics(
     ),
     period: str = Query(default="5Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.upper().strip()
@@ -2384,6 +2507,7 @@ async def get_quant_metrics(
         end_date=end_date,
         source=source,
         period=period_upper,
+        adjustment_mode=adjustment_mode,
     )
     last_data_timestamp = _resolve_frame_last_timestamp(frame)
 
@@ -2394,6 +2518,7 @@ async def get_quant_metrics(
         payload = QuantResponseData(
             symbol=symbol_upper,
             period=period_upper,
+            adjustment_mode=_normalize_adjustment_mode(adjustment_mode),
             computed_at=last_data_timestamp or datetime.utcnow(),
             last_data_date=last_data_timestamp,
             metrics={},
@@ -2429,6 +2554,7 @@ async def get_quant_metrics(
     payload = QuantResponseData(
         symbol=symbol_upper,
         period=period_upper,
+        adjustment_mode=_normalize_adjustment_mode(adjustment_mode),
         computed_at=last_data_timestamp or datetime.utcnow(),
         last_data_date=last_data_timestamp,
         metrics=computed_metrics,

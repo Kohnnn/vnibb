@@ -98,7 +98,7 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} underwater`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} underwater · ${(data?.data?.adjustment_mode || 'adjusted')} history`} align="right" />
         </div>
       </div>
 

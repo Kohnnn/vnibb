@@ -5,14 +5,16 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceLine,
   Tooltip,
   XAxis,
   YAxis
 } from 'recharts'
-import { useHistoricalPrices } from '@/lib/queries'
+import { useCompanyEvents, useHistoricalPrices } from '@/lib/queries'
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetEmpty } from '@/components/ui/widget-states'
+import { buildChartEventMarkers } from '@/lib/chartEventMarkers'
 import { cn } from '@/lib/utils'
 
 const TIMEFRAME_DAYS: Record<string, number> = {
@@ -56,6 +58,7 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
 
   const rows = historyQuery.data?.data || []
   const hasData = rows.length > 0
+  const companyEventsQuery = useCompanyEvents(symbol, { enabled: Boolean(symbol), limit: 80 })
 
   const chartData = useMemo(
     () =>
@@ -64,6 +67,10 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
         close: point.close
       })),
     [rows]
+  )
+  const eventMarkers = useMemo(
+    () => buildChartEventMarkers(companyEventsQuery.data?.data || [], rows, timeframe === '5Y' ? 12 : 8),
+    [companyEventsQuery.data?.data, rows, timeframe]
   )
 
   if (historyQuery.isLoading && !hasData) {
@@ -98,6 +105,14 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
         ))}
       </div>
 
+      {eventMarkers.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
+          <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1">D Dividend</span>
+          <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1">S Split</span>
+          <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1">R Rights</span>
+        </div>
+      ) : null}
+
       <ChartSizeBox className="h-full" minHeight={220}>
         {({ width, height }) => (
           <LineChart
@@ -125,6 +140,15 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
               contentStyle={{ background: 'var(--bg-tooltip)', border: '1px solid var(--border-default)', fontSize: '11px' }}
               labelStyle={{ color: 'var(--text-muted)' }}
             />
+            {eventMarkers.map((marker) => (
+              <ReferenceLine
+                key={`${marker.date}-${marker.shortLabel}`}
+                x={marker.date}
+                stroke={marker.color}
+                strokeDasharray="3 4"
+                label={{ value: marker.shortLabel, fill: marker.color, fontSize: 10, position: 'insideTopRight' }}
+              />
+            ))}
             <Line type="monotone" dataKey="close" stroke="#38bdf8" strokeWidth={2} dot={false} />
           </LineChart>
         )}

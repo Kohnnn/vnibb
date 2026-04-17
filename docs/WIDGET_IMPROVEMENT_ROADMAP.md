@@ -29,7 +29,7 @@ Improve data correctness, chart semantics, resize behavior, analytical depth, an
 ### In Progress / Partial
 
 - Corporate-action support is best-effort, not yet a full institutional total-return engine
-- Adjusted-price history is available, but not every backend quant/stat endpoint is adjustment-aware yet
+- Adjusted-price history is available and quant endpoints now accept `adjustment_mode`, but not every backend stat/derived endpoint is fully action-aware yet
 
 ### Not Started
 
@@ -95,9 +95,9 @@ Delivered:
 
 Remaining follow-up:
 
-- push adjusted-price logic deeper into backend quant/stat endpoints
+- push adjusted-price logic deeper into the remaining backend stat/derived endpoints beyond the main quant set
 - add total-return or richer action-aware modes when data quality is good enough
-- add event markers and adjustment explanations in chart UIs
+- expand event markers and adjustment explanations beyond the main price-chart surfaces
 
 ### P1: Financial Visualization Quality
 

@@ -86,7 +86,7 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} Sortino vs Sharpe`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} Sortino vs Sharpe · ${(data?.data?.adjustment_mode || 'adjusted')} history`} align="right" />
         </div>
       </div>
 

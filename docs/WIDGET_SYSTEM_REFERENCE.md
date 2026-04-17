@@ -125,6 +125,7 @@ Chart-hosting rule:
 - `technical_summary` now includes a visual signal-distribution gauge alongside the buy/neutral/sell counts.
 - `orderbook` includes both a cumulative depth chart and the existing row-level depth table.
 - `relative_rotation` should prefer rendering the quadrant chart first, then layer metrics and trail details around it.
+- main historical price charts should show corporate-action markers for dividends, splits, and rights/stock-dividend actions when those events are available in-range.
 
 ## History / Valuation Rules
 
@@ -171,6 +172,12 @@ Recent shipped system template changes:
 - Broader USD conversion for quote and market widgets remains separate roadmap work.
 
 See also: `docs/USD_DISPLAY_ARCHITECTURE.md`.
+
+## Adjustment-Aware Analytics
+
+- quant endpoints now support `adjustment_mode` so frontend quant and risk widgets can stay aligned with adjusted history.
+- quant and risk widgets should prefer adjusted history by default unless a specific surface explicitly needs raw behavior.
+- main price-chart surfaces now render compact corporate-action markers for dividends, splits, and rights-related actions.
 
 ## Screener / AI Notes
 

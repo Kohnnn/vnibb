@@ -207,7 +207,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
           <WidgetMeta
             updatedAt={quantQuery.data?.data?.last_data_date ?? quantQuery.data?.data?.computed_at ?? historyQuery.dataUpdatedAt}
             isFetching={(quantQuery.isFetching || historyQuery.isFetching) && hasData}
-            note={`${period} composite view · adjusted history`}
+            note={`${period} composite view · ${(quantQuery.data?.data?.adjustment_mode || 'adjusted')} history`}
             align="right"
           />
         </div>

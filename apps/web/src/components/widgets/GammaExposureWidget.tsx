@@ -77,7 +77,7 @@ export function GammaExposureWidget({ symbol }: GammaExposureWidgetProps) {
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} proxy`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} proxy · ${(payload?.adjustment_mode || 'adjusted')} history`} align="right" />
         </div>
       </div>
 

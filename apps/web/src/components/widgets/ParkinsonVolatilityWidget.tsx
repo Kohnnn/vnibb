@@ -107,7 +107,7 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} 30D`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} 30D · ${(data?.data?.adjustment_mode || 'adjusted')} history`} align="right" />
         </div>
       </div>
 
