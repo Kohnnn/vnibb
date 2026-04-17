@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Star, Plus, Trash2, Bookmark } from 'lucide-react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import type { ActiveFilter } from './FilterBar';
 import type { FilterGroup } from './FilterBuilderPanel';
@@ -78,6 +79,10 @@ interface SavedScreensDropdownProps {
   customScreens: SavedScreen[];
   onSave: (name: string) => void;
   onDelete: (id: string) => void;
+  analyticsContext?: {
+    widgetId: string;
+    symbol?: string;
+  };
 }
 
 export function SavedScreensDropdown({
@@ -86,6 +91,7 @@ export function SavedScreensDropdown({
   customScreens,
   onSave,
   onDelete,
+  analyticsContext,
 }: SavedScreensDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -107,7 +113,16 @@ export function SavedScreensDropdown({
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          const nextOpen = !isOpen;
+          captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+            action: nextOpen ? 'open_saved_screens' : 'close_saved_screens',
+            widget_id: analyticsContext?.widgetId,
+            widget_type: 'screener',
+            symbol: analyticsContext?.symbol,
+          });
+          setIsOpen(nextOpen);
+        }}
         className={cn(
             "flex h-8 items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 text-[11px] font-bold uppercase tracking-tight text-[var(--text-primary)] transition-all hover:bg-[var(--bg-tertiary)]",
             isOpen && "border-blue-500 bg-[var(--bg-tertiary)]"
@@ -131,7 +146,19 @@ export function SavedScreensDropdown({
                 {BUILT_IN_SCREENS.map((screen) => (
                 <button
                     key={screen.id}
-                    onClick={() => { onSelect(screen); setIsOpen(false); }}
+                    onClick={() => {
+                      captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+                        action: 'select_screen',
+                        widget_id: analyticsContext?.widgetId,
+                        widget_type: 'screener',
+                        symbol: analyticsContext?.symbol,
+                        screen_id: screen.id,
+                        screen_name: screen.name,
+                        screen_source: screen.isBuiltIn ? 'built_in' : 'custom',
+                      });
+                      onSelect(screen);
+                      setIsOpen(false);
+                    }}
                     className={cn(
                         "w-full flex items-center gap-2 px-2 py-2 text-left text-[11px] font-medium rounded transition-colors group",
                         activeScreenId === screen.id ? 'bg-blue-600/10 text-blue-400' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
@@ -153,7 +180,19 @@ export function SavedScreensDropdown({
                         className="flex items-center group px-1"
                     >
                         <button
-                            onClick={() => { onSelect(screen); setIsOpen(false); }}
+                            onClick={() => {
+                              captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+                                action: 'select_screen',
+                                widget_id: analyticsContext?.widgetId,
+                                widget_type: 'screener',
+                                symbol: analyticsContext?.symbol,
+                                screen_id: screen.id,
+                                screen_name: screen.name,
+                                screen_source: 'custom',
+                              });
+                              onSelect(screen);
+                              setIsOpen(false);
+                            }}
                             className={cn(
                                 "flex-1 flex items-center gap-2 px-2 py-2 text-left text-[11px] font-medium rounded transition-colors",
                                 activeScreenId === screen.id ? 'bg-blue-600/10 text-blue-400' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
@@ -163,7 +202,17 @@ export function SavedScreensDropdown({
                             {screen.name}
                         </button>
                         <button
-                            onClick={() => onDelete(screen.id)}
+                            onClick={() => {
+                              captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+                                action: 'delete_screen',
+                                widget_id: analyticsContext?.widgetId,
+                                widget_type: 'screener',
+                                symbol: analyticsContext?.symbol,
+                                screen_id: screen.id,
+                                screen_name: screen.name,
+                              });
+                              onDelete(screen.id)
+                            }}
                             className="p-2 text-[var(--text-muted)] opacity-0 transition-colors group-hover:opacity-100 hover:text-red-500"
                         >
                             <Trash2 size={10} />
@@ -188,6 +237,13 @@ export function SavedScreensDropdown({
                 disabled={!newName.trim()}
                 onClick={() => {
                   if (newName.trim()) {
+                    captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+                      action: 'save_screen',
+                      widget_id: analyticsContext?.widgetId,
+                      widget_type: 'screener',
+                      symbol: analyticsContext?.symbol,
+                      screen_name: newName.trim(),
+                    });
                     onSave(newName.trim());
                     setNewName('');
                   }

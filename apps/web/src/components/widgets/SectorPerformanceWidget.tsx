@@ -30,7 +30,7 @@ function getHeatmapColor(changePct: number): string {
 export function SectorPerformanceWidget({ onRemove, widgetGroup }: SectorPerformanceWidgetProps) {
     const [view, setView] = useState<'grid' | 'list'>('grid');
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorPerformance();
-    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'sector_performance' });
 
     const sectors = data?.data || [];
     const hasData = sectors.length > 0;

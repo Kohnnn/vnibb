@@ -41,7 +41,7 @@ export function TopMoversWidget({
     index: 'VNINDEX',
   });
 
-  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'top_movers' });
 
   useEffect(() => {
     if (lastRefresh) {

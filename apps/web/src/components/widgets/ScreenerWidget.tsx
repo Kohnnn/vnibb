@@ -17,6 +17,7 @@ import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import type { WidgetGroupId } from '@/types/widget';
 import { ALL_COLUMNS } from '@/types/screener';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { formatScreenerValue } from '@/utils/formatters';
 import { MarketToggle, type Market } from './screener/MarketToggle';
 import { cn } from '@/lib/utils';
@@ -259,7 +260,10 @@ export function ScreenerWidget({
     const visibleColumns = useMemo(() => ALL_COLUMNS.filter((column) => activeColumnIds.includes(column.id)), [activeColumnIds]);
 
     const source = useVnstockSource();
-    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetId: id, widgetType: 'screener' });
+    const analyticsContext = useMemo(() => ({
+        widgetId: id,
+    }), [id]);
 
     const serializedFilters = useMemo(
         () => buildSerializedFilters(activeFilters, advancedFilterGroup),
@@ -343,19 +347,33 @@ export function ScreenerWidget({
         ]) ?? dataUpdatedAt;
 
     const handleSort = useCallback((field: string) => {
+        captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+            control_type: 'screener_sort',
+            previous_value: sortField === field ? sortOrder : `${sortField}:${sortOrder}`,
+            value: sortField === field ? `${field}:${sortOrder === 'asc' ? 'desc' : 'asc'}` : `${field}:desc`,
+            widget_id: id,
+            widget_type: 'screener',
+        });
         if (sortField === field) {
             setSortOrder((previous) => (previous === 'asc' ? 'desc' : 'asc'));
             return;
         }
         setSortField(field);
         setSortOrder('desc');
-    }, [sortField]);
+    }, [id, sortField, sortOrder]);
 
     const handleSymbolSelect = useCallback((symbol: string) => {
         if (!symbol) return;
+        captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+            action: 'select_symbol',
+            widget_id: id,
+            widget_type: 'screener',
+            symbol,
+            view_mode: viewMode,
+        });
         onSymbolClick?.(symbol);
         setLinkedSymbol(symbol);
-    }, [onSymbolClick, setLinkedSymbol]);
+    }, [id, onSymbolClick, setLinkedSymbol, viewMode]);
 
     const handleSelectScreen = useCallback((screen: SavedScreen) => {
         setActiveScreenId(screen.id);
@@ -394,13 +412,19 @@ export function ScreenerWidget({
     }, [activeScreenId]);
 
     const handleResetFilters = useCallback(() => {
+        captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+            action: 'reset_filters',
+            widget_id: id,
+            widget_type: 'screener',
+            filter_count: activeFilters.length,
+        });
         setActiveFilters([]);
         setAdvancedFilterGroup(createEmptyFilterGroup());
         setSearch('');
         setActiveScreenId('all');
         setSortField(DEFAULT_SORT_FIELD);
         setSortOrder(DEFAULT_SORT_ORDER);
-    }, []);
+    }, [activeFilters.length, id]);
 
     const tableColumns = useMemo(() => {
         return visibleColumns.map((column) => ({
@@ -431,6 +455,7 @@ export function ScreenerWidget({
                         onSelect={handleSelectScreen}
                         onSave={handleSaveScreen}
                         onDelete={handleDeleteScreen}
+                        analyticsContext={analyticsContext}
                     />
 
                     <div className="mx-1 h-4 w-[1px] bg-[var(--border-color)]" />
@@ -449,7 +474,16 @@ export function ScreenerWidget({
 
                     <div className="flex rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
                         <button
-                            onClick={() => setViewMode('table')}
+                            onClick={() => {
+                                captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                                    control_type: 'screener_view_mode',
+                                    previous_value: viewMode,
+                                    value: 'table',
+                                    widget_id: id,
+                                    widget_type: 'screener',
+                                });
+                                setViewMode('table')
+                            }}
                             className={cn(
                                 'rounded-md p-1.5 transition-all',
                                 viewMode === 'table'
@@ -461,7 +495,16 @@ export function ScreenerWidget({
                             <Table size={14} />
                         </button>
                         <button
-                            onClick={() => setViewMode('performance')}
+                            onClick={() => {
+                                captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                                    control_type: 'screener_view_mode',
+                                    previous_value: viewMode,
+                                    value: 'performance',
+                                    widget_id: id,
+                                    widget_type: 'screener',
+                                });
+                                setViewMode('performance')
+                            }}
                             className={cn(
                                 'rounded-md p-1.5 transition-all',
                                 viewMode === 'performance'
@@ -473,7 +516,16 @@ export function ScreenerWidget({
                             <LineChart size={14} />
                         </button>
                         <button
-                            onClick={() => setViewMode('chart')}
+                            onClick={() => {
+                                captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                                    control_type: 'screener_view_mode',
+                                    previous_value: viewMode,
+                                    value: 'chart',
+                                    widget_id: id,
+                                    widget_type: 'screener',
+                                });
+                                setViewMode('chart')
+                            }}
                             className={cn(
                                 'rounded-md p-1.5 transition-all',
                                 viewMode === 'chart'
@@ -488,7 +540,15 @@ export function ScreenerWidget({
 
                     <div className="ml-auto flex items-center gap-1">
                         <button
-                            onClick={() => setShowAdvancedFilters((current) => !current)}
+                            onClick={() => {
+                                const nextOpen = !showAdvancedFilters
+                                captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
+                                    action: nextOpen ? 'open_advanced_filters' : 'close_advanced_filters',
+                                    widget_id: id,
+                                    widget_type: 'screener',
+                                });
+                                setShowAdvancedFilters(nextOpen)
+                            }}
                             className={cn(
                                 'flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase transition-all',
                                 showAdvancedFilters
@@ -503,11 +563,12 @@ export function ScreenerWidget({
                         <ColumnCustomizer
                             columns={ALL_COLUMNS.map((column) => ({ id: column.id, label: column.label, visible: activeColumnIds.includes(column.id) }))}
                             onChange={(columns) => setColumns(columns.filter((column) => column.visible).map((column) => column.id))}
+                            analyticsContext={analyticsContext}
                         />
                     </div>
                 </div>
 
-                <FilterBar filters={activeFilters} onChange={setActiveFilters} />
+                <FilterBar filters={activeFilters} onChange={setActiveFilters} analyticsContext={analyticsContext} />
 
                 {showAdvancedFilters && (
                     <div className="border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/30 px-3 py-2">

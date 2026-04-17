@@ -121,7 +121,7 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
     }, [validSymbolsData]);
 
     const { prices: livePrices, isConnected } = useWebSocket({ symbols });
-    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'watchlist' });
 
     useEffect(() => {
         setSymbols((current) => JSON.stringify(current) === JSON.stringify(persistedSymbols) ? current : persistedSymbols);

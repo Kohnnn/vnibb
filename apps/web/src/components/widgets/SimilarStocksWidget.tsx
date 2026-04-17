@@ -27,7 +27,7 @@ function formatMarketCap(value?: number | null): string {
 
 export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidgetProps) {
     const upperSymbol = symbol?.toUpperCase() || '';
-    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'similar_stocks' });
     const {
         data,
         isLoading,

@@ -302,7 +302,7 @@ export function PortfolioTrackerWidget({
     onSymbolClick,
     widgetGroup,
 }: PortfolioTrackerWidgetProps) {
-    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'portfolio_tracker' });
     const {
         positions,
         symbols,

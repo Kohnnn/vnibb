@@ -41,7 +41,7 @@ function getRSBg(rating: number): string {
 export function RSRankingWidget({ widgetGroup }: RSRankingWidgetProps) {
     const [activeTab, setActiveTab] = useState<TabType>('leaders');
     const [limit] = useState(50);
-    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'rs_ranking' });
 
     const leadersQuery = useRSLeaders(limit);
     const laggardsQuery = useRSLaggards(limit);

@@ -18,7 +18,7 @@ interface SectorRotationRadarWidgetProps {
 
 export function SectorRotationRadarWidget({ id, widgetGroup, onRemove }: SectorRotationRadarWidgetProps) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorPerformance();
-  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup);
+  const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'sector_rotation_radar' });
 
   const sectors = data?.data || [];
   const hasData = sectors.length > 0;
