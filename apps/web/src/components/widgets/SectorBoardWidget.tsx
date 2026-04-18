@@ -3,13 +3,14 @@
 import { memo, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, LayoutGrid } from 'lucide-react';
 
+import { useUnit } from '@/contexts/UnitContext';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useSectorBoard } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
-import { formatNumber } from '@/lib/units';
+import { formatNumber, formatPriceValueForUnit } from '@/lib/units';
 import { cn } from '@/lib/utils';
 
 interface SectorBoardWidgetProps {
@@ -51,6 +52,7 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sortBy, setSortBy] = useState<'volume' | 'market_cap' | 'change_pct'>('volume');
   const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'sector_board' });
+  const { config: unitConfig } = useUnit();
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorBoard({
     limit_per_sector: 12,
@@ -133,12 +135,12 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
                 </button>
               ))}
             </div>
-            <WidgetMeta
-              updatedAt={data?.updated_at || dataUpdatedAt}
-              isFetching={isFetching && hasData}
-              note={`Sorted by ${sortBy.replace('_', ' ')}`}
-              align="right"
-            />
+              <WidgetMeta
+                updatedAt={data?.updated_at || dataUpdatedAt}
+                isFetching={isFetching && hasData}
+                note={unitConfig.display === 'USD' ? `Sorted by ${sortBy.replace('_', ' ')} · USD for price/value fields` : `Sorted by ${sortBy.replace('_', ' ')}`}
+                align="right"
+              />
           </div>
         </div>
 
@@ -196,12 +198,12 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
                           </div>
                         </div>
                         <div className="min-w-[64px] text-right">
-                          <div className={cn('break-words whitespace-normal text-xs font-semibold tabular-nums', colorClass(stock.color))}>
-                            {stock.change_pct != null && stock.change_pct > 0 ? '+' : ''}
-                            {formatNumber(stock.change_pct ?? null, { decimals: 2 })}%
-                          </div>
+                            <div className={cn('break-words whitespace-normal text-xs font-semibold tabular-nums', colorClass(stock.color))}>
+                              {stock.change_pct != null && stock.change_pct > 0 ? '+' : ''}
+                              {formatNumber(stock.change_pct ?? null, { decimals: 2 })}%
+                            </div>
                             <div className="text-[10px] font-mono text-[var(--text-secondary)]">
-                              {formatNumber(stock.price ?? null, { decimals: 2 })}
+                              {formatPriceValueForUnit(stock.price ?? null, unitConfig, { decimals: 2 })}
                             </div>
                           </div>
                         </button>

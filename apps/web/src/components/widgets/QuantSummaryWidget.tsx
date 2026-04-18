@@ -66,6 +66,15 @@ type DrawdownMetric = {
   avg_days_to_recovery?: number | null
 }
 
+type BenchmarkRiskMetric = {
+  benchmark?: string | null
+  current_beta_63d?: number | null
+  current_tracking_error_30d_pct?: number | null
+  downside_deviation_30d_pct?: number | null
+  var_95_1d_pct?: number | null
+  cvar_95_1d_pct?: number | null
+}
+
 function formatSigned(value: number | null | undefined, suffix = ''): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—'
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}${suffix}`
@@ -83,6 +92,16 @@ function flowTone(score: number): string {
   return 'text-cyan-300'
 }
 
+function scoreTrackingError(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(value)) return 50
+  return Math.max(0, Math.min(100, Math.round(100 - value * 3.2)))
+}
+
+function scoreDownsideDeviation(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(value)) return 50
+  return Math.max(0, Math.min(100, Math.round(100 - value * 2.8)))
+}
+
 function averageSortino(metric: SortinoMetric | undefined): number | null {
   return average(
     Object.values(metric?.monthly_sortino || {}).filter(
@@ -97,7 +116,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
 
   const quantQuery = useQuantMetrics(upperSymbol, {
     period,
-    metrics: ['seasonality', 'volume_delta', 'sortino', 'ema_respect', 'drawdown_recovery'],
+    metrics: ['seasonality', 'volume_delta', 'sortino', 'ema_respect', 'drawdown_recovery', 'benchmark_risk'],
     enabled: Boolean(upperSymbol),
   })
   const regime = useQuantRegime(upperSymbol, { period, enabled: Boolean(upperSymbol) })
@@ -108,6 +127,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
   const sortino = metrics.sortino as SortinoMetric | undefined
   const emaRespect = metrics.ema_respect as EmaMetric | undefined
   const drawdown = metrics.drawdown_recovery as DrawdownMetric | undefined
+  const benchmarkRisk = metrics.benchmark_risk as BenchmarkRiskMetric | undefined
 
   const sortinoAverage = averageSortino(sortino)
   const seasonalityScore = scoreSeasonality(seasonality?.hit_rate_pct ?? null)
@@ -121,6 +141,8 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
     drawdown?.avg_days_to_recovery ?? null,
   )
   const sortinoScore = scoreSortino(sortinoAverage)
+  const trackingScore = scoreTrackingError(benchmarkRisk?.current_tracking_error_30d_pct)
+  const downsideScore = scoreDownsideDeviation(benchmarkRisk?.downside_deviation_30d_pct)
 
   const radarData = useMemo(
     () => [
@@ -132,8 +154,10 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
       { metric: 'Drawdown', value: drawdownScore, fullMark: 100 },
       { metric: 'Seasonality', value: seasonalityScore, fullMark: 100 },
       { metric: 'EMA', value: emaScore, fullMark: 100 },
+      { metric: 'Tracking', value: trackingScore, fullMark: 100 },
+      { metric: 'Downside', value: downsideScore, fullMark: 100 },
     ],
-    [drawdownScore, emaScore, flowScore, regime.momentum.score, regime.structure.score, regime.volatility.score, seasonalityScore, sortinoScore],
+    [downsideScore, drawdownScore, emaScore, flowScore, regime.momentum.score, regime.structure.score, regime.volatility.score, seasonalityScore, sortinoScore, trackingScore],
   )
 
   const compositeRiskScore = Math.round(
@@ -159,6 +183,11 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
       drawdown_score: drawdownScore,
       seasonality_score: seasonalityScore,
       ema_score: emaScore,
+      beta_63d: benchmarkRisk?.current_beta_63d ?? null,
+      tracking_error_30d_pct: benchmarkRisk?.current_tracking_error_30d_pct ?? null,
+      downside_deviation_30d_pct: benchmarkRisk?.downside_deviation_30d_pct ?? null,
+      var_95_1d_pct: benchmarkRisk?.var_95_1d_pct ?? null,
+      cvar_95_1d_pct: benchmarkRisk?.cvar_95_1d_pct ?? null,
       composite_risk_score: compositeRiskScore,
     },
   ]
@@ -203,7 +232,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
           <WidgetMeta
             updatedAt={quantQuery.data?.data?.last_data_date || quantQuery.data?.data?.computed_at || regime.updatedAt}
             isFetching={isFetching && hasData}
-            note={`${period} composite view · ${(quantQuery.data?.data?.adjustment_mode || 'adjusted')} history`}
+            note={`${period} composite view · ${(quantQuery.data?.data?.adjustment_mode || 'adjusted')} history vs ${benchmarkRisk?.benchmark || 'VNINDEX'}`}
             align="right"
           />
         </div>
@@ -226,7 +255,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
           <WidgetEmpty message="Quant summary is not available yet" icon={<Gauge size={18} />} />
         ) : (
           <div className="flex h-full flex-col gap-3">
-            <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 xl:grid-cols-6">
               <div className="flex min-h-[180px] flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Momentum</div>
                 <div className={`mt-1 text-lg font-semibold ${regime.momentum.tone}`}>{regime.momentum.shortLabel}</div>
@@ -251,6 +280,11 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Risk Score</div>
                 <div className="mt-1 text-lg font-semibold text-cyan-300">{compositeRiskScore}/100</div>
                 <div className="text-[10px] text-[var(--text-secondary)]">Composite regime risk</div>
+              </div>
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Tracking</div>
+                <div className="mt-1 text-lg font-semibold text-fuchsia-300">{formatSigned(benchmarkRisk?.current_tracking_error_30d_pct, '%')}</div>
+                <div className="text-[10px] text-[var(--text-secondary)]">{benchmarkRisk?.benchmark || 'VNINDEX'} error 30D</div>
               </div>
             </div>
 
@@ -321,12 +355,28 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Recovery</div>
                       <div className="mt-1 text-[var(--text-primary)]">{formatSigned(drawdown?.avg_days_to_recovery, 'd')}</div>
                     </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Beta 63D</div>
+                      <div className="mt-1 text-[var(--text-primary)]">{formatSigned(benchmarkRisk?.current_beta_63d)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Downside Dev</div>
+                      <div className="mt-1 text-[var(--text-primary)]">{formatSigned(benchmarkRisk?.downside_deviation_30d_pct, '%')}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">VaR 95</div>
+                      <div className="mt-1 text-amber-300">{formatSigned(benchmarkRisk?.var_95_1d_pct, '%')}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">CVaR 95</div>
+                      <div className="mt-1 text-rose-300">{formatSigned(benchmarkRisk?.cvar_95_1d_pct, '%')}</div>
+                    </div>
                   </div>
 
                   <div className="mt-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2">
                     <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Summary</div>
                     <div className="mt-1 text-[var(--text-primary)]">
-                      Flow is {flowLabel(flowScore).toLowerCase()}, seasonality hit rate is {formatSigned(seasonality?.hit_rate_pct, '%')}, and the current setup leans {regime.momentum.shortLabel.toLowerCase()}.
+                      Flow is {flowLabel(flowScore).toLowerCase()}, seasonality hit rate is {formatSigned(seasonality?.hit_rate_pct, '%')}, and benchmark risk sits at {formatSigned(benchmarkRisk?.current_tracking_error_30d_pct, '%')} tracking error with {formatSigned(benchmarkRisk?.downside_deviation_30d_pct, '%')} downside deviation.
                     </div>
                   </div>
                 </div>

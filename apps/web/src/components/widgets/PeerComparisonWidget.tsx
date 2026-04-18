@@ -21,13 +21,14 @@ import {
 import { useComparison, usePeers } from '@/hooks/useComparison';
 import { ExportButton } from '@/components/common/ExportButton';
 import { exportPeers } from '@/lib/api';
-import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
+import { EMPTY_VALUE, formatCompactValueForUnit, formatNumber, formatPercent, type UnitConfig } from '@/lib/units';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { useUnit } from '@/contexts/UnitContext';
 import { logClientError } from '@/lib/clientLogger';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import {
@@ -146,6 +147,7 @@ function parseSortDirection(config: Record<string, unknown> | undefined): SortDi
 
 export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove }: PeerComparisonWidgetProps) {
     const { updateWidget } = useDashboard();
+    const { config: unitConfig } = useUnit();
     const widgetLocation = useDashboardWidget(id);
     const persistedPeers = useMemo(() => parseComparisonPeers(config, symbol || 'FPT'), [config, symbol]);
     const persistedSets = useMemo(() => parseComparisonSets(config), [config]);
@@ -489,13 +491,13 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove }
 
                                         return (
                                             <td key={`${sym}-${index}`} className={cellClass} style={cellStyle}>
-                                                {formatCellValue(value, metric.format)}
+                                                {formatCellValue(value, metric.format, unitConfig)}
                                             </td>
                                         );
 
                                     })}
                                     <td className="text-right px-2 font-mono text-amber-400/60 border-l border-[var(--border-subtle)]">
-                                        {sectorValue !== undefined ? formatCellValue(sectorValue, metric.format) : '-'}
+                                        {sectorValue !== undefined ? formatCellValue(sectorValue, metric.format, unitConfig) : '-'}
                                         {sectorAverageCounts?.[metric.key] ? (
                                             <span className="ml-1 text-[8px] text-[var(--text-muted)]">(n={sectorAverageCounts[metric.key]})</span>
                                         ) : null}
@@ -803,21 +805,17 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove }
 }
 
 // Helper: Format cell values based on metric format type
-function formatCellValue(value: any, format: string) {
+function formatCellValue(value: any, format: string, unitConfig: UnitConfig) {
     if (value === null || value === undefined) return EMPTY_VALUE;
     if (typeof value !== 'number') return String(value);
 
     switch (format) {
         case 'currency':
-            if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
-            return value.toLocaleString();
+            return formatCompactValueForUnit(value, { ...unitConfig, decimalPlaces: 1 });
         case 'percent':
             return formatPercent(value, { decimals: 1, input: 'auto', clamp: 'margin' });
         case 'large_number':
-            if (value >= 1e12) return `${(value / 1e12).toFixed(1)}T`;
-            if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
-            if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
-            return value.toLocaleString();
+            return formatCompactValueForUnit(value, { ...unitConfig, decimalPlaces: 1 });
         case 'ratio':
             return formatNumber(value, { decimals: 2 });
         default:

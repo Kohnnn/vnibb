@@ -42,7 +42,7 @@ const FOLDERS_KEY = 'vnibb_folders';
 const STORAGE_VERSION_KEY = 'vnibb-dashboard-version';
 const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
-const CURRENT_MIGRATION_VERSION = 18;
+const CURRENT_MIGRATION_VERSION = 20;
 const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
@@ -334,6 +334,24 @@ const GLOBAL_MARKETS_TEMPLATE: TemplateWidget[] = [
         config: { feedMode: 'all_symbols' },
         layout: { x: 16, y: 22, w: 8, h: 7, minW: 6, minH: 5 }
     },
+    {
+        type: 'derivatives_contracts_board',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 29, w: 8, h: 8, minW: 6, minH: 6 }
+    },
+    {
+        type: 'derivatives_price_history',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 8, y: 29, w: 8, h: 8, minW: 6, minH: 6 }
+    },
+    {
+        type: 'derivatives_analytics',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 29, w: 8, h: 8, minW: 6, minH: 6 }
+    },
 ];
 
 // Comparison Analysis Tab: Multi-ticker comparison toolkit
@@ -364,19 +382,25 @@ const OWNERSHIP_TEMPLATE: TemplateWidget[] = [
         type: 'major_shareholders',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 8, h: 8, minW: 6, minH: 6 }
+        layout: { x: 0, y: 0, w: 6, h: 8, minW: 6, minH: 6 }
+    },
+    {
+        type: 'ownership_rating_summary',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 6, y: 0, w: 6, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'officers_management',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 0, w: 8, h: 8, minW: 6, minH: 6 }
+        layout: { x: 12, y: 0, w: 6, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'share_statistics',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 0, w: 8, h: 8, minW: 6, minH: 6 }
+        layout: { x: 18, y: 0, w: 6, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'subsidiaries',
@@ -426,25 +450,31 @@ const MAIN_MACRO_TEMPLATE: TemplateWidget[] = [
         type: 'market_overview',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 8, h: 4, minW: 6, minH: 3 }
+        layout: { x: 0, y: 0, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'top_movers',
         syncGroupId: 1,
         config: {},
-        layout: { x: 8, y: 0, w: 8, h: 4, minW: 6, minH: 3 }
+        layout: { x: 8, y: 0, w: 8, h: 8, minW: 6, minH: 6 }
+    },
+    {
+        type: 'market_sentiment',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 0, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
         type: 'market_heatmap',
         syncGroupId: 1,
         config: {},
-        layout: { x: 16, y: 0, w: 8, h: 8, minW: 6, minH: 5 }
+        layout: { x: 0, y: 8, w: 12, h: 12, minW: 10, minH: 10 }
     },
     {
-        type: 'screener',
+        type: 'listing_browser',
         syncGroupId: 1,
-        config: { preset: 'value_momentum' },
-        layout: { x: 0, y: 4, w: 16, h: 8, minW: 12, minH: 6 }
+        config: {},
+        layout: { x: 12, y: 8, w: 12, h: 12, minW: 8, minH: 8 }
     },
 ];
 
@@ -468,13 +498,13 @@ const MAIN_DEEP_DIVE_TEMPLATE: TemplateWidget[] = [
         layout: { x: 0, y: 8, w: 8, h: 5, minW: 6, minH: 4 }
     },
     {
-        type: 'key_metrics',
+        type: 'ttm_snapshot',
         syncGroupId: 1,
         config: {},
         layout: { x: 0, y: 13, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
-        type: 'volume_analysis',
+        type: 'growth_bridge',
         syncGroupId: 1,
         config: {},
         layout: { x: 8, y: 10, w: 8, h: 6, minW: 6, minH: 5 }
@@ -1549,6 +1579,7 @@ const createMainSystemDashboard = (): Dashboard => {
         MAIN_DASHBOARD_ID,
         MAIN_DASHBOARD_NAME,
         [
+            { idSuffix: 'discovery', name: 'Discovery', template: MAIN_MACRO_TEMPLATE },
             { idSuffix: 'fundamentals', name: 'Fundamentals', template: MAIN_FUNDAMENTALS_TEMPLATE },
             { idSuffix: 'overview', name: 'Overview', template: MAIN_DEEP_DIVE_TEMPLATE },
             { idSuffix: 'company', name: 'Company', template: INITIAL_FUNDAMENTAL_TEMPLATE },
@@ -2628,6 +2659,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 }
 
                 if (migrationVersion < 18) {
+                    dashboards = refreshSystemDashboardTemplates(dashboards);
+                }
+
+                if (migrationVersion < 20) {
                     dashboards = refreshSystemDashboardTemplates(dashboards);
                 }
 

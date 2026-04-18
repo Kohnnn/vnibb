@@ -37,12 +37,7 @@ Improve data correctness, chart semantics, resize behavior, analytical depth, an
 - Event markers and action-aware annotations across all chart widgets
 - Deeper risk model upgrade with benchmark-relative and downside distribution measures
 - Lower-priority backend-ready widget backlog:
-  - `ttm_snapshot`
-  - `growth_bridge`
-  - `ownership_rating_summary`
-  - `market_sentiment`
-  - expanded derivatives analytics beyond contracts/history
-  - broader listing/discovery surfaces beyond the first `listing_browser` pass
+  - broader listing/discovery surfaces beyond the current `listing_browser` v2 pass
 
 ## Priority Structure
 
@@ -229,7 +224,7 @@ Remaining follow-up:
 
 #### P2.5 Risk Dashboard
 
-Status: Shipped first pass
+Status: Shipped second pass
 
 Delivered:
 
@@ -237,11 +232,15 @@ Delivered:
 - clearer score explanation and explicit score-driver cards
 - responsive underwater chart panel
 - better Hurst/latest-data context
+- benchmark-relative drawdown and benchmark drawdown context via `VNINDEX`
+- 63-day rolling beta and 30-day tracking error
+- downside deviation plus 95% VaR / CVaR readouts
+- quant summary integration for benchmark-relative and downside-tail measures
 
 Remaining follow-up:
 
-- deeper benchmark-relative risk model
-- distribution-aware downside metrics like VaR/CVaR if needed
+- sector-relative attribution if the underlying benchmark/sector data path is clean enough
+- richer time-series visualization for beta / tracking error if a dedicated panel is warranted
 
 ## TradingView / Global Markets Progress
 

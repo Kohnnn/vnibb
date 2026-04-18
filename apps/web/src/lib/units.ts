@@ -99,6 +99,31 @@ export function convertFinancialValueForUnit(
   return rate > 0 ? value / rate : value
 }
 
+export function convertCurrentValueForUnit(
+  value: number | null | undefined,
+  config: UnitConfig = DEFAULT_UNIT_CONFIG,
+): number | null {
+  return convertFinancialValueForUnit(value, config, null)
+}
+
+export function formatCompactValueForUnit(
+  value: number | null | undefined,
+  config: UnitConfig = DEFAULT_UNIT_CONFIG,
+  options: NumberFormatOptions = {}
+): string {
+  const converted = convertCurrentValueForUnit(value, config)
+  return formatLargeNumber(converted, options)
+}
+
+export function formatPriceValueForUnit(
+  value: number | null | undefined,
+  config: UnitConfig = DEFAULT_UNIT_CONFIG,
+  options: NumberFormatOptions = {}
+): string {
+  const converted = convertCurrentValueForUnit(value, config)
+  return formatNumber(converted, { decimals: options.decimals ?? 2, locale: options.locale, useGrouping: options.useGrouping })
+}
+
 export function formatUnitValue(
   value: number | null | undefined,
   config: UnitConfig = DEFAULT_UNIT_CONFIG

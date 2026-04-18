@@ -14,13 +14,15 @@ import {
   YAxis,
 } from 'recharts';
 
+import { useUnit } from '@/contexts/UnitContext';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useTransactionFlow } from '@/lib/queries';
-import { formatNumber } from '@/lib/units';
+import { formatNumber, formatPriceValueForUnit, formatCompactValueForUnit, type UnitConfig } from '@/lib/units';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 import { cn } from '@/lib/utils';
 
 interface TransactionFlowWidgetProps {
@@ -51,13 +53,15 @@ function formatShortDate(value: string) {
   return parsed.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
 }
 
-function formatFlowValue(value: number | null | undefined, mode: FlowMode) {
+function formatFlowValue(
+  value: number | null | undefined,
+  mode: FlowMode,
+  unitConfig: UnitConfig
+) {
   if (value === null || value === undefined || !Number.isFinite(value)) return 'N/A';
   const abs = Math.abs(value);
   if (mode === 'value') {
-    if (abs >= 1e9) return `${value < 0 ? '-' : ''}${(abs / 1e9).toFixed(2)}B`;
-    if (abs >= 1e6) return `${value < 0 ? '-' : ''}${(abs / 1e6).toFixed(2)}M`;
-    return formatNumber(value, { decimals: 0 });
+    return formatCompactValueForUnit(value, { ...unitConfig, decimalPlaces: 2 });
   }
   if (abs >= 1e6) return `${value < 0 ? '-' : ''}${(abs / 1e6).toFixed(2)}M`;
   if (abs >= 1e3) return `${value < 0 ? '-' : ''}${(abs / 1e3).toFixed(1)}K`;
@@ -81,6 +85,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
   const [scope, setScope] = useState<FlowScope>('total');
   const [mode, setMode] = useState<FlowMode>('value');
   const upperSymbol = symbol?.toUpperCase() || '';
+  const { config: unitConfig } = useUnit();
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useTransactionFlow(upperSymbol, {
     days: 30,
@@ -100,6 +105,19 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
   }, [latestDataDate]);
 
   const isStale = Boolean(staleDays !== null && staleDays > 7);
+  const healthState: WidgetHealthState | undefined = isStale
+    ? {
+        status: 'stale',
+        label: 'Stale snapshot',
+        detail: `Latest flow snapshot is ${staleDays} day${staleDays === 1 ? '' : 's'} old.`,
+      }
+    : error && hasData
+      ? {
+          status: 'cached',
+          label: 'Cached snapshot',
+          detail: 'Showing the last successful transaction flow data while refresh is degraded.',
+        }
+      : undefined
 
   const chartRows = useMemo(() => {
     return rows.map((row) => ({
@@ -221,6 +239,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
               <WidgetMeta
                 updatedAt={data?.meta?.last_data_date ?? dataUpdatedAt}
                 isFetching={isFetching && hasData}
+                health={healthState}
                 note={note}
                 align="right"
               />
@@ -245,6 +264,11 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
               icon={<Activity size={18} />}
               message={`Investor bucket flow is not available for ${upperSymbol} yet.`}
               detail="This stream is sparse for non-broker symbols and resumes when provider data is available."
+              health={{
+                status: 'coverage_gap',
+                label: 'Sparse coverage',
+                detail: 'Flow buckets are usually available only for selected broker or high-liquidity names.',
+              }}
               size="compact"
             />
           ) : (
@@ -271,7 +295,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                       {card.label}
                     </div>
                     <div className={cn('text-lg font-semibold', card.tone)}>
-                      {formatFlowValue(card.value, mode)}
+                      {formatFlowValue(card.value, mode, unitConfig)}
                     </div>
                   </div>
                 ))}
@@ -302,7 +326,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                         tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                         axisLine={false}
                         tickLine={false}
-                        tickFormatter={(value) => formatFlowValue(Number(value), mode)}
+                        tickFormatter={(value) => formatFlowValue(Number(value), mode, unitConfig)}
                       />
                       <YAxis
                         yAxisId="price"
@@ -310,7 +334,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                         tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                         axisLine={false}
                         tickLine={false}
-                        tickFormatter={(value) => formatNumber(Number(value), { decimals: 2 })}
+                        tickFormatter={(value) => formatPriceValueForUnit(Number(value), unitConfig, { decimals: 2 })}
                       />
                       <Tooltip
                         contentStyle={{
@@ -322,8 +346,8 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                         formatter={(value: any, name: any) => {
                           const numericValue = typeof value === 'number' ? value : Number(value);
                           const label = typeof name === 'string' ? name : 'Flow';
-                          if (label === 'Price') return [formatNumber(numericValue, { decimals: 2 }), label];
-                          return [formatFlowValue(numericValue, mode), label];
+                          if (label === 'Price') return [formatPriceValueForUnit(numericValue, unitConfig, { decimals: 2 }), label];
+                          return [formatFlowValue(numericValue, mode, unitConfig), label];
                         }}
                       />
                       <Legend />
@@ -371,13 +395,13 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                   <div>
                     <div className="text-[var(--text-muted)]">Price</div>
                     <div className="font-medium text-[var(--text-primary)]">
-                      {formatNumber(latest?.price ?? null, { decimals: 2 })}
+                      {formatPriceValueForUnit(latest?.price ?? null, unitConfig, { decimals: 2 })}
                     </div>
                   </div>
                   <div>
                     <div className="text-[var(--text-muted)]">Gross</div>
                     <div className="font-medium text-[var(--text-primary)]">
-                      {formatFlowValue(latest?.total_gross_value, 'value')}
+                      {formatFlowValue(latest?.total_gross_value, 'value', unitConfig)}
                     </div>
                   </div>
                   <div>

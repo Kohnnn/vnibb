@@ -18,6 +18,9 @@ import {
     Download,
     FileText,
     Terminal,
+    History,
+    Database,
+    Clock3,
     type LucideIcon,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -46,6 +49,13 @@ import {
 } from '@/lib/aiSettings';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { CopilotEvidencePanel } from '@/components/ui/CopilotEvidencePanel';
+import { logClientError } from '@/lib/clientLogger';
+import {
+    archiveVniAgentSession,
+    readRecentVniAgentSessions,
+    removeRecentVniAgentSession,
+    type VniAgentSessionArchive,
+} from '@/lib/vniagentSessions';
 
 interface Message {
     id: string;
@@ -314,6 +324,17 @@ function getInputPlaceholder(widgetContext?: string): string {
     return `Ask about @${widgetContext}...`;
 }
 
+function formatSessionTimestamp(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+
+    const now = new Date();
+    const sameDay = parsed.toDateString() === now.toDateString();
+    return sameDay
+        ? parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : parsed.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
 export function AICopilot({
     isOpen,
     onClose,
@@ -333,6 +354,7 @@ export function AICopilot({
     const [attachedDocuments, setAttachedDocuments] = useState<CopilotDocumentContext[]>([]);
     const [runtimeConfig, setRuntimeConfig] = useState<{ provider: string; model: string } | null>(null);
     const [isComposerToolsOpen, setIsComposerToolsOpen] = useState(false);
+    const [recentSessions, setRecentSessions] = useState<VniAgentSessionArchive[]>([]);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -364,6 +386,17 @@ export function AICopilot({
         () => getSessionKey(currentSymbol, widgetContext, activeTabName),
         [currentSymbol, widgetContext, activeTabName]
     );
+    const currentSessionMessageCount = useMemo(
+        () => messages.filter((message) => message.role === 'user' || message.content.trim()).length,
+        [messages]
+    );
+    const relevantRecentSessions = useMemo(
+        () => recentSessions.filter((session) => !currentSymbol || session.symbol === currentSymbol).slice(0, 4),
+        [currentSymbol, recentSessions]
+    );
+    const activeModelLabel = aiSettings.mode === 'browser_key'
+        ? aiSettings.model
+        : runtimeConfig?.model || latestResolvedResponseMeta?.model || 'global model';
 
     // Scroll to bottom when new messages arrive
     useEffect(() => {
@@ -384,6 +417,11 @@ export function AICopilot({
             setMessages([]);
         }
     }, [sessionKey]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        setRecentSessions(readRecentVniAgentSessions());
+    }, [isOpen, sessionKey]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -599,7 +637,7 @@ export function AICopilot({
             });
 
         } catch (error) {
-            console.error('VniAgent Error:', error);
+            logClientError('VniAgent Error:', error);
             setCurrentStatus(null);
             captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseFailed, {
                 symbol: currentSymbol,
@@ -645,6 +683,18 @@ export function AICopilot({
     };
 
     const handleNewChat = () => {
+        if (messages.some((message) => message.role === 'user' && message.content.trim())) {
+            setRecentSessions(
+                archiveVniAgentSession({
+                    sessionKey,
+                    symbol: currentSymbol || 'UNKNOWN',
+                    widgetContext,
+                    activeTabName,
+                    messages: messages.map(toPersistedMessage),
+                })
+            );
+        }
+
         captureAnalyticsEvent(ANALYTICS_EVENTS.copilotNewChatStarted, {
             symbol: currentSymbol,
             tab_name: activeTabName,
@@ -661,6 +711,21 @@ export function AICopilot({
             window.sessionStorage.removeItem(sessionKey);
         }
         inputRef.current?.focus();
+    };
+
+    const handleRestoreRecentSession = (archive: VniAgentSessionArchive) => {
+        setMessages(archive.messages.map((message) => fromPersistedMessage(message as PersistedMessage)));
+        setShowDetails({});
+        setAttachedDocuments([]);
+        setCurrentStatus(null);
+        if (typeof window !== 'undefined') {
+            window.sessionStorage.setItem(sessionKey, JSON.stringify(archive.messages));
+        }
+        inputRef.current?.focus();
+    };
+
+    const handleDeleteRecentSession = (archiveId: string) => {
+        setRecentSessions(removeRecentVniAgentSession(archiveId));
     };
 
     const toggleDetails = (messageId: string) => {
@@ -738,23 +803,57 @@ export function AICopilot({
                 </div>
             </div>
 
-            {/* Context Badge */}
-            <div className="px-4 py-2 border-b border-[var(--border-color)] bg-blue-600/10 flex items-center justify-between">
-                <span className="text-xs text-blue-400">
-                    {widgetContext ? `Context: @${widgetContext} · ` : ''}
-                    {activeTabName ? `${activeTabName} · ` : ''}
-                    {currentSymbol} · {getProviderLabel(aiSettings.provider)} · {aiSettings.mode === 'browser_key' ? `Browser key · ${aiSettings.model}` : `App default · ${runtimeConfig?.model || latestResolvedResponseMeta?.model || 'global model'}`}
-                </span>
-                {messages.length > 0 && (
-                    <button
-                        onClick={handleExport}
-                        className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                        title="Export VniAgent chat as Markdown"
-                        aria-label="Export VniAgent chat"
-                    >
-                        <Download size={14} />
-                    </button>
-                )}
+            <div className="px-4 py-3 border-b border-[var(--border-color)] bg-blue-600/10 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-primary)]">
+                            <Database size={11} className="text-cyan-300" />
+                            {aiSettings.preferAppwriteData ? 'VNIBB DB' : 'External-first'}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em]">
+                            {getProviderLabel(aiSettings.provider)}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em]">
+                            {aiSettings.mode === 'browser_key' ? 'Browser Key' : 'App Default'}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-cyan-200">
+                            {activeModelLabel}
+                        </span>
+                        {aiSettings.webSearch ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-blue-200">
+                                <Globe size={11} /> web
+                            </span>
+                        ) : null}
+                    </div>
+                    {messages.length > 0 && (
+                        <button
+                            onClick={handleExport}
+                            className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                            title="Export VniAgent chat as Markdown"
+                            aria-label="Export VniAgent chat"
+                        >
+                            <Download size={14} />
+                        </button>
+                    )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-blue-200/85">
+                    {widgetContext ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1">
+                            @{widgetContext}
+                        </span>
+                    ) : null}
+                    {activeTabName ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1">
+                            {activeTabName}
+                        </span>
+                    ) : null}
+                    <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 font-semibold">
+                        {currentSymbol}
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 text-blue-100/80">
+                        <Clock3 size={11} /> {currentSessionMessageCount} saved message{currentSessionMessageCount === 1 ? '' : 's'} in this context
+                    </span>
+                </div>
             </div>
 
             {widgetContext && (
@@ -795,6 +894,53 @@ export function AICopilot({
                                 >
                                     <X size={10} />
                                 </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {relevantRecentSessions.length > 0 && (
+                <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/40 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">
+                            <History size={12} /> Recent Sessions
+                        </div>
+                        <div className="text-[10px] text-[var(--text-muted)]">Same symbol thread archive</div>
+                    </div>
+                    <div className="space-y-2">
+                        {relevantRecentSessions.map((session) => (
+                            <div key={session.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0 flex-1">
+                                        <div className="truncate text-[11px] font-semibold text-[var(--text-primary)]">{session.title}</div>
+                                        <div className="mt-1 truncate text-[10px] text-[var(--text-secondary)]">{session.preview}</div>
+                                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                                            <span>{session.symbol}</span>
+                                            {session.activeTabName ? <span>• {session.activeTabName}</span> : null}
+                                            {session.widgetContext ? <span>• @{session.widgetContext}</span> : null}
+                                            <span>• {session.messageCount} msgs</span>
+                                            <span>• {formatSessionTimestamp(session.updatedAt)}</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => handleRestoreRecentSession(session)}
+                                            className="rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-200 transition-colors hover:bg-blue-500/20"
+                                        >
+                                            Restore
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleDeleteRecentSession(session.id)}
+                                            className="rounded-md border border-[var(--border-default)] px-2 py-1 text-[10px] text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+                                            aria-label={`Delete session ${session.title}`}
+                                        >
+                                            <Trash2 size={11} />
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         ))}
                     </div>

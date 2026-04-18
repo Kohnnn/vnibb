@@ -21,6 +21,19 @@ interface RiskDashboardWidgetProps {
   onRemove?: () => void;
 }
 
+interface BenchmarkRiskMetric {
+  benchmark?: string | null
+  current_beta_63d?: number | null
+  current_tracking_error_30d_pct?: number | null
+  downside_deviation_30d_pct?: number | null
+  var_95_1d_pct?: number | null
+  cvar_95_1d_pct?: number | null
+  current_relative_drawdown_pct?: number | null
+  max_relative_drawdown_pct?: number | null
+  current_benchmark_drawdown_pct?: number | null
+  benchmark_correlation_63d?: number | null
+}
+
 function average(values: number[]): number | null {
   if (!values.length) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -100,7 +113,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
 
   const quantQuery = useQuantMetrics(upperSymbol, {
     period,
-    metrics: ['drawdown_recovery', 'parkinson_volatility', 'sortino'],
+    metrics: ['drawdown_recovery', 'parkinson_volatility', 'sortino', 'benchmark_risk'],
     enabled: Boolean(upperSymbol),
   });
   const historyQuery = useHistoricalPrices(upperSymbol, {
@@ -117,6 +130,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
   const drawdown = metrics.drawdown_recovery as Record<string, any> | undefined;
   const parkinson = metrics.parkinson_volatility as Record<string, any> | undefined;
   const sortino = metrics.sortino as Record<string, any> | undefined;
+  const benchmarkRisk = metrics.benchmark_risk as BenchmarkRiskMetric | undefined;
 
   const sortinoAverage = average(
     Object.values(sortino?.monthly_sortino || {}).filter((value): value is number => typeof value === 'number')
@@ -133,18 +147,24 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
     const volatilityPenalty = Math.min(Number(parkinson?.current_parkinson_vol_30d_pct || 0), 30);
     const sortinoPenalty = sortinoAverage === null ? 12 : Math.min(Math.max(2 - sortinoAverage, 0) * 12, 20);
     const hurstPenalty = hurst === null ? 8 : Math.abs(hurst - 0.5) < 0.08 ? 6 : 0;
-    const score = Math.max(0, Math.min(100, Math.round(100 - drawdownPenalty - volatilityPenalty - sortinoPenalty - hurstPenalty)));
+    const relativeDrawdownPenalty = Math.min(Math.abs(Math.min(Number(benchmarkRisk?.current_relative_drawdown_pct || 0), 0)) * 1.2, 14);
+    const trackingPenalty = Math.min(Number(benchmarkRisk?.current_tracking_error_30d_pct || 0) * 0.6, 14);
+    const downsidePenalty = Math.min(Number(benchmarkRisk?.downside_deviation_30d_pct || 0) * 0.6, 16);
+    const score = Math.max(0, Math.min(100, Math.round(100 - drawdownPenalty - volatilityPenalty - sortinoPenalty - hurstPenalty - relativeDrawdownPenalty - trackingPenalty - downsidePenalty)));
 
     return {
       score,
       drivers: [
         { label: 'Drawdown Stress', value: drawdownPenalty, tone: 'text-rose-300' },
         { label: 'Volatility Stress', value: volatilityPenalty, tone: 'text-amber-300' },
+        { label: 'Relative DD', value: relativeDrawdownPenalty, tone: 'text-fuchsia-300' },
+        { label: 'Tracking Error', value: trackingPenalty, tone: 'text-cyan-300' },
+        { label: 'Downside Dev', value: downsidePenalty, tone: 'text-sky-300' },
         { label: 'Sortino Penalty', value: sortinoPenalty, tone: 'text-cyan-300' },
         { label: 'Structure Penalty', value: hurstPenalty, tone: 'text-violet-300' },
       ],
     }
-  }, [drawdown?.max_drawdown_from_52w_high_pct, parkinson?.current_parkinson_vol_30d_pct, sortinoAverage, hurst]);
+  }, [benchmarkRisk?.current_relative_drawdown_pct, benchmarkRisk?.current_tracking_error_30d_pct, benchmarkRisk?.downside_deviation_30d_pct, drawdown?.max_drawdown_from_52w_high_pct, parkinson?.current_parkinson_vol_30d_pct, sortinoAverage, hurst]);
 
   const riskScore = riskComputation.score
   const scoreLabel = riskGrade(riskScore);
@@ -168,6 +188,13 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
       parkinson_vol_pct: parkinson?.current_parkinson_vol_30d_pct ?? null,
       avg_sortino: sortinoAverage,
       hurst,
+      benchmark: benchmarkRisk?.benchmark ?? 'VNINDEX',
+      beta_63d: benchmarkRisk?.current_beta_63d ?? null,
+      tracking_error_30d_pct: benchmarkRisk?.current_tracking_error_30d_pct ?? null,
+      downside_deviation_30d_pct: benchmarkRisk?.downside_deviation_30d_pct ?? null,
+      var_95_1d_pct: benchmarkRisk?.var_95_1d_pct ?? null,
+      cvar_95_1d_pct: benchmarkRisk?.cvar_95_1d_pct ?? null,
+      relative_drawdown_pct: benchmarkRisk?.current_relative_drawdown_pct ?? null,
     },
   ];
 
@@ -207,7 +234,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
           <WidgetMeta
             updatedAt={quantQuery.data?.data?.last_data_date ?? quantQuery.data?.data?.computed_at ?? historyQuery.dataUpdatedAt}
             isFetching={(quantQuery.isFetching || historyQuery.isFetching) && hasData}
-            note={`${period} composite view · ${(quantQuery.data?.data?.adjustment_mode || 'adjusted')} history`}
+            note={`${period} composite view · ${(quantQuery.data?.data?.adjustment_mode || 'adjusted')} history vs ${benchmarkRisk?.benchmark || 'VNINDEX'}`}
             align="right"
           />
         </div>
@@ -237,13 +264,13 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
                 {warningMessage}
               </div>
             ) : null}
-            <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 xl:grid-cols-6">
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 xl:col-span-2">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Composite Risk Score</div>
                 <div className={`mt-1 text-2xl font-black ${scoreLabel.tone}`}>{riskScore}</div>
                 <div className={`mt-1 text-sm font-semibold ${scoreLabel.tone}`}>{scoreLabel.label}</div>
                 <div className="mt-2 text-[11px] text-[var(--text-secondary)]">
-                  Built from drawdown stress, Parkinson volatility, monthly Sortino quality, and Hurst structure.
+                  Built from drawdown stress, Parkinson volatility, benchmark-relative stress, downside distribution, monthly Sortino quality, and Hurst structure.
                 </div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
@@ -251,13 +278,20 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
                 <div className="mt-1 text-lg font-semibold text-rose-300">{formatSigned(drawdown?.max_drawdown_from_52w_high_pct, '%')}</div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Volatility Regime</div>
-                <div className="mt-1 text-lg font-semibold text-cyan-300">{parkinson?.current_regime || '—'}</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Benchmark DD</div>
+                <div className="mt-1 text-lg font-semibold text-fuchsia-300">{formatSigned(benchmarkRisk?.current_benchmark_drawdown_pct, '%')}</div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
-                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Hurst</div>
-                <div className={`mt-1 text-lg font-semibold ${hurstState.tone}`}>{hurstState.label}</div>
-                <div className="mt-1 text-[11px] text-[var(--text-secondary)]">{hurst === null ? 'Needs more price history' : `Value ${hurst.toFixed(3)} from long-run price structure`}</div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Tracking Error</div>
+                <div className="mt-1 text-lg font-semibold text-cyan-300">{formatSigned(benchmarkRisk?.current_tracking_error_30d_pct, '%')}</div>
+              </div>
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Downside Dev</div>
+                <div className="mt-1 text-lg font-semibold text-sky-300">{formatSigned(benchmarkRisk?.downside_deviation_30d_pct, '%')}</div>
+              </div>
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Beta 63D</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{formatSigned(benchmarkRisk?.current_beta_63d)}</div>
               </div>
             </div>
 
@@ -308,6 +342,28 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
                 </div>
 
                 <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Relative & Tail Risk</div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
+                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Relative DD</div>
+                      <div className="mt-1 font-mono text-fuchsia-300">{formatSigned(benchmarkRisk?.current_relative_drawdown_pct, '%')}</div>
+                    </div>
+                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Corr 63D</div>
+                      <div className="mt-1 font-mono text-[var(--text-primary)]">{formatSigned(benchmarkRisk?.benchmark_correlation_63d)}</div>
+                    </div>
+                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">VaR 95</div>
+                      <div className="mt-1 font-mono text-amber-300">{formatSigned(benchmarkRisk?.var_95_1d_pct, '%')}</div>
+                    </div>
+                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">CVaR 95</div>
+                      <div className="mt-1 font-mono text-rose-300">{formatSigned(benchmarkRisk?.cvar_95_1d_pct, '%')}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                   <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Volatility Stack</div>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
@@ -315,8 +371,8 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
                       <div className="mt-1 font-mono text-cyan-300">{formatSigned(parkinson?.current_parkinson_vol_30d_pct, '%')}</div>
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
-                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Close/Range</div>
-                      <div className="mt-1 font-mono text-[var(--text-primary)]">{formatSigned(parkinson?.close_to_park_ratio)}</div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Volatility Regime</div>
+                      <div className="mt-1 font-mono text-cyan-300">{parkinson?.current_regime || '—'}</div>
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">52W Drawdown</div>

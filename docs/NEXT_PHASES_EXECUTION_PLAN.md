@@ -76,6 +76,13 @@ Deliverables:
 - better answer-first default layout in the main sidebar
 - stronger symbol/tab/widget context chips
 
+Current shipped pass:
+
+- settings are now grouped more clearly into basics, connection, and data/behavior sections
+- site settings now include a current-runtime summary card for VniAgent
+- the main VniAgent sidebar now exposes recent archived sessions with restore support
+- the sidebar header now makes symbol, tab, widget, provider, mode, model, and database-first stance visible at a glance
+
 Primary targets:
 
 - `apps/web/src/lib/aiSettings.ts`
@@ -121,6 +128,12 @@ Deliverables:
 - last-good snapshot display where applicable
 - symbol/widget coverage map for ops and QA
 
+Current shipped pass:
+
+- shared widget health state model for meta badges and empty-state labels
+- first-wave rollout on breadth, relative rotation, transaction flow, and foreign trading widgets
+- clearer distinction between sparse coverage, cached snapshots, stale snapshots, and awaiting publication
+
 Primary targets:
 
 - `WidgetMeta`
@@ -140,6 +153,12 @@ Deliverables:
 - dead-tab detection
 - dense vs analyst layout recommendations
 - one-click `clone system tab into workspace` flows
+
+Current shipped pass:
+
+- shared dashboard intelligence helper for duplicate detection, dead-tab heuristics, dense-tab heuristics, and per-widget layout-fit warnings
+- tab-level recommendation banner in the dashboard shell
+- edit-time per-widget layout guidance when a widget is too short or auto-compacted into a sparse state
 
 Primary targets:
 
@@ -161,6 +180,13 @@ Deliverables:
 - downside deviation panels
 - VaR / CVaR
 - sector-relative attribution where cleanly supported
+
+Current shipped pass:
+
+- backend `benchmark_risk` quant metric family using `VNINDEX` benchmark history
+- benchmark-relative drawdown, 63-day rolling beta, 30-day tracking error, 30-day downside deviation, and 95% VaR/CVaR
+- `RiskDashboardWidget` now surfaces benchmark-relative and downside-tail metrics in the main risk readout
+- `QuantSummaryWidget` now includes benchmark-risk metrics in the summary and composite view
 
 Primary targets:
 
@@ -188,6 +214,16 @@ Suggested order:
 1. market sentiment
 2. listing browser v2
 3. growth bridge
+
+Current shipped pass:
+
+- `market_sentiment` widget for aggregate mood, trending topics, and most-mentioned stocks
+- `listing_browser` v2 with exchange, index-group, industry, and search filters
+- browser-local saved listing views for recurring universe slices
+- `ttm_snapshot` widget for trailing-twelve-month income, cash flow, and balance-sheet pulse
+- `growth_bridge` widget for annual versus latest comparable-quarter growth readouts
+- `ownership_rating_summary` widget for concentration, foreign participation, and insider-bias synthesis
+- `derivatives_analytics` widget for front-contract pulse and short futures curve analytics
 
 ## Phase 8: Global Markets Consistency
 

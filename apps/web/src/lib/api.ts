@@ -874,7 +874,7 @@ export async function saveAdminSystemDashboardTemplate(
 
 export interface SymbolsResponse {
     count: number;
-    data: Array<{ symbol: string; organ_name: string }>;
+    data: Array<{ symbol: string; organ_name: string; exchange?: string | null; industry?: string | null }>;
 }
 
 export interface IndustriesResponse {
@@ -886,6 +886,23 @@ export interface IndustriesResponse {
         icb_name3: string;
         icb_name4: string;
     }>;
+}
+
+export interface MarketSentimentResponse {
+    overall: string;
+    bullish_count: number;
+    neutral_count: number;
+    bearish_count: number;
+    total_articles: number;
+    bullish_percentage: number;
+    bearish_percentage: number;
+    trend_direction: string;
+}
+
+export interface TrendingAnalysisResponse {
+    topics: string[];
+    stocks_mentioned: string[];
+    sentiment: string;
 }
 
 export async function getSymbols(options?: { limit?: number }): Promise<SymbolsResponse> {
@@ -906,6 +923,47 @@ export async function getSymbolsByGroup(group: string): Promise<SymbolsResponse>
 
 export async function getIndustries(): Promise<IndustriesResponse> {
     return fetchAPI<IndustriesResponse>('/listing/industries');
+}
+
+export interface TTMSnapshotResponse {
+    data: {
+        symbol: string;
+        income?: Record<string, any> | null;
+        balance?: Record<string, any> | null;
+        cash_flow?: Record<string, any> | null;
+    };
+    meta?: { count?: number };
+    error?: string | null;
+}
+
+export interface GrowthRatesResponse {
+    data: {
+        symbol: string;
+        yoy: Record<string, number | null>;
+        qoq: Record<string, number | null>;
+        as_of: {
+            annual?: string | null;
+            quarter?: string | null;
+        };
+    };
+    meta?: { count?: number };
+    error?: string | null;
+}
+
+export async function getTTMSnapshot(symbol: string): Promise<TTMSnapshotResponse> {
+    return fetchAPI<TTMSnapshotResponse>(`/equity/${symbol}/ttm`)
+}
+
+export async function getGrowthRates(symbol: string): Promise<GrowthRatesResponse> {
+    return fetchAPI<GrowthRatesResponse>(`/equity/${symbol}/growth`)
+}
+
+export async function getMarketSentiment(): Promise<MarketSentimentResponse> {
+    return fetchAPI<MarketSentimentResponse>('/news/sentiment');
+}
+
+export async function getTrendingAnalysis(): Promise<TrendingAnalysisResponse> {
+    return fetchAPI<TrendingAnalysisResponse>('/news/trending');
 }
 
 // ============ Trading API ============
@@ -1649,6 +1707,7 @@ export type QuantMetric =
     | 'parkinson_volatility'
     | 'ema_respect'
     | 'drawdown_recovery'
+    | 'benchmark_risk'
 
 export interface QuantResponse {
     data: {

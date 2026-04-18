@@ -42,6 +42,7 @@ import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
 import { autoFitGridItems, findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { analyzeDashboardTab } from '@/lib/dashboardIntelligence';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
@@ -830,6 +831,11 @@ function DashboardContent() {
         }));
     }, [activeTab?.widgets, isEditing]);
 
+    const activeTabIntelligence = useMemo(
+        () => analyzeDashboardTab(activeTab?.widgets || []),
+        [activeTab?.widgets]
+    );
+
     const getWidgetParameters = useCallback((
         widget: WidgetInstance,
         onConfigChange: (key: string, value: string) => void
@@ -980,6 +986,43 @@ function DashboardContent() {
                             {activeDashboard && activeTab ? (
                                 <>
                             <div className="h-full w-full overflow-y-auto scrollbar-hide">
+                            {activeTabIntelligence.recommendations.length > 0 && (isEditing || activeTabIntelligence.isDeadTab) ? (
+                                <div className="mb-2 flex flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.14),rgba(15,23,42,0.94))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.18)]">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div>
+                                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
+                                                Dashboard Recommendations
+                                            </div>
+                                            <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                                                Live hints from widget size contracts and sparse-state compaction.
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {canEditCurrentDashboard ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleAutoFitLayout}
+                                                    className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-100 transition hover:bg-amber-500/15"
+                                                >
+                                                    Auto-fit Dashboard
+                                                </button>
+                                            ) : null}
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsWidgetLibraryOpen(true)}
+                                                className="rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+                                            >
+                                                Open Widget Library
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1 text-[11px] text-amber-100/85">
+                                        {activeTabIntelligence.recommendations.map((recommendation) => (
+                                            <div key={recommendation}>- {recommendation}</div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : null}
                             {isSystemFundamentalsTab ? (
                                 <div className="mb-2 flex flex-col gap-2 rounded-2xl border border-blue-500/20 bg-[linear-gradient(135deg,rgba(30,41,59,0.92),rgba(15,23,42,0.92))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.22)]">
                                     <div className="flex flex-wrap items-center justify-between gap-2">

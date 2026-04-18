@@ -4,11 +4,13 @@
 
 import { Users } from 'lucide-react';
 import { usePeerCompanies } from '@/lib/queries';
+import { useUnit } from '@/contexts/UnitContext';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
+import { formatCompactValueForUnit } from '@/lib/units';
 
 interface SimilarStocksWidgetProps {
     symbol: string;
@@ -17,17 +19,10 @@ interface SimilarStocksWidgetProps {
     onRemove?: () => void;
 }
 
-function formatMarketCap(value?: number | null): string {
-    if (!value && value !== 0) return '-';
-    if (value >= 1e12) return `${(value / 1e12).toFixed(1)}T`;
-    if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
-    if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
-    return value.toLocaleString();
-}
-
 export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidgetProps) {
     const upperSymbol = symbol?.toUpperCase() || '';
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'similar_stocks' });
+    const { config: unitConfig } = useUnit();
     const {
         data,
         isLoading,
@@ -92,7 +87,7 @@ export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidget
                                     P/E: {peer.pe_ratio?.toFixed(1) || '-'}
                                 </div>
                                 <div className="text-xs text-[var(--text-secondary)]">
-                                    MCap: {formatMarketCap(peer.market_cap)}
+                                    MCap: {formatCompactValueForUnit(peer.market_cap, unitConfig)}
                                 </div>
                             </div>
                         </button>

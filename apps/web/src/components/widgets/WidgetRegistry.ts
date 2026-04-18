@@ -99,6 +99,11 @@ import { SmartMoneyWidget } from './SmartMoneyWidget';
 import { RelativeRotationWidget } from './RelativeRotationWidget';
 import { RiskDashboardWidget } from './RiskDashboardWidget';
 import { QuantSummaryWidget } from './QuantSummaryWidget';
+import { MarketSentimentWidget } from './MarketSentimentWidget';
+import { TTMSnapshotWidget } from './TTMSnapshotWidget';
+import { GrowthBridgeWidget } from './GrowthBridgeWidget';
+import { OwnershipRatingSummaryWidget } from './OwnershipRatingSummaryWidget';
+import { DerivativesAnalyticsWidget } from './DerivativesAnalyticsWidget';
 import {
     tradingViewWidgetDefaultLayouts,
     tradingViewWidgetDescriptions,
@@ -392,6 +397,11 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     relative_rotation: RelativeRotationWidget as ComponentType<WidgetProps>,
     risk_dashboard: RiskDashboardWidget as ComponentType<WidgetProps>,
     quant_summary: QuantSummaryWidget as ComponentType<WidgetProps>,
+    market_sentiment: MarketSentimentWidget as ComponentType<WidgetProps>,
+    ttm_snapshot: TTMSnapshotWidget as ComponentType<WidgetProps>,
+    growth_bridge: GrowthBridgeWidget as ComponentType<WidgetProps>,
+    ownership_rating_summary: OwnershipRatingSummaryWidget as ComponentType<WidgetProps>,
+    derivatives_analytics: DerivativesAnalyticsWidget as ComponentType<WidgetProps>,
     similar_stocks: SimilarStocksWidget as ComponentType<WidgetProps>,
     listing_browser: ListingBrowserWidget as ComponentType<WidgetProps>,
     quick_stats: QuickStatsWidget as ComponentType<WidgetProps>,
@@ -500,6 +510,11 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     relative_rotation: { w: 6, h: 6, minW: 4, minH: 5 },
     risk_dashboard: { w: 12, h: 11, minW: 8, minH: 8 },
     quant_summary: { w: 24, h: 10, minW: 10, minH: 8 },
+    market_sentiment: { w: 8, h: 8, minW: 6, minH: 6 },
+    ttm_snapshot: { w: 8, h: 8, minW: 6, minH: 6 },
+    growth_bridge: { w: 10, h: 8, minW: 8, minH: 6 },
+    ownership_rating_summary: { w: 8, h: 8, minW: 6, minH: 6 },
+    derivatives_analytics: { w: 10, h: 8, minW: 8, minH: 6 },
     forex_rates: { w: 8, h: 7, minW: 6, minH: 6 },
     commodities: { w: 8, h: 6, minW: 5, minH: 4 },
     similar_stocks: { w: 4, h: 6, minW: 3, minH: 5 },
@@ -550,6 +565,10 @@ Object.assign(defaultWidgetLayouts, {
     money_flow_trend: { w: 14, h: 12, minW: 10, minH: 9 },
     quant_summary: { w: 24, h: 8, minW: 10, minH: 6 },
     relative_rotation: { w: 12, h: 10, minW: 8, minH: 8 },
+    ttm_snapshot: { w: 8, h: 8, minW: 6, minH: 6 },
+    growth_bridge: { w: 10, h: 8, minW: 8, minH: 6 },
+    ownership_rating_summary: { w: 8, h: 8, minW: 6, minH: 6 },
+    derivatives_analytics: { w: 10, h: 8, minW: 8, minH: 6 },
     technical_summary: { w: 8, h: 10, minW: 6, minH: 8 },
     signal_summary: { w: 24, h: 8, minW: 12, minH: 6 },
     similar_stocks: { w: 6, h: 8, minW: 5, minH: 6 },
@@ -644,6 +663,11 @@ export const widgetNames: Record<WidgetType, string> = {
     relative_rotation: 'Relative Rotation',
     risk_dashboard: 'Risk Dashboard',
     quant_summary: 'Quant Summary',
+    market_sentiment: 'Market Sentiment',
+    ttm_snapshot: 'TTM Snapshot',
+    growth_bridge: 'Growth Bridge',
+    ownership_rating_summary: 'Ownership Rating Summary',
+    derivatives_analytics: 'Derivatives Analytics',
     forex_rates: 'Forex Rates',
     commodities: 'Commodities',
     similar_stocks: 'Similar Stocks',
@@ -756,6 +780,11 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     relative_rotation: 'Relative Strength rating trend and quadrant classification',
     risk_dashboard: 'Composite view of drawdown, volatility, Sortino, and Hurst-style structure risk',
     quant_summary: 'Radar view of momentum, volatility, flow, seasonality, and regime context',
+    market_sentiment: 'Discovery widget for aggregate news mood, trending topics, and most-mentioned stocks',
+    ttm_snapshot: 'Trailing-twelve-month pulse for revenue, profitability, cash flow, and balance-sheet scale',
+    growth_bridge: 'Annual versus latest comparable-quarter growth bridge for core financial drivers',
+    ownership_rating_summary: 'Synthesized ownership quality view across concentration, foreign participation, and insider bias',
+    derivatives_analytics: 'Front-contract pulse and short futures curve analytics across the contract ladder',
     forex_rates: 'Currency exchange (VND pairs)',
     commodities: 'Gold, oil, and metals',
     similar_stocks: 'Stocks with high correlation',

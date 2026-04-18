@@ -5,7 +5,8 @@ Date: 2026-04-16
 ## Scope
 
 - USD conversion currently applies to financial, statement-style, and fundamental widgets that already route values through the shared unit helpers.
-- Quote widgets, market-wide widgets, and generic TradingView embeds are still out of scope for this conversion layer.
+- Quote and selected market/comparison widgets now participate when they expose actual currency-valued fields such as price, market cap, and net flow value.
+- Generic point/index surfaces and pure TradingView embeds remain out of scope for forced conversion.
 
 ## Runtime Model
 
@@ -51,6 +52,15 @@ This means admin defaults now provide shared yearly baselines without taking con
 - `apps/web/src/components/settings/SettingsModal.tsx`: local override UI and admin default editor
 - `apps/web/src/lib/api.ts`: runtime-config request/response types
 
+Expanded widget coverage now includes selected current-value surfaces such as:
+
+- `TickerInfoWidget`
+- `SimilarStocksWidget`
+- `PeerComparisonWidget`
+- `TransactionFlowWidget` when the widget is in value mode
+- market-cap-driven summaries in `MarketHeatmapWidget`
+- price-display fields in `SectorBoardWidget`
+
 ## Settings Surface
 
 - The site settings `Data` tab now keeps the `Currency & FX` section visible even when the current display unit is `VND`.
@@ -68,3 +78,4 @@ This means admin defaults now provide shared yearly baselines without taking con
 - Clearing an admin yearly value removes that year-specific default and falls back to the global admin rate.
 - Clearing a browser-local yearly value removes only the local override for that year.
 - Browser-local overrides should remain explicit UI behavior until a tenant-aware settings store is introduced.
+- Current-value quote and market surfaces use the active admin/default USD/VND fallback because they do not carry report-year semantics the way financial statements do.

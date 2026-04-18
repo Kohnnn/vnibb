@@ -10,6 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { cn } from '@/lib/utils';
 import { memo, useEffect, useMemo } from 'react';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface ForeignTradingWidgetProps {
     id: string;
@@ -105,6 +106,13 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     const hasData = trades.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+    const healthState: WidgetHealthState | undefined = isFallback
+        ? {
+            status: 'cached',
+            label: 'Cached snapshot',
+            detail: 'Showing the last successful foreign flow snapshot while refresh is degraded.',
+        }
+        : undefined
 
     useEffect(() => {
         onDataChange?.({
@@ -135,7 +143,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                     <WidgetMeta
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
-                        isCached={isFallback}
+                        health={healthState}
                         note="Net position"
                         align="right"
                     />
@@ -174,6 +182,11 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                         <WidgetEmpty
                             message={`No data for ${symbol}`}
                             detail="Foreign flow appears here when exchange data is available."
+                            health={{
+                                status: 'coverage_gap',
+                                label: 'Coverage gap',
+                                detail: 'Some symbols or sessions do not publish foreign participation in the provider feed yet.',
+                            }}
                             icon={<Globe size={18} />}
                             size="compact"
                         />

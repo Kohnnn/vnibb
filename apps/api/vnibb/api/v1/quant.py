@@ -51,6 +51,7 @@ SUPPORTED_METRICS = (
     "parkinson_volatility",
     "ema_respect",
     "drawdown_recovery",
+    "benchmark_risk",
 )
 DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
 ALLOWED_QUANT_PERIODS = ("1M", "6M", "1Y", "3Y", "5Y", "ALL")
@@ -86,6 +87,10 @@ METRIC_ALIASES = {
     "ema-respect": "ema_respect",
     "drawdown_recovery": "drawdown_recovery",
     "drawdown-recovery": "drawdown_recovery",
+    "benchmark_risk": "benchmark_risk",
+    "benchmark-risk": "benchmark_risk",
+    "risk_relative": "benchmark_risk",
+    "relative-risk": "benchmark_risk",
 }
 MONTH_LABELS = {
     1: "Jan",
@@ -434,6 +439,191 @@ async def _load_quant_frame_with_warning(
     )
 
 
+async def _load_benchmark_frame(
+    *,
+    db: AsyncSession,
+    start_date: date,
+    end_date: date,
+    source: str,
+    benchmark: str = "VNINDEX",
+) -> pd.DataFrame:
+    stmt = (
+        select(StockIndex.time, StockIndex.close)
+        .where(
+            StockIndex.index_code == benchmark,
+            StockIndex.time >= start_date,
+            StockIndex.time <= end_date,
+        )
+        .order_by(StockIndex.time.asc())
+    )
+
+    try:
+        result = await db.execute(stmt)
+        rows = result.all()
+    except Exception as exc:
+        await _rollback_after_query_error(db, f"Benchmark frame query for {benchmark}")
+        logger.warning("Benchmark frame query failed for %s: %s", benchmark, exc)
+        rows = []
+
+    frame = pd.DataFrame(rows, columns=["time", "close"]) if rows else pd.DataFrame()
+    if frame.empty:
+        candidate_sources: list[str] = []
+        for candidate in [source, settings.vnstock_source, "VCI", "KBS"]:
+            if candidate and candidate not in candidate_sources:
+                candidate_sources.append(candidate)
+
+        for candidate in candidate_sources:
+            try:
+                provider_rows = await VnstockEquityHistoricalFetcher.fetch(
+                    EquityHistoricalQueryParams(
+                        symbol=benchmark,
+                        start_date=start_date,
+                        end_date=end_date,
+                        interval="1D",
+                        source=candidate,
+                    )
+                )
+            except Exception as provider_error:
+                logger.warning(
+                    "Benchmark provider fallback failed for %s source=%s: %s",
+                    benchmark,
+                    candidate,
+                    provider_error,
+                )
+                continue
+
+            if provider_rows:
+                frame = pd.DataFrame(
+                    [{"time": row.time, "close": row.close} for row in provider_rows]
+                )
+                break
+
+    if frame.empty:
+        return pd.DataFrame(columns=["time", "close"])
+
+    frame["time"] = pd.to_datetime(frame["time"], errors="coerce")
+    if frame["time"].dt.tz is not None:
+        frame["time"] = frame["time"].dt.tz_localize(None)
+    frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
+    frame = frame.dropna(subset=["time", "close"]).sort_values("time")
+    frame = frame.drop_duplicates(subset=["time"], keep="last")
+    return frame.reset_index(drop=True)
+
+
+def _compute_benchmark_risk(frame: pd.DataFrame, benchmark_frame: pd.DataFrame) -> Dict[str, Any]:
+    merged = (
+        frame[["time", "close"]]
+        .rename(columns={"close": "stock_close"})
+        .merge(
+            benchmark_frame[["time", "close"]].rename(columns={"close": "benchmark_close"}),
+            on="time",
+            how="inner",
+        )
+        .dropna(subset=["stock_close", "benchmark_close"])
+        .sort_values("time")
+        .reset_index(drop=True)
+    )
+
+    base_payload = {
+        "benchmark": "VNINDEX",
+        "current_beta_63d": None,
+        "current_tracking_error_30d_pct": None,
+        "downside_deviation_30d_pct": None,
+        "var_95_1d_pct": None,
+        "cvar_95_1d_pct": None,
+        "current_relative_drawdown_pct": None,
+        "max_relative_drawdown_pct": None,
+        "current_benchmark_drawdown_pct": None,
+        "benchmark_correlation_63d": None,
+        "series": [],
+    }
+
+    if len(merged) < 30:
+        return base_payload
+
+    merged["stock_return"] = merged["stock_close"].pct_change()
+    merged["benchmark_return"] = merged["benchmark_close"].pct_change()
+    merged = merged.dropna(subset=["stock_return", "benchmark_return"]).reset_index(drop=True)
+    if len(merged) < 30:
+        return base_payload
+
+    merged["active_return"] = merged["stock_return"] - merged["benchmark_return"]
+    merged["stock_cumulative"] = (1 + merged["stock_return"]).cumprod()
+    merged["benchmark_cumulative"] = (1 + merged["benchmark_return"]).cumprod()
+    merged["stock_drawdown_pct"] = (
+        (merged["stock_cumulative"] / merged["stock_cumulative"].cummax().replace(0, np.nan)) - 1
+    ) * 100
+    merged["benchmark_drawdown_pct"] = (
+        (
+            merged["benchmark_cumulative"]
+            / merged["benchmark_cumulative"].cummax().replace(0, np.nan)
+        )
+        - 1
+    ) * 100
+    merged["relative_drawdown_pct"] = (
+        merged["stock_drawdown_pct"] - merged["benchmark_drawdown_pct"]
+    )
+
+    covariance = merged["stock_return"].rolling(63).cov(merged["benchmark_return"])
+    benchmark_variance = merged["benchmark_return"].rolling(63).var()
+    rolling_beta = covariance / benchmark_variance.replace(0, np.nan)
+    tracking_error_30d = merged["active_return"].rolling(30).std(ddof=0) * np.sqrt(252) * 100
+    downside_returns = merged["stock_return"].clip(upper=0)
+    downside_deviation_30d = downside_returns.rolling(30).std(ddof=0) * np.sqrt(252) * 100
+    rolling_correlation = merged["stock_return"].rolling(63).corr(merged["benchmark_return"])
+
+    returns_array = merged["stock_return"].to_numpy(dtype=float)
+    var_threshold = np.nanpercentile(returns_array, 5)
+    cvar_series = merged.loc[merged["stock_return"] <= var_threshold, "stock_return"]
+
+    return {
+        "benchmark": "VNINDEX",
+        "current_beta_63d": _safe_float(
+            rolling_beta.dropna().iloc[-1] if not rolling_beta.dropna().empty else None,
+            3,
+        ),
+        "current_tracking_error_30d_pct": _safe_float(
+            tracking_error_30d.dropna().iloc[-1] if not tracking_error_30d.dropna().empty else None,
+            2,
+        ),
+        "downside_deviation_30d_pct": _safe_float(
+            downside_deviation_30d.dropna().iloc[-1]
+            if not downside_deviation_30d.dropna().empty
+            else None,
+            2,
+        ),
+        "var_95_1d_pct": _safe_float(
+            var_threshold * 100 if np.isfinite(var_threshold) else None, 2
+        ),
+        "cvar_95_1d_pct": _safe_float(
+            cvar_series.mean() * 100 if not cvar_series.empty else None, 2
+        ),
+        "current_relative_drawdown_pct": _safe_float(merged["relative_drawdown_pct"].iloc[-1], 2),
+        "max_relative_drawdown_pct": _safe_float(merged["relative_drawdown_pct"].min(), 2),
+        "current_benchmark_drawdown_pct": _safe_float(merged["benchmark_drawdown_pct"].iloc[-1], 2),
+        "benchmark_correlation_63d": _safe_float(
+            rolling_correlation.dropna().iloc[-1]
+            if not rolling_correlation.dropna().empty
+            else None,
+            3,
+        ),
+        "series": [
+            {
+                "date": row.time.strftime("%Y-%m-%d"),
+                "beta_63d": _safe_float(row.beta_63d, 3),
+                "tracking_error_30d_pct": _safe_float(row.tracking_error_30d_pct, 2),
+                "relative_drawdown_pct": _safe_float(row.relative_drawdown_pct, 2),
+            }
+            for row in merged.assign(
+                beta_63d=rolling_beta,
+                tracking_error_30d_pct=tracking_error_30d,
+            )
+            .tail(252)
+            .itertuples(index=False)
+        ],
+    }
+
+
 def _compute_seasonality(frame: pd.DataFrame) -> Dict[str, Any]:
     enriched = frame.copy()
     enriched["time"] = pd.to_datetime(enriched["time"], errors="coerce")
@@ -503,7 +693,7 @@ async def _get_quant_metric_alias_response(
     canonical_metric = _normalize_metric_name(metric_name)
     calculators = _get_quant_calculators()
     calculator = calculators.get(canonical_metric)
-    if calculator is None:
+    if calculator is None and canonical_metric != "benchmark_risk":
         raise HTTPException(
             status_code=400,
             detail={
@@ -511,6 +701,15 @@ async def _get_quant_metric_alias_response(
                 "invalid_metric": metric_name,
                 "supported_metrics": list(SUPPORTED_METRICS),
             },
+        )
+
+    benchmark_frame: pd.DataFrame | None = None
+    if canonical_metric == "benchmark_risk":
+        benchmark_frame = await _load_benchmark_frame(
+            db=db,
+            start_date=start_date,
+            end_date=end_date,
+            source=source,
         )
 
     period_upper = _normalize_quant_period(period)
@@ -553,7 +752,13 @@ async def _get_quant_metric_alias_response(
         )
 
     try:
-        metric_payload = calculator(frame.copy())
+        metric_payload = (
+            _compute_benchmark_risk(
+                frame.copy(), benchmark_frame if benchmark_frame is not None else pd.DataFrame()
+            )
+            if canonical_metric == "benchmark_risk"
+            else calculator(frame.copy())
+        )
     except Exception as exc:
         logger.warning(
             "Quant metric alias %s failed for %s: %s", canonical_metric, symbol_upper, exc
@@ -1537,6 +1742,7 @@ async def get_gamma_exposure_proxy(
     symbol: str,
     period: str = Query(default="3Y"),
     source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """Gamma exposure proxy using volatility regime until warrant OI feed is integrated."""
@@ -1553,6 +1759,7 @@ async def get_gamma_exposure_proxy(
         end_date=end_date,
         source=source,
         period=period_upper,
+        adjustment_mode=adjustment_mode,
     )
     last_data_timestamp = _resolve_frame_last_timestamp(frame)
 
@@ -1561,6 +1768,7 @@ async def get_gamma_exposure_proxy(
             data={
                 "symbol": symbol_upper,
                 "period": period_upper,
+                "adjustment_mode": _normalize_adjustment_mode(adjustment_mode),
                 "computed_at": datetime.utcnow(),
                 "bands": [],
                 "data_quality_note": warning,
@@ -2440,6 +2648,24 @@ async def get_drawdown_recovery_metric(
     )
 
 
+@router.get("/{symbol}/benchmark-risk", response_model=StandardResponse[Dict[str, Any]])
+async def get_benchmark_risk_metric(
+    symbol: str,
+    period: str = Query(default="5Y"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="benchmark-risk",
+        period=period,
+        source=source,
+        adjustment_mode=adjustment_mode,
+        db=db,
+    )
+
+
 @router.get("/{symbol}/gap-analysis", response_model=StandardResponse[Dict[str, Any]])
 async def get_gap_analysis_metric(
     symbol: str,
@@ -2539,14 +2765,28 @@ async def get_quant_metrics(
         )
 
     calculators = _get_quant_calculators()
+    benchmark_frame: pd.DataFrame | None = None
 
     computed_metrics: Dict[str, Any] = {}
     for metric_name in unique_metrics:
         calculator = calculators.get(metric_name)
-        if calculator is None:
+        if calculator is None and metric_name != "benchmark_risk":
             continue
         try:
-            computed_metrics[metric_name] = calculator(frame.copy())
+            if metric_name == "benchmark_risk":
+                if benchmark_frame is None:
+                    benchmark_frame = await _load_benchmark_frame(
+                        db=db,
+                        start_date=start_date,
+                        end_date=end_date,
+                        source=source,
+                    )
+                computed_metrics[metric_name] = _compute_benchmark_risk(
+                    frame.copy(),
+                    benchmark_frame,
+                )
+            else:
+                computed_metrics[metric_name] = calculator(frame.copy())
         except Exception as exc:
             logger.warning("Quant metric %s failed for %s: %s", metric_name, symbol_upper, exc)
             computed_metrics[metric_name] = {"error": str(exc)}

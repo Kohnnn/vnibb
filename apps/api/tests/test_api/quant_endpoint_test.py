@@ -146,10 +146,59 @@ async def test_quant_alias_endpoints_forward_adjustment_mode(client, monkeypatch
         "/api/v1/quant/VNM/sortino-monthly",
         "/api/v1/quant/VNM/parkinson-volatility",
         "/api/v1/quant/VNM/drawdown-recovery",
+        "/api/v1/quant/VNM/benchmark-risk",
     ]:
         response = await client.get(endpoint, params={"adjustment_mode": "adjusted"})
         assert response.status_code == 200
         assert calls[-1]["adjustment_mode"] == "adjusted"
+
+
+@pytest.mark.asyncio
+async def test_quant_endpoint_returns_benchmark_risk_metric(client, monkeypatch):
+    async def fake_load_quant_frame_with_warning(**_kwargs):
+        return _build_price_frame(220), None
+
+    async def fake_load_benchmark_frame(**_kwargs):
+        benchmark = _build_price_frame(220)
+        benchmark["close"] = benchmark["close"] * 0.985
+        return benchmark[["time", "close"]]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.quant._load_quant_frame_with_warning", fake_load_quant_frame_with_warning
+    )
+    monkeypatch.setattr("vnibb.api.v1.quant._load_benchmark_frame", fake_load_benchmark_frame)
+
+    response = await client.get(
+        "/api/v1/quant/VNM",
+        params={"metrics": "benchmark_risk", "period": "1Y", "adjustment_mode": "adjusted"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    metric = payload["data"]["metrics"]["benchmark_risk"]
+    assert payload["data"]["adjustment_mode"] == "adjusted"
+    assert metric["benchmark"] == "VNINDEX"
+    assert "current_beta_63d" in metric
+    assert "current_tracking_error_30d_pct" in metric
+    assert "downside_deviation_30d_pct" in metric
+    assert "var_95_1d_pct" in metric
+    assert "cvar_95_1d_pct" in metric
+    assert isinstance(metric["series"], list)
+
+
+def test_compute_benchmark_risk_returns_relative_and_tail_metrics():
+    frame = _build_price_frame(260)
+    benchmark = _build_price_frame(260)
+    benchmark["close"] = benchmark["close"] * 0.992
+
+    payload = quant._compute_benchmark_risk(frame, benchmark[["time", "close"]])
+
+    assert payload["benchmark"] == "VNINDEX"
+    assert payload["current_beta_63d"] is not None
+    assert payload["current_tracking_error_30d_pct"] is not None
+    assert payload["downside_deviation_30d_pct"] is not None
+    assert payload["var_95_1d_pct"] is not None
+    assert payload["cvar_95_1d_pct"] is not None
 
 
 @pytest.mark.asyncio

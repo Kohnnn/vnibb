@@ -49,6 +49,7 @@ import {
     DropdownMenuSubContent
 } from '@/components/ui/dropdown-menu';
 import { isTradingViewWidget, usesTradingViewWidgetSymbol } from '@/lib/tradingViewWidgets';
+import { getWidgetLayoutInsight } from '@/lib/dashboardIntelligence';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { exportToCSV, exportToJSON, exportToPNG } from '@/lib/exportWidget';
@@ -335,6 +336,10 @@ export function WidgetWrapper({
 
         return internalData;
     }, [internalData]);
+    const layoutInsight = useMemo(
+        () => (currentWidget ? getWidgetLayoutInsight(currentWidget) : null),
+        [currentWidget]
+    );
 
     const trackWidgetAction = (action: string, properties?: Record<string, string | number | boolean | string[] | null | undefined>) => {
         captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
@@ -735,6 +740,20 @@ export function WidgetWrapper({
                         </DropdownMenu>
                     }
                 />
+
+                {isEditing && layoutInsight ? (
+                    <div className={cn(
+                        'border-b px-3 py-2 text-[10px] leading-4',
+                        layoutInsight.severity === 'warning'
+                            ? 'border-amber-500/20 bg-amber-500/8 text-amber-100/90'
+                            : 'border-blue-500/20 bg-blue-500/8 text-blue-100/85'
+                    )}>
+                        <span className="font-semibold uppercase tracking-[0.16em]">
+                            {layoutInsight.kind === 'compacted_sparse' ? 'Sparse State' : 'Layout Fit'}
+                        </span>
+                        <span className="ml-2">{layoutInsight.detail}</span>
+                    </div>
+                ) : null}
 
 
                 {/* Content */}
