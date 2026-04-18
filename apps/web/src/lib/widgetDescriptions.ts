@@ -61,6 +61,49 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
       'Treat screen output as a watchlist generator, not a final ranking of conviction.',
     ],
   },
+  listing_browser: {
+    purpose: 'Explores the listed universe through exchange, index-group, industry, and search filters with saved discovery views.',
+    calculation: 'Starts from the VNIBB symbol universe, then layers local filters and optional saved views without mutating the underlying market dataset.',
+    interpretation: 'Use it when you want to scan the universe before moving into single-stock analysis. It is a discovery surface, not a ranking engine.',
+    pro_tips: [
+      'Save recurring exchange or index-group views so you can reopen the same discovery slice quickly.',
+    ],
+  },
+  ttm_snapshot: {
+    purpose: 'Provides a compact trailing-twelve-month pulse across income, cash flow, and balance-sheet scale.',
+    calculation: 'Uses the latest TTM-normalized income, cash flow, and balance-sheet rows, then converts key values into the active unit display.',
+    interpretation: 'Useful when you want a fast current-state read on revenue, profitability, cash generation, and balance-sheet scale before opening full statements.',
+  },
+  growth_bridge: {
+    purpose: 'Compares annual growth with the latest comparable-quarter growth for core financial drivers.',
+    calculation: 'Uses the backend growth endpoint to pair annual YoY growth with the latest quarter matched against the same quarter last year.',
+    interpretation: 'Use it to see whether growth is accelerating, stalling, or diverging between the annual base and the latest quarter signal.',
+    limitations: [
+      'The quarter side is based on comparable-quarter growth, not simple quarter-over-quarter seasonally noisy changes.',
+    ],
+  },
+  ownership_rating_summary: {
+    purpose: 'Summarizes ownership concentration, foreign participation, and insider bias into a compact scorecard.',
+    calculation: 'Combines shareholder concentration, holder-type mix, foreign-flow direction, and insider sentiment into a lightweight composite score.',
+    interpretation: 'Use it to judge whether the ownership base looks constructive, overly concentrated, or distribution-prone before doing deeper ownership work.',
+    limitations: [
+      'This is a synthesis layer over available ownership and insider datasets, not a regulatory ownership-quality grade.',
+    ],
+  },
+  derivatives_analytics: {
+    purpose: 'Shows the front-contract pulse and a short futures curve view across the nearest listed contracts.',
+    calculation: 'Combines the contract ladder with recent contract histories to derive 20-day return, realized volatility, volume, and front-to-back curve shape.',
+    interpretation: 'Use it to spot whether the near curve looks flat, contango, or backwardated and whether the front contract is building momentum or cooling off.',
+  },
+  market_sentiment: {
+    purpose: 'Summarizes the broad market mood from recent news and highlights the topics and stocks getting the most attention.',
+    calculation: 'Aggregates article-level sentiment into a market mood summary, then layers trending topics and mention frequency as discovery signals.',
+    interpretation: 'Use it to see whether the market narrative is risk-on, risk-off, or indecisive before drilling into single-stock work.',
+    limitations: [
+      'News sentiment is a context layer, not a trading signal by itself.',
+      'Topic and ticker mention frequency can lag the tape during fast intraday reversals.',
+    ],
+  },
   ticker_profile: {
     purpose: 'Provides the business identity, exchange context, and recent corporate profile details for the selected company.',
     calculation: 'Combines cached profile metadata, website, listing context, and related corporate actions or dividend details.',

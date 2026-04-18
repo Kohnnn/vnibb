@@ -2,6 +2,7 @@
 
 import { AlertCircle, AlertTriangle, RefreshCw, Wifi, WifiOff, Inbox, Loader2 } from 'lucide-react';
 import React from 'react';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 /**
  * Common widget state components for consistent UX
@@ -122,6 +123,7 @@ interface WidgetEmptyProps {
     message?: string;
     icon?: React.ReactNode;
     detail?: string;
+    health?: WidgetHealthState;
     size?: 'default' | 'compact';
     action?: {
         label: string;
@@ -133,17 +135,23 @@ export function WidgetEmpty({
     message = 'No data available',
     icon,
     detail,
+    health,
     size = 'compact',
     action
 }: WidgetEmptyProps) {
     return (
         <div className={`flex flex-col items-center justify-center h-full p-4 text-center ${size === 'compact' ? 'min-h-[72px]' : 'min-h-[120px]'}`}>
+            {health?.label && (
+                <div className="mb-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200">
+                    {health.label}
+                </div>
+            )}
             <div className="text-[var(--text-muted)] mb-2">
                 {icon || <Inbox size={24} />}
             </div>
             <p className="text-xs text-[var(--text-secondary)] font-medium mb-3">{message}</p>
-            {detail && (
-                <p className="-mt-1 mb-3 text-[11px] text-[var(--text-muted)]">{detail}</p>
+            {(detail || health?.detail) && (
+                <p className="-mt-1 mb-3 text-[11px] text-[var(--text-muted)]">{detail || health?.detail}</p>
             )}
             {action && (
                 <button

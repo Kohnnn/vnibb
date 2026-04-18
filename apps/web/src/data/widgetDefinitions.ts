@@ -822,11 +822,56 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'listing_browser',
         name: 'Listing Browser',
-        description: 'Explore listed symbols by exchange, company, and industry',
+        description: 'Saved views, exchange/index filters, and universe discovery',
         category: 'screener',
         defaultConfig: {},
         defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 },
         searchKeywords: ['listing', 'universe', 'exchange', 'industry', 'browser']
+    },
+    {
+        type: 'market_sentiment',
+        name: 'Market Sentiment',
+        description: 'Aggregate market mood, trending topics, and most-mentioned stocks',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 },
+        searchKeywords: ['sentiment', 'market mood', 'topics', 'mentions', 'discovery']
+    },
+    {
+        type: 'ttm_snapshot',
+        name: 'TTM Snapshot',
+        description: 'Trailing-twelve-month snapshot across income, cash flow, and balance sheet',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 },
+        searchKeywords: ['ttm', 'snapshot', 'fundamentals', 'trailing twelve month']
+    },
+    {
+        type: 'growth_bridge',
+        name: 'Growth Bridge',
+        description: 'Annual versus latest comparable-quarter growth for core drivers',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
+        searchKeywords: ['growth', 'bridge', 'revenue growth', 'earnings growth', 'fundamentals']
+    },
+    {
+        type: 'ownership_rating_summary',
+        name: 'Ownership Rating Summary',
+        description: 'Concentration, foreign participation, and insider bias in one ownership scorecard',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 },
+        searchKeywords: ['ownership', 'rating', 'foreign flow', 'insider bias', 'concentration']
+    },
+    {
+        type: 'derivatives_analytics',
+        name: 'Derivatives Analytics',
+        description: 'Front-contract pulse and short futures curve analytics',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 10, h: 8, minW: 8, minH: 6 },
+        searchKeywords: ['derivatives', 'futures', 'curve', 'analytics', 'term structure']
     },
     {
         type: 'research_browser',
@@ -1116,6 +1161,11 @@ const WIDGET_LIBRARY_SECTION_OVERRIDES: Partial<Record<WidgetType, WidgetLibrary
     price_alerts: 'screeners_tools',
     notes: 'screeners_tools',
     listing_browser: 'screeners_tools',
+    market_sentiment: 'ai_research',
+    ttm_snapshot: 'fundamentals',
+    growth_bridge: 'fundamentals',
+    ownership_rating_summary: 'ownership',
+    derivatives_analytics: 'global_markets',
     database_inspector: 'screeners_tools',
     intraday_trades: 'screeners_tools',
     block_trade: 'screeners_tools',

@@ -122,6 +122,15 @@ For current TradingView-native coverage, use:
 - Widget-library size badges now come from the shared dashboard layout contract instead of stale definition-only defaults.
 - The shipped Fundamental, Technical, and Quant system tabs were rebalanced to reduce whitespace, remove duplicated market widgets, and give statement/order-flow widgets more usable height.
 - `Market Heatmap` now uses live container dimensions for its D3 treemap, and `Sector Board` now expands columns to fill wide layouts more naturally.
+- VniAgent settings now expose a clearer runtime summary, and the main sidebar now includes recent-session restore for symbol/context-specific research threads.
+- USD/FX coverage now extends beyond statement widgets into selected quote, comparison, and market-value surfaces such as ticker price panels, peer market caps, transaction-flow value mode, and market-cap-driven heatmap summaries.
+- Shared widget health badges and explanatory empty states now cover first-wave sparse/fallback widgets such as market breadth, relative rotation, transaction flow, and foreign trading.
+- Dashboard intelligence now adds tab-level duplicate/dead-space recommendations and edit-time widget fit guidance based on the shared size contracts.
+- Risk surfaces now include benchmark-relative and downside-tail metrics such as relative drawdown, beta, tracking error, downside deviation, and VaR/CVaR.
+- Discovery surfaces now include `Market Sentiment` plus a stronger `Listing Browser` with saved views and multi-axis filtering.
+- Discovery/fundamental surfaces now also include `TTM Snapshot` and `Growth Bridge` for fast trailing-twelve-month and growth-momentum review.
+- Ownership surfaces now include `Ownership Rating Summary` for concentration, foreign flow, and insider-bias synthesis.
+- Derivatives coverage now includes `Derivatives Analytics` for front-contract pulse and short-curve structure, beyond the base contracts board and price-history widgets.
 - Broader USD conversion for quote and market widgets is intentionally deferred to the roadmap.
 - Additional widgets now exposed in the widget library:
   - `block_trade`

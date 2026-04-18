@@ -142,8 +142,9 @@ Financial statement notes:
 - Current history caps remain intentionally in place for performance; wider default history windows are deferred to a later optimization pass.
 - Financial and statement-style widgets now support `USD` display mode with per-year browser-local USD/VND overrides plus admin-managed yearly defaults.
 - Effective USD/VND precedence is now `local year override -> admin year default -> admin global fallback -> hardcoded fallback`.
-- USD conversion is currently scoped to financial and fundamental statement-style surfaces first; quote and market-wide currency conversion remains a lower-priority roadmap item.
+- USD conversion now also applies to selected quote, comparison, and market-value surfaces where the displayed fields are clearly currency-denominated. Pure point/index and TradingView-native surfaces remain separate.
 - Quant endpoints now accept `adjustment_mode=raw|adjusted` so adjusted-history behavior can propagate into frontend risk and quant widgets instead of stopping at chart-only consumers.
+- Quant endpoints also support benchmark-relative risk calculations through the `benchmark_risk` metric family, including relative drawdown, beta, tracking error, downside deviation, and VaR/CVaR.
 - Main historical chart surfaces now render compact corporate-action markers for dividends, splits, and rights-related actions when those dates are available in the loaded window.
 
 Copilot notes:

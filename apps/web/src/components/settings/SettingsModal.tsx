@@ -703,6 +703,39 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 </div>
 
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 space-y-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-[var(--text-primary)]">Current Runtime Summary</h4>
+                    <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                      Snapshot of the VniAgent setup currently active in this browser.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[10px]">
+                    <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                      {aiProvider === 'openai_compatible' ? 'OpenAI-Compatible' : 'OpenRouter'}
+                    </span>
+                    <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                      {aiMode === 'browser_key' ? 'Browser Key' : 'App Default'}
+                    </span>
+                    <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 font-semibold uppercase tracking-[0.16em] text-blue-200">
+                      {aiMode === 'browser_key' ? aiModelInput || 'Set model' : publicRuntimeModel || 'Admin runtime model'}
+                    </span>
+                    <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                      {aiPreferAppwriteData ? 'VNIBB DB first' : 'External-first'}
+                    </span>
+                    <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                      {aiEnableSidebarWorkflowOutputs ? 'Workflow panels on' : 'Answer-first sidebar'}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]">Basics</h4>
+                  <p className="mb-3 text-[11px] text-[var(--text-muted)]">
+                    Choose the provider, credential source, and model behavior VniAgent should use by default in this browser.
+                  </p>
+                </div>
+
                 <div>
                   <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]">Provider</h4>
                   <div className="grid grid-cols-2 gap-2">
@@ -867,6 +900,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 <div>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]">Connection</h4>
+                  <p className="mb-3 text-[11px] text-[var(--text-muted)]">
+                    Browser-key credentials stay local to this browser. App Default mode continues to use the backend-managed OpenRouter runtime.
+                  </p>
+                </div>
+
+                <div>
                   <label
                     htmlFor="settings-ai-api-key"
                     className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]"
@@ -913,6 +953,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </p>
                   </div>
                 )}
+
+                <div>
+                  <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]">Data & Behavior</h4>
+                  <p className="mb-3 text-[11px] text-[var(--text-muted)]">
+                    Control whether VniAgent stays VNIBB database-first, whether it can reach the web, and whether the sidebar keeps workflow detail panels visible.
+                  </p>
+                </div>
 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">

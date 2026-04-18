@@ -6,6 +6,7 @@ import { ChevronLeft, Download, LayoutGrid } from 'lucide-react';
 import { hierarchy, treemap } from 'd3-hierarchy';
 import html2canvas from 'html2canvas';
 import { logClientError } from '@/lib/clientLogger';
+import { useUnit } from '@/contexts/UnitContext';
 import { useMarketHeatmap } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { SectorGroup } from '@/lib/api';
@@ -14,6 +15,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
+import { formatCompactValueForUnit } from '@/lib/units';
 import { cn } from '@/lib/utils';
 
 interface MarketHeatmapWidgetProps {
@@ -62,6 +64,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
     const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
     const heatmapRef = useRef<HTMLDivElement>(null);
     const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'market_heatmap' });
+    const { config: unitConfig } = useUnit();
 
     const {
         data,
@@ -263,7 +266,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                                     {node.data.symbol || node.data.name}
                                                                     {node.data.sector ? `\nSector: ${node.data.sector}` : ''}
                                                                     {'\n'}Change: {changePct.toFixed(2)}%
-                                                                    {'\n'}Value: {((node.data.value || 0) / 1e9).toFixed(1)}B
+                                                                    {'\n'}Value: {formatCompactValueForUnit(node.data.value || 0, unitConfig, { decimals: 1 })}
                                                                     {!selectedGroup && node.data.stockCount ? `\nStocks: ${node.data.stockCount}` : ''}
                                                                 </title>
                                                             </rect>
@@ -301,8 +304,8 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
                                                                     style={{ fontSize: 10 }}
                                                                 >
                                                                     {selectedGroup
-                                                                        ? `${node.data.sector || selectedGroup} • ${((node.data.value || 0) / 1e9).toFixed(1)}B`
-                                                                        : `${node.data.stockCount || 0} stocks • ${((node.data.value || 0) / 1e9).toFixed(1)}B`}
+                                                                        ? `${node.data.sector || selectedGroup} • ${formatCompactValueForUnit(node.data.value || 0, unitConfig, { decimals: 1 })}`
+                                                                        : `${node.data.stockCount || 0} stocks • ${formatCompactValueForUnit(node.data.value || 0, unitConfig, { decimals: 1 })}`}
                                                                 </text>
                                                             )}
                                                         </g>

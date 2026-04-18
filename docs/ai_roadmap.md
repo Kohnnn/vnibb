@@ -58,6 +58,13 @@ Reduce avoidable complexity in VniAgent and improve answer quality and runtime r
 - prefer VNIBB database wording in user-facing VniAgent surfaces
 - keep the sidebar, widget, and analysis views answer-first with details collapsed by default
 
+### Shipped in the current UX pass
+
+- clearer VniAgent settings grouping into basics, connection, and data/behavior sections
+- visible current-runtime summary in site settings so users can quickly see provider, mode, model, and data preference
+- VniAgent sidebar runtime/context chips for symbol, tab, widget context, provider, mode, model, and data-source stance
+- recent-session archive and restore flow in the main VniAgent sidebar so prior symbol/context threads are easier to resume
+
 ## Batch 1: Table Artifacts
 
 Status: shipped MVP

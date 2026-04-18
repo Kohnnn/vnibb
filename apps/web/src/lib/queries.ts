@@ -52,6 +52,8 @@ export const queryKeys = {
     incomeStatement: (symbol: string, period: string) => ['incomeStatement', symbol, period] as const,
     cashFlow: (symbol: string, period: string) => ['cashFlow', symbol, period] as const,
     marketOverview: () => ['marketOverview'] as const,
+    marketSentiment: () => ['marketSentiment'] as const,
+    trendingAnalysis: () => ['trendingAnalysis'] as const,
     marketBreadth: () => ['marketBreadth'] as const,
     earningsSeason: (exchange?: string, limit?: number) => ['earningsSeason', exchange, limit] as const,
     industryBubble: (params?: Record<string, unknown>) => ['industryBubble', params] as const,
@@ -66,6 +68,8 @@ export const queryKeys = {
     symbolsByExchange: (exchange: string) => ['symbolsByExchange', exchange] as const,
     symbolsByGroup: (group: string) => ['symbolsByGroup', group] as const,
     industries: () => ['industries'] as const,
+    ttmSnapshot: (symbol: string) => ['ttmSnapshot', symbol] as const,
+    growthRates: (symbol: string) => ['growthRates', symbol] as const,
     // Trading
     priceBoard: (symbols: string[]) => ['priceBoard', symbols] as const,
     topMovers: (type: string, index: string, limit: number) => ['topMovers', type, index, limit] as const,
@@ -620,6 +624,24 @@ export function useSymbols(options?: { limit?: number; enabled?: boolean }) {
     });
 }
 
+export function useMarketSentiment(enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.marketSentiment(),
+        queryFn: () => api.getMarketSentiment(),
+        enabled,
+        staleTime: 10 * 60 * 1000,
+    });
+}
+
+export function useTrendingAnalysis(enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.trendingAnalysis(),
+        queryFn: () => api.getTrendingAnalysis(),
+        enabled,
+        staleTime: 10 * 60 * 1000,
+    });
+}
+
 export function useSymbolsByExchange(
     exchange: 'HOSE' | 'HNX' | 'UPCOM',
     enabled = true
@@ -647,6 +669,24 @@ export function useIndustries(enabled = true) {
         queryFn: () => api.getIndustries(),
         enabled,
         staleTime: 24 * 60 * 60 * 1000, // 24 hours - industries rarely change
+    });
+}
+
+export function useTTMSnapshot(symbol: string, enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.ttmSnapshot(symbol),
+        queryFn: () => api.getTTMSnapshot(symbol),
+        enabled: enabled && !!symbol,
+        staleTime: 60 * 60 * 1000,
+    });
+}
+
+export function useGrowthRates(symbol: string, enabled = true) {
+    return useQuery({
+        queryKey: queryKeys.growthRates(symbol),
+        queryFn: () => api.getGrowthRates(symbol),
+        enabled: enabled && !!symbol,
+        staleTime: 60 * 60 * 1000,
     });
 }
 

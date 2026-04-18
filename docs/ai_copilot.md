@@ -136,6 +136,7 @@ Browser widget data remains lower-priority than backend data.
 - public runtime-model visibility for app-default mode
 - OpenRouter model suggestions and searchable model selection
 - OpenRouter free-model helper link under model selection
+- current-runtime summary card in site settings for provider, mode, model, and database preference
 - integrated VniAgent prompt library in the main agent panel
 - admin-managed shared prompt library editing
 - admin-managed shared prompt version history
@@ -151,6 +152,7 @@ Browser widget data remains lower-priority than backend data.
 - reasoning/status display while the answer is being prepared
 - document/PDF attachment support in the main VniAgent sidebar
 - advanced artifacts/actions/evidence are collapsed behind per-message details in the main sidebar flow
+- symbol/context-scoped recent-session archive and restore flow in the main VniAgent sidebar
 
 Current telemetry note:
 
@@ -172,6 +174,7 @@ Current stability note:
 - advanced message panels in sidebar, widget, and analysis views are collapsed behind `Details`
 - prompt starters are trimmed down to the strongest few per context
 - document attach is now behind a secondary tools menu in the sidebar composer
+- the sidebar header now makes the active symbol, tab, widget context, provider, mode, model, and VNIBB database-first stance visible at a glance
 - when `VNIBB_MCP_URL` is configured, selected server-side VniAgent runtime reads now flow through the dedicated read-only VNIBB MCP instead of hitting Appwrite directly
 - if the MCP companion is unavailable, the backend falls back to direct Appwrite/Postgres context reads so chat does not hard-fail on transport issues
 

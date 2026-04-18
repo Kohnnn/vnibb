@@ -156,12 +156,53 @@ Recent shipped system template changes:
 - Technical `Market` increases top-row market widget height and gives heatmap / sector board more responsive room.
 - Quant `Market` removes duplicate `rs_ranking` / `relative_rotation` placement in favor of broader market context widgets.
 
+## Dashboard Intelligence
+
+- Shared dashboard intelligence now analyzes active-tab widget layouts using the same size contracts defined in `dashboardLayout.ts`.
+- The shell can now detect:
+  - duplicate non-repeatable widget types in a tab
+  - compacted sparse widgets that are likely carrying empty-state dead space
+  - widgets that are below their recommended height and may clip content
+  - very dense tabs that would benefit from a compact or analyst-friendly re-layout
+- Tab-level recommendation banners are visible during edit mode, or automatically when a tab looks materially dead.
+- Per-widget layout-fit guidance appears in edit mode when a widget is clearly undersized or auto-compacted into a sparse state.
+
+## Discovery Surfaces
+
+- `listing_browser` is now a discovery-first universe browser rather than a plain listing dump.
+- `listing_browser` should support exchange, index-group, industry, and search filtering together, plus browser-local saved views.
+- `market_sentiment` should act as a top-down narrative discovery widget, pairing aggregate mood with trending topics and most-mentioned stocks.
+- `ttm_snapshot` should compress trailing-twelve-month income, cash flow, and balance-sheet scale into a fast current-state pulse.
+- `growth_bridge` should compare annual growth with the latest comparable-quarter growth so users can detect acceleration or stall quickly.
+- `ownership_rating_summary` should synthesize concentration, foreign participation, and insider bias into a compact ownership-quality readout.
+- `derivatives_analytics` should extend derivatives discovery beyond a simple contract list by exposing front-contract pulse and short-curve structure.
+
 ## Shell / Workspace Rules
 
 - The app stores the last active dashboard and the last active tab per dashboard locally.
 - Low-resolution layouts should treat VniAgent as an overlay sooner to protect workspace width.
 - Header and tab-strip controls should collapse or simplify earlier instead of forcing horizontal crowding.
 - Recoverable widget/runtime failures should surface in UI state first; production builds should avoid noisy browser-console logging for handled widget errors, export failures, and local fallback paths.
+
+## Data Quality / Empty States
+
+- Shared data-quality status now uses a lightweight `WidgetHealthState` model.
+- `WidgetMeta` can render explicit health badges such as cached snapshot, stale snapshot, limited history, coverage gap, and awaiting snapshot.
+- `WidgetEmpty` can render the same health labels plus a short explanatory detail line.
+- Use these explicit states when the widget is functioning correctly but the upstream feed is sparse, stale, cached, or not yet published.
+
+Current first-wave coverage includes:
+
+- `MarketBreadthWidget`
+- `RelativeRotationWidget`
+- `TransactionFlowWidget`
+- `ForeignTradingWidget`
+
+Expected behavior:
+
+- coverage or publication gaps should not look like render failures
+- cached or stale snapshots should be labeled as such in widget meta
+- sparse provider support should explain itself in the empty state instead of only saying "No data"
 
 ## USD Display
 
@@ -178,6 +219,12 @@ See also: `docs/USD_DISPLAY_ARCHITECTURE.md`.
 - quant endpoints now support `adjustment_mode` so frontend quant and risk widgets can stay aligned with adjusted history.
 - quant and risk widgets should prefer adjusted history by default unless a specific surface explicitly needs raw behavior.
 - main price-chart surfaces now render compact corporate-action markers for dividends, splits, and rights-related actions.
+
+## Risk Model
+
+- the quant API now supports a `benchmark_risk` metric family anchored on `VNINDEX`.
+- `RiskDashboardWidget` and `QuantSummaryWidget` now surface benchmark-relative drawdown, rolling beta, tracking error, downside deviation, and 95% VaR/CVaR.
+- current benchmark-relative risk visuals are card/panel first; deeper dedicated time-series panels remain follow-up work.
 
 ## Screener / AI Notes
 

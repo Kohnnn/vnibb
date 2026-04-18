@@ -1,8 +1,9 @@
 'use client';
 
-import { Clock, RefreshCw, Database, AlertTriangle } from 'lucide-react';
+import { Clock, RefreshCw, Database, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatAbsoluteTimestamp, formatTime } from '@/lib/format';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 const fetchingBadgeStyle = {
   backgroundColor: 'color-mix(in srgb, var(--accent-blue) 12%, transparent)',
@@ -16,6 +17,12 @@ const warningBadgeStyle = {
   color: 'color-mix(in srgb, #b45309 72%, var(--text-primary) 28%)',
 } as const;
 
+const infoBadgeStyle = {
+  backgroundColor: 'color-mix(in srgb, #38bdf8 12%, transparent)',
+  borderColor: 'color-mix(in srgb, #38bdf8 28%, transparent)',
+  color: 'color-mix(in srgb, #0ea5e9 72%, var(--text-primary) 28%)',
+} as const;
+
 interface WidgetMetaProps {
   updatedAt?: number | string | Date | null;
   isFetching?: boolean;
@@ -23,8 +30,25 @@ interface WidgetMetaProps {
   isStale?: boolean;
   sourceLabel?: string;
   note?: string;
+  health?: WidgetHealthState;
   align?: 'left' | 'right';
   className?: string;
+}
+
+function getHealthBadgePresentation(health: WidgetHealthState) {
+  switch (health.status) {
+    case 'awaiting_update':
+      return { icon: Clock, style: infoBadgeStyle }
+    case 'cached':
+      return { icon: Database, style: warningBadgeStyle }
+    case 'stale':
+      return { icon: AlertTriangle, style: warningBadgeStyle }
+    case 'limited':
+      return { icon: ShieldAlert, style: warningBadgeStyle }
+    case 'coverage_gap':
+    default:
+      return { icon: AlertTriangle, style: warningBadgeStyle }
+  }
 }
 
 function toDate(value?: number | string | Date | null): Date | null {
@@ -42,12 +66,15 @@ export function WidgetMeta({
   isStale = false,
   sourceLabel,
   note,
+  health,
   align = 'left',
   className,
 }: WidgetMetaProps) {
   const updatedDate = toDate(updatedAt);
   const updatedLabel = updatedDate ? formatAbsoluteTimestamp(updatedDate) : null;
   const exactTime = updatedDate ? formatTime(updatedDate, true) : null;
+
+  const healthPresentation = health ? getHealthBadgePresentation(health) : null
 
   return (
     <div
@@ -74,7 +101,18 @@ export function WidgetMeta({
         </span>
       )}
 
-      {(isCached || isStale) && (
+      {health && healthPresentation && (
+        <span
+          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5"
+          style={healthPresentation.style}
+          title={health.detail}
+        >
+          <healthPresentation.icon size={10} />
+          {health.label}
+        </span>
+      )}
+
+      {!health && (isCached || isStale) && (
         <span
           className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5"
           style={warningBadgeStyle}

@@ -2,27 +2,16 @@
 
 import { memo, useEffect } from 'react';
 import { useStockQuote, useProfile, useScreenerData, useTradingStats } from '@/lib/queries';
+import { useUnit } from '@/contexts/UnitContext';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { formatNumber } from '@/lib/formatters';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useQuantRegime } from '@/hooks/useQuantRegime';
 import { TrendingUp, TrendingDown, Info, Activity } from 'lucide-react';
+import { formatCompactValueForUnit, formatNumber, formatPriceValueForUnit } from '@/lib/units';
 import { cn } from '@/lib/utils';
-
-const priceFormatter = new Intl.NumberFormat('en-US', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})
-
-function formatPriceValue(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) {
-    return '--'
-  }
-  return priceFormatter.format(value)
-}
 
 function toPositiveNumber(value: unknown): number | null {
   const parsed = typeof value === 'number' ? value : Number(value)
@@ -76,6 +65,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   });
   const { data: tradingStats } = useTradingStats(symbol, Boolean(symbol));
   const quantRegime = useQuantRegime(symbol, { period: '1Y', enabled: Boolean(symbol) })
+  const { config: unitConfig } = useUnit();
 
   const isLoading = quoteLoading || profileLoading;
   const isFetching = quoteFetching || profileFetching || screenerFetching;
@@ -188,7 +178,9 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               ? 'Market cap derived from profile shares x quote'
               : quote?.cached
                 ? 'Cached response'
-                : undefined
+                : unitConfig.display === 'USD'
+                  ? 'Price and value fields shown in USD using current FX defaults'
+                  : undefined
           }
           sourceLabel="Quote + profile"
           className="justify-between"
@@ -200,7 +192,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               {symbol}
             </span>
             <span className="text-3xl font-black font-mono tracking-tighter text-[var(--text-primary)] tabular-nums drop-shadow-lg">
-              {formatPriceValue(price)}
+              {formatPriceValueForUnit(price, unitConfig)}
             </span>
             <div
               className={cn(
@@ -224,17 +216,17 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          {[
-            { label: 'Day High', value: formatPriceValue(quote?.high) },
-            { label: 'Day Low', value: formatPriceValue(quote?.low) },
-            { label: '52W High', value: formatPriceValue(rangeHigh) },
-            { label: '52W Low', value: formatPriceValue(rangeLow) },
+            {[
+            { label: 'Day High', value: formatPriceValueForUnit(quote?.high, unitConfig) },
+            { label: 'Day Low', value: formatPriceValueForUnit(quote?.low, unitConfig) },
+            { label: '52W High', value: formatPriceValueForUnit(rangeHigh, unitConfig) },
+            { label: '52W Low', value: formatPriceValueForUnit(rangeLow, unitConfig) },
             { label: 'Volume', value: formatNumber(quote?.volume) },
-            { label: 'Prev Close', value: formatPriceValue(quote?.prevClose) },
-            { label: 'Open', value: formatPriceValue(quote?.open) },
+            { label: 'Prev Close', value: formatPriceValueForUnit(quote?.prevClose, unitConfig) },
+            { label: 'Open', value: formatPriceValueForUnit(quote?.open, unitConfig) },
             {
               label: 'Mkt Cap',
-              value: formatNumber(marketCap),
+              value: formatCompactValueForUnit(marketCap, unitConfig),
               source: marketCapSource,
             },
           ].slice(0, 8).map((item, i) => (
@@ -271,9 +263,9 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               <div className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border border-white/50 bg-[var(--bg-primary)] shadow" style={{ left: `calc(${rangePosition}% - 6px)` }} />
             </div>
             <div className="mt-1.5 flex items-center justify-between text-[10px] font-mono text-[var(--text-secondary)] tabular-nums">
-              <span>{formatPriceValue(rangeLow)}</span>
-              <span className="text-[var(--text-primary)]">{formatPriceValue(rangePrice)}</span>
-              <span>{formatPriceValue(rangeHigh)}</span>
+              <span>{formatPriceValueForUnit(rangeLow, unitConfig)}</span>
+              <span className="text-[var(--text-primary)]">{formatPriceValueForUnit(rangePrice, unitConfig)}</span>
+              <span>{formatPriceValueForUnit(rangeHigh, unitConfig)}</span>
             </div>
           </div>
         )}

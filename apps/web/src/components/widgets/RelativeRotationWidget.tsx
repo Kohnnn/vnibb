@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { Sparkline } from '@/components/ui/Sparkline'
+import type { WidgetHealthState } from '@/lib/widgetHealth'
 
 interface RelativeRotationWidgetProps {
   symbol: string
@@ -117,6 +118,13 @@ export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) 
     }
   }, [trailPoints, universePoints])
   const hasChartData = universePoints.length > 0
+  const healthState: WidgetHealthState | undefined = hasData && !hasChartData
+    ? {
+        status: 'limited',
+        label: 'Limited history',
+        detail: `Need enough overlapping ${upperSymbol} and ${payload?.benchmark || 'VNINDEX'} history to plot the quadrant map.`,
+      }
+    : undefined
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view relative rotation" icon={<Orbit size={18} />} />
@@ -132,6 +140,7 @@ export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) 
         <WidgetMeta
           updatedAt={dataUpdatedAt}
           isFetching={isFetching && hasData}
+          health={healthState}
           note="VN30 vs VNINDEX"
           align="right"
         />

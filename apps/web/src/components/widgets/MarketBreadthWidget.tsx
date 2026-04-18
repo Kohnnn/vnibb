@@ -9,6 +9,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useMarketBreadth } from '@/lib/queries';
 import { formatNumber } from '@/lib/format';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface MarketBreadthWidgetProps {
   id: string;
@@ -29,6 +30,13 @@ export function MarketBreadthWidget({ id, onRemove }: MarketBreadthWidgetProps) 
   const error = breadthQuery.error;
   const updatedAt = breadthQuery.data?.updated_at || breadthQuery.dataUpdatedAt;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+  const healthState: WidgetHealthState | undefined = error && hasData
+    ? {
+        status: 'cached',
+        label: 'Cached snapshot',
+        detail: 'Showing the last successful breadth snapshot while the refresh path is degraded.',
+      }
+    : undefined
 
   return (
     <WidgetContainer
@@ -47,7 +55,7 @@ export function MarketBreadthWidget({ id, onRemove }: MarketBreadthWidgetProps) 
           <WidgetMeta
             updatedAt={updatedAt}
             isFetching={isFetching && hasData}
-            isCached={Boolean(error && hasData)}
+            health={healthState}
             note="A/D + trend breadth"
             align="right"
           />
@@ -68,7 +76,15 @@ export function MarketBreadthWidget({ id, onRemove }: MarketBreadthWidgetProps) 
           ) : error && !hasData ? (
             <WidgetError error={error as Error} onRetry={() => breadthQuery.refetch()} />
           ) : !hasData ? (
-            <WidgetEmpty message="Breadth data not available yet" icon={<Activity size={18} />} />
+            <WidgetEmpty
+              message="Breadth data not available yet"
+              icon={<Activity size={18} />}
+              health={{
+                status: 'awaiting_update',
+                label: 'Awaiting snapshot',
+                detail: 'Breadth cards appear when exchange breadth rows are published for the current session.',
+              }}
+            />
           ) : (
             <div className="space-y-2">
               {rows.map((row) => {
