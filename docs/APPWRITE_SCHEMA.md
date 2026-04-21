@@ -638,7 +638,7 @@ System dashboard templates.
 
 ```
 stocks (1) ──┬── (*) stock_prices
-             ├── (*) intraday_trades  
+             ├── (*) intraday_trades
              ├── (*) balance_sheets
              ├── (*) cash_flows
              ├── (*) financial_ratios
@@ -660,6 +660,129 @@ user_dashboards (1) ── (*) dashboard_widgets
 
 stock_indices (1) ── (*) screener_snapshots (via index_code)
 ```
+
+---
+
+## Dimensional Modeling
+
+VNIBB follows a **star schema** design pattern with `stocks` as the central fact hub.
+
+### Dimension Tables (Dims)
+
+Dimension tables provide descriptive context for facts. They are typically:
+- Low volume (hundreds to thousands of records)
+- Rarely updated (batch sync on schedule)
+- Queried for filtering and grouping
+
+| Dim Table | Primary Key | Description | Connects To |
+|-----------|-------------|-------------|-------------|
+| **`stocks`** | `symbol` | Stock master - ticker, exchange, industry, sector | All stock-level facts |
+| **`companies`** | `symbol` | Extended company info - name, shares, registration | Ownership facts |
+| **`market_sectors`** | `sector_code` | Sector hierarchy with ICB classification | Sector facts |
+
+### Fact Tables (Facts)
+
+Fact tables contain measurable, transactional data. They are typically:
+- High volume (thousands to millions of records)
+- Time-series oriented
+- Queried aggregations
+
+| Fact Table | Grain | Description |
+|-----------|-------|-------------|
+| **`stock_prices`** | symbol + time + interval | OHLCV price data |
+| **`stock_indices`** | index_code + time | Market index values |
+| **`intraday_trades`** | symbol + trade_time | Tick-level trades |
+| **`income_statements`** | symbol + period | Quarterly/annual income |
+| **`balance_sheets`** | symbol + period | Balance sheet snapshots |
+| **`cash_flows`** | symbol + period | Cash flow statements |
+| **`financial_ratios`** | symbol + period | Pre-calculated ratios |
+| **`foreign_trading`** | symbol + trade_date | Daily foreign activity |
+| **`order_flow_daily`** | symbol + trade_date | Daily order flow |
+| **`orderbook_snapshots`** | symbol + snapshot_time | Price depth snapshots |
+| **`insider_deals`** | id (symbol + date) | Insider transactions |
+| **`dividends`** | symbol + exercise_date | Dividend events |
+| **`company_events`** | symbol + event_date | Corporate events |
+| **`company_news`** | symbol + published_date | News articles |
+| **`derivative_prices`** | symbol + trade_date + interval | Futures/derivatives |
+| **`screener_snapshots`** | symbol + snapshot_date | Daily pre-calculated metrics |
+
+### Bridge Tables
+
+Many-to-many relationships requiring junction tables:
+
+| Bridge Table | Connects | Purpose |
+|--------------|----------|---------|
+| **`shareholders`** | companies → individuals | Major shareholder tracking |
+| **`officers`** | companies → individuals | Management/executive tracking |
+| **`subsidiaries`** | companies → companies | Subsidiary relationships |
+
+### User Data Tables
+
+| Table | Type | Description |
+|-------|------|-------------|
+| **`user_dashboards`** | Dim | User personalization |
+| **`dashboard_widgets`** | Fact | Widget configuration per dashboard |
+| **`system_dashboard_templates`** | Dim | Pre-built template definitions |
+
+### Star Schema Diagram
+
+```
+                    ┌─────────────────┐
+                    │   dim_stocks    │
+                    │   (symbol PK)   │
+                    │  exchange       │
+                    │  industry       │
+                    │  sector         │
+                    └────────┬────────┘
+                             │
+        ┌────────────────────┼────────────────────┐
+        │                    │                    │
+        ▼                    ▼                    ▼
+┌───────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ fact_prices   │  │ fact_financials │  │ fact_trading    │
+│ symbol+time   │  │ symbol+period   │  │ symbol+date     │
+└───────────────┘  └─────────────────┘  └─────────────────┘
+                            │
+        ┌───────────────────┼───────────────────┐
+        ▼                   ▼                   ▼
+┌───────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ income_stmt   │  │ balance_sheet   │  │ cash_flows      │
+└───────────────┘  └─────────────────┘  └─────────────────┘
+        │
+        ▼
+┌───────────────┐
+│ fact_ratios   │
+│ symbol+period │
+└───────────────┘
+```
+
+### Slowly Changing Dimensions (SCD)
+
+| Dim Table | SCD Type | Strategy |
+|-----------|----------|----------|
+| `stocks` | Type 1 | Overwrite on change (exchange, industry drift) |
+| `companies` | Type 1 | Overwrite on change |
+| `market_sectors` | Type 0 | Immutable hierarchy (new codes only) |
+| `shareholders` | Type 2 | Track historical ownership with `as_of_date` |
+| `officers` | Type 1 | Overwrite on title/position change |
+
+### Query Patterns
+
+**Dimension-first queries** (filter then fact):
+```
+1. SELECT symbol FROM stocks WHERE industry = 'Banking'
+2. SELECT * FROM financial_ratios WHERE symbol IN (...) AND period = 'FY2024'
+```
+
+**Fact-first queries** (aggregate then dim join):
+```
+1. SELECT symbol, SUM(buy_value) FROM foreign_trading GROUP BY symbol
+2. SELECT s.industry, AVG(f.roe) FROM stocks s JOIN financial_ratios f ON s.symbol = f.symbol GROUP BY s.industry
+```
+
+**Conformed Dimensions**
+
+`stocks.symbol` and `companies.symbol` are conformed dimensions reused across all facts, enabling cross-domain analysis (e.g., joining foreign_trading with financial_ratios on symbol).
 
 ---
 
@@ -690,380 +813,3 @@ flowchart LR
     stock_prices -->|powers| Charts[Price Charts]
     financials -->|powers| Ratios[Financial Ratios]
 ```
----
-
-## Clean Mermaid
-```mermaid
-erDiagram
-    STOCKS ||--o{ STOCK_PRICES : has
-    STOCKS ||--o{ TRADES : has
-    STOCKS ||--o{ FINANCIALS : has
-    STOCKS ||--o{ BALANCE_SHEET : has
-    STOCKS ||--o{ CASH_FLOW : has
-    STOCKS ||--o{ RATIOS : has
-    STOCKS ||--o{ COMPANY_INFO : has
-    STOCKS ||--o{ SHAREHOLDERS : has
-    STOCKS ||--o{ OFFICERS : has
-    STOCKS ||--o{ SUBSIDIARIES : has
-    STOCKS ||--o{ DIVIDENDS : has
-    STOCKS ||--o{ CORPORATE_EVENTS : has
-    STOCKS ||--o{ NEWS : has
-    STOCKS ||--o{ INSIDER_TRADES : has
-    STOCKS ||--o{ FOREIGN_TRADES : has
-    STOCKS ||--o{ PROPRIETARY_TRADES : has
-    STOCKS ||--o{ TECHNICAL_ANALYSIS : has
-    STOCKS ||--o{ ORDER_BOOK : has
-    STOCKS ||--o{ DERIVATIVES : has
-    INDICES ||--o{ INDEX_PRICES : has
-    SECTORS ||--o{ SECTOR_PERFORMANCE : has
-    COMPANY_INFO ||--o{ STOCK_SNAPSHOT : has
-    USERS ||--o{ DASHBOARDS : has
-    DASHBOARDS ||--o{ DASHBOARD_WIDGETS : has
-    DASHBOARD_TEMPLATES ||--o{ DASHBOARDS : uses
-
-    STOCKS {
-        string symbol PK
-        string isin
-        string company_name
-        string short_name
-        string exchange
-        string industry
-        string sector
-        boolean is_active
-        date listing_date
-    }
-
-    STOCK_PRICES {
-        string symbol FK
-        datetime time
-        float open
-        float high
-        float low
-        float close
-        float volume
-        float value
-        float adj_close
-        string interval
-    }
-
-    TRADES {
-        string symbol FK
-        datetime trade_time
-        float price
-        float volume
-        string match_type
-        float accumulated_vol
-        float accumulated_val
-        string transaction_id
-    }
-
-    FINANCIALS {
-        string symbol FK
-        string period
-        string period_type
-        int fiscal_year
-        int fiscal_quarter
-        float revenue
-        float cost_of_revenue
-        float gross_profit
-        float operating_expenses
-        float operating_income
-        float net_income
-        float eps
-        float ebitda
-    }
-
-    BALANCE_SHEET {
-        string symbol FK
-        string period
-        string period_type
-        float total_assets
-        float current_assets
-        float cash_and_equivalents
-        float total_liabilities
-        float current_liabilities
-        float total_equity
-        float book_value_per_share
-    }
-
-    CASH_FLOW {
-        string symbol FK
-        string period
-        float operating_cash_flow
-        float free_cash_flow
-        float dividends_paid
-        float net_change_in_cash
-    }
-
-    RATIOS {
-        string symbol FK
-        string period
-        float pe_ratio
-        float pb_ratio
-        float ps_ratio
-        float peg_ratio
-        float ev_ebitda
-        float ev_sales
-        float roe
-        float roa
-        float roic
-        float gross_margin
-        float net_margin
-        float current_ratio
-        float quick_ratio
-        float debt_to_equity
-        float eps
-        float dps
-    }
-
-    COMPANY_INFO {
-        string symbol PK
-        string company_name
-        string short_name
-        string english_name
-        string exchange
-        string industry
-        string sector
-        string subsector
-        float outstanding_shares
-        float listed_shares
-        string website
-        string address
-    }
-
-    SHAREHOLDERS {
-        string company_id FK
-        string symbol FK
-        string name
-        string shareholder_type
-        float shares_held
-        float ownership_pct
-        date as_of_date
-    }
-
-    OFFICERS {
-        string company_id FK
-        string symbol FK
-        string name
-        string title
-        string position_type
-        float shares_held
-        float ownership_pct
-    }
-
-    SUBSIDIARIES {
-        string symbol FK
-        string subsidiary_name
-        string subsidiary_symbol
-        float ownership_pct
-        string relationship_type
-    }
-
-    DIVIDENDS {
-        string symbol FK
-        date exercise_date
-        int cash_year
-        float dividend_rate
-        float dividend_value
-        string issue_method
-        date record_date
-        date payment_date
-    }
-
-    CORPORATE_EVENTS {
-        string symbol FK
-        string event_type
-        date event_date
-        date ex_date
-        date record_date
-        date payment_date
-        float value
-    }
-
-    NEWS {
-        string symbol FK
-        string title
-        string summary
-        string source
-        string url
-        date published_date
-        float rsi
-        float rs
-        float price
-    }
-
-    INSIDER_TRADES {
-        string symbol FK
-        date announce_date
-        string deal_method
-        string deal_action
-        float deal_quantity
-        float deal_price
-        float deal_value
-        string insider_name
-    }
-
-    FOREIGN_TRADES {
-        string symbol FK
-        date trade_date
-        float buy_volume
-        float buy_value
-        float sell_volume
-        float sell_value
-        float net_volume
-        float net_value
-        float room_available
-        float room_pct
-    }
-
-    PROPRIETARY_TRADES {
-        string symbol FK
-        date trade_date
-        float buy_volume
-        float sell_volume
-        float buy_value
-        float sell_value
-        float net_volume
-        float foreign_buy_volume
-        float foreign_sell_volume
-        int big_order_count
-        int block_trade_count
-    }
-
-    TECHNICAL_ANALYSIS {
-        string symbol FK
-        date trade_date
-        float buy_volume
-        float sell_volume
-        float buy_value
-        float sell_value
-        float net_volume
-    }
-
-    ORDER_BOOK {
-        string symbol FK
-        datetime snapshot_time
-        float bid1_price
-        float bid1_volume
-        float bid2_price
-        float bid2_volume
-        float bid3_price
-        float bid3_volume
-        float ask1_price
-        float ask1_volume
-        float total_bid_volume
-        float total_ask_volume
-    }
-
-    DERIVATIVES {
-        string symbol FK
-        date trade_date
-        float open
-        float high
-        float low
-        float close
-        float volume
-        float open_interest
-        string interval
-    }
-
-    INDICES {
-        string index_code PK
-        datetime time
-        float open
-        float high
-        float low
-        float close
-        float volume
-        float value
-        float change
-        float change_pct
-    }
-
-    INDEX_PRICES {
-        string index_code FK
-        datetime time
-        float open
-        float high
-        float low
-        float close
-        float volume
-        float value
-    }
-
-    SECTORS {
-        string sector_code PK
-        string sector_name
-        string sector_name_en
-        string parent_code
-        int level
-        string icb_code
-    }
-
-    SECTOR_PERFORMANCE {
-        string sector_code FK
-        date trade_date
-        float change_pct
-        float avg_change_pct
-        float total_value
-    }
-
-    STOCK_SNAPSHOT {
-        string symbol FK
-        date snapshot_date
-        string company_name
-        string exchange
-        string industry
-        float price
-        float volume
-        float market_cap
-        float pe
-        float pb
-        float ps
-        float ev_ebitda
-        float roe
-        float roa
-        float roic
-        float gross_margin
-        float net_margin
-        float revenue_growth
-        float earnings_growth
-        float dividend_yield
-        float debt_to_equity
-        float current_ratio
-        float foreign_ownership
-        float rs_rating
-    }
-
-    USERS {
-        string user_id PK
-        string name
-        string description
-        boolean is_default
-        string layout_config
-    }
-
-    DASHBOARDS {
-        string dashboard_id PK
-        string user_id FK
-        string name
-        string description
-        boolean is_default
-        string layout_config
-    }
-
-    DASHBOARD_WIDGETS {
-        string dashboard_id FK
-        string widget_id PK
-        string widget_type
-        string layout
-        string widget_config
-    }
-
-    DASHBOARD_TEMPLATES {
-        string dashboard_key PK
-        string status
-        string version
-        string dashboard_json
-        string notes
-    }
