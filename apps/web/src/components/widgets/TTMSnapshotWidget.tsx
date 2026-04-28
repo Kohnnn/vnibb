@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useUnit } from '@/contexts/UnitContext';
 import { useTTMSnapshot } from '@/lib/queries';
 import { buildTTMSnapshotCards } from '@/lib/financialDiscovery';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface TTMSnapshotWidgetProps {
   id: string;
@@ -24,6 +25,20 @@ export function TTMSnapshotWidget({ id, symbol, onRemove }: TTMSnapshotWidgetPro
   const payload = query.data?.data
   const cards = buildTTMSnapshotCards(payload || {}, unitConfig)
   const hasData = cards.length > 0
+  const expectedCardCount = 8
+  const ttmHealth: WidgetHealthState | undefined = !hasData && !query.isLoading && !query.error
+    ? {
+        status: 'coverage_gap',
+        label: 'Coverage gap',
+        detail: `${upperSymbol} does not have enough trailing income, cash-flow, or balance-sheet rows in the current VNIBB database snapshot.`,
+      }
+    : hasData && cards.length < expectedCardCount
+      ? {
+          status: 'limited',
+          label: 'Partial TTM',
+          detail: `${cards.length} of ${expectedCardCount} core TTM fields are available for this symbol.`,
+        }
+      : undefined
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to inspect TTM snapshot" icon={<Activity size={18} />} />
@@ -46,7 +61,7 @@ export function TTMSnapshotWidget({ id, symbol, onRemove }: TTMSnapshotWidgetPro
           <div className="text-[11px] text-[var(--text-secondary)]">
             Latest trailing-twelve-month snapshot across income, cash flow, and balance sheet.
           </div>
-          <WidgetMeta updatedAt={query.dataUpdatedAt} isFetching={query.isFetching && hasData} note={unitConfig.display === 'USD' ? 'TTM · USD display' : 'TTM · VND display'} align="right" />
+          <WidgetMeta updatedAt={query.dataUpdatedAt} isFetching={query.isFetching && hasData} note={unitConfig.display === 'USD' ? 'TTM · USD display' : 'TTM · VND display'} health={ttmHealth} align="right" />
         </div>
 
         {query.isLoading && !hasData ? (
@@ -54,7 +69,12 @@ export function TTMSnapshotWidget({ id, symbol, onRemove }: TTMSnapshotWidgetPro
         ) : query.error && !hasData ? (
           <WidgetError error={query.error as Error} onRetry={() => void query.refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty message="No TTM snapshot available yet" icon={<Activity size={18} />} />
+          <WidgetEmpty
+            message={`No TTM snapshot for ${upperSymbol}`}
+            icon={<Activity size={18} />}
+            health={ttmHealth}
+            size="default"
+          />
         ) : (
           <div className="grid flex-1 grid-cols-2 gap-2 xl:grid-cols-4">
             {cards.map((card) => (

@@ -10,6 +10,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useGrowthRates } from '@/lib/queries';
 import { buildGrowthBridgeRows } from '@/lib/financialDiscovery';
 import { formatPercent } from '@/lib/units';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface GrowthBridgeWidgetProps {
   id: string;
@@ -31,6 +32,23 @@ export function GrowthBridgeWidget({ id, symbol, onRemove }: GrowthBridgeWidgetP
     [query.data?.data]
   )
   const hasData = rows.some((row) => row.annual !== null || row.quarter !== null)
+  const availableGrowthPoints = rows.reduce((count, row) => count + (row.annual !== null ? 1 : 0) + (row.quarter !== null ? 1 : 0), 0)
+  const expectedGrowthPoints = 9
+  const annualLabel = query.data?.data?.as_of?.annual || 'Annual'
+  const quarterLabel = query.data?.data?.as_of?.quarter || 'Quarter'
+  const growthHealth: WidgetHealthState | undefined = !hasData && !query.isLoading && !query.error
+    ? {
+        status: 'coverage_gap',
+        label: 'Coverage gap',
+        detail: `${upperSymbol} does not have enough annual or comparable-quarter history for growth bridge calculations.`,
+      }
+    : hasData && availableGrowthPoints < expectedGrowthPoints
+      ? {
+          status: 'limited',
+          label: 'Partial growth set',
+          detail: `${availableGrowthPoints} of ${expectedGrowthPoints} annual/quarter growth points are available.`,
+        }
+      : undefined
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view growth bridge" icon={<TrendingUp size={18} />} />
@@ -53,7 +71,7 @@ export function GrowthBridgeWidget({ id, symbol, onRemove }: GrowthBridgeWidgetP
           <div className="text-[11px] text-[var(--text-secondary)]">
             Compares annual YoY growth with the latest comparable quarter for core earnings drivers.
           </div>
-          <WidgetMeta updatedAt={query.dataUpdatedAt} isFetching={query.isFetching && hasData} note={`${query.data?.data?.as_of?.annual || 'Annual'} vs ${query.data?.data?.as_of?.quarter || 'quarter'} `} align="right" />
+          <WidgetMeta updatedAt={query.dataUpdatedAt} isFetching={query.isFetching && hasData} note={`${annualLabel} vs ${quarterLabel}`} health={growthHealth} align="right" />
         </div>
 
         {query.isLoading && !hasData ? (
@@ -61,7 +79,12 @@ export function GrowthBridgeWidget({ id, symbol, onRemove }: GrowthBridgeWidgetP
         ) : query.error && !hasData ? (
           <WidgetError error={query.error as Error} onRetry={() => void query.refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty message="No growth bridge available yet" icon={<TrendingUp size={18} />} />
+          <WidgetEmpty
+            message={`No growth bridge for ${upperSymbol}`}
+            icon={<TrendingUp size={18} />}
+            health={growthHealth}
+            size="default"
+          />
         ) : (
           <div className="space-y-3">
             {rows.map((row) => (
@@ -79,7 +102,7 @@ export function GrowthBridgeWidget({ id, symbol, onRemove }: GrowthBridgeWidgetP
                         style={{ width: `${widthForChange(row.annual)}%` }}
                       />
                       <div className="relative z-10 flex h-full items-center justify-between px-3 text-xs text-[var(--text-primary)]">
-                        <span>{query.data?.data?.as_of?.annual || 'Annual'}</span>
+                        <span>{annualLabel}</span>
                         <span className={row.annual !== null && row.annual >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
                           {formatPercent(row.annual, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}
                         </span>
@@ -94,7 +117,7 @@ export function GrowthBridgeWidget({ id, symbol, onRemove }: GrowthBridgeWidgetP
                         style={{ width: `${widthForChange(row.quarter)}%` }}
                       />
                       <div className="relative z-10 flex h-full items-center justify-between px-3 text-xs text-[var(--text-primary)]">
-                        <span>{query.data?.data?.as_of?.quarter || 'Quarter'}</span>
+                        <span>{quarterLabel}</span>
                         <span className={row.quarter !== null && row.quarter >= 0 ? 'text-cyan-300' : 'text-amber-300'}>
                           {formatPercent(row.quarter, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}
                         </span>

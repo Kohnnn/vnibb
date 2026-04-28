@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Building2, Filter, FolderOpen, Save, Search, X } from 'lucide-react';
+import { Building2, Filter, FolderOpen, RotateCcw, Save, Search, X } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
@@ -10,6 +10,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useSymbols, useSymbolsByGroup } from '@/lib/queries';
 import {
   readListingBrowserViews,
+  buildListingBrowserFilterSummary,
+  buildListingBrowserViewName,
   removeListingBrowserView,
   saveListingBrowserView,
   type ListingBrowserView,
@@ -97,15 +99,27 @@ export function ListingBrowserWidget({
   const isLoading = symbolsQuery.isLoading || groupQuery.isLoading
   const error = symbolsQuery.error || (group !== 'ALL' ? groupQuery.error : null)
   const updatedAt = Math.max(symbolsQuery.dataUpdatedAt, groupQuery.dataUpdatedAt)
+  const hasActiveFilters = exchange !== 'ALL' || group !== 'ALL' || industry !== 'ALL' || search.trim() !== '' || sortMode !== 'symbol'
+  const viewInput = { exchange, group, industry, search, sortMode }
+  const filterSummary = buildListingBrowserFilterSummary(viewInput)
+
+  const clearFilters = () => {
+    setExchange('ALL')
+    setGroup('ALL')
+    setIndustry('ALL')
+    setSearch('')
+    setSortMode('symbol')
+  }
 
   const saveCurrentView = () => {
     const next = saveListingBrowserView({
       id: `${exchange}:${group}:${industry}:${search}:${sortMode}`,
-      name: `${exchange}${group !== 'ALL' ? ` • ${group}` : ''}${industry !== 'ALL' ? ` • ${industry}` : ''}`,
+      name: buildListingBrowserViewName(viewInput),
       exchange,
       group,
       industry,
       search,
+      sortMode,
       updatedAt: new Date().toISOString(),
     })
     setSavedViews(next)
@@ -116,6 +130,7 @@ export function ListingBrowserWidget({
     setGroup(view.group as GroupFilter)
     setIndustry(view.industry)
     setSearch(view.search)
+    if (view.sortMode) setSortMode(view.sortMode as SortMode)
   }
 
   return (
@@ -184,15 +199,25 @@ export function ListingBrowserWidget({
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] text-[var(--text-secondary)]">
             <div className="flex flex-wrap items-center gap-2">
               <Filter size={12} className="text-cyan-300" />
-              <span>Filtered universe for exchange, index group, and industry discovery.</span>
+              <span>{filterSummary}</span>
             </div>
-            <button
-              type="button"
-              onClick={saveCurrentView}
-              className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 font-semibold text-blue-200 transition-colors hover:bg-blue-500/20"
-            >
-              <Save size={11} /> Save View
-            </button>
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                onClick={clearFilters}
+                disabled={!hasActiveFilters}
+                className="inline-flex items-center gap-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RotateCcw size={11} /> Clear
+              </button>
+              <button
+                type="button"
+                onClick={saveCurrentView}
+                className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 font-semibold text-blue-200 transition-colors hover:bg-blue-500/20"
+              >
+                <Save size={11} /> Save View
+              </button>
+            </div>
           </div>
 
           {savedViews.length > 0 ? (
@@ -217,7 +242,10 @@ export function ListingBrowserWidget({
           ) : error && !hasData ? (
             <WidgetError error={error as Error} onRetry={() => void symbolsQuery.refetch()} />
           ) : !hasData ? (
-            <WidgetEmpty message="No listings matched your discovery filters." icon={<Building2 size={18} />} />
+            <WidgetEmpty
+              message={hasActiveFilters ? 'No listings matched your discovery filters. Clear filters or broaden the saved view.' : 'No listing universe loaded yet.'}
+              icon={<Building2 size={18} />}
+            />
           ) : (
             <div className="space-y-1.5">
               {rows.map((item) => (

@@ -8,6 +8,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useTrendingAnalysis, useMarketSentiment } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface MarketSentimentWidgetProps {
   id: string;
@@ -50,20 +51,54 @@ export function MarketSentimentWidget({ id, onRemove }: MarketSentimentWidgetPro
   const error = sentimentQuery.error || trendingQuery.error;
   const hasData = Boolean(sentiment && sentiment.total_articles > 0);
   const updatedAt = Math.max(sentimentQuery.dataUpdatedAt, trendingQuery.dataUpdatedAt);
+  const refresh = () => {
+    void sentimentQuery.refetch();
+    void trendingQuery.refetch();
+  };
+  const awaitingNewsHealth: WidgetHealthState = {
+    status: 'awaiting_update',
+    label: 'Awaiting news',
+    detail: 'No classified market-news items are available in the current VNIBB sentiment snapshot.',
+  };
+  const noTrendingTopicsHealth: WidgetHealthState = {
+    status: 'limited',
+    label: 'Topic extraction sparse',
+    detail: 'The news feed loaded, but there were not enough repeated terms to form a reliable topic list.',
+  };
+  const noMentionedStocksHealth: WidgetHealthState = {
+    status: 'limited',
+    label: 'No ticker mentions',
+    detail: 'The news feed loaded, but no listed ticker mentions were extracted from the latest articles.',
+  };
 
   if (isLoading) {
     return <WidgetSkeleton lines={6} />;
   }
 
   if (error && !hasData) {
-    return <WidgetError error={error as Error} onRetry={() => {
-      void sentimentQuery.refetch();
-      void trendingQuery.refetch();
-    }} />;
+    return <WidgetError error={error as Error} onRetry={refresh} />;
   }
 
   if (!sentiment || sentiment.total_articles === 0) {
-    return <WidgetEmpty message="No market sentiment data available yet" icon={<Activity size={18} />} />;
+    return (
+      <WidgetContainer
+        title="Market Sentiment"
+        subtitle="News-driven pulse and discovery cues"
+        widgetId={id}
+        onClose={onRemove}
+        onRefresh={refresh}
+        noPadding
+        exportData={{ sentiment, trending }}
+        exportFilename="market_sentiment"
+      >
+        <WidgetEmpty
+          message="No market sentiment snapshot yet"
+          icon={<Activity size={18} />}
+          health={awaitingNewsHealth}
+          size="default"
+        />
+      </WidgetContainer>
+    );
   }
 
   const normalizedOverall = sentimentLabel(sentiment.overall);
@@ -77,10 +112,7 @@ export function MarketSentimentWidget({ id, onRemove }: MarketSentimentWidgetPro
       subtitle="News-driven pulse and discovery cues"
       widgetId={id}
       onClose={onRemove}
-      onRefresh={() => {
-        void sentimentQuery.refetch();
-        void trendingQuery.refetch();
-      }}
+      onRefresh={refresh}
       noPadding
       exportData={{ sentiment, trending }}
       exportFilename="market_sentiment"
@@ -133,19 +165,23 @@ export function MarketSentimentWidget({ id, onRemove }: MarketSentimentWidgetPro
         <div className="grid flex-1 grid-cols-1 gap-3 xl:grid-cols-2">
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
             <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Trending Topics</div>
-            <div className="flex flex-wrap gap-2">
-              {(trending?.topics || []).slice(0, 8).map((topic) => (
-                <span key={topic} className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 text-[10px] text-[var(--text-secondary)]">
-                  {topic}
-                </span>
-              ))}
-            </div>
+            {(trending?.topics || []).slice(0, 8).length === 0 ? (
+              <WidgetEmpty message="No reliable topics extracted" health={noTrendingTopicsHealth} size="compact" />
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {(trending?.topics || []).slice(0, 8).map((topic) => (
+                  <span key={topic} className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 text-[10px] text-[var(--text-secondary)]">
+                    {topic}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
             <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Most Mentioned Stocks</div>
             {(trending?.stocks_mentioned || []).slice(0, 8).length === 0 ? (
-              <WidgetEmpty message="No stock mentions extracted" size="compact" />
+              <WidgetEmpty message="No stock mentions extracted" health={noMentionedStocksHealth} size="compact" />
             ) : (
               <div className="flex flex-wrap gap-2">
                 {(trending?.stocks_mentioned || []).slice(0, 8).map((ticker) => (

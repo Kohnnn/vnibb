@@ -15,6 +15,7 @@ import { queryKeys, useDerivativesContracts } from '@/lib/queries';
 import { buildDerivativesCurveRows, classifyDerivativesCurve } from '@/lib/derivativesAnalytics';
 import { formatDate } from '@/lib/format';
 import { formatNumber, formatPercent } from '@/lib/units';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface DerivativesAnalyticsWidgetProps {
   id: string;
@@ -60,6 +61,33 @@ export function DerivativesAnalyticsWidget({ id, onRemove }: DerivativesAnalytic
   const isFetching = contractsQuery.isFetching || historyQueries.some((query) => query.isFetching)
   const error = contractsQuery.error || historyQueries.find((query) => query.error)?.error
   const updatedAt = Math.max(contractsQuery.dataUpdatedAt, ...historyQueries.map((query) => query.dataUpdatedAt || 0))
+  const pricedContracts = curveRows.filter((row) => row.latestClose !== null).length
+  const derivativesHealth: WidgetHealthState | undefined = !hasData && !isLoading && !error
+    ? {
+        status: 'coverage_gap',
+        label: sortedContracts.length === 0 ? 'No contracts' : 'No curve prices',
+        detail: sortedContracts.length === 0
+          ? 'No active derivatives contracts are available in the current VNIBB database snapshot.'
+          : 'Contracts loaded, but recent settlement history is unavailable for the front curve.',
+      }
+    : hasData && pricedContracts < curveRows.length
+      ? {
+          status: 'limited',
+          label: 'Partial curve',
+          detail: `${pricedContracts} of ${curveRows.length} front-curve contracts have recent close history.`,
+        }
+      : latestCurve.length === 1
+        ? {
+            status: 'limited',
+            label: 'Single contract',
+            detail: 'Only one priced contract is available, so curve slope classification is limited.',
+          }
+        : undefined
+
+  const refresh = () => {
+    void contractsQuery.refetch()
+    historyQueries.forEach((query) => { void query.refetch() })
+  }
 
   return (
     <WidgetContainer
@@ -67,10 +95,7 @@ export function DerivativesAnalyticsWidget({ id, onRemove }: DerivativesAnalytic
       subtitle="Front-contract pulse and short futures curve"
       widgetId={id}
       onClose={onRemove}
-      onRefresh={() => {
-        void contractsQuery.refetch()
-        historyQueries.forEach((query) => { void query.refetch() })
-      }}
+      onRefresh={refresh}
       noPadding
       exportData={curveRows}
       exportFilename="derivatives_analytics"
@@ -84,15 +109,20 @@ export function DerivativesAnalyticsWidget({ id, onRemove }: DerivativesAnalytic
               <div className="text-[11px] text-[var(--text-secondary)]">Short curve classification from front to far contracts</div>
             </div>
           </div>
-          <WidgetMeta updatedAt={updatedAt} isFetching={isFetching && hasData} note={`${curveRows.length} contracts`} align="right" />
+          <WidgetMeta updatedAt={updatedAt} isFetching={isFetching && hasData} note={`${curveRows.length} contracts`} health={derivativesHealth} align="right" />
         </div>
 
         {isLoading ? (
           <WidgetSkeleton lines={7} />
         ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => void contractsQuery.refetch()} />
+          <WidgetError error={error as Error} onRetry={refresh} />
         ) : !hasData ? (
-          <WidgetEmpty message="No derivatives analytics available yet" icon={<Sigma size={18} />} />
+          <WidgetEmpty
+            message="No derivatives analytics available"
+            icon={<Sigma size={18} />}
+            health={derivativesHealth}
+            size="default"
+          />
         ) : (
           <div className="flex h-full flex-col gap-3">
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">

@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useForeignTrading, useInsiderSentiment, useShareholders } from '@/lib/queries';
 import { buildOwnershipSummary } from '@/lib/ownershipAnalytics';
 import { formatNumber } from '@/lib/units';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface OwnershipRatingSummaryWidgetProps {
   id: string;
@@ -45,6 +46,26 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove }: Ownership
   const error = shareholdersQuery.error || foreignQuery.error || insiderQuery.error
   const updatedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt)
   const gradeTone = summary.grade === 'A' ? 'text-emerald-300' : summary.grade === 'B' ? 'text-cyan-300' : summary.grade === 'C' ? 'text-amber-300' : 'text-rose-300'
+  const availableSources = [shareholders.length > 0, foreignFlow.length > 0, Boolean(insider)].filter(Boolean).length
+  const ownershipHealth: WidgetHealthState | undefined = !hasData && !isLoading && !error
+    ? {
+        status: 'coverage_gap',
+        label: 'Coverage gap',
+        detail: `${upperSymbol} does not have shareholder, foreign-flow, or insider-sentiment rows in the current VNIBB database snapshot.`,
+      }
+    : hasData && availableSources < 3
+      ? {
+          status: 'limited',
+          label: 'Partial ownership view',
+          detail: `${availableSources} of 3 ownership inputs are available: shareholders, foreign flow, and insider sentiment.`,
+        }
+      : undefined
+
+  const refresh = () => {
+    void shareholdersQuery.refetch()
+    void foreignQuery.refetch()
+    void insiderQuery.refetch()
+  }
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view ownership summary" icon={<Users size={18} />} />
@@ -57,11 +78,7 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove }: Ownership
       symbol={upperSymbol}
       widgetId={id}
       onClose={onRemove}
-      onRefresh={() => {
-        void shareholdersQuery.refetch()
-        void foreignQuery.refetch()
-        void insiderQuery.refetch()
-      }}
+      onRefresh={refresh}
       noPadding
       exportData={{ summary, insider, foreignFlow: foreignFlow.slice(0, 10) }}
       exportFilename={`ownership_rating_summary_${upperSymbol}`}
@@ -75,15 +92,20 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove }: Ownership
               <div className="text-[11px] text-[var(--text-secondary)]">{summary.stance}</div>
             </div>
           </div>
-          <WidgetMeta updatedAt={updatedAt} isFetching={isFetching && hasData} note={`${summary.holderCount} holders`} align="right" />
+          <WidgetMeta updatedAt={updatedAt} isFetching={isFetching && hasData} note={`${summary.holderCount} holders`} health={ownershipHealth} align="right" />
         </div>
 
         {isLoading ? (
           <WidgetSkeleton lines={6} />
         ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => void shareholdersQuery.refetch()} />
+          <WidgetError error={error as Error} onRetry={refresh} />
         ) : !hasData ? (
-          <WidgetEmpty message="No ownership summary available yet" icon={<Users size={18} />} />
+          <WidgetEmpty
+            message={`No ownership summary for ${upperSymbol}`}
+            icon={<Users size={18} />}
+            health={ownershipHealth}
+            size="default"
+          />
         ) : (
           <div className="grid flex-1 grid-cols-2 gap-2 xl:grid-cols-4">
             <MetricCard label="Top 3" value={formatPct(summary.top3Pct)} tone="text-cyan-300" />
