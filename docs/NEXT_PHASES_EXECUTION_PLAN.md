@@ -133,6 +133,8 @@ Current shipped pass:
 - shared widget health state model for meta badges and empty-state labels
 - first-wave rollout on breadth, relative rotation, transaction flow, and foreign trading widgets
 - clearer distinction between sparse coverage, cached snapshots, stale snapshots, and awaiting publication
+- second-wave discovery rollout for `market_sentiment`, `ttm_snapshot`, and `growth_bridge` with awaiting-news, coverage-gap, partial-coverage, and sparse-extraction explanations
+- completed discovery rollout for `ownership_rating_summary` and `derivatives_analytics` with partial input coverage, missing ownership source, no-contract, and partial-curve explanations
 
 Primary targets:
 
@@ -220,6 +222,9 @@ Current shipped pass:
 - `market_sentiment` widget for aggregate mood, trending topics, and most-mentioned stocks
 - `listing_browser` v2 with exchange, index-group, industry, and search filters
 - browser-local saved listing views for recurring universe slices
+- `listing_browser` v2 saved-view polish with sort restoration, descriptive view names, active filter summaries, clear-filter action, and more specific no-match empty states
+- discovery data-quality pass for `market_sentiment`, `ttm_snapshot`, and `growth_bridge` so sparse news, missing financial coverage, and partial growth histories are explained inline
+- discovery data-quality pass for `ownership_rating_summary` and `derivatives_analytics` so partial ownership inputs and incomplete futures curves are called out clearly
 - `ttm_snapshot` widget for trailing-twelve-month income, cash flow, and balance-sheet pulse
 - `growth_bridge` widget for annual versus latest comparable-quarter growth readouts
 - `ownership_rating_summary` widget for concentration, foreign participation, and insider-bias synthesis

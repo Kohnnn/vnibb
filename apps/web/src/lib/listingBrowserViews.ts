@@ -9,7 +9,38 @@ export interface ListingBrowserView {
   group: string
   industry: string
   search: string
+  sortMode?: string
   updatedAt: string
+}
+
+export interface ListingBrowserViewInput {
+  exchange: string
+  group: string
+  industry: string
+  search: string
+  sortMode: string
+}
+
+export function buildListingBrowserViewName(view: ListingBrowserViewInput): string {
+  const parts = [view.exchange === 'ALL' ? 'All exchanges' : view.exchange]
+
+  if (view.group !== 'ALL') parts.push(view.group)
+  if (view.industry !== 'ALL') parts.push(view.industry)
+  if (view.search.trim()) parts.push(`Search: ${view.search.trim()}`)
+  if (view.sortMode !== 'symbol') parts.push(`Sort: ${view.sortMode}`)
+
+  return parts.join(' • ')
+}
+
+export function buildListingBrowserFilterSummary(view: ListingBrowserViewInput): string {
+  const filters = [view.exchange === 'ALL' ? 'all exchanges' : view.exchange]
+
+  filters.push(view.group === 'ALL' ? 'all groups' : view.group)
+  filters.push(view.industry === 'ALL' ? 'all industries' : view.industry)
+
+  if (view.search.trim()) filters.push(`matching "${view.search.trim()}"`)
+
+  return `Showing ${filters.join(', ')}. Sorted by ${view.sortMode}.`
 }
 
 export function readListingBrowserViews(): ListingBrowserView[] {
