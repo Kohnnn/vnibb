@@ -223,6 +223,20 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
         });
     }, [activeTabName, isOpen, symbol, widgetContext, widgetTypeKey]);
 
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const handleEscape = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            onClose();
+        };
+
+        window.addEventListener('keydown', handleEscape, true);
+        return () => window.removeEventListener('keydown', handleEscape, true);
+    }, [isOpen, onClose]);
+
     // Save prompts to localStorage
     const savePrompts = (newPrompts: Prompt[]) => {
         setPrompts(newPrompts);
@@ -301,13 +315,18 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
             />
 
             {/* Modal */}
-            <div className="relative w-full max-w-2xl max-h-[80vh] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl overflow-hidden flex flex-col">
+            <div
+                className="relative w-full max-w-2xl max-h-[80vh] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl overflow-hidden flex flex-col"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="prompt-library-title"
+            >
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] shrink-0">
                     <div className="flex items-center gap-2">
                         <Sparkles size={18} className="text-blue-400" />
                         <div>
-                            <h2 className="text-base font-semibold text-[var(--text-primary)]">VniAgent Prompt Library</h2>
+                            <h2 id="prompt-library-title" className="text-base font-semibold text-[var(--text-primary)]">VniAgent Prompt Library</h2>
                             <p className="text-xs text-[var(--text-muted)]">Context-aware prompt templates for Vietnam market research</p>
                         </div>
                     </div>

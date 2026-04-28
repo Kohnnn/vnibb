@@ -33,6 +33,7 @@ import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
+import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
 import { cn } from '@/lib/utils';
 
 interface CommandPaletteProps {
@@ -107,6 +108,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   } = useDashboard();
   const { setGlobalSymbol: setWidgetGroupGlobalSymbol } = useWidgetGroups();
   const { setGlobalSymbol: setLinkedGlobalSymbol } = useSymbolLink();
+  const { setGlobalMarketsSymbol } = useGlobalMarketsSymbol();
 
   useEffect(() => {
     if (!open) return;
@@ -263,6 +265,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       description: 'Open a global asset chart widget in the Global Markets tab',
     };
     actions.set(tradingViewItem.id, () => {
+      setGlobalMarketsSymbol('NASDAQ:AAPL');
       const destination = resolveTradingViewDestination();
       if (destination.existingWidgetId) {
         updateWidget(destination.dashboardId, destination.tabId, destination.existingWidgetId, {
@@ -291,6 +294,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     router,
     setActiveDashboard,
     setActiveTab,
+    setGlobalMarketsSymbol,
     state.dashboards,
     updateTab,
     updateWidget,
@@ -371,6 +375,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     if (!normalizedSymbol) return;
     setWidgetGroupGlobalSymbol(normalizedSymbol);
     setLinkedGlobalSymbol(normalizedSymbol);
+    setGlobalMarketsSymbol(normalizedSymbol);
     if (activeDashboard) {
       updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
     }
@@ -393,17 +398,19 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       return;
     }
 
+    const tradingViewSymbol = item.tv_symbol || item.symbol;
+    setGlobalMarketsSymbol(tradingViewSymbol);
     const destination = resolveTradingViewDestination();
     if (destination.existingWidgetId) {
       updateWidget(destination.dashboardId, destination.tabId, destination.existingWidgetId, {
         type: 'tradingview_chart',
-        config: { ...destination.existingConfig, symbol: item.tv_symbol || item.symbol },
+        config: { ...destination.existingConfig, symbol: tradingViewSymbol },
       });
     } else {
       addWidget(destination.dashboardId, destination.tabId, {
         type: 'tradingview_chart',
         tabId: destination.tabId,
-        config: { symbol: item.tv_symbol || item.symbol },
+        config: { symbol: tradingViewSymbol },
         layout: { x: 0, y: Infinity, w: 10, h: 8, minW: 8, minH: 6 },
       });
     }

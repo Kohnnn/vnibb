@@ -316,7 +316,7 @@ function getWidgetAwareIntro(widgetContext?: string, activeTabName?: string, sym
     if (widgetContext) {
         return `Connected to @${widgetContext} on ${tabLabel} for ${symbol}. Ask me to explain the widget, call out anomalies, or connect it to the broader thesis.`;
     }
-    return `Ask me anything about ${symbol}`;
+    return `Ask VniAgent about ${symbol}: fundamentals, valuation, technical setup, risks, or what changed in this workspace.`;
 }
 
 function getInputPlaceholder(widgetContext?: string): string {
@@ -437,6 +437,9 @@ export function AICopilot({
     useEffect(() => {
         if (isOpen) {
             inputRef.current?.focus();
+        } else {
+            setIsPromptLibraryOpen(false);
+            setIsComposerToolsOpen(false);
         }
     }, [isOpen]);
 
@@ -851,7 +854,9 @@ export function AICopilot({
                         {currentSymbol}
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 text-blue-100/80">
-                        <Clock3 size={11} /> {currentSessionMessageCount} saved message{currentSessionMessageCount === 1 ? '' : 's'} in this context
+                        <Clock3 size={11} /> {currentSessionMessageCount > 0
+                            ? `${currentSessionMessageCount} saved message${currentSessionMessageCount === 1 ? '' : 's'} in this context`
+                            : 'Fresh context for this symbol'}
                     </span>
                 </div>
             </div>
@@ -953,7 +958,10 @@ export function AICopilot({
                     <div className="space-y-4">
                         <div className="text-center text-[var(--text-muted)] py-8">
                             <Sparkles size={40} className="mx-auto mb-3 text-cyan-300/70" />
-                            <p className="text-sm">{getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)}</p>
+                            <div className="text-sm font-semibold text-[var(--text-primary)]">Start with evidence from the VNIBB database</div>
+                            <p className="mx-auto mt-2 max-w-[26rem] text-xs leading-5">
+                                {getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)} Responses prioritize your configured VNIBB/Appwrite data, attached documents, and the active workspace context before external sources.
+                            </p>
                         </div>
 
                         {/* Suggested Prompts */}
