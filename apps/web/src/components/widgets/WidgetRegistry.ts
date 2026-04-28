@@ -109,7 +109,8 @@ import {
     tradingViewWidgetDescriptions,
     tradingViewWidgetNames,
 } from '@/lib/tradingViewWidgets';
-import type { ComponentType } from 'react';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { createElement, type ComponentType } from 'react';
 import dynamic from 'next/dynamic';
 
 export interface WidgetProps {
@@ -123,12 +124,20 @@ export interface WidgetProps {
     widgetGroup?: WidgetGroupId;
 }
 
+function DynamicWidgetLoading() {
+    return createElement(WidgetSkeleton, { lines: 6 });
+}
+
+function DynamicChartWidgetLoading() {
+    return createElement(WidgetSkeleton, { variant: 'chart' });
+}
+
 function createTradingViewDynamicWidget(exportName: string): ComponentType<WidgetProps> {
     return dynamic(
         () => import('./TradingViewNativeWidgets').then((module) => module[exportName as keyof typeof module] as any),
         {
             ssr: false,
-            loading: () => null,
+            loading: DynamicChartWidgetLoading,
         }
     ) as ComponentType<WidgetProps>;
 }
@@ -137,7 +146,7 @@ const PriceChartWidget = dynamic(
     () => import('./PriceChartWidget').then((m) => m.PriceChartWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicChartWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
@@ -171,7 +180,7 @@ const FinancialsWidget = dynamic(
     () => import('./FinancialsWidget').then((m) => m.FinancialsWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
@@ -179,20 +188,20 @@ const ComparisonAnalysisWidget = dynamic(
     () => import('./ComparisonAnalysisWidget').then((m) => m.ComparisonAnalysisWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
 const ResearchBrowserWidget = dynamic(() => import('./ResearchBrowserWidget'), {
     ssr: false,
-    loading: () => null,
+    loading: DynamicWidgetLoading,
 }) as ComponentType<WidgetProps>;
 
 const ScreenerWidget = dynamic(
     () => import('./ScreenerWidget').then((m) => m.ScreenerWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
@@ -200,7 +209,7 @@ const NewsFeedWidget = dynamic(
     () => import('./NewsFeedWidget').then((m) => m.NewsFeedWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
@@ -208,7 +217,7 @@ const IndustryBubbleWidget = dynamic(
     () => import('./IndustryBubbleWidget').then((m) => m.IndustryBubbleWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicChartWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
@@ -216,7 +225,7 @@ const SectorBoardWidget = dynamic(
     () => import('./SectorBoardWidget').then((m) => m.SectorBoardWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
@@ -224,7 +233,7 @@ const PeerComparisonWidget = dynamic(
     () => import('./PeerComparisonWidget').then((m) => m.PeerComparisonWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
@@ -232,7 +241,7 @@ const ComparisonWidget = dynamic(
     () => import('./ComparisonWidget').then((m) => m.ComparisonWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
@@ -240,7 +249,7 @@ const PortfolioTrackerWidget = dynamic(
     () => import('./PortfolioTrackerWidget').then((m) => m.PortfolioTrackerWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
@@ -248,7 +257,7 @@ const PriceAlertsWidget = dynamic(
     () => import('./PriceAlertsWidget').then((m) => m.PriceAlertsWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 
@@ -256,7 +265,7 @@ const MarketHeatmapWidget = dynamic(
     () => import('./MarketHeatmapWidget').then((m) => m.MarketHeatmapWidget as any),
     {
         ssr: false,
-        loading: () => null,
+        loading: DynamicChartWidgetLoading,
     }
 ) as ComponentType<WidgetProps>;
 

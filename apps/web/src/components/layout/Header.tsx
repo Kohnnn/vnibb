@@ -1,13 +1,12 @@
-// Header component with symbol search
+// Header component with market status and workspace controls
 
 'use client'
 
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import {
   Command,
   Search,
   User,
-  X,
   MoreHorizontal,
   Settings2,
   LayoutGrid,
@@ -19,7 +18,6 @@ import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useHistoricalPrices, useMarketOverview, useStockQuote } from '@/lib/queries'
 import { probeBackendReadiness } from '@/lib/backendHealth'
-import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics'
 import type { UnitDisplay } from '@/lib/units'
 import { cn } from '@/lib/utils'
 import {
@@ -82,7 +80,6 @@ function getVietnamMarketStatus(reference = new Date()): { label: string; isOpen
 
 interface HeaderProps {
   currentSymbol: string
-  onSymbolChange: (symbol: string) => void
   isEditing?: boolean
   onEditToggle?: () => void
   onAIClick?: () => void
@@ -97,7 +94,6 @@ interface HeaderProps {
 
 export function Header({
   currentSymbol,
-  onSymbolChange,
   isEditing = false,
   onEditToggle,
   onAIClick,
@@ -109,9 +105,6 @@ export function Header({
   unitDisplay = 'auto',
   onUnitDisplayChange,
 }: HeaderProps) {
-  const [searchValue, setSearchValue] = useState(currentSymbol)
-  const [isSearching, setIsSearching] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
   const hasActionMenu = Boolean(
     onResetLayout || onCollapseAll || onExpandAll
   )
@@ -206,12 +199,6 @@ export function Header({
   const healthTitle = `${marketStatus.label} • Backend ${healthBadge.label}`
 
   useEffect(() => {
-    if (!isSearching) {
-      setSearchValue(currentSymbol)
-    }
-  }, [currentSymbol, isSearching])
-
-  useEffect(() => {
     const timer = window.setInterval(() => {
       setMarketClock(Date.now())
     }, 60 * 1000)
@@ -250,30 +237,11 @@ export function Header({
     }
   }, [])
 
-  const handleSearch = useCallback(() => {
-    const normalized = searchValue.trim().toUpperCase()
-    if (normalized) {
-      captureAnalyticsEvent(ANALYTICS_EVENTS.symbolSearchSubmitted, {
-        symbol: normalized,
-        source: 'header_search',
-      })
-      onSymbolChange(normalized)
-      setSearchValue(normalized)
-      setIsSearching(false)
-    }
-  }, [searchValue, onSymbolChange])
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        handleSearch()
-      } else if (e.key === 'Escape') {
-        setSearchValue(currentSymbol)
-        setIsSearching(false)
-      }
-    },
-    [handleSearch, currentSymbol]
-  )
+  const openHeaderSearch = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('vnibb:open-command-palette', {
+      detail: { source: 'header_search' },
+    }))
+  }, [])
 
   return (
     <header className="relative z-30 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85">
@@ -313,68 +281,38 @@ export function Header({
           </div>
 
           <div data-tour="header-search" className="relative min-w-[220px] flex-1">
-          <Search
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-            size={14}
-          />
-          <input
-            ref={inputRef}
-            type="text"
-            aria-label="Search symbol"
-            value={searchValue}
-            onChange={(e) => {
-              setSearchValue(e.target.value.toUpperCase())
-              setIsSearching(true)
-            }}
-            onFocus={(e) => {
-              setIsSearching(true)
-              const normalizedCurrent = currentSymbol.trim().toUpperCase()
-              const normalizedSearch = searchValue.trim().toUpperCase()
-              if (normalizedSearch === normalizedCurrent) {
-                setSearchValue('')
-              } else {
-                e.target.select()
-              }
-            }}
-            onKeyDown={handleKeyDown}
-            onBlur={() => {
-              setTimeout(() => {
-                if (isSearching) handleSearch()
-              }, 150)
-            }}
-            placeholder="Search symbol or press Ctrl+K"
-            className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-10 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-all focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/10"
-          />
-          {searchValue && searchValue !== currentSymbol && (
             <button
               type="button"
-              onClick={() => {
-                setSearchValue(currentSymbol)
-                setIsSearching(false)
-                inputRef.current?.focus()
-              }}
-              className="absolute right-10 top-1/2 -translate-y-1/2 text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
-              title="Clear search"
-              aria-label="Clear search"
+              aria-label="Open symbol search and command palette"
+              onClick={openHeaderSearch}
+              className="flex w-full items-center justify-between gap-3 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-left text-xs text-[var(--text-primary)] transition-all hover:border-blue-500/40 hover:bg-[var(--bg-hover)] focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/10"
             >
-              <X size={12} />
+              <Search
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
+                size={14}
+              />
+              <span className="min-w-0 truncate text-[var(--text-secondary)]">
+                Search tickers, commands, and workspaces
+              </span>
+              <span className="hidden shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] sm:inline-flex">
+                Ctrl+K
+              </span>
             </button>
-          )}
           </div>
 
           <div data-tour="header-tools" className="flex shrink-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent('vnibb:open-command-palette', {
-              detail: { source: 'header_button' },
-            }))}
-            className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            title="Open command palette (Ctrl+K)"
-            aria-label="Open command palette"
-          >
-            <Command size={13} />
-            <span className="hidden md:inline">Ctrl+K</span>
-          </button>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('vnibb:open-command-palette', {
+                detail: { source: 'header_button' },
+              }))}
+              className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              title="Open command palette (Ctrl+K)"
+              aria-label="Open command palette"
+            >
+              <Command size={13} />
+              <span className="hidden md:inline">Ctrl+K</span>
+            </button>
 
           {onAIClick && (
             <button

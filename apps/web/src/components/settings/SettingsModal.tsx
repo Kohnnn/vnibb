@@ -1233,19 +1233,51 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
               </div>
             )}
-            {activeTab === 'notifications' && <div className="text-[var(--text-muted)] text-sm">Notification settings coming soon.</div>}
+            {activeTab === 'notifications' && (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-2 text-blue-300">
+                      <Bell size={16} />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-[var(--text-primary)]">Price alerts are managed from widgets</div>
+                      <div className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+                        Use Price Alerts and Alert Settings widgets to create symbol-specific thresholds. This settings tab is reserved for delivery channels, quiet hours, and global alert defaults once notification delivery is enabled.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-300">Available Now</div>
+                    <div className="mt-2 text-xs text-[var(--text-secondary)]">In-workspace price alerts, alert history, and widget-level thresholds.</div>
+                  </div>
+                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">Planned</div>
+                    <div className="mt-2 text-xs text-[var(--text-secondary)]">Email, browser push, and default notification policies.</div>
+                  </div>
+                </div>
+              </div>
+            )}
             {activeTab === 'appearance' && (
               <div className="space-y-6">
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Theme</h4>
                   <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-                    <div className="text-sm font-bold text-blue-300">Dark mode only</div>
+                    <div className="text-sm font-bold text-blue-300">Dark mode locked for this release</div>
                     <div className="mt-1 text-xs text-[var(--text-muted)]">
-                      Light mode is temporarily disabled to keep layout, chart, and widget rendering consistent.
+                      The dashboard is currently tuned for dark surfaces so TradingView embeds, dense tables, and financial charts stay visually consistent. Light mode will return after widget color tokens and chart overlays are audited together.
                     </div>
                     <div className="mt-3 inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[11px] font-semibold text-blue-300">
                       Active theme: {resolvedTheme}
                     </div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                  <div className="text-sm font-bold text-[var(--text-primary)]">Display controls still live in the header</div>
+                  <div className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+                    Use the header display menu for unit formatting and precision. Appearance settings will consolidate density, theme, and chart-style defaults after the visual QA pass.
                   </div>
                 </div>
               </div>

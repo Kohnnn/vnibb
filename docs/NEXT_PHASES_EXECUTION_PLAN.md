@@ -82,6 +82,8 @@ Current shipped pass:
 - site settings now include a current-runtime summary card for VniAgent
 - the main VniAgent sidebar now exposes recent archived sessions with restore support
 - the sidebar header now makes symbol, tab, widget, provider, mode, model, and database-first stance visible at a glance
+- finalization pass clarifies the empty VniAgent state as VNIBB database-first, replaces `0 saved messages` copy with fresh-context messaging, and closes nested prompt/tool surfaces when the sidebar closes
+- settings placeholder cleanup now explains notification delivery status, current widget-based alerts, and dark-mode release guardrails instead of showing generic `coming soon` copy
 
 Primary targets:
 
@@ -242,6 +244,14 @@ Deliverables:
 - per-widget capability hints from docs inside settings
 - macro dashboard presets by use case: FX, rates, equities, crypto
 - tighter alignment between typed settings and final runtime payloads
+
+Current shipped pass:
+
+- header search now opens the full command palette so ticker search, commands, workspaces, recents, and Global Markets routing share one entry point
+- VN ticker selection and header/global symbol changes now update the Global Markets symbol used by linked TradingView widgets
+- non-VN command-palette selections update the Global Markets symbol and reuse the TradingView symbol when creating or updating chart widgets
+- dynamic TradingView and heavy widget imports now show widget skeleton fallbacks instead of blank loading panels
+- VniAgent Prompt Library now handles Escape inside the nested modal, preventing parent/sidebar ghost-close behavior
 
 Primary targets:
 

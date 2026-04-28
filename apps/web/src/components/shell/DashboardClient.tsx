@@ -112,7 +112,7 @@ function DashboardContent() {
 
     const { setGlobalSymbol: setContextGlobalSymbol } = useWidgetGroups();
     const { globalSymbol: stockGlobalSymbol, setGlobalSymbol: setStockGlobalSymbol } = useSymbolLink();
-    const { globalMarketsSymbol } = useGlobalMarketsSymbol();
+    const { globalMarketsSymbol, setGlobalMarketsSymbol } = useGlobalMarketsSymbol();
     const { config: unitConfig, setUnit } = useUnit();
 
     const [isEditing, setIsEditing] = useState(false);
@@ -382,10 +382,11 @@ function DashboardContent() {
 
         setStockGlobalSymbol(normalizedSymbol);
         setContextGlobalSymbol(normalizedSymbol);
+        setGlobalMarketsSymbol(normalizedSymbol);
         if (activeDashboard) {
             updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
         }
-    }, [activeDashboard, activeTab?.id, setContextGlobalSymbol, setStockGlobalSymbol, stockGlobalSymbol, updateSyncGroupSymbol]);
+    }, [activeDashboard, activeTab?.id, setContextGlobalSymbol, setGlobalMarketsSymbol, setStockGlobalSymbol, stockGlobalSymbol, updateSyncGroupSymbol]);
 
     const isSystemFundamentalsTab =
         activeDashboard?.id === MAIN_FUNDAMENTAL_DASHBOARD_ID &&
@@ -906,7 +907,6 @@ function DashboardContent() {
             <main className="flex-1 min-w-0 flex flex-col relative overflow-hidden">
                 <Header
                     currentSymbol={stockGlobalSymbol}
-                    onSymbolChange={handleSymbolChange}
                     isEditing={isEditing}
                     onEditToggle={canEditCurrentDashboard ? handleEditToggle : undefined}
                     isAIOpen={showAICopilot}
