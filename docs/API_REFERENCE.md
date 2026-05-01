@@ -76,6 +76,18 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 - `GET /market/heatmap`
 - `GET /market/research/rss-feed`
 
+### News
+- `GET /news/feed`
+- `GET /news/flow`
+- `GET /news/world`
+- `GET /news/world/sources`
+
+World news monitor notes:
+- `GET /news/world` returns live RSS/Atom headlines from the maintained Vietnam and global source registry.
+- Supported filters are `region=vietnam|asia|us|europe|global`, `category=markets|economy|business|geopolitics|technology`, `language=vi|en`, `source=<source id or domain>`, `limit`, and `freshness_hours`.
+- Every article includes the original article `url`, source homepage `source_url`, feed `feed_url`, source/domain metadata, classification tags, and a `live=true` marker.
+- `GET /news/world/sources` returns the maintained source registry so operators can audit source names, domains, homepage links, and live feed URLs.
+
 Market data notes:
 - `GET /market/indices` is a mixed-source snapshot for `VNINDEX`, `VN30`, `HNX`, and `UPCOM`.
 - Yahoo Finance is the fast path for mapped symbols. Any required index missing from Yahoo falls back to `vnstock` before persisted DB rows are used as a last-known snapshot.

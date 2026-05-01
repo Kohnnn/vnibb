@@ -52,6 +52,7 @@ Legacy aliases such as `company_profile`, `financials`, `institutional_ownership
 
 - `financial_snapshot`: combined P&L, balance sheet, cash flow, and ratio snapshot
 - `earnings_release_recap`: quarter recap combining statement deltas, cash-flow context, quality checks, and linked news/events
+- `world_news_monitor`: live Vietnam and global RSS/Atom news monitor with article, source, and feed links
 
 ## Persistence Rules
 
@@ -155,6 +156,7 @@ Recent shipped system template changes:
 - Technical `Trading` removes duplicate foreign-trading placement and gives order-flow widgets usable height.
 - Technical `Market` increases top-row market widget height and gives heatmap / sector board more responsive room.
 - Quant `Market` removes duplicate `rs_ranking` / `relative_rotation` placement in favor of broader market context widgets.
+- Global Markets and News & Events templates now include `world_news_monitor` so live external source links are available in default workspaces.
 
 ## Dashboard Intelligence
 
@@ -172,6 +174,7 @@ Recent shipped system template changes:
 - `listing_browser` is now a discovery-first universe browser rather than a plain listing dump.
 - `listing_browser` should support exchange, index-group, industry, and search filtering together, plus browser-local saved views.
 - `market_sentiment` should act as a top-down narrative discovery widget, pairing aggregate mood with trending topics and most-mentioned stocks.
+- `world_news_monitor` should preserve source transparency by showing original article links, source homepage links, and feed links for every headline.
 - `ttm_snapshot` should compress trailing-twelve-month income, cash flow, and balance-sheet scale into a fast current-state pulse.
 - `growth_bridge` should compare annual growth with the latest comparable-quarter growth so users can detect acceleration or stall quickly.
 - `ownership_rating_summary` should synthesize concentration, foreign participation, and insider bias into a compact ownership-quality readout.
