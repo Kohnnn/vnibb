@@ -485,6 +485,100 @@ export async function getCompanyNews(
     });
 }
 
+export type WorldNewsRegion = 'vietnam' | 'asia' | 'us' | 'europe' | 'global';
+export type WorldNewsCategory = 'markets' | 'economy' | 'business' | 'geopolitics' | 'technology';
+export type WorldNewsLanguage = 'vi' | 'en';
+
+export interface WorldNewsArticle {
+    id: string;
+    title: string;
+    summary: string | null;
+    source_id: string;
+    source: string;
+    source_domain: string;
+    source_url: string;
+    feed_url: string;
+    url: string;
+    published_at: string | null;
+    region: WorldNewsRegion;
+    category: WorldNewsCategory;
+    language: WorldNewsLanguage;
+    tags: string[];
+    relevance_score: number;
+    live: boolean;
+}
+
+export interface WorldNewsFeedResponse {
+    articles: WorldNewsArticle[];
+    total: number;
+    fetched_at: string;
+    source_count: number;
+    feed_count: number;
+    failed_feed_count: number;
+    region: WorldNewsRegion | null;
+    category: WorldNewsCategory | null;
+    language: WorldNewsLanguage | null;
+    source: string | null;
+    freshness_hours: number;
+}
+
+export interface WorldNewsSourceInfo {
+    id: string;
+    name: string;
+    domain: string;
+    region: WorldNewsRegion;
+    category: WorldNewsCategory;
+    language: WorldNewsLanguage;
+    tier: number;
+    homepage_url: string;
+    feed_urls: string[];
+}
+
+export interface WorldNewsSourcesResponse {
+    sources: WorldNewsSourceInfo[];
+    total: number;
+}
+
+export async function getWorldNews(options?: {
+    region?: WorldNewsRegion;
+    category?: WorldNewsCategory;
+    language?: WorldNewsLanguage;
+    source?: string;
+    limit?: number;
+    freshnessHours?: number;
+    signal?: AbortSignal;
+}): Promise<WorldNewsFeedResponse> {
+    return fetchAPI<WorldNewsFeedResponse>('/news/world', {
+        params: {
+            region: options?.region,
+            category: options?.category,
+            language: options?.language,
+            source: options?.source,
+            limit: options?.limit,
+            freshness_hours: options?.freshnessHours,
+        },
+        signal: options?.signal,
+        timeout: 20000,
+    });
+}
+
+export async function getWorldNewsSources(options?: {
+    region?: WorldNewsRegion;
+    category?: WorldNewsCategory;
+    language?: WorldNewsLanguage;
+    signal?: AbortSignal;
+}): Promise<WorldNewsSourcesResponse> {
+    return fetchAPI<WorldNewsSourcesResponse>('/news/world/sources', {
+        params: {
+            region: options?.region,
+            category: options?.category,
+            language: options?.language,
+        },
+        signal: options?.signal,
+        timeout: 10000,
+    });
+}
+
 export async function getCompanyEvents(
     symbol: string,
     options?: { limit?: number }

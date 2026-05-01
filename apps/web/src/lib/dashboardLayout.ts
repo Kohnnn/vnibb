@@ -95,6 +95,7 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   news_corporate_actions: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 2 },
   events_calendar: { preferredW: 12, preferredH: 8, minW: 8, minH: 5, orientation: 'vertical', expandPriority: 2 },
   market_news: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  world_news_monitor: { preferredW: 12, preferredH: 9, minW: 8, minH: 6, orientation: 'vertical', expandPriority: 3 },
   volume_analysis: { preferredW: 8, preferredH: 6, minW: 6, minH: 5, orientation: 'horizontal', expandPriority: 2 },
   peer_comparison: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
   comparison_analysis: { preferredW: 10, preferredH: 8, minW: 6, minH: 5, orientation: 'vertical', expandPriority: 2 },

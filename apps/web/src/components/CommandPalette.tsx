@@ -258,6 +258,25 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     });
     items.push(marketNewsItem);
 
+    const worldNewsItem: CommandPaletteActionItem = {
+      id: 'command:add-world-news-monitor',
+      type: 'command',
+      label: 'Add World News Monitor',
+      description: 'Add live Vietnam and global RSS source links to the active tab',
+    };
+    actions.set(worldNewsItem.id, () => {
+      if (state.activeDashboardId && state.activeTabId) {
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'world_news_monitor',
+          tabId: state.activeTabId,
+          config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 },
+          layout: { x: 0, y: Infinity, w: 12, h: 9 },
+        });
+      }
+      onOpenChange(false);
+    });
+    items.push(worldNewsItem);
+
     const tradingViewItem: CommandPaletteActionItem = {
       id: 'command:add-tradingview',
       type: 'command',

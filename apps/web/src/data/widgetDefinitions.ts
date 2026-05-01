@@ -796,6 +796,16 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['commodities', 'gold', 'oil', 'macro', 'global']
     },
     {
+        type: 'world_news_monitor',
+        name: 'World News Monitor',
+        description: 'Live Vietnam and global RSS/Atom news sources with direct article, source, and feed links',
+        category: 'global_markets',
+        defaultConfig: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 },
+        defaultLayout: { w: 12, h: 9, minW: 8, minH: 6 },
+        recommended: true,
+        searchKeywords: ['world news', 'rss', 'live news', 'vietnam news', 'macro', 'global', 'geopolitics']
+    },
+    {
         type: 'similar_stocks',
         name: 'Similar Stocks',
         description: 'Find stocks similar to current symbol',
@@ -1019,6 +1029,7 @@ const widgetDefaultLayoutOverrides: Partial<Record<WidgetType, WidgetDefinition[
     block_trade: { w: 12, h: 8, minW: 8, minH: 6 },
     orderbook: { w: 12, h: 8, minW: 8, minH: 6 },
     market_news: { w: 12, h: 9, minW: 8, minH: 6 },
+    world_news_monitor: { w: 12, h: 9, minW: 8, minH: 6 },
 };
 
 widgetDefinitions.forEach((widget) => {

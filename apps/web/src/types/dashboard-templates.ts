@@ -75,6 +75,7 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { type: 'tradingview_forex_cross_rates', layout: { x: 0, y: 22, w: 8, h: 7 } },
       { type: 'tradingview_stock_heatmap', layout: { x: 8, y: 22, w: 8, h: 7 } },
       { type: 'tradingview_top_stories', layout: { x: 16, y: 22, w: 8, h: 7 }, config: { feedMode: 'all_symbols' } },
+      { type: 'world_news_monitor', layout: { x: 0, y: 29, w: 12, h: 8 }, config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 } },
     ],
   },
   {
@@ -192,6 +193,7 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { type: 'market_news', layout: { x: 12, y: 0, w: 12, h: 8 } },
       { type: 'events_calendar', layout: { x: 0, y: 8, w: 12, h: 6 } },
       { type: 'price_chart', layout: { x: 12, y: 8, w: 12, h: 6 } },
+      { type: 'world_news_monitor', layout: { x: 0, y: 14, w: 12, h: 8 }, config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 } },
     ],
   },
   {

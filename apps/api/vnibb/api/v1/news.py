@@ -6,23 +6,34 @@ Uses vnstock_news premium package.
 """
 
 import logging
-from typing import Optional, List, Dict, Any
 from collections import defaultdict
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from pydantic import BaseModel
 
-from vnibb.core.config import settings
-from vnibb.services.news_crawler import news_crawler
-from vnibb.services.sentiment_analyzer import sentiment_analyzer
-from vnibb.providers.vnstock.equity_screener import (
-    VnstockScreenerFetcher,
-    StockScreenerParams,
-    ScreenerData,
-)
-from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
-from vnibb.services.cache_manager import CacheManager
 from vnibb.core.cache import cached
+from vnibb.core.config import settings
+from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.providers.vnstock.equity_screener import (
+    ScreenerData,
+    StockScreenerParams,
+    VnstockScreenerFetcher,
+)
+from vnibb.services.cache_manager import CacheManager
+from vnibb.services.news_crawler import news_crawler
+from vnibb.services.news_service import (
+    NewsResponse,
+    get_news_flow,
+    get_ranked_news_rows,
+)
+from vnibb.services.sentiment_analyzer import sentiment_analyzer
+from vnibb.services.world_news_service import (
+    WorldNewsFeedResponse,
+    WorldNewsSourcesResponse,
+    get_world_news_feed,
+    list_world_news_sources,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -31,43 +42,43 @@ logger = logging.getLogger(__name__)
 class NewsArticle(BaseModel):
     """News article with AI sentiment."""
 
-    id: Optional[int] = None
+    id: int | None = None
     title: str
-    summary: Optional[str] = None
-    content: Optional[str] = None
+    summary: str | None = None
+    content: str | None = None
     source: str
-    url: Optional[str] = None
-    author: Optional[str] = None
-    image_url: Optional[str] = None
-    category: Optional[str] = None
-    published_date: Optional[str] = None
-    related_symbols: List[str] = []
-    sectors: List[str] = []
-    sentiment: Optional[str] = None
-    sentiment_score: Optional[float] = None
-    ai_summary: Optional[str] = None
+    url: str | None = None
+    author: str | None = None
+    image_url: str | None = None
+    category: str | None = None
+    published_date: str | None = None
+    related_symbols: list[str] = []
+    sectors: list[str] = []
+    sentiment: str | None = None
+    sentiment_score: float | None = None
+    ai_summary: str | None = None
     read_count: int = 0
     bookmarked: bool = False
-    relevance_score: Optional[float] = None
-    matched_symbols: List[str] = []
-    match_reason: Optional[str] = None
+    relevance_score: float | None = None
+    matched_symbols: list[str] = []
+    match_reason: str | None = None
     is_market_wide_fallback: bool = False
 
 
 class NewsFeed(BaseModel):
     """News feed response."""
 
-    articles: List[NewsArticle]
+    articles: list[NewsArticle]
     total: int
-    source: Optional[str] = None
+    source: str | None = None
     mode: str = "all"
     fallback_used: bool = False
 
 
 async def get_news_feed(
-    source: Optional[str] = None,
-    sentiment: Optional[str] = None,
-    symbol: Optional[str] = None,
+    source: str | None = None,
+    sentiment: str | None = None,
+    symbol: str | None = None,
     limit: int = 20,
     offset: int = 0,
     mode: str = "all",
@@ -82,7 +93,7 @@ async def get_news_feed(
         mode=mode,
     )
 
-    normalized: List[NewsArticle] = []
+    normalized: list[NewsArticle] = []
     for item in articles:
         published_date = item.get("published_date") or item.get("published_at")
         if hasattr(published_date, "isoformat"):
@@ -147,8 +158,8 @@ class MarketSentiment(BaseModel):
 class TrendingAnalysis(BaseModel):
     """Trending topics analysis."""
 
-    topics: List[str] = []
-    stocks_mentioned: List[str] = []
+    topics: list[str] = []
+    stocks_mentioned: list[str] = []
     sentiment: str = "neutral"
 
 
@@ -157,7 +168,7 @@ class CrawlStatus(BaseModel):
 
     status: str
     message: str
-    count: Optional[int] = None
+    count: int | None = None
 
 
 # ============================================================================
@@ -171,19 +182,19 @@ class HeatmapStock(BaseModel):
     symbol: str
     name: str
     sector: str
-    industry: Optional[str] = None
+    industry: str | None = None
     market_cap: float
     price: float
     change: float  # Absolute price change
     change_pct: float  # Percentage change
-    volume: Optional[float] = None
+    volume: float | None = None
 
 
 class SectorGroup(BaseModel):
     """Aggregated sector data for heatmap."""
 
     sector: str
-    stocks: List[HeatmapStock]
+    stocks: list[HeatmapStock]
     total_market_cap: float
     avg_change_pct: float
     stock_count: int
@@ -196,7 +207,7 @@ class HeatmapResponse(BaseModel):
     group_by: str
     color_metric: str
     size_metric: str
-    sectors: List[SectorGroup]
+    sectors: list[SectorGroup]
     cached: bool = False
 
 
@@ -204,11 +215,71 @@ class HeatmapResponse(BaseModel):
 # NEWS ENDPOINTS
 # ============================================================================
 
-from vnibb.services.news_service import (
-    NewsResponse,
-    get_news_flow,
-    get_ranked_news_rows,
+@router.get(
+    "/world",
+    response_model=WorldNewsFeedResponse,
+    summary="Get World News Monitor Feed",
+    description="Get live RSS/Atom headlines from Vietnam and global business, market, and macro sources.",
 )
+@cached(ttl=300, key_prefix="world_news")
+async def get_world_news_api(
+    region: str | None = Query(
+        default=None,
+        pattern=r"^(vietnam|asia|us|europe|global)$",
+        description="Optional source region filter",
+    ),
+    category: str | None = Query(
+        default=None,
+        pattern=r"^(markets|economy|business|geopolitics|technology)$",
+        description="Optional classified category filter",
+    ),
+    language: str | None = Query(
+        default=None,
+        pattern=r"^(vi|en)$",
+        description="Optional language filter",
+    ),
+    source: str | None = Query(
+        default=None,
+        description="Optional source id or domain filter, for example cafef_markets or bbc.co.uk",
+    ),
+    limit: int = Query(default=40, ge=1, le=100),
+    freshness_hours: int = Query(default=72, ge=1, le=168),
+) -> WorldNewsFeedResponse:
+    return await get_world_news_feed(
+        region=region,
+        category=category,
+        language=language,
+        source=source,
+        limit=limit,
+        freshness_hours=freshness_hours,
+    )
+
+
+@router.get(
+    "/world/sources",
+    response_model=WorldNewsSourcesResponse,
+    summary="Get World News Sources",
+    description="Get the maintained live RSS/Atom source registry used by the world news monitor.",
+)
+@cached(ttl=1800, key_prefix="world_news_sources")
+async def get_world_news_sources_api(
+    region: str | None = Query(
+        default=None,
+        pattern=r"^(vietnam|asia|us|europe|global)$",
+        description="Optional source region filter",
+    ),
+    category: str | None = Query(
+        default=None,
+        pattern=r"^(markets|economy|business|geopolitics|technology)$",
+        description="Optional source category filter",
+    ),
+    language: str | None = Query(
+        default=None,
+        pattern=r"^(vi|en)$",
+        description="Optional language filter",
+    ),
+) -> WorldNewsSourcesResponse:
+    return list_world_news_sources(region=region, category=category, language=language)
 
 
 @router.get(
@@ -219,9 +290,9 @@ from vnibb.services.news_service import (
 )
 async def get_news_feed_api(
     background_tasks: BackgroundTasks,
-    source: Optional[str] = Query(default=None, description="Filter by source"),
-    sentiment: Optional[str] = Query(default=None, description="Filter by sentiment"),
-    symbol: Optional[str] = Query(default=None, description="Filter by symbol"),
+    source: str | None = Query(default=None, description="Filter by source"),
+    sentiment: str | None = Query(default=None, description="Filter by sentiment"),
+    symbol: str | None = Query(default=None, description="Filter by symbol"),
     mode: str = Query(default="all", pattern=r"^(all|related)$", description="Feed mode"),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -253,9 +324,9 @@ async def get_news_feed_api(
     description="Get chronological news flow with optional filters for symbols and sentiment.",
 )
 async def get_news_flow_api(
-    symbols: Optional[str] = Query(None, description="Comma-separated symbols"),
-    sector: Optional[str] = Query(None),
-    sentiment: Optional[str] = Query(
+    symbols: str | None = Query(None, description="Comma-separated symbols"),
+    sector: str | None = Query(None),
+    sentiment: str | None = Query(
         None, pattern=r"^(bullish|neutral|bearish|positive|negative)$"
     ),
     mode: str = Query(default="related", pattern=r"^(all|related)$"),
@@ -285,7 +356,7 @@ async def get_news_flow_api(
     deprecated=True,
 )
 async def get_latest_news(
-    source: Optional[str] = Query(default=None, description="Filter by source"),
+    source: str | None = Query(default=None, description="Filter by source"),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> NewsFeed:
     """Get latest market news (legacy endpoint)."""
@@ -312,7 +383,7 @@ async def search_news_by_symbol(
         )
     except Exception as e:
         logger.error(f"Failed to search news for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get(
@@ -320,7 +391,7 @@ async def search_news_by_symbol(
     summary="Get Available Sources",
     description="Get list of supported news sources.",
 )
-async def get_sources() -> Dict[str, Any]:
+async def get_sources() -> dict[str, Any]:
     """Get available news sources."""
     return {
         "sources": news_crawler.SOURCES,
@@ -379,7 +450,7 @@ async def get_trending() -> TrendingAnalysis:
 )
 async def crawl_news(
     background_tasks: BackgroundTasks,
-    sources: Optional[List[str]] = Query(default=None, description="Sources to crawl"),
+    sources: list[str] | None = Query(default=None, description="Sources to crawl"),
     limit: int = Query(default=50, ge=1, le=200),
     analyze_sentiment: bool = Query(default=True, description="Run sentiment analysis"),
     async_mode: bool = Query(default=True, description="Run in background"),
@@ -410,7 +481,7 @@ async def crawl_news(
         )
     except Exception as e:
         logger.error(f"News crawl failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post(
@@ -459,7 +530,7 @@ async def analyze_sentiment(
         )
     except Exception as e:
         logger.error(f"Sentiment analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============================================================================
@@ -530,7 +601,7 @@ async def get_heatmap_data(
         )
 
         # Try cache first
-        screener_data: List[ScreenerData] = []
+        screener_data: list[ScreenerData] = []
         cached = False
 
         if use_cache:
@@ -581,7 +652,7 @@ async def get_heatmap_data(
         random.seed(42)  # Deterministic for demo
 
         # Step 4: Group stocks by sector/industry
-        groups: Dict[str, List[HeatmapStock]] = defaultdict(list)
+        groups: dict[str, list[HeatmapStock]] = defaultdict(list)
 
         for stock in screener_data:
             # Skip stocks with missing critical data
@@ -627,7 +698,7 @@ async def get_heatmap_data(
             groups[group_key].append(heatmap_stock)
 
         # Step 5: Create sector aggregations
-        sectors: List[SectorGroup] = []
+        sectors: list[SectorGroup] = []
         for sector_name, stocks in groups.items():
             total_market_cap = sum(s.market_cap for s in stocks)
             # Weighted average change by market cap
@@ -662,7 +733,7 @@ async def get_heatmap_data(
 
     except (ProviderTimeoutError, ProviderError) as e:
         if isinstance(e, ProviderTimeoutError):
-            raise HTTPException(status_code=504, detail=f"Timeout: {e.message}")
-        raise HTTPException(status_code=502, detail=f"Provider error: {e.message}")
+            raise HTTPException(status_code=504, detail=f"Timeout: {e.message}") from e
+        raise HTTPException(status_code=502, detail=f"Provider error: {e.message}") from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e

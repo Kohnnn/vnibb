@@ -92,6 +92,7 @@ export type WidgetType =
     | 'peer_comparison'
     | 'top_movers'
     | 'world_indices'
+    | 'world_news_monitor'
     | 'sector_performance'
     | 'market_movers_sectors'
     | 'sector_rotation_radar'

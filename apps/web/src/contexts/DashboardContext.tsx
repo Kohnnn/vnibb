@@ -352,6 +352,12 @@ const GLOBAL_MARKETS_TEMPLATE: TemplateWidget[] = [
         config: {},
         layout: { x: 16, y: 29, w: 8, h: 8, minW: 6, minH: 6 }
     },
+    {
+        type: 'world_news_monitor',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 },
+        layout: { x: 0, y: 37, w: 12, h: 9, minW: 8, minH: 6 }
+    },
 ];
 
 // Comparison Analysis Tab: Multi-ticker comparison toolkit
@@ -828,22 +834,28 @@ const MAIN_NEWS_TEMPLATE: TemplateWidget[] = [
         type: 'news_feed',
         syncGroupId: 1,
         config: {},
-        layout: { x: 0, y: 0, w: 12, h: 9, minW: 8, minH: 7 }
+        layout: { x: 0, y: 0, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'news_corporate_actions',
         syncGroupId: 1,
         config: {},
-        layout: { x: 12, y: 0, w: 12, h: 9, minW: 8, minH: 7 }
-    },
-    {
-        type: 'events_calendar',
-        syncGroupId: 1,
-        config: {},
-        layout: { x: 0, y: 9, w: 12, h: 9, minW: 8, minH: 6 }
+        layout: { x: 8, y: 0, w: 8, h: 9, minW: 6, minH: 7 }
     },
     {
         type: 'market_news',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 16, y: 0, w: 8, h: 9, minW: 6, minH: 6 }
+    },
+    {
+        type: 'world_news_monitor',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 },
+        layout: { x: 0, y: 9, w: 12, h: 9, minW: 8, minH: 6 }
+    },
+    {
+        type: 'events_calendar',
         syncGroupId: 1,
         config: {},
         layout: { x: 12, y: 9, w: 12, h: 9, minW: 8, minH: 6 }
