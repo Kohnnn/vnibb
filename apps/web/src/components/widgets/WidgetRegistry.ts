@@ -69,7 +69,10 @@ import { DatabaseInspectorWidget } from './DatabaseInspectorWidget';
 import { OrderbookWidget } from './OrderbookWidget';
 import { IndexComparisonWidget } from './IndexComparisonWidget';
 import { MarketNewsWidget } from './MarketNewsWidget';
+import { WorldNewsLiveStreamWidget } from './WorldNewsLiveStreamWidget';
+import { WorldNewsMapWidget } from './WorldNewsMapWidget';
 import { WorldNewsMonitorWidget } from './WorldNewsMonitorWidget';
+import { WorldNewsSourcesWidget } from './WorldNewsSourcesWidget';
 import { SectorBreakdownWidget } from './SectorBreakdownWidget';
 import { MarketMoversSectorsWidget } from './MarketMoversSectorsWidget';
 import { NewsFlowWidget } from './NewsFlowWidget';
@@ -354,6 +357,9 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     news_feed: NewsFeedWidget as ComponentType<WidgetProps>,
     market_news: MarketNewsWidget as ComponentType<WidgetProps>,
     world_news_monitor: WorldNewsMonitorWidget as ComponentType<WidgetProps>,
+    world_news_map: WorldNewsMapWidget as ComponentType<WidgetProps>,
+    world_news_live_stream: WorldNewsLiveStreamWidget as ComponentType<WidgetProps>,
+    world_news_sources: WorldNewsSourcesWidget as ComponentType<WidgetProps>,
     news_flow: NewsFlowWidget as ComponentType<WidgetProps>,
     news_corporate_actions: NewsCorporateActionsWidget as ComponentType<WidgetProps>,
     dividend_ladder: DividendLadderWidget as ComponentType<WidgetProps>,
@@ -547,6 +553,9 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     index_comparison: { w: 4, h: 4, minW: 3, minH: 3 },
     market_news: { w: 14, h: 8, minW: 10, minH: 6 },
     world_news_monitor: { w: 12, h: 9, minW: 8, minH: 6 },
+    world_news_map: { w: 12, h: 9, minW: 8, minH: 6 },
+    world_news_live_stream: { w: 7, h: 9, minW: 5, minH: 6 },
+    world_news_sources: { w: 8, h: 9, minW: 5, minH: 6 },
     sector_breakdown: { w: 4, h: 6, minW: 3, minH: 4 },
     market_movers_sectors: { w: 8, h: 7, minW: 6, minH: 5 },
     comparison_analysis: { w: 8, h: 10, minW: 6, minH: 8 },
@@ -588,6 +597,9 @@ Object.assign(defaultWidgetLayouts, {
     orderbook: { w: 12, h: 8, minW: 8, minH: 6 },
     market_news: { w: 12, h: 9, minW: 8, minH: 6 },
     world_news_monitor: { w: 12, h: 9, minW: 8, minH: 6 },
+    world_news_map: { w: 12, h: 9, minW: 8, minH: 6 },
+    world_news_live_stream: { w: 7, h: 9, minW: 5, minH: 6 },
+    world_news_sources: { w: 8, h: 9, minW: 5, minH: 6 },
 } satisfies Partial<Record<WidgetType, { w: number; h: number; minW?: number; minH?: number }>>);
 
 
@@ -702,6 +714,9 @@ export const widgetNames: Record<WidgetType, string> = {
     index_comparison: 'Index Comparison',
     market_news: 'Market News',
     world_news_monitor: 'World News Monitor',
+    world_news_map: 'World News Map',
+    world_news_live_stream: 'World News Live Stream',
+    world_news_sources: 'World News Sources',
     sector_breakdown: 'Sector Breakdown',
     market_movers_sectors: 'Market Movers & Sectors',
     comparison_analysis: 'Comparison Analysis',
@@ -820,6 +835,9 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     index_comparison: 'Major indices performance',
     market_news: 'Broad market news stream',
     world_news_monitor: 'Live Vietnam and global RSS/Atom headlines with source and feed links',
+    world_news_map: 'Geographic live-news signal map with country, source, and latest-headline drilldown',
+    world_news_live_stream: 'Polling headline stream for fresh global and Vietnam market-risk signals',
+    world_news_sources: 'Auditable source registry with homepage, feed, geography, tier, and filter metadata',
     sector_breakdown: 'Market cap by industry',
     market_movers_sectors: 'Sector performance with top movers',
     comparison_analysis: 'Side-by-side fundamentals',

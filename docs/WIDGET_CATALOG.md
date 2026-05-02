@@ -78,6 +78,9 @@ For current TradingView-native coverage, use:
 | Index Comparison | `index_comparison` | core_data | `GET /market/indices`, `GET /market/world-indices` |
 | Market News | `market_news` | core_data | `GET /news/*`, `GET /market/research/rss-feed` |
 | World News Monitor | `world_news_monitor` | global_markets | `GET /news/world`, `GET /news/world/sources` |
+| World News Map | `world_news_map` | global_markets | `GET /news/world/map`, `GET /news/world` |
+| World News Live Stream | `world_news_live_stream` | global_markets | `GET /news/world` |
+| World News Sources | `world_news_sources` | global_markets | `GET /news/world/sources` |
 | Sector Breakdown | `sector_breakdown` | core_data | `GET /market/heatmap`, `GET /sectors` |
 | Comparison Analysis | `comparison_analysis` | core_data | `GET /comparison`, `GET /comparison/performance` |
 | News Flow | `news_flow` | core_data | `GET /news/*`, `GET /equity/{symbol}/news` |
@@ -106,6 +109,10 @@ For current TradingView-native coverage, use:
   - `financial_snapshot`: a 4-panel financial table covering P&L, balance sheet, cash flow, and ratios.
   - `earnings_release_recap`: a latest-quarter recap that combines statement deltas, cash-flow context, quality checks, and linked news/events.
   - `world_news_monitor`: live Vietnam and global RSS/Atom headlines with article, source, and feed links.
+  - `world_news_map`: source-geography article density and latest-headline drilldown for the live world-news feed.
+  - `world_news_live_stream`: polling headline stream for fresh global and Vietnam market-risk signals.
+  - `world_news_sources`: auditable maintained source registry with homepage, feed, geography, tier, region, category, and language metadata.
+- The World Monitor suite is intentionally source-transparent: every headline surface keeps original article, source homepage, and feed links visible, and `world_news_sources` exposes the registry behind those links.
 - Financial statement widgets now default to chronological ascending period ordering while preserving growth comparison against the older adjacent period.
 - Screener Pro now uses backend filter JSON plus backend sort and persists saved screens in widget config.
 - Financial tables now render in chronological ascending order from oldest to newest, but they auto-scroll to the newest periods on first open so history remains easy to inspect by scrolling back.

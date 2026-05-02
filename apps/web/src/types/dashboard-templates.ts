@@ -75,7 +75,22 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { type: 'tradingview_forex_cross_rates', layout: { x: 0, y: 22, w: 8, h: 7 } },
       { type: 'tradingview_stock_heatmap', layout: { x: 8, y: 22, w: 8, h: 7 } },
       { type: 'tradingview_top_stories', layout: { x: 16, y: 22, w: 8, h: 7 }, config: { feedMode: 'all_symbols' } },
-      { type: 'world_news_monitor', layout: { x: 0, y: 29, w: 12, h: 8 }, config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 } },
+      { type: 'world_news_map', layout: { x: 0, y: 29, w: 12, h: 8 }, config: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 } },
+      { type: 'world_news_live_stream', layout: { x: 12, y: 29, w: 12, h: 8 }, config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 } },
+      { type: 'world_news_monitor', layout: { x: 0, y: 37, w: 16, h: 8 }, config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 } },
+      { type: 'world_news_sources', layout: { x: 16, y: 37, w: 8, h: 8 }, config: { region: 'all', category: 'all', language: 'all' } },
+    ],
+  },
+  {
+    id: 'world-monitor',
+    name: 'World Monitor',
+    description: 'Source-transparent global and Vietnam news map, live stream, headline monitor, and source registry.',
+    category: 'global',
+    widgets: [
+      { type: 'world_news_map', layout: { x: 0, y: 0, w: 14, h: 9 }, config: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 } },
+      { type: 'world_news_live_stream', layout: { x: 14, y: 0, w: 10, h: 9 }, config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 } },
+      { type: 'world_news_monitor', layout: { x: 0, y: 9, w: 16, h: 9 }, config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 } },
+      { type: 'world_news_sources', layout: { x: 16, y: 9, w: 8, h: 9 }, config: { region: 'all', category: 'all', language: 'all' } },
     ],
   },
   {
@@ -194,6 +209,8 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { type: 'events_calendar', layout: { x: 0, y: 8, w: 12, h: 6 } },
       { type: 'price_chart', layout: { x: 12, y: 8, w: 12, h: 6 } },
       { type: 'world_news_monitor', layout: { x: 0, y: 14, w: 12, h: 8 }, config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 } },
+      { type: 'world_news_live_stream', layout: { x: 12, y: 14, w: 6, h: 8 }, config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 } },
+      { type: 'world_news_sources', layout: { x: 18, y: 14, w: 6, h: 8 }, config: { region: 'all', category: 'all', language: 'all' } },
     ],
   },
   {

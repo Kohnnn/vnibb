@@ -30,8 +30,10 @@ from vnibb.services.news_service import (
 from vnibb.services.sentiment_analyzer import sentiment_analyzer
 from vnibb.services.world_news_service import (
     WorldNewsFeedResponse,
+    WorldNewsMapResponse,
     WorldNewsSourcesResponse,
     get_world_news_feed,
+    get_world_news_map,
     list_world_news_sources,
 )
 
@@ -250,6 +252,41 @@ async def get_world_news_api(
         category=category,
         language=language,
         source=source,
+        limit=limit,
+        freshness_hours=freshness_hours,
+    )
+
+
+@router.get(
+    "/world/map",
+    response_model=WorldNewsMapResponse,
+    summary="Get World News Map",
+    description="Get live world news article counts and latest headlines grouped by source geography.",
+)
+@cached(ttl=300, key_prefix="world_news_map")
+async def get_world_news_map_api(
+    region: str | None = Query(
+        default=None,
+        pattern=r"^(vietnam|asia|us|europe|global)$",
+        description="Optional source region filter",
+    ),
+    category: str | None = Query(
+        default=None,
+        pattern=r"^(markets|economy|business|geopolitics|technology)$",
+        description="Optional classified category filter",
+    ),
+    language: str | None = Query(
+        default=None,
+        pattern=r"^(vi|en)$",
+        description="Optional language filter",
+    ),
+    limit: int = Query(default=100, ge=1, le=200),
+    freshness_hours: int = Query(default=72, ge=1, le=168),
+) -> WorldNewsMapResponse:
+    return await get_world_news_map(
+        region=region,
+        category=category,
+        language=language,
         limit=limit,
         freshness_hours=freshness_hours,
     )

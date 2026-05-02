@@ -806,6 +806,36 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['world news', 'rss', 'live news', 'vietnam news', 'macro', 'global', 'geopolitics']
     },
     {
+        type: 'world_news_map',
+        name: 'World News Map',
+        description: 'Geographic live-news signal map with country, source, and latest-headline drilldown',
+        category: 'global_markets',
+        defaultConfig: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 },
+        defaultLayout: { w: 12, h: 9, minW: 8, minH: 6 },
+        recommended: true,
+        searchKeywords: ['world news', 'map', 'geo', 'geography', 'source map', 'global risk', 'macro']
+    },
+    {
+        type: 'world_news_live_stream',
+        name: 'World News Live Stream',
+        description: 'Polling headline stream for fresh global and Vietnam market-risk signals',
+        category: 'global_markets',
+        defaultConfig: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 },
+        defaultLayout: { w: 7, h: 9, minW: 5, minH: 6 },
+        recommended: true,
+        searchKeywords: ['world news', 'live stream', 'rss', 'breaking news', 'risk monitor', 'headlines']
+    },
+    {
+        type: 'world_news_sources',
+        name: 'World News Sources',
+        description: 'Auditable source registry with homepage, feed, geography, tier, and filter metadata',
+        category: 'global_markets',
+        defaultConfig: { region: 'all', category: 'all', language: 'all' },
+        defaultLayout: { w: 8, h: 9, minW: 5, minH: 6 },
+        recommended: true,
+        searchKeywords: ['world news', 'sources', 'rss', 'feeds', 'registry', 'audit', 'source transparency']
+    },
+    {
         type: 'similar_stocks',
         name: 'Similar Stocks',
         description: 'Find stocks similar to current symbol',
@@ -1030,6 +1060,9 @@ const widgetDefaultLayoutOverrides: Partial<Record<WidgetType, WidgetDefinition[
     orderbook: { w: 12, h: 8, minW: 8, minH: 6 },
     market_news: { w: 12, h: 9, minW: 8, minH: 6 },
     world_news_monitor: { w: 12, h: 9, minW: 8, minH: 6 },
+    world_news_map: { w: 12, h: 9, minW: 8, minH: 6 },
+    world_news_live_stream: { w: 7, h: 9, minW: 5, minH: 6 },
+    world_news_sources: { w: 8, h: 9, minW: 5, minH: 6 },
 };
 
 widgetDefinitions.forEach((widget) => {

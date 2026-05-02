@@ -80,13 +80,17 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 - `GET /news/feed`
 - `GET /news/flow`
 - `GET /news/world`
+- `GET /news/world/map`
 - `GET /news/world/sources`
 
 World news monitor notes:
 - `GET /news/world` returns live RSS/Atom headlines from the maintained Vietnam and global source registry.
+- `GET /news/world/map` returns the same live feed grouped by source geography, including country coordinates, article counts, top category, top sources, and latest articles for map drilldowns.
 - Supported filters are `region=vietnam|asia|us|europe|global`, `category=markets|economy|business|geopolitics|technology`, `language=vi|en`, `source=<source id or domain>`, `limit`, and `freshness_hours`.
 - Every article includes the original article `url`, source homepage `source_url`, feed `feed_url`, source/domain metadata, classification tags, and a `live=true` marker.
-- `GET /news/world/sources` returns the maintained source registry so operators can audit source names, domains, homepage links, and live feed URLs.
+- `GET /news/world/sources` returns the maintained source registry so operators can audit source names, domains, homepage links, live feed URLs, and source geography.
+- Map buckets include `country_code`, `country_name`, `latitude`, `longitude`, `article_count`, `source_count`, `top_category`, `top_sources`, `latest_headline`, and `latest_articles`.
+- Source registry rows include `tier`, `homepage_url`, `feed_urls`, `country_code`, `country_name`, `latitude`, `longitude`, and `map_region`.
 
 Market data notes:
 - `GET /market/indices` is a mixed-source snapshot for `VNINDEX`, `VN30`, `HNX`, and `UPCOM`.

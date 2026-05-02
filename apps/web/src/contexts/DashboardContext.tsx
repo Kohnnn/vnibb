@@ -353,10 +353,28 @@ const GLOBAL_MARKETS_TEMPLATE: TemplateWidget[] = [
         layout: { x: 16, y: 29, w: 8, h: 8, minW: 6, minH: 6 }
     },
     {
+        type: 'world_news_map',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 },
+        layout: { x: 0, y: 37, w: 12, h: 9, minW: 8, minH: 6 }
+    },
+    {
+        type: 'world_news_live_stream',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 },
+        layout: { x: 12, y: 37, w: 12, h: 9, minW: 6, minH: 6 }
+    },
+    {
         type: 'world_news_monitor',
         syncGroupId: 1,
         config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 },
-        layout: { x: 0, y: 37, w: 12, h: 9, minW: 8, minH: 6 }
+        layout: { x: 0, y: 46, w: 16, h: 9, minW: 8, minH: 6 }
+    },
+    {
+        type: 'world_news_sources',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', language: 'all' },
+        layout: { x: 16, y: 46, w: 8, h: 9, minW: 5, minH: 6 }
     },
 ];
 
@@ -859,6 +877,24 @@ const MAIN_NEWS_TEMPLATE: TemplateWidget[] = [
         syncGroupId: 1,
         config: {},
         layout: { x: 12, y: 9, w: 12, h: 9, minW: 8, minH: 6 }
+    },
+    {
+        type: 'world_news_map',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 },
+        layout: { x: 0, y: 18, w: 12, h: 9, minW: 8, minH: 6 }
+    },
+    {
+        type: 'world_news_live_stream',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 },
+        layout: { x: 12, y: 18, w: 6, h: 9, minW: 5, minH: 6 }
+    },
+    {
+        type: 'world_news_sources',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', language: 'all' },
+        layout: { x: 18, y: 18, w: 6, h: 9, minW: 5, minH: 6 }
     },
 ];
 
@@ -1738,8 +1774,24 @@ const shouldRefreshGlobalMarketsLayout = (dashboard?: Dashboard): boolean => {
                 widget.config.mode !== 'all'
         )
     );
+    const hasWorldNewsMap = dashboard.tabs.some((tab) =>
+        tab.widgets.some((widget) => widget.type === 'world_news_map')
+    );
+    const hasWorldNewsLiveStream = dashboard.tabs.some((tab) =>
+        tab.widgets.some((widget) => widget.type === 'world_news_live_stream')
+    );
+    const hasWorldNewsSources = dashboard.tabs.some((tab) =>
+        tab.widgets.some((widget) => widget.type === 'world_news_sources')
+    );
 
-    return usesLegacyTradingViewSymbol || usesLegacyWorldIndicesHeight || usesLegacyMarketNewsMode;
+    return (
+        usesLegacyTradingViewSymbol ||
+        usesLegacyWorldIndicesHeight ||
+        usesLegacyMarketNewsMode ||
+        !hasWorldNewsMap ||
+        !hasWorldNewsLiveStream ||
+        !hasWorldNewsSources
+    );
 };
 
 const ensureMainDashboardPresent = (dashboards: Dashboard[]): Dashboard[] => {
