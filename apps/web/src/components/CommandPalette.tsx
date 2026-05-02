@@ -277,6 +277,43 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     });
     items.push(worldNewsItem);
 
+    const worldMonitorSuiteItem: CommandPaletteActionItem = {
+      id: 'command:add-world-monitor-suite',
+      type: 'command',
+      label: 'Add World Monitor Suite',
+      description: 'Add the world news map, live stream, headline monitor, and source registry',
+    };
+    actions.set(worldMonitorSuiteItem.id, () => {
+      if (state.activeDashboardId && state.activeTabId) {
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'world_news_map',
+          tabId: state.activeTabId,
+          config: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 },
+          layout: { x: 0, y: Infinity, w: 12, h: 9 },
+        });
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'world_news_live_stream',
+          tabId: state.activeTabId,
+          config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 },
+          layout: { x: 12, y: Infinity, w: 12, h: 9 },
+        });
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'world_news_monitor',
+          tabId: state.activeTabId,
+          config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 },
+          layout: { x: 0, y: Infinity, w: 16, h: 9 },
+        });
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'world_news_sources',
+          tabId: state.activeTabId,
+          config: { region: 'all', category: 'all', language: 'all' },
+          layout: { x: 16, y: Infinity, w: 8, h: 9 },
+        });
+      }
+      onOpenChange(false);
+    });
+    items.push(worldMonitorSuiteItem);
+
     const tradingViewItem: CommandPaletteActionItem = {
       id: 'command:add-tradingview',
       type: 'command',

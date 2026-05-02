@@ -532,11 +532,47 @@ export interface WorldNewsSourceInfo {
     tier: number;
     homepage_url: string;
     feed_urls: string[];
+    country_code: string;
+    country_name: string;
+    latitude: number;
+    longitude: number;
+    map_region: string;
 }
 
 export interface WorldNewsSourcesResponse {
     sources: WorldNewsSourceInfo[];
     total: number;
+}
+
+export interface WorldNewsMapBucket {
+    id: string;
+    label: string;
+    region: string;
+    country_code: string;
+    country_name: string;
+    latitude: number;
+    longitude: number;
+    article_count: number;
+    source_count: number;
+    failed_feed_count: number;
+    top_category: WorldNewsCategory | null;
+    top_sources: string[];
+    latest_headline: string | null;
+    latest_published_at: string | null;
+    latest_articles: WorldNewsArticle[];
+}
+
+export interface WorldNewsMapResponse {
+    buckets: WorldNewsMapBucket[];
+    total_articles: number;
+    source_count: number;
+    feed_count: number;
+    failed_feed_count: number;
+    fetched_at: string;
+    region: WorldNewsRegion | null;
+    category: WorldNewsCategory | null;
+    language: WorldNewsLanguage | null;
+    freshness_hours: number;
 }
 
 export async function getWorldNews(options?: {
@@ -576,6 +612,27 @@ export async function getWorldNewsSources(options?: {
         },
         signal: options?.signal,
         timeout: 10000,
+    });
+}
+
+export async function getWorldNewsMap(options?: {
+    region?: WorldNewsRegion;
+    category?: WorldNewsCategory;
+    language?: WorldNewsLanguage;
+    limit?: number;
+    freshnessHours?: number;
+    signal?: AbortSignal;
+}): Promise<WorldNewsMapResponse> {
+    return fetchAPI<WorldNewsMapResponse>('/news/world/map', {
+        params: {
+            region: options?.region,
+            category: options?.category,
+            language: options?.language,
+            limit: options?.limit,
+            freshness_hours: options?.freshnessHours,
+        },
+        signal: options?.signal,
+        timeout: 20000,
     });
 }
 

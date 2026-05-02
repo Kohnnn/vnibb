@@ -8,6 +8,8 @@ from vnibb.api.v1 import news
 from vnibb.services.world_news_service import (
     WorldNewsArticle,
     WorldNewsFeedResponse,
+    WorldNewsMapBucket,
+    WorldNewsMapResponse,
     WorldNewsSourceInfo,
     WorldNewsSourcesResponse,
 )
@@ -136,6 +138,71 @@ async def test_world_news_endpoint_returns_live_source_links(client, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_world_news_map_endpoint_returns_source_geography(client, monkeypatch):
+    async def fake_world_news_map(**kwargs):
+        assert kwargs["region"] == "vietnam"
+        assert kwargs["category"] == "markets"
+        return WorldNewsMapResponse(
+            buckets=[
+                WorldNewsMapBucket(
+                    id="vn",
+                    label="Vietnam",
+                    region="Vietnam",
+                    country_code="VN",
+                    country_name="Vietnam",
+                    latitude=16.0544,
+                    longitude=108.2022,
+                    article_count=1,
+                    source_count=1,
+                    top_category="markets",
+                    top_sources=["CafeF Markets"],
+                    latest_headline="VN-Index extends gains",
+                    latest_published_at=datetime(2026, 5, 1, 9, 0, tzinfo=UTC),
+                    latest_articles=[
+                        WorldNewsArticle(
+                            id="cafef-1",
+                            title="VN-Index extends gains",
+                            source_id="cafef_markets",
+                            source="CafeF Markets",
+                            source_domain="cafef.vn",
+                            source_url="https://cafef.vn/thi-truong-chung-khoan.chn",
+                            feed_url="https://cafef.vn/thi-truong-chung-khoan.rss",
+                            url="https://cafef.vn/story",
+                            published_at=datetime(2026, 5, 1, 9, 0, tzinfo=UTC),
+                            region="vietnam",
+                            category="markets",
+                            language="vi",
+                            tags=["markets", "vietnam"],
+                            relevance_score=0.91,
+                        )
+                    ],
+                )
+            ],
+            total_articles=1,
+            source_count=1,
+            feed_count=1,
+            failed_feed_count=0,
+            fetched_at=datetime(2026, 5, 1, 9, 1, tzinfo=UTC),
+            region="vietnam",
+            category="markets",
+            language=None,
+            freshness_hours=72,
+        )
+
+    monkeypatch.setattr(news, "get_world_news_map", fake_world_news_map)
+
+    response = await client.get(
+        "/api/v1/news/world/map",
+        params={"region": "vietnam", "category": "markets", "limit": 20},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["buckets"][0]["country_code"] == "VN"
+    assert payload["buckets"][0]["latest_articles"][0]["url"] == "https://cafef.vn/story"
+
+
+@pytest.mark.asyncio
 async def test_world_news_sources_endpoint_returns_registry(client, monkeypatch):
     def fake_sources(**kwargs):
         assert kwargs["region"] == "vietnam"
@@ -151,6 +218,11 @@ async def test_world_news_sources_endpoint_returns_registry(client, monkeypatch)
                     tier=1,
                     homepage_url="https://cafef.vn/thi-truong-chung-khoan.chn",
                     feed_urls=["https://cafef.vn/thi-truong-chung-khoan.rss"],
+                    country_code="VN",
+                    country_name="Vietnam",
+                    latitude=21.0285,
+                    longitude=105.8542,
+                    map_region="Vietnam",
                 )
             ],
             total=1,

@@ -67,6 +67,11 @@ class WorldNewsSourceInfo(BaseModel):
     tier: int
     homepage_url: str
     feed_urls: list[str]
+    country_code: str
+    country_name: str
+    latitude: float
+    longitude: float
+    map_region: str
 
 
 class WorldNewsFeedResponse(BaseModel):
@@ -86,6 +91,37 @@ class WorldNewsFeedResponse(BaseModel):
 class WorldNewsSourcesResponse(BaseModel):
     sources: list[WorldNewsSourceInfo]
     total: int
+
+
+class WorldNewsMapBucket(BaseModel):
+    id: str
+    label: str
+    region: str
+    country_code: str
+    country_name: str
+    latitude: float
+    longitude: float
+    article_count: int
+    source_count: int
+    failed_feed_count: int = 0
+    top_category: str | None = None
+    top_sources: list[str] = Field(default_factory=list)
+    latest_headline: str | None = None
+    latest_published_at: datetime | None = None
+    latest_articles: list[WorldNewsArticle] = Field(default_factory=list)
+
+
+class WorldNewsMapResponse(BaseModel):
+    buckets: list[WorldNewsMapBucket]
+    total_articles: int
+    source_count: int
+    feed_count: int
+    failed_feed_count: int = 0
+    fetched_at: datetime
+    region: str | None = None
+    category: str | None = None
+    language: str | None = None
+    freshness_hours: int
 
 
 @dataclass(frozen=True)
@@ -272,6 +308,160 @@ WORLD_NEWS_SOURCES: tuple[WorldNewsSourceConfig, ...] = (
         feed_urls=("https://www.aljazeera.com/xml/rss/all.xml",),
     ),
 )
+
+
+WORLD_NEWS_SOURCE_GEO: dict[str, dict[str, str | float]] = {
+    "cafef_markets": {
+        "country_code": "VN",
+        "country_name": "Vietnam",
+        "latitude": 21.0285,
+        "longitude": 105.8542,
+        "map_region": "Vietnam",
+    },
+    "cafef_macro": {
+        "country_code": "VN",
+        "country_name": "Vietnam",
+        "latitude": 21.0285,
+        "longitude": 105.8542,
+        "map_region": "Vietnam",
+    },
+    "vietstock_markets": {
+        "country_code": "VN",
+        "country_name": "Vietnam",
+        "latitude": 10.8231,
+        "longitude": 106.6297,
+        "map_region": "Vietnam",
+    },
+    "vietstock_economy": {
+        "country_code": "VN",
+        "country_name": "Vietnam",
+        "latitude": 10.8231,
+        "longitude": 106.6297,
+        "map_region": "Vietnam",
+    },
+    "vnexpress_business": {
+        "country_code": "VN",
+        "country_name": "Vietnam",
+        "latitude": 21.0285,
+        "longitude": 105.8542,
+        "map_region": "Vietnam",
+    },
+    "vnexpress_world": {
+        "country_code": "VN",
+        "country_name": "Vietnam",
+        "latitude": 21.0285,
+        "longitude": 105.8542,
+        "map_region": "Vietnam",
+    },
+    "tuoitre_business": {
+        "country_code": "VN",
+        "country_name": "Vietnam",
+        "latitude": 10.8231,
+        "longitude": 106.6297,
+        "map_region": "Vietnam",
+    },
+    "vneconomy_markets": {
+        "country_code": "VN",
+        "country_name": "Vietnam",
+        "latitude": 21.0285,
+        "longitude": 105.8542,
+        "map_region": "Vietnam",
+    },
+    "baodautu_business": {
+        "country_code": "VN",
+        "country_name": "Vietnam",
+        "latitude": 21.0285,
+        "longitude": 105.8542,
+        "map_region": "Vietnam",
+    },
+    "bbc_business": {
+        "country_code": "GB",
+        "country_name": "United Kingdom",
+        "latitude": 51.5072,
+        "longitude": -0.1276,
+        "map_region": "Europe",
+    },
+    "bbc_world": {
+        "country_code": "GB",
+        "country_name": "United Kingdom",
+        "latitude": 51.5072,
+        "longitude": -0.1276,
+        "map_region": "Europe",
+    },
+    "ap_business": {
+        "country_code": "US",
+        "country_name": "United States",
+        "latitude": 40.7128,
+        "longitude": -74.006,
+        "map_region": "North America",
+    },
+    "ap_world": {
+        "country_code": "US",
+        "country_name": "United States",
+        "latitude": 40.7128,
+        "longitude": -74.006,
+        "map_region": "North America",
+    },
+    "cnbc_markets": {
+        "country_code": "US",
+        "country_name": "United States",
+        "latitude": 40.7128,
+        "longitude": -74.006,
+        "map_region": "North America",
+    },
+    "guardian_business": {
+        "country_code": "GB",
+        "country_name": "United Kingdom",
+        "latitude": 51.5072,
+        "longitude": -0.1276,
+        "map_region": "Europe",
+    },
+    "aljazeera_global": {
+        "country_code": "QA",
+        "country_name": "Qatar",
+        "latitude": 25.2854,
+        "longitude": 51.531,
+        "map_region": "Middle East",
+    },
+}
+
+WORLD_NEWS_REGION_GEO: dict[str, dict[str, str | float]] = {
+    "vietnam": {
+        "country_code": "VN",
+        "country_name": "Vietnam",
+        "latitude": 16.0544,
+        "longitude": 108.2022,
+        "map_region": "Vietnam",
+    },
+    "asia": {
+        "country_code": "SG",
+        "country_name": "Singapore",
+        "latitude": 1.3521,
+        "longitude": 103.8198,
+        "map_region": "Asia",
+    },
+    "us": {
+        "country_code": "US",
+        "country_name": "United States",
+        "latitude": 40.7128,
+        "longitude": -74.006,
+        "map_region": "North America",
+    },
+    "europe": {
+        "country_code": "GB",
+        "country_name": "United Kingdom",
+        "latitude": 51.5072,
+        "longitude": -0.1276,
+        "map_region": "Europe",
+    },
+    "global": {
+        "country_code": "GB",
+        "country_name": "United Kingdom",
+        "latitude": 51.5072,
+        "longitude": -0.1276,
+        "map_region": "Global",
+    },
+}
 
 
 CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -479,6 +669,110 @@ async def get_world_news_feed(
         category=category,
         language=language,
         source=source,
+        freshness_hours=freshness_hours,
+    )
+
+
+async def get_world_news_map(
+    *,
+    region: str | None = None,
+    category: str | None = None,
+    language: str | None = None,
+    limit: int = 100,
+    freshness_hours: int = 72,
+) -> WorldNewsMapResponse:
+    selected_sources = _select_sources(
+        region=region,
+        category=None,
+        language=language,
+        source_id=None,
+    )
+    source_by_id = {source.id: source for source in selected_sources}
+    feed = await get_world_news_feed(
+        region=region,
+        category=category,
+        language=language,
+        limit=limit,
+        freshness_hours=freshness_hours,
+    )
+
+    bucket_meta: dict[str, dict[str, str | float]] = {}
+    bucket_sources: dict[str, dict[str, int]] = {}
+    bucket_categories: dict[str, dict[str, int]] = {}
+    bucket_articles: dict[str, list[WorldNewsArticle]] = {}
+
+    for source in selected_sources:
+        bucket_id, geo = _source_bucket(source)
+        bucket_meta[bucket_id] = geo
+        bucket_sources.setdefault(bucket_id, {})[source.name] = 0
+        bucket_categories.setdefault(bucket_id, {})
+        bucket_articles.setdefault(bucket_id, [])
+
+    for article in feed.articles:
+        source = source_by_id.get(article.source_id)
+        if source is None:
+            continue
+
+        bucket_id, geo = _source_bucket(source)
+        bucket_meta[bucket_id] = geo
+        source_counts = bucket_sources.setdefault(bucket_id, {})
+        source_counts[article.source] = source_counts.get(article.source, 0) + 1
+        category_counts = bucket_categories.setdefault(bucket_id, {})
+        category_counts[article.category] = category_counts.get(article.category, 0) + 1
+        bucket_articles.setdefault(bucket_id, []).append(article)
+
+    buckets: list[WorldNewsMapBucket] = []
+    for bucket_id, geo in bucket_meta.items():
+        articles = sorted(bucket_articles.get(bucket_id, []), key=_article_sort_key, reverse=True)
+        category_counts = bucket_categories.get(bucket_id, {})
+        source_counts = bucket_sources.get(bucket_id, {})
+        top_category = None
+        if category_counts:
+            top_category = max(category_counts.items(), key=lambda item: (item[1], item[0]))[0]
+
+        buckets.append(
+            WorldNewsMapBucket(
+                id=bucket_id,
+                label=str(geo["country_name"]),
+                region=str(geo["map_region"]),
+                country_code=str(geo["country_code"]),
+                country_name=str(geo["country_name"]),
+                latitude=float(geo["latitude"]),
+                longitude=float(geo["longitude"]),
+                article_count=len(articles),
+                source_count=len(source_counts),
+                top_category=top_category,
+                top_sources=[
+                    source_name
+                    for source_name, _count in sorted(
+                        source_counts.items(), key=lambda item: (-item[1], item[0])
+                    )[:5]
+                ],
+                latest_headline=articles[0].title if articles else None,
+                latest_published_at=articles[0].published_at if articles else None,
+                latest_articles=articles[:5],
+            )
+        )
+
+    buckets.sort(
+        key=lambda bucket: (
+            bucket.article_count,
+            bucket.latest_published_at or datetime(1970, 1, 1, tzinfo=UTC),
+            bucket.source_count,
+        ),
+        reverse=True,
+    )
+
+    return WorldNewsMapResponse(
+        buckets=buckets,
+        total_articles=feed.total,
+        source_count=feed.source_count,
+        feed_count=feed.feed_count,
+        failed_feed_count=feed.failed_feed_count,
+        fetched_at=feed.fetched_at,
+        region=region,
+        category=category,
+        language=language,
         freshness_hours=freshness_hours,
     )
 
@@ -723,7 +1017,22 @@ def _article_sort_key(article: WorldNewsArticle) -> tuple[datetime, float]:
     return _coerce_utc(published_at), article.relevance_score
 
 
+def _source_bucket(source: WorldNewsSourceConfig) -> tuple[str, dict[str, str | float]]:
+    geo = _source_geo(source)
+    bucket_id = str(geo["country_code"]).lower()
+    return bucket_id, geo
+
+
+def _source_geo(source: WorldNewsSourceConfig) -> dict[str, str | float]:
+    return (
+        WORLD_NEWS_SOURCE_GEO.get(source.id)
+        or WORLD_NEWS_REGION_GEO.get(source.region)
+        or WORLD_NEWS_REGION_GEO["global"]
+    )
+
+
 def _to_source_info(source: WorldNewsSourceConfig) -> WorldNewsSourceInfo:
+    geo = _source_geo(source)
     return WorldNewsSourceInfo(
         id=source.id,
         name=source.name,
@@ -734,4 +1043,9 @@ def _to_source_info(source: WorldNewsSourceConfig) -> WorldNewsSourceInfo:
         tier=source.tier,
         homepage_url=source.homepage_url,
         feed_urls=list(source.feed_urls),
+        country_code=str(geo["country_code"]),
+        country_name=str(geo["country_name"]),
+        latitude=float(geo["latitude"]),
+        longitude=float(geo["longitude"]),
+        map_region=str(geo["map_region"]),
     )

@@ -75,6 +75,10 @@ export function WidgetPreview({ type }: WidgetPreviewProps) {
         sector_top_movers: <SectorPreview />,
         market_breadth: <IndexCardsPreview />,
         world_indices: <IndexCardsPreview />,
+        world_news_monitor: <WorldNewsStreamPreview />,
+        world_news_map: <WorldNewsMapPreview />,
+        world_news_live_stream: <WorldNewsStreamPreview />,
+        world_news_sources: <WorldNewsSourcesPreview />,
         technical_summary: <TechnicalPreview />,
         technical_snapshot: <TechnicalPreview />,
         signal_summary: <TechnicalPreview />,
@@ -124,6 +128,7 @@ function normalizeWidgetType(type: string) {
         dividend_payment: 'news_feed',
         stock_splits: 'news_feed',
         news_flow: 'news_feed',
+        world_news_monitor: 'world_news_live_stream',
         institutional_ownership: 'ticker_info',
         unified_financials: 'balance_sheet',
         financial_snapshot: 'balance_sheet',
@@ -137,6 +142,66 @@ function normalizeWidgetType(type: string) {
     };
 
     return map[type] || type;
+}
+
+function WorldNewsMapPreview() {
+    return (
+        <div className="relative h-full overflow-hidden rounded-lg bg-[#050b14] p-1.5">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_30%,rgba(245,158,11,0.22),transparent_35%),radial-gradient(circle_at_72%_55%,rgba(59,130,246,0.18),transparent_30%)]" />
+            <div className="absolute left-[12%] top-[24%] h-[32%] w-[24%] rounded-full bg-white/[0.06]" />
+            <div className="absolute left-[48%] top-[18%] h-[34%] w-[18%] rounded-full bg-white/[0.06]" />
+            <div className="absolute left-[68%] top-[54%] h-[20%] w-[20%] rounded-full bg-white/[0.06]" />
+            {[
+                { left: '78%', top: '48%', active: true },
+                { left: '28%', top: '36%', active: false },
+                { left: '52%', top: '28%', active: false },
+            ].map((point, index) => (
+                <span
+                    key={index}
+                    className={`absolute h-2 w-2 rounded-full border ${point.active ? 'border-amber-100 bg-amber-300' : 'border-sky-100 bg-sky-300'}`}
+                    style={{ left: point.left, top: point.top }}
+                />
+            ))}
+        </div>
+    );
+}
+
+function WorldNewsStreamPreview() {
+    return (
+        <div className="h-full space-y-1 p-1.5">
+            <div className="rounded bg-emerald-500/15 px-1.5 py-1 text-[6px] font-black uppercase text-emerald-300">
+                Live RSS
+            </div>
+            {[1, 2, 3].map((item) => (
+                <div key={item} className="space-y-0.5 border-t border-[var(--border-subtle)] pt-1">
+                    <div className="h-1.5 w-full rounded bg-[var(--bg-tertiary)]" />
+                    <div className="h-1.5 w-2/3 rounded bg-[var(--bg-tertiary)]/70" />
+                </div>
+            ))}
+        </div>
+    );
+}
+
+function WorldNewsSourcesPreview() {
+    return (
+        <div className="h-full space-y-1 p-1.5">
+            <div className="grid grid-cols-3 gap-1">
+                {[1, 2, 3].map((item) => (
+                    <div key={item} className="h-4 rounded bg-sky-500/15" />
+                ))}
+            </div>
+            {[1, 2, 3].map((item) => (
+                <div key={item} className="space-y-0.5 rounded border border-[var(--border-subtle)] p-1">
+                    <div className="h-1.5 w-2/3 rounded bg-[var(--bg-tertiary)]" />
+                    <div className="flex gap-1">
+                        <div className="h-1.5 w-5 rounded bg-sky-500/25" />
+                        <div className="h-1.5 w-5 rounded bg-emerald-500/25" />
+                        <div className="h-1.5 w-5 rounded bg-[var(--bg-tertiary)]" />
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
 }
 
 // Mini chart preview with bars

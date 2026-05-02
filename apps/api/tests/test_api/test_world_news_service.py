@@ -9,6 +9,7 @@ from vnibb.services.world_news_service import (
     WorldNewsSourceConfig,
     _parse_feed,
     get_world_news_feed,
+    get_world_news_map,
 )
 
 
@@ -152,3 +153,75 @@ async def test_get_world_news_feed_filters_dedupes_and_reports_failed_feeds(monk
     assert response.total == 1
     assert response.articles[0].id == "a-1"
     assert response.articles[0].source_url == "https://a.example"
+
+
+@pytest.mark.asyncio
+async def test_get_world_news_map_groups_articles_by_source_geography(monkeypatch):
+    now = datetime.now(UTC)
+    sources = (
+        WorldNewsSourceConfig(
+            id="source_a",
+            name="Source A",
+            domain="a.example",
+            region="vietnam",
+            category="markets",
+            language="vi",
+            tier=1,
+            homepage_url="https://a.example",
+            feed_urls=("https://a.example/rss.xml",),
+        ),
+        WorldNewsSourceConfig(
+            id="source_b",
+            name="Source B",
+            domain="b.example",
+            region="vietnam",
+            category="business",
+            language="vi",
+            tier=2,
+            homepage_url="https://b.example",
+            feed_urls=("https://b.example/rss.xml",),
+        ),
+    )
+
+    async def fake_fetch_feed(_client, source, feed_url):
+        if source.id == "source_b":
+            return FeedFetchResult(articles=[], failed=True)
+
+        return FeedFetchResult(
+            articles=[
+                WorldNewsArticle(
+                    id="a-1",
+                    title="VN-Index extends gains",
+                    source_id=source.id,
+                    source=source.name,
+                    source_domain=source.domain,
+                    source_url=source.homepage_url,
+                    feed_url=feed_url,
+                    url="https://a.example/story",
+                    published_at=now,
+                    region=source.region,
+                    category="markets",
+                    language=source.language,
+                    tags=["markets", "vietnam"],
+                    relevance_score=0.9,
+                )
+            ]
+        )
+
+    monkeypatch.setattr(world_news_service, "WORLD_NEWS_SOURCES", sources)
+    monkeypatch.setattr(world_news_service, "_fetch_feed", fake_fetch_feed)
+
+    response = await get_world_news_map(region="vietnam", limit=10, freshness_hours=72)
+
+    assert response.total_articles == 1
+    assert response.source_count == 2
+    assert response.failed_feed_count == 1
+    assert len(response.buckets) == 1
+    bucket = response.buckets[0]
+    assert bucket.country_code == "VN"
+    assert bucket.article_count == 1
+    assert bucket.source_count == 2
+    assert bucket.top_category == "markets"
+    assert bucket.top_sources == ["Source A", "Source B"]
+    assert bucket.latest_headline == "VN-Index extends gains"
+    assert bucket.latest_articles[0].source_url == "https://a.example"
