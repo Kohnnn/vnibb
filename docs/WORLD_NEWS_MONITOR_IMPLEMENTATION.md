@@ -135,6 +135,7 @@ Updated integration points:
 - `apps/web/src/contexts/DashboardContext.tsx`: added the suite to the Global Markets system dashboard and the Main News system tab.
 - `apps/web/src/types/dashboard-templates.ts`: added the suite to Global Markets, added a World Monitor starter template, and expanded News Watcher.
 - `apps/web/src/components/widgets/WidgetPreview.tsx`: added world-news map/stream/source previews.
+- `apps/web/src/components/widgets/WidgetLibrary.tsx`: added `World Monitor Suite` as a recommended bundle.
 - `apps/web/src/components/CommandPalette.tsx`: added explicit monitor and suite add actions.
 
 Final inclusion checklist:

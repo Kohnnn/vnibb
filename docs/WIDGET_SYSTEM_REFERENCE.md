@@ -161,6 +161,22 @@ Recent shipped system template changes:
 - Quant `Market` removes duplicate `rs_ranking` / `relative_rotation` placement in favor of broader market context widgets.
 - Global Markets and News & Events templates now include the World Monitor suite (`world_news_map`, `world_news_live_stream`, `world_news_monitor`, `world_news_sources`) so live external source links, source geography, and source registry auditability are available in default workspaces.
 
+Template selector UX rules:
+
+- Template cards should make the primary action visible with an explicit `Use Template` CTA instead of relying on hidden hover overlays.
+- Template discovery should support searching by template name, template description, and included widget names.
+- Template cards should expose workflow intent, widget count, notable data dependencies such as `Live RSS` or `TradingView`, and whether a template can be used without a symbol.
+- Template previews should reflect actual layout proportions from `apps/web/src/types/dashboard-templates.ts` rather than generic placeholder grids.
+- Template cards should list the first several included widgets so users can decide without opening documentation.
+
+Widget library UX rules:
+
+- The widget drawer is an `Add Widgets` command surface, not only a raw component list.
+- Curated bundles should appear before categories when no search is active. Current bundles are `World Monitor Suite`, `Market Pulse Pack`, and `Fundamental Core`.
+- Individual widget rows/cards should expose scope, data source, and default size from the shared layout contract.
+- Primary add actions should remain visible. Batch selection stays available, but checkboxes should not be the only obvious affordance.
+- Search should match widget names, descriptions, keywords, and user-facing bundle/data language where practical.
+
 ## Dashboard Intelligence
 
 - Shared dashboard intelligence now analyzes active-tab widget layouts using the same size contracts defined in `dashboardLayout.ts`.

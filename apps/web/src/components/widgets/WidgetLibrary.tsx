@@ -7,7 +7,7 @@ import {
     Search, X, ChevronRight,
     Activity, BarChart3, Brain, Box, Globe,
     Info, Layers, Newspaper, TrendingUp,
-    Plus, Clock, Maximize2, Sigma
+    Plus, Clock, Maximize2, Sigma, Package
 } from 'lucide-react';
 import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
@@ -35,6 +35,87 @@ const CATEGORY_ICONS: Record<string, any> = {
 };
 
 const WIDGET_TYPE_SET = new Set<WidgetType>(widgetDefinitions.map((widget) => widget.type));
+
+interface WidgetBundle {
+    id: string;
+    name: string;
+    description: string;
+    widgetTypes: WidgetType[];
+    tags: string[];
+    accent: string;
+}
+
+const WIDGET_BUNDLES: WidgetBundle[] = [
+    {
+        id: 'world-monitor-suite',
+        name: 'World Monitor Suite',
+        description: 'Map, live stream, headline list, and source registry for global risk monitoring.',
+        widgetTypes: ['world_news_map', 'world_news_live_stream', 'world_news_monitor', 'world_news_sources'],
+        tags: ['Live RSS', 'No symbol', 'Global'],
+        accent: 'from-sky-500/20 via-blue-500/10 to-emerald-500/10',
+    },
+    {
+        id: 'market-pulse-pack',
+        name: 'Market Pulse Pack',
+        description: 'Market overview, movers, breadth, heatmap, and news for top-down scanning.',
+        widgetTypes: ['market_overview', 'top_movers', 'market_breadth', 'market_heatmap', 'market_news'],
+        tags: ['Market', 'Scanner', 'Live'],
+        accent: 'from-blue-500/20 via-cyan-500/10 to-emerald-500/10',
+    },
+    {
+        id: 'fundamental-core-pack',
+        name: 'Fundamental Core',
+        description: 'Financial snapshot, ratios, statements, and peer context for company research.',
+        widgetTypes: ['financial_snapshot', 'financial_ratios', 'income_statement', 'balance_sheet', 'peer_comparison'],
+        tags: ['Research', 'Symbol', 'Statements'],
+        accent: 'from-amber-500/20 via-orange-500/10 to-blue-500/10',
+    },
+];
+
+const GLOBAL_WIDGETS = new Set<WidgetType>([
+    'world_indices',
+    'world_news_monitor',
+    'world_news_map',
+    'world_news_live_stream',
+    'world_news_sources',
+    'forex_rates',
+    'commodities',
+    'economic_calendar',
+    'tradingview_market_overview',
+    'tradingview_market_data',
+    'tradingview_ticker_tape',
+    'tradingview_stock_heatmap',
+    'tradingview_top_stories',
+]);
+
+const LIVE_WIDGETS = new Set<WidgetType>([
+    'world_news_monitor',
+    'world_news_map',
+    'world_news_live_stream',
+    'world_news_sources',
+    'market_news',
+    'market_overview',
+    'top_movers',
+    'market_breadth',
+    'market_heatmap',
+    'intraday_trades',
+    'orderbook',
+]);
+
+function getWidgetScopeLabel(type: WidgetType): string {
+    if (GLOBAL_WIDGETS.has(type)) return 'Global';
+    if (type.includes('market') || type.includes('sector') || type === 'top_movers') return 'Market';
+    if (type === 'notes' || type === 'watchlist' || type === 'portfolio_tracker' || type === 'price_alerts') return 'Workspace';
+    return 'Symbol';
+}
+
+function getWidgetDataLabel(type: WidgetType): string {
+    if (type.startsWith('tradingview_')) return 'TradingView';
+    if (type.startsWith('world_news_')) return 'Live RSS';
+    if (LIVE_WIDGETS.has(type)) return 'Live API';
+    if (type === 'notes' || type === 'watchlist') return 'Local';
+    return 'VNIBB API';
+}
 
 function isWidgetType(value: string): value is WidgetType {
     const normalized = normalizeWidgetType(value);
@@ -157,6 +238,14 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         handleAddWidgets([widgetDef]);
     }, [handleAddWidgets]);
 
+    const handleAddBundle = useCallback((bundle: WidgetBundle) => {
+        const bundleDefinitions = bundle.widgetTypes
+            .map((type) => getWidgetDefinition(type))
+            .filter((widget): widget is NonNullable<typeof widget> => Boolean(widget));
+
+        handleAddWidgets(bundleDefinitions);
+    }, [handleAddWidgets]);
+
     const toggleWidgetSelection = useCallback((widgetType: WidgetType, checked: boolean) => {
         setSelectedWidgetTypes((current) => {
             if (checked) {
@@ -213,7 +302,10 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         <div className="p-4 border-b border-[var(--border-default)] flex items-center justify-between bg-[var(--bg-elevated)]">
                             <div className="flex items-center gap-2">
                                 <Layers size={18} className="text-blue-500" />
-                                <span className="text-sm font-black uppercase tracking-widest text-[var(--text-primary)]">Components</span>
+                                <div>
+                                    <span className="text-sm font-black uppercase tracking-widest text-[var(--text-primary)]">Add Widgets</span>
+                                    <p className="mt-0.5 text-[10px] font-medium text-[var(--text-muted)]">Pick one widget, select many, or add a curated bundle.</p>
+                                </div>
                             </div>
                             <button
                                 onClick={onClose}
@@ -232,7 +324,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                     autoFocus
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    placeholder="Search widgets..."
+                                    placeholder="Search widgets, bundles, or data sources..."
                                     className="w-full pl-9 pr-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-blue-500/50 transition-all font-medium"
                                 />
                             </div>
@@ -240,6 +332,56 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
 
                         {/* Content */}
                         <div className="flex-1 overflow-y-auto scrollbar-hide">
+                            {/* Recommended bundles */}
+                            {searchQuery === '' && (
+                                <div className="border-b border-[var(--border-subtle)]">
+                                    <div className="px-4 py-2 text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] bg-[var(--bg-secondary)] flex items-center gap-2">
+                                        <Package size={10} />
+                                        Recommended Bundles
+                                    </div>
+                                    <div className="space-y-2 p-2">
+                                        {WIDGET_BUNDLES.map((bundle) => (
+                                            <div
+                                                key={bundle.id}
+                                                className={cn(
+                                                    'overflow-hidden rounded-xl border border-[var(--border-default)] bg-gradient-to-br p-3 transition-all hover:border-blue-500/35',
+                                                    bundle.accent
+                                                )}
+                                            >
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="text-[11px] font-black uppercase tracking-tight text-[var(--text-primary)]">
+                                                            {bundle.name}
+                                                        </div>
+                                                        <p className="mt-1 text-[10px] leading-snug text-[var(--text-secondary)]">
+                                                            {bundle.description}
+                                                        </p>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleAddBundle(bundle)}
+                                                        disabled={!dashboardEditable}
+                                                        className="shrink-0 rounded-lg bg-blue-600 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-[0.14em] text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        Add
+                                                    </button>
+                                                </div>
+                                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                                    {bundle.tags.map((tag) => (
+                                                        <span key={tag} className="rounded-full border border-white/10 bg-black/15 px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                                                            {tag}
+                                                        </span>
+                                                    ))}
+                                                    <span className="rounded-full border border-white/10 bg-black/15 px-2 py-0.5 text-[8px] font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                                                        {bundle.widgetTypes.length} widgets
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Recents */}
                             {searchQuery === '' && recentWidgetTypes.length > 0 && (
                                 <div className="border-b border-[var(--border-subtle)]">
@@ -361,9 +503,12 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                                 onClick={() => handleAddWidget(widget)}
                                                                 disabled={!dashboardEditable}
                                                                 title={dashboardEditable ? `Add ${widget.name}` : 'Main dashboard is read-only'}
-                                                                className="p-1 rounded bg-blue-600 text-white opacity-0 group-hover:opacity-100 transition-all hover:scale-110 active:scale-95 shadow-lg shadow-blue-600/20 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
+                                                                className="rounded-lg bg-blue-600 px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white transition-all hover:bg-blue-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
                                                             >
-                                                                <Plus size={14} strokeWidth={3} />
+                                                                <span className="flex items-center gap-1">
+                                                                    <Plus size={12} strokeWidth={3} />
+                                                                    Add
+                                                                </span>
                                                             </button>
                                                         </div>
                                                         <div className="text-[10px] text-[var(--text-muted)] line-clamp-2 leading-tight font-medium">
@@ -375,6 +520,12 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                                     Recommended
                                                                 </div>
                                                             )}
+                                                            <div className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                                                                {getWidgetScopeLabel(widget.type)}
+                                                            </div>
+                                                            <div className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                                                                {getWidgetDataLabel(widget.type)}
+                                                            </div>
                                                             <div className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
                                                                 <Maximize2 size={10} className="text-blue-400/60" />
                                                                 {libraryLayout.w}x{libraryLayout.h}
