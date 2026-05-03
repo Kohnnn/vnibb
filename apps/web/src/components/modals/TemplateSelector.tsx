@@ -39,8 +39,71 @@ function formatWidgetType(type: string) {
     .join(' ');
 }
 
+function getTemplateIntent(template: DashboardTemplate) {
+  if (template.id === 'world-monitor') return 'Global risk monitoring';
+  if (template.id === 'global-markets') return 'Cross-market context';
+  if (template.category === 'fundamentals') return 'Long-horizon research';
+  if (template.category === 'technical') return 'Trading workflow';
+  if (template.category === 'quant') return 'Signal research';
+  if (template.category === 'research') return 'Investigation workflow';
+  return 'Market monitoring';
+}
+
+function getTemplateBadges(template: DashboardTemplate) {
+  const badges = [getTemplateIntent(template), `${template.widgets.length} widgets`];
+  if (template.widgets.some((widget) => widget.type.startsWith('world_news_'))) {
+    badges.push('Live RSS');
+  }
+  if (template.widgets.some((widget) => widget.type.startsWith('tradingview_'))) {
+    badges.push('TradingView');
+  }
+  if (template.id === 'world-monitor' || template.id === 'global-markets') {
+    badges.push('No symbol required');
+  }
+  return badges.slice(0, 4);
+}
+
+function TemplateLayoutPreview({ template }: { template: DashboardTemplate }) {
+  const maxY = Math.max(...template.widgets.map((widget) => widget.layout.y + widget.layout.h), 1);
+  const visibleWidgets = template.widgets.slice(0, 8);
+
+  return (
+    <div className={cn(
+      "relative mb-3 aspect-video w-full overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 transition-all group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)]",
+      "bg-gradient-to-br",
+      CATEGORY_PREVIEW_STYLES[template.category]
+    )}>
+      <div className="absolute inset-0 p-3">
+        {visibleWidgets.map((widget, index) => (
+          <div
+            key={`${template.id}-layout-${widget.type}-${index}`}
+            className="absolute rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/85 shadow-sm"
+            style={{
+              left: `${(widget.layout.x / 24) * 100}%`,
+              top: `${(widget.layout.y / maxY) * 100}%`,
+              width: `${Math.max(8, (widget.layout.w / 24) * 100)}%`,
+              height: `${Math.max(12, (widget.layout.h / maxY) * 100)}%`,
+            }}
+          />
+        ))}
+      </div>
+      <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-1.5">
+        {template.widgets.slice(0, 4).map((widget) => (
+          <span
+            key={`${template.id}-${widget.type}`}
+            className="rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-2 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[var(--text-secondary)]"
+          >
+            {formatWidgetType(widget.type)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: TemplateSelectorProps) {
   const [selectedCategory, setSelectedCategory] = useState<DashboardTemplateCategory | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     if (!open) return
@@ -58,9 +121,18 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
     ) as Record<DashboardTemplateCategory, number>;
   }, []);
 
-  const filteredTemplates = selectedCategory
-    ? DASHBOARD_TEMPLATES.filter(t => t.category === selectedCategory)
-    : DASHBOARD_TEMPLATES;
+  const filteredTemplates = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    return DASHBOARD_TEMPLATES.filter((template) => {
+      const matchesCategory = !selectedCategory || template.category === selectedCategory;
+      const matchesSearch = !normalizedQuery
+        || template.name.toLowerCase().includes(normalizedQuery)
+        || template.description.toLowerCase().includes(normalizedQuery)
+        || template.widgets.some((widget) => formatWidgetType(widget.type).toLowerCase().includes(normalizedQuery));
+
+      return matchesCategory && matchesSearch;
+    });
+  }, [searchQuery, selectedCategory]);
 
   if (!open) return null;
 
@@ -76,7 +148,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         onClick={(event) => event.stopPropagation()}
-        className="w-full max-w-4xl max-h-[85vh] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col"
+        className="w-full max-w-6xl max-h-[88vh] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-[var(--border-default)] bg-[var(--bg-surface)]">
@@ -85,7 +157,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
                 <Layout className="text-blue-500" size={20} />
                 Dashboard Templates
             </h2>
-            <p className="text-xs text-[var(--text-muted)] font-medium">Quickly setup your workspace with professional layouts</p>
+            <p className="text-xs text-[var(--text-muted)] font-medium">Choose by workflow, included widgets, and setup requirements.</p>
           </div>
           <button
             onClick={onClose}
@@ -97,105 +169,117 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
         </div>
 
         {/* Category Filter */}
-        <div className="flex gap-2 border-b border-[var(--border-default)] bg-[var(--bg-surface)]/70 p-4">
-          <button
-            onClick={() => setSelectedCategory(null)}
-            className={cn(
-                "rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all",
-                !selectedCategory
-                  ? 'border-blue-400/50 bg-blue-600 text-white shadow-[0_0_0_1px_rgba(96,165,250,0.24)]'
-                  : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-blue-500/30'
-            )}
-          >
-            All Templates
-          </button>
-          {DASHBOARD_TEMPLATE_CATEGORIES.map((category) => {
-            const Icon = CATEGORY_ICONS[category.id]
-            return (
+        <div className="space-y-3 border-b border-[var(--border-default)] bg-[var(--bg-surface)]/70 p-4">
+          <div className="relative max-w-xl">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search templates or included widgets..."
+              className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none transition-all focus:border-blue-500/50"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
             <button
-              key={category.id}
-              onClick={() => setSelectedCategory(category.id)}
+              onClick={() => setSelectedCategory(null)}
               className={cn(
-                "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all",
-                selectedCategory === category.id
-                  ? 'border-blue-400/50 bg-blue-600 text-white shadow-[0_0_0_1px_rgba(96,165,250,0.24)]'
-                  : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-blue-500/30'
+                  "rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all",
+                  !selectedCategory
+                    ? 'border-blue-400/50 bg-blue-600 text-white shadow-[0_0_0_1px_rgba(96,165,250,0.24)]'
+                    : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-blue-500/30'
               )}
             >
-              <Icon className="w-3 h-3" />
-              {category.label}
-              <span className="text-[9px] opacity-75">{categoryCounts[category.id]}</span>
+              All Templates
             </button>
-            )
-          })}
+            {DASHBOARD_TEMPLATE_CATEGORIES.map((category) => {
+              const Icon = CATEGORY_ICONS[category.id]
+              return (
+              <button
+                key={category.id}
+                onClick={() => setSelectedCategory(category.id)}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all",
+                  selectedCategory === category.id
+                    ? 'border-blue-400/50 bg-blue-600 text-white shadow-[0_0_0_1px_rgba(96,165,250,0.24)]'
+                    : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-blue-500/30'
+                )}
+              >
+                <Icon className="w-3 h-3" />
+                {category.label}
+                <span className="text-[9px] opacity-75">{categoryCounts[category.id]}</span>
+              </button>
+              )
+            })}
+          </div>
         </div>
 
         {/* Templates Grid */}
         <div className="flex-1 p-6 overflow-y-auto scrollbar-hide bg-[var(--bg-primary)]">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredTemplates.map(template => (
-              <button
-                key={template.id}
-                onClick={() => {
-                  onSelectTemplate(template);
-                  onClose();
-                }}
-                className="group flex flex-col rounded-xl border border-transparent bg-[var(--bg-surface)]/45 p-2 text-left transition-all duration-300 hover:border-blue-500/20 hover:bg-[var(--bg-surface)]/70 focus:outline-none"
-              >
-                <div className={cn(
-                  "relative mb-3 aspect-video w-full overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)] transition-all",
-                  "bg-gradient-to-br",
-                  CATEGORY_PREVIEW_STYLES[template.category]
-                )}>
-                  <div className="absolute inset-0 p-3 flex flex-col justify-between">
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {template.widgets.slice(0, 4).map((widget, idx) => (
-                        <div
-                          key={`${template.id}-preview-top-${idx}`}
-                          className="h-5 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/85"
-                        />
-                      ))}
-                    </div>
-                    <div className="space-y-1">
-                      {template.widgets.slice(0, 4).map((widget, idx) => (
-                        <div
-                          key={`${template.id}-preview-label-${idx}`}
-                          className="inline-flex items-center mr-1 mb-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-1.5 py-0.5"
-                        >
-                          <span className="text-[8px] font-bold uppercase tracking-wide text-[var(--text-secondary)]">
-                            {formatWidgetType(widget.type)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {filteredTemplates.map(template => {
+              const categoryLabel = DASHBOARD_TEMPLATE_CATEGORIES.find((category) => category.id === template.category)?.label || template.category;
+              return (
+                <article
+                  key={template.id}
+                  className="group flex flex-col rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)]/55 p-3 text-left transition-all duration-300 hover:border-blue-500/30 hover:bg-[var(--bg-surface)]/80"
+                >
+                  <TemplateLayoutPreview template={template} />
+
+                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                    <span className="inline-flex items-center rounded-full border border-blue-500/15 bg-blue-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-blue-200/90">
+                      {categoryLabel}
+                    </span>
+                    {getTemplateBadges(template).map((badge) => (
+                      <span key={badge} className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
+                  <h3 className="text-sm font-black text-[var(--text-primary)] transition-colors group-hover:text-blue-400">{template.name}</h3>
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                    {template.description}
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {template.widgets.slice(0, 5).map((widget) => (
+                      <span key={`${template.id}-included-${widget.type}`} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[8px] font-bold uppercase text-[var(--text-secondary)]">
+                        {formatWidgetType(widget.type)}
+                      </span>
+                    ))}
+                    {template.widgets.length > 5 && (
+                      <span className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[8px] font-bold uppercase text-[var(--text-muted)]">
+                        +{template.widgets.length - 5} more
+                      </span>
+                    )}
                   </div>
 
-                  <div className="absolute inset-0 bg-blue-600/0 group-hover:bg-blue-600/5 transition-colors flex items-center justify-center">
-                    <div className="px-4 py-2 bg-blue-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transform translate-y-2 group-hover:translate-y-0 transition-all">
-                      Apply Template
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="inline-flex items-center rounded-full border border-blue-500/15 bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-blue-200/90">
-                    {DASHBOARD_TEMPLATE_CATEGORIES.find((category) => category.id === template.category)?.label || template.category}
-                  </span>
-                </div>
-                <h3 className="font-bold text-[var(--text-primary)] text-sm group-hover:text-blue-400 transition-colors">{template.name}</h3>
-                <p className="text-[11px] text-[var(--text-muted)] mt-1 line-clamp-2 leading-relaxed">
-                    {template.description}
-                </p>
-                
-                <div className="mt-auto pt-3 flex items-center justify-between border-t border-[var(--border-default)]/70">
-                    <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tighter">
-                      {template.widgets.length} widgets
+                  <div className="mt-auto pt-4 flex items-center justify-between gap-3">
+                    <span className="text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                      Ready layout
                     </span>
-                    <ChevronRight size={14} className="text-[var(--text-muted)] group-hover:text-blue-500 group-hover:translate-x-1 transition-all" />
-                </div>
-              </button>
-            ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelectTemplate(template);
+                        onClose();
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-blue-500"
+                    >
+                      Use Template
+                      <ChevronRight size={13} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
+
+          {filteredTemplates.length === 0 && (
+            <div className="py-12 text-center text-sm text-[var(--text-muted)]">
+              No templates match your filters.
+            </div>
+          )}
         </div>
       </motion.div>
     </div>

@@ -140,6 +140,8 @@ For current TradingView-native coverage, use:
 - Discovery/fundamental surfaces now also include `TTM Snapshot` and `Growth Bridge` for fast trailing-twelve-month and growth-momentum review.
 - Ownership surfaces now include `Ownership Rating Summary` for concentration, foreign flow, and insider-bias synthesis.
 - Derivatives coverage now includes `Derivatives Analytics` for front-contract pulse and short-curve structure, beyond the base contracts board and price-history widgets.
+- The widget drawer now includes recommended bundles, visible add actions, and metadata chips for scope, data source, and default size.
+- The template gallery now supports template/widget search, actual layout previews, visible `Use Template` CTAs, workflow-intent badges, and included-widget summaries.
 - Broader USD conversion for quote and market widgets is intentionally deferred to the roadmap.
 - Additional widgets now exposed in the widget library:
   - `block_trade`
