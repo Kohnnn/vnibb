@@ -3,13 +3,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import html
+import ipaddress
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -20,9 +22,21 @@ from vnibb.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-VALID_WORLD_NEWS_REGIONS = {"vietnam", "asia", "us", "europe", "global"}
+VALID_WORLD_NEWS_REGIONS = {
+    "vietnam",
+    "asia",
+    "us",
+    "europe",
+    "middleeast",
+    "africa",
+    "latam",
+    "oceania",
+    "global",
+}
 VALID_WORLD_NEWS_CATEGORIES = {"markets", "economy", "business", "geopolitics", "technology"}
 VALID_WORLD_NEWS_LANGUAGES = {"vi", "en"}
+CUSTOM_RSS_SOURCE_ID_PREFIX = "custom_rss"
+MAX_CUSTOM_RSS_URL_LENGTH = 500
 
 
 @dataclass(frozen=True)
@@ -307,6 +321,524 @@ WORLD_NEWS_SOURCES: tuple[WorldNewsSourceConfig, ...] = (
         homepage_url="https://www.aljazeera.com/news/",
         feed_urls=("https://www.aljazeera.com/xml/rss/all.xml",),
     ),
+    WorldNewsSourceConfig(
+        id="guardian_world",
+        name="The Guardian World",
+        domain="theguardian.com",
+        region="global",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.theguardian.com/world",
+        feed_urls=("https://www.theguardian.com/world/rss",),
+    ),
+    WorldNewsSourceConfig(
+        id="reuters_world",
+        name="Reuters World",
+        domain="reuters.com",
+        region="global",
+        category="geopolitics",
+        language="en",
+        tier=1,
+        homepage_url="https://www.reuters.com/world/",
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:reuters.com%20world%20when:1d&hl=en-US&gl=US&ceid=US:en",
+        ),
+    ),
+    WorldNewsSourceConfig(
+        id="reuters_business",
+        name="Reuters Business",
+        domain="reuters.com",
+        region="global",
+        category="business",
+        language="en",
+        tier=1,
+        homepage_url="https://www.reuters.com/business/",
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:reuters.com%20business%20markets%20when:1d&hl=en-US&gl=US&ceid=US:en",
+        ),
+    ),
+    WorldNewsSourceConfig(
+        id="bloomberg_markets",
+        name="Bloomberg Markets",
+        domain="bloomberg.com",
+        region="us",
+        category="markets",
+        language="en",
+        tier=1,
+        homepage_url="https://www.bloomberg.com/markets",
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:bloomberg.com%20markets%20when:1d&hl=en-US&gl=US&ceid=US:en",
+        ),
+    ),
+    WorldNewsSourceConfig(
+        id="marketwatch_markets",
+        name="MarketWatch Markets",
+        domain="marketwatch.com",
+        region="us",
+        category="markets",
+        language="en",
+        tier=2,
+        homepage_url="https://www.marketwatch.com/markets",
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:marketwatch.com%20markets%20when:1d&hl=en-US&gl=US&ceid=US:en",
+        ),
+    ),
+    WorldNewsSourceConfig(
+        id="yahoo_finance",
+        name="Yahoo Finance",
+        domain="finance.yahoo.com",
+        region="us",
+        category="markets",
+        language="en",
+        tier=2,
+        homepage_url="https://finance.yahoo.com/news/",
+        feed_urls=("https://finance.yahoo.com/news/rssindex",),
+    ),
+    WorldNewsSourceConfig(
+        id="financial_times",
+        name="Financial Times",
+        domain="ft.com",
+        region="europe",
+        category="business",
+        language="en",
+        tier=1,
+        homepage_url="https://www.ft.com/",
+        feed_urls=("https://www.ft.com/rss/home",),
+    ),
+    WorldNewsSourceConfig(
+        id="npr_news",
+        name="NPR News",
+        domain="npr.org",
+        region="us",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.npr.org/sections/news/",
+        feed_urls=("https://feeds.npr.org/1001/rss.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="pbs_newshour",
+        name="PBS NewsHour",
+        domain="pbs.org",
+        region="us",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.pbs.org/newshour/",
+        feed_urls=("https://www.pbs.org/newshour/feeds/rss/headlines",),
+    ),
+    WorldNewsSourceConfig(
+        id="france24_world",
+        name="France 24 World",
+        domain="france24.com",
+        region="europe",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.france24.com/en/",
+        feed_urls=("https://www.france24.com/en/rss",),
+    ),
+    WorldNewsSourceConfig(
+        id="euronews_world",
+        name="Euronews",
+        domain="euronews.com",
+        region="europe",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.euronews.com/",
+        feed_urls=("https://www.euronews.com/rss?format=xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="dw_news",
+        name="DW News",
+        domain="dw.com",
+        region="europe",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.dw.com/en/top-stories/s-9097",
+        feed_urls=("https://rss.dw.com/xml/rss-en-all",),
+    ),
+    WorldNewsSourceConfig(
+        id="le_monde_en",
+        name="Le Monde English",
+        domain="lemonde.fr",
+        region="europe",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.lemonde.fr/en/",
+        feed_urls=("https://www.lemonde.fr/en/rss/une.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="bbc_middle_east",
+        name="BBC Middle East",
+        domain="bbc.co.uk",
+        region="middleeast",
+        category="geopolitics",
+        language="en",
+        tier=1,
+        homepage_url="https://www.bbc.com/news/world/middle_east",
+        feed_urls=("https://feeds.bbci.co.uk/news/world/middle_east/rss.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="guardian_middle_east",
+        name="The Guardian Middle East",
+        domain="theguardian.com",
+        region="middleeast",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.theguardian.com/world/middleeast",
+        feed_urls=("https://www.theguardian.com/world/middleeast/rss",),
+    ),
+    WorldNewsSourceConfig(
+        id="the_national_middle_east",
+        name="The National Middle East",
+        domain="thenationalnews.com",
+        region="middleeast",
+        category="business",
+        language="en",
+        tier=2,
+        homepage_url="https://www.thenationalnews.com/",
+        feed_urls=("https://www.thenationalnews.com/arc/outboundfeeds/rss/?outputType=xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="al_arabiya_business",
+        name="Al Arabiya Business",
+        domain="alarabiya.net",
+        region="middleeast",
+        category="business",
+        language="en",
+        tier=2,
+        homepage_url="https://english.alarabiya.net/business",
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:english.alarabiya.net%20business%20when:2d&hl=en-US&gl=US&ceid=US:en",
+        ),
+    ),
+    WorldNewsSourceConfig(
+        id="bbc_asia",
+        name="BBC Asia",
+        domain="bbc.co.uk",
+        region="asia",
+        category="geopolitics",
+        language="en",
+        tier=1,
+        homepage_url="https://www.bbc.com/news/world/asia",
+        feed_urls=("https://feeds.bbci.co.uk/news/world/asia/rss.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="the_diplomat_asia",
+        name="The Diplomat",
+        domain="thediplomat.com",
+        region="asia",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://thediplomat.com/",
+        feed_urls=("https://thediplomat.com/feed/",),
+    ),
+    WorldNewsSourceConfig(
+        id="cna_asia",
+        name="Channel NewsAsia",
+        domain="channelnewsasia.com",
+        region="asia",
+        category="business",
+        language="en",
+        tier=2,
+        homepage_url="https://www.channelnewsasia.com/",
+        feed_urls=("https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="nikkei_asia",
+        name="Nikkei Asia",
+        domain="asia.nikkei.com",
+        region="asia",
+        category="markets",
+        language="en",
+        tier=1,
+        homepage_url="https://asia.nikkei.com/",
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:asia.nikkei.com%20when:3d&hl=en-US&gl=US&ceid=US:en",
+        ),
+    ),
+    WorldNewsSourceConfig(
+        id="ndtv_india",
+        name="NDTV India",
+        domain="ndtv.com",
+        region="asia",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.ndtv.com/",
+        feed_urls=("https://feeds.feedburner.com/ndtvnews-top-stories",),
+    ),
+    WorldNewsSourceConfig(
+        id="the_hindu_india",
+        name="The Hindu India",
+        domain="thehindu.com",
+        region="asia",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.thehindu.com/",
+        feed_urls=("https://www.thehindu.com/feeder/default.rss",),
+    ),
+    WorldNewsSourceConfig(
+        id="abc_australia",
+        name="ABC News Australia",
+        domain="abc.net.au",
+        region="oceania",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.abc.net.au/news/",
+        feed_urls=("https://www.abc.net.au/news/feed/2942460/rss.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="guardian_australia",
+        name="The Guardian Australia",
+        domain="theguardian.com",
+        region="oceania",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.theguardian.com/australia-news",
+        feed_urls=("https://www.theguardian.com/australia-news/rss",),
+    ),
+    WorldNewsSourceConfig(
+        id="bbc_africa",
+        name="BBC Africa",
+        domain="bbc.co.uk",
+        region="africa",
+        category="geopolitics",
+        language="en",
+        tier=1,
+        homepage_url="https://www.bbc.com/news/world/africa",
+        feed_urls=("https://feeds.bbci.co.uk/news/world/africa/rss.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="news24_africa",
+        name="News24 Africa",
+        domain="news24.com",
+        region="africa",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.news24.com/news24/africa",
+        feed_urls=("https://feeds.news24.com/articles/news24/TopStories/rss",),
+    ),
+    WorldNewsSourceConfig(
+        id="africanews",
+        name="Africanews",
+        domain="africanews.com",
+        region="africa",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.africanews.com/",
+        feed_urls=("https://www.africanews.com/feed/rss",),
+    ),
+    WorldNewsSourceConfig(
+        id="premium_times_nigeria",
+        name="Premium Times Nigeria",
+        domain="premiumtimesng.com",
+        region="africa",
+        category="business",
+        language="en",
+        tier=2,
+        homepage_url="https://www.premiumtimesng.com/",
+        feed_urls=("https://www.premiumtimesng.com/feed",),
+    ),
+    WorldNewsSourceConfig(
+        id="bbc_latin_america",
+        name="BBC Latin America",
+        domain="bbc.co.uk",
+        region="latam",
+        category="geopolitics",
+        language="en",
+        tier=1,
+        homepage_url="https://www.bbc.com/news/world/latin_america",
+        feed_urls=("https://feeds.bbci.co.uk/news/world/latin_america/rss.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="guardian_americas",
+        name="The Guardian Americas",
+        domain="theguardian.com",
+        region="latam",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.theguardian.com/world/americas",
+        feed_urls=("https://www.theguardian.com/world/americas/rss",),
+    ),
+    WorldNewsSourceConfig(
+        id="insight_crime",
+        name="InSight Crime",
+        domain="insightcrime.org",
+        region="latam",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://insightcrime.org/",
+        feed_urls=("https://insightcrime.org/feed/",),
+    ),
+    WorldNewsSourceConfig(
+        id="infobae_americas",
+        name="Infobae Americas",
+        domain="infobae.com",
+        region="latam",
+        category="business",
+        language="en",
+        tier=2,
+        homepage_url="https://www.infobae.com/america/",
+        feed_urls=("https://www.infobae.com/arc/outboundfeeds/rss/",),
+    ),
+    WorldNewsSourceConfig(
+        id="techcrunch",
+        name="TechCrunch",
+        domain="techcrunch.com",
+        region="us",
+        category="technology",
+        language="en",
+        tier=1,
+        homepage_url="https://techcrunch.com/",
+        feed_urls=("https://techcrunch.com/feed/",),
+    ),
+    WorldNewsSourceConfig(
+        id="the_verge",
+        name="The Verge",
+        domain="theverge.com",
+        region="us",
+        category="technology",
+        language="en",
+        tier=2,
+        homepage_url="https://www.theverge.com/",
+        feed_urls=("https://www.theverge.com/rss/index.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="mit_tech_review",
+        name="MIT Technology Review",
+        domain="technologyreview.com",
+        region="us",
+        category="technology",
+        language="en",
+        tier=2,
+        homepage_url="https://www.technologyreview.com/",
+        feed_urls=("https://www.technologyreview.com/feed/",),
+    ),
+    WorldNewsSourceConfig(
+        id="venturebeat_ai",
+        name="VentureBeat AI",
+        domain="venturebeat.com",
+        region="us",
+        category="technology",
+        language="en",
+        tier=2,
+        homepage_url="https://venturebeat.com/category/ai/",
+        feed_urls=("https://venturebeat.com/category/ai/feed/",),
+    ),
+    WorldNewsSourceConfig(
+        id="foreign_policy",
+        name="Foreign Policy",
+        domain="foreignpolicy.com",
+        region="global",
+        category="geopolitics",
+        language="en",
+        tier=1,
+        homepage_url="https://foreignpolicy.com/",
+        feed_urls=("https://foreignpolicy.com/feed/",),
+    ),
+    WorldNewsSourceConfig(
+        id="foreign_affairs",
+        name="Foreign Affairs",
+        domain="foreignaffairs.com",
+        region="global",
+        category="geopolitics",
+        language="en",
+        tier=1,
+        homepage_url="https://www.foreignaffairs.com/",
+        feed_urls=("https://www.foreignaffairs.com/rss.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="atlantic_council",
+        name="Atlantic Council",
+        domain="atlanticcouncil.org",
+        region="global",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.atlanticcouncil.org/",
+        feed_urls=("https://www.atlanticcouncil.org/feed/",),
+    ),
+    WorldNewsSourceConfig(
+        id="csis",
+        name="CSIS",
+        domain="csis.org",
+        region="us",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://www.csis.org/",
+        feed_urls=("https://www.csis.org/rss.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="war_on_the_rocks",
+        name="War on the Rocks",
+        domain="warontherocks.com",
+        region="us",
+        category="geopolitics",
+        language="en",
+        tier=2,
+        homepage_url="https://warontherocks.com/",
+        feed_urls=("https://warontherocks.com/feed/",),
+    ),
+    WorldNewsSourceConfig(
+        id="crisiswatch",
+        name="CrisisWatch",
+        domain="crisisgroup.org",
+        region="global",
+        category="geopolitics",
+        language="en",
+        tier=1,
+        homepage_url="https://www.crisisgroup.org/crisiswatch",
+        feed_urls=("https://www.crisisgroup.org/rss",),
+    ),
+    WorldNewsSourceConfig(
+        id="un_news",
+        name="UN News",
+        domain="news.un.org",
+        region="global",
+        category="geopolitics",
+        language="en",
+        tier=1,
+        homepage_url="https://news.un.org/en/",
+        feed_urls=("https://news.un.org/feed/subscribe/en/news/all/rss.xml",),
+    ),
+    WorldNewsSourceConfig(
+        id="iaea_news",
+        name="IAEA News",
+        domain="iaea.org",
+        region="europe",
+        category="geopolitics",
+        language="en",
+        tier=1,
+        homepage_url="https://www.iaea.org/newscenter",
+        feed_urls=("https://www.iaea.org/feeds/topnews",),
+    ),
+    WorldNewsSourceConfig(
+        id="cisa_alerts",
+        name="CISA Alerts",
+        domain="cisa.gov",
+        region="us",
+        category="technology",
+        language="en",
+        tier=1,
+        homepage_url="https://www.cisa.gov/news-events/cybersecurity-advisories",
+        feed_urls=("https://www.cisa.gov/cybersecurity-advisories/all.xml",),
+    ),
 )
 
 
@@ -454,6 +986,34 @@ WORLD_NEWS_REGION_GEO: dict[str, dict[str, str | float]] = {
         "longitude": -0.1276,
         "map_region": "Europe",
     },
+    "middleeast": {
+        "country_code": "AE",
+        "country_name": "United Arab Emirates",
+        "latitude": 24.4539,
+        "longitude": 54.3773,
+        "map_region": "Middle East",
+    },
+    "africa": {
+        "country_code": "ZA",
+        "country_name": "South Africa",
+        "latitude": -26.2041,
+        "longitude": 28.0473,
+        "map_region": "Africa",
+    },
+    "latam": {
+        "country_code": "BR",
+        "country_name": "Brazil",
+        "latitude": -15.7939,
+        "longitude": -47.8828,
+        "map_region": "Latin America",
+    },
+    "oceania": {
+        "country_code": "AU",
+        "country_name": "Australia",
+        "latitude": -35.2809,
+        "longitude": 149.13,
+        "map_region": "Oceania",
+    },
     "global": {
         "country_code": "GB",
         "country_name": "United Kingdom",
@@ -462,6 +1022,153 @@ WORLD_NEWS_REGION_GEO: dict[str, dict[str, str | float]] = {
         "map_region": "Global",
     },
 }
+
+WORLD_NEWS_SOURCE_GEO.update(
+    {
+        "guardian_world": WORLD_NEWS_REGION_GEO["global"],
+        "reuters_world": WORLD_NEWS_REGION_GEO["global"],
+        "reuters_business": WORLD_NEWS_REGION_GEO["global"],
+        "bloomberg_markets": WORLD_NEWS_REGION_GEO["us"],
+        "marketwatch_markets": WORLD_NEWS_REGION_GEO["us"],
+        "yahoo_finance": WORLD_NEWS_REGION_GEO["us"],
+        "financial_times": WORLD_NEWS_REGION_GEO["europe"],
+        "npr_news": WORLD_NEWS_REGION_GEO["us"],
+        "pbs_newshour": WORLD_NEWS_REGION_GEO["us"],
+        "france24_world": {
+            "country_code": "FR",
+            "country_name": "France",
+            "latitude": 48.8566,
+            "longitude": 2.3522,
+            "map_region": "Europe",
+        },
+        "euronews_world": {
+            "country_code": "FR",
+            "country_name": "France",
+            "latitude": 45.764,
+            "longitude": 4.8357,
+            "map_region": "Europe",
+        },
+        "dw_news": {
+            "country_code": "DE",
+            "country_name": "Germany",
+            "latitude": 52.52,
+            "longitude": 13.405,
+            "map_region": "Europe",
+        },
+        "le_monde_en": {
+            "country_code": "FR",
+            "country_name": "France",
+            "latitude": 48.8566,
+            "longitude": 2.3522,
+            "map_region": "Europe",
+        },
+        "bbc_middle_east": WORLD_NEWS_REGION_GEO["middleeast"],
+        "guardian_middle_east": WORLD_NEWS_REGION_GEO["middleeast"],
+        "the_national_middle_east": WORLD_NEWS_REGION_GEO["middleeast"],
+        "al_arabiya_business": {
+            "country_code": "SA",
+            "country_name": "Saudi Arabia",
+            "latitude": 24.7136,
+            "longitude": 46.6753,
+            "map_region": "Middle East",
+        },
+        "bbc_asia": WORLD_NEWS_REGION_GEO["asia"],
+        "the_diplomat_asia": {
+            "country_code": "JP",
+            "country_name": "Japan",
+            "latitude": 35.6762,
+            "longitude": 139.6503,
+            "map_region": "Asia",
+        },
+        "cna_asia": WORLD_NEWS_REGION_GEO["asia"],
+        "nikkei_asia": {
+            "country_code": "JP",
+            "country_name": "Japan",
+            "latitude": 35.6762,
+            "longitude": 139.6503,
+            "map_region": "Asia",
+        },
+        "ndtv_india": {
+            "country_code": "IN",
+            "country_name": "India",
+            "latitude": 28.6139,
+            "longitude": 77.209,
+            "map_region": "Asia",
+        },
+        "the_hindu_india": {
+            "country_code": "IN",
+            "country_name": "India",
+            "latitude": 13.0827,
+            "longitude": 80.2707,
+            "map_region": "Asia",
+        },
+        "abc_australia": WORLD_NEWS_REGION_GEO["oceania"],
+        "guardian_australia": WORLD_NEWS_REGION_GEO["oceania"],
+        "bbc_africa": WORLD_NEWS_REGION_GEO["africa"],
+        "news24_africa": WORLD_NEWS_REGION_GEO["africa"],
+        "africanews": {
+            "country_code": "CG",
+            "country_name": "Republic of the Congo",
+            "latitude": -4.2634,
+            "longitude": 15.2429,
+            "map_region": "Africa",
+        },
+        "premium_times_nigeria": {
+            "country_code": "NG",
+            "country_name": "Nigeria",
+            "latitude": 9.0765,
+            "longitude": 7.3986,
+            "map_region": "Africa",
+        },
+        "bbc_latin_america": WORLD_NEWS_REGION_GEO["latam"],
+        "guardian_americas": WORLD_NEWS_REGION_GEO["latam"],
+        "insight_crime": {
+            "country_code": "CO",
+            "country_name": "Colombia",
+            "latitude": 4.711,
+            "longitude": -74.0721,
+            "map_region": "Latin America",
+        },
+        "infobae_americas": {
+            "country_code": "AR",
+            "country_name": "Argentina",
+            "latitude": -34.6037,
+            "longitude": -58.3816,
+            "map_region": "Latin America",
+        },
+        "techcrunch": WORLD_NEWS_REGION_GEO["us"],
+        "the_verge": WORLD_NEWS_REGION_GEO["us"],
+        "mit_tech_review": WORLD_NEWS_REGION_GEO["us"],
+        "venturebeat_ai": WORLD_NEWS_REGION_GEO["us"],
+        "foreign_policy": WORLD_NEWS_REGION_GEO["us"],
+        "foreign_affairs": WORLD_NEWS_REGION_GEO["us"],
+        "atlantic_council": WORLD_NEWS_REGION_GEO["us"],
+        "csis": WORLD_NEWS_REGION_GEO["us"],
+        "war_on_the_rocks": WORLD_NEWS_REGION_GEO["us"],
+        "crisiswatch": {
+            "country_code": "BE",
+            "country_name": "Belgium",
+            "latitude": 50.8503,
+            "longitude": 4.3517,
+            "map_region": "Europe",
+        },
+        "un_news": {
+            "country_code": "US",
+            "country_name": "United States",
+            "latitude": 40.7489,
+            "longitude": -73.968,
+            "map_region": "North America",
+        },
+        "iaea_news": {
+            "country_code": "AT",
+            "country_name": "Austria",
+            "latitude": 48.2082,
+            "longitude": 16.3738,
+            "map_region": "Europe",
+        },
+        "cisa_alerts": WORLD_NEWS_REGION_GEO["us"],
+    }
+)
 
 
 CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -583,6 +1290,36 @@ VIETNAM_KEYWORDS = (
     "tphcm",
 )
 
+DEDUP_STOP_WORDS = {
+    "about",
+    "after",
+    "again",
+    "amid",
+    "from",
+    "have",
+    "into",
+    "more",
+    "news",
+    "over",
+    "said",
+    "says",
+    "than",
+    "that",
+    "their",
+    "this",
+    "with",
+    "world",
+    "will",
+    "trong",
+    "nhung",
+    "những",
+    "duoc",
+    "được",
+    "theo",
+    "dang",
+    "đang",
+}
+
 
 def list_world_news_sources(
     *,
@@ -601,15 +1338,29 @@ async def get_world_news_feed(
     category: str | None = None,
     language: str | None = None,
     source: str | None = None,
+    custom_feed_url: str | None = None,
+    custom_source_name: str | None = None,
     limit: int = 40,
     freshness_hours: int = 72,
 ) -> WorldNewsFeedResponse:
-    selected_sources = _select_sources(
-        region=region,
-        category=None,
-        language=language,
-        source_id=source,
+    selected_sources = list(
+        _select_sources(
+            region=region,
+            category=None,
+            language=language,
+            source_id=source,
+        )
     )
+    custom_source = _custom_source_from_url(
+        custom_feed_url,
+        name=custom_source_name,
+        region=region,
+        category=category,
+        language=language,
+    )
+    if custom_source is not None and not source:
+        selected_sources.append(custom_source)
+
     feed_count = sum(len(item.feed_urls) for item in selected_sources)
     now = datetime.now(UTC)
 
@@ -678,20 +1429,36 @@ async def get_world_news_map(
     region: str | None = None,
     category: str | None = None,
     language: str | None = None,
+    custom_feed_url: str | None = None,
+    custom_source_name: str | None = None,
     limit: int = 100,
     freshness_hours: int = 72,
 ) -> WorldNewsMapResponse:
-    selected_sources = _select_sources(
-        region=region,
-        category=None,
-        language=language,
-        source_id=None,
+    selected_sources = list(
+        _select_sources(
+            region=region,
+            category=None,
+            language=language,
+            source_id=None,
+        )
     )
+    custom_source = _custom_source_from_url(
+        custom_feed_url,
+        name=custom_source_name,
+        region=region,
+        category=category,
+        language=language,
+    )
+    if custom_source is not None:
+        selected_sources.append(custom_source)
+
     source_by_id = {source.id: source for source in selected_sources}
     feed = await get_world_news_feed(
         region=region,
         category=category,
         language=language,
+        custom_feed_url=custom_feed_url,
+        custom_source_name=custom_source_name,
         limit=limit,
         freshness_hours=freshness_hours,
     )
@@ -792,6 +1559,82 @@ def _select_sources(
         and (not language or source.language == language)
         and (not source_id or source.id == source_id or source.domain == source_id)
     ]
+
+
+def _custom_source_from_url(
+    feed_url: str | None,
+    *,
+    name: str | None,
+    region: str | None,
+    category: str | None,
+    language: str | None,
+) -> WorldNewsSourceConfig | None:
+    normalized_feed_url = _normalize_custom_feed_url(feed_url)
+    if not normalized_feed_url:
+        return None
+
+    parsed = urlparse(normalized_feed_url)
+    domain = (parsed.hostname or "custom-rss.local").lower()
+    source_region = region if region in VALID_WORLD_NEWS_REGIONS else "global"
+    source_category = category if category in VALID_WORLD_NEWS_CATEGORIES else "business"
+    source_language = language if language in VALID_WORLD_NEWS_LANGUAGES else "en"
+    digest = hashlib.sha1(normalized_feed_url.encode("utf-8")).hexdigest()[:10]
+    source_name = _clean_custom_source_name(name, domain)
+
+    return WorldNewsSourceConfig(
+        id=f"{CUSTOM_RSS_SOURCE_ID_PREFIX}_{digest}",
+        name=source_name,
+        domain=domain.removeprefix("www."),
+        region=source_region,
+        category=source_category,
+        language=source_language,
+        tier=3,
+        homepage_url=urlunparse((parsed.scheme, parsed.netloc, "", "", "", "")),
+        feed_urls=(normalized_feed_url,),
+    )
+
+
+def _normalize_custom_feed_url(feed_url: str | None) -> str | None:
+    if not feed_url:
+        return None
+
+    value = feed_url.strip()
+    if not value or len(value) > MAX_CUSTOM_RSS_URL_LENGTH:
+        return None
+
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    if parsed.username or parsed.password:
+        return None
+
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname or hostname in {"localhost", "localhost.localdomain"}:
+        return None
+    if hostname.endswith(".local") or "." not in hostname:
+        return None
+
+    try:
+        address = ipaddress.ip_address(hostname.strip("[]"))
+    except ValueError:
+        address = None
+    if address and (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    ):
+        return None
+
+    path = parsed.path or "/"
+    return urlunparse((parsed.scheme, parsed.netloc.lower(), path, "", parsed.query, ""))
+
+
+def _clean_custom_source_name(name: str | None, domain: str) -> str:
+    cleaned = _clean_text(name or "")[:80]
+    return cleaned or f"Custom RSS ({domain.removeprefix('www.')})"
 
 
 async def _fetch_feed(
@@ -994,22 +1837,68 @@ def _build_article_id(source_id: str, link: str, title: str, guid: str | None) -
 
 
 def _dedupe_articles(articles: list[WorldNewsArticle]) -> list[WorldNewsArticle]:
-    seen: set[str] = set()
+    seen_urls: set[str] = set()
+    seen_titles: set[str] = set()
+    seen_token_sets: list[set[str]] = []
     deduped: list[WorldNewsArticle] = []
-    for article in articles:
-        key = _dedupe_key(article)
-        if key in seen:
+    for article in sorted(articles, key=_article_sort_key, reverse=True):
+        url_key = _dedupe_url_key(article)
+        title_key = _dedupe_title_key(article.title)
+        title_tokens = _headline_tokens(article.title)
+
+        if url_key and url_key in seen_urls:
             continue
-        seen.add(key)
+        if title_key and title_key in seen_titles:
+            continue
+        if title_tokens and any(_headline_similarity(title_tokens, seen) >= 0.62 for seen in seen_token_sets):
+            continue
+
+        if url_key:
+            seen_urls.add(url_key)
+        if title_key:
+            seen_titles.add(title_key)
+        if title_tokens:
+            seen_token_sets.append(title_tokens)
         deduped.append(article)
     return deduped
 
 
-def _dedupe_key(article: WorldNewsArticle) -> str:
+def _dedupe_url_key(article: WorldNewsArticle) -> str:
     parsed_url = urlparse(article.url)
     if parsed_url.netloc and parsed_url.path:
-        return f"{parsed_url.netloc.lower()}{parsed_url.path.rstrip('/').lower()}"
-    return re.sub(r"[^a-z0-9]+", "-", article.title.lower()).strip("-")
+        domain = parsed_url.netloc.lower().removeprefix("www.")
+        path = re.sub(r"/+", "/", parsed_url.path).rstrip("/").lower()
+        return f"{domain}{path}"
+    return ""
+
+
+def _dedupe_title_key(title: str) -> str:
+    normalized = _normalize_headline(title)
+    return re.sub(r"[^a-z0-9]+", "-", normalized).strip("-")
+
+
+def _headline_tokens(title: str) -> set[str]:
+    normalized = _normalize_headline(title)
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", normalized)
+        if len(token) >= 4 and token not in DEDUP_STOP_WORDS
+    }
+
+
+def _headline_similarity(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    overlap = len(left & right)
+    return overlap / min(len(left), len(right))
+
+
+def _normalize_headline(title: str) -> str:
+    normalized = unicodedata.normalize("NFKD", title.lower())
+    ascii_text = "".join(char for char in normalized if not unicodedata.combining(char))
+    ascii_text = re.sub(r"\s[-–—|:]\s[^-–—|:]{2,48}$", "", ascii_text)
+    ascii_text = re.sub(r"\b(live updates?|breaking news|exclusive|analysis|update)\b", " ", ascii_text)
+    return re.sub(r"\s+", " ", ascii_text).strip()
 
 
 def _article_sort_key(article: WorldNewsArticle) -> tuple[datetime, float]:

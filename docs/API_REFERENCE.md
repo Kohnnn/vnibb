@@ -84,10 +84,11 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 - `GET /news/world/sources`
 
 World news monitor notes:
-- `GET /news/world` returns live RSS/Atom headlines from the maintained Vietnam and global source registry.
-- `GET /news/world/map` returns the same live feed grouped by source geography, including country coordinates, article counts, top category, top sources, and latest articles for map drilldowns.
-- Supported filters are `region=vietnam|asia|us|europe|global`, `category=markets|economy|business|geopolitics|technology`, `language=vi|en`, `source=<source id or domain>`, `limit`, and `freshness_hours`.
+- `GET /news/world` returns live RSS/Atom headlines from the maintained Vietnam and global source registry, with optional request-scoped custom RSS via `custom_feed_url` and `custom_source_name`.
+- `GET /news/world/map` returns the same live feed grouped by source/coverage geography, including country coordinates, article counts, top category, top sources, and latest articles for map drilldowns. It also accepts request-scoped custom RSS parameters.
+- Supported filters are `region=vietnam|asia|us|europe|middleeast|africa|latam|oceania|global`, `category=markets|economy|business|geopolitics|technology`, `language=vi|en`, `source=<source id or domain>`, `custom_feed_url`, `custom_source_name`, `limit`, and `freshness_hours`.
 - Every article includes the original article `url`, source homepage `source_url`, feed `feed_url`, source/domain metadata, classification tags, and a `live=true` marker.
+- Feed results are deduplicated by canonical URL and headline-token similarity to reduce repeated wire/repost headlines.
 - `GET /news/world/sources` returns the maintained source registry so operators can audit source names, domains, homepage links, live feed URLs, and source geography.
 - Map buckets include `country_code`, `country_name`, `latitude`, `longitude`, `article_count`, `source_count`, `top_category`, `top_sources`, `latest_headline`, and `latest_articles`.
 - Source registry rows include `tier`, `homepage_url`, `feed_urls`, `country_code`, `country_name`, `latitude`, `longitude`, and `map_region`.

@@ -52,8 +52,8 @@ Legacy aliases such as `company_profile`, `financials`, `institutional_ownership
 
 - `financial_snapshot`: combined P&L, balance sheet, cash flow, and ratio snapshot
 - `earnings_release_recap`: quarter recap combining statement deltas, cash-flow context, quality checks, and linked news/events
-- `world_news_monitor`: live Vietnam and global RSS/Atom news monitor with article, source, and feed links
-- `world_news_map`: source-geography map for live world-news article density and latest headlines
+- `world_news_monitor`: live Vietnam and global RSS/Atom news monitor with article, source, feed links, custom feed input, and stronger duplicate filtering
+- `world_news_map`: SVG world map for live world-news article density, source/coverage geography, latest headlines, regional view controls, and custom feed input
 - `world_news_live_stream`: polling live headline stream for global and Vietnam market-risk monitoring
 - `world_news_sources`: source registry audit surface with homepage, feed, geography, tier, region, category, and language metadata
 
@@ -194,6 +194,8 @@ Widget library UX rules:
 - `listing_browser` should support exchange, index-group, industry, and search filtering together, plus browser-local saved views.
 - `market_sentiment` should act as a top-down narrative discovery widget, pairing aggregate mood with trending topics and most-mentioned stocks.
 - `world_news_monitor`, `world_news_map`, and `world_news_live_stream` should preserve source transparency by showing original article links, source homepage links, and feed links for every headline.
+- `world_news_monitor` and `world_news_map` should expose request-scoped custom RSS/Atom inputs while keeping the maintained registry as the default source set.
+- `world_news_map` should render a recognizable world-map surface with graticule, land masses, regional view controls, and source/coverage markers instead of abstract geography blobs.
 - `world_news_sources` should preserve source transparency by exposing the maintained source registry, homepage links, feed URLs, geography, tier, region, category, and language metadata.
 - `ttm_snapshot` should compress trailing-twelve-month income, cash flow, and balance-sheet scale into a fast current-state pulse.
 - `growth_bridge` should compare annual growth with the latest comparable-quarter growth so users can detect acceleration or stall quickly.

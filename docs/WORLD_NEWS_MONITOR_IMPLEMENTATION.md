@@ -29,20 +29,21 @@ New endpoints:
 - `GET /api/v1/news/world/map`
 - `GET /api/v1/news/world/sources`
 
-The service fetches live RSS/Atom feeds, normalizes article fields, deduplicates by URL/title, classifies each article into a category, and returns source/homepage/feed/article links for auditability. The map endpoint reuses the same live feed path and groups fresh articles by source geography.
+The service fetches live RSS/Atom feeds, normalizes article fields, deduplicates by canonical URL and headline-token similarity, classifies each article into a category, and returns source/homepage/feed/article links for auditability. The map endpoint reuses the same live feed path and groups fresh articles by source/coverage geography.
 
 Endpoint responsibilities:
 
-- `GET /api/v1/news/world`: live article feed with source, region, category, language, source homepage, feed URL, and original article URL.
-- `GET /api/v1/news/world/map`: source-geography buckets with country coordinates, article counts, top category, top sources, latest headline, latest publish time, and latest articles.
+- `GET /api/v1/news/world`: live article feed with source, region, category, language, source homepage, feed URL, original article URL, and optional per-request custom RSS/Atom feed.
+- `GET /api/v1/news/world/map`: source/coverage-geography buckets with country coordinates, article counts, top category, top sources, latest headline, latest publish time, latest articles, and optional per-request custom RSS/Atom feed.
 - `GET /api/v1/news/world/sources`: maintained source registry with homepage/feed URLs and geography metadata.
 
 Supported filters:
 
-- `region=vietnam|asia|us|europe|global`
+- `region=vietnam|asia|us|europe|middleeast|africa|latam|oceania|global`
 - `category=markets|economy|business|geopolitics|technology`
 - `language=vi|en`
 - `source=<source id or domain>` on `/news/world`
+- `custom_feed_url` and `custom_source_name` on `/news/world` and `/news/world/map`
 - `limit` and `freshness_hours` on feed/map endpoints
 
 Core response contracts:
@@ -84,6 +85,8 @@ Current source coverage:
 - `cnbc_markets`: CNBC markets feed, US, English, markets.
 - `guardian_business`: The Guardian business feed, Europe, English, business.
 - `aljazeera_global`: Al Jazeera global feed, global, English, geopolitics.
+- Expanded coverage now also includes Reuters, Bloomberg, MarketWatch, Yahoo Finance, Financial Times, NPR, PBS, France 24, Euronews, DW, Le Monde, BBC regional feeds, The Diplomat, CNA, Nikkei Asia, NDTV, The Hindu, ABC Australia, Africanews, News24, Premium Times, Guardian Americas/Australia/Middle East, InSight Crime, Infobae, TechCrunch, The Verge, MIT Technology Review, VentureBeat AI, Foreign Policy, Foreign Affairs, Atlantic Council, CSIS, War on the Rocks, CrisisWatch, UN News, IAEA, and CISA.
+- Custom RSS/Atom feeds are request-scoped. The backend accepts only http(s) URLs, rejects localhost/private literal IPs and credentialed URLs, derives a stable custom source id, and maps the feed to the selected region/category/language when provided.
 
 ## Frontend
 
@@ -107,8 +110,9 @@ New API client types and functions:
 
 The widget suite exposes:
 
-- region filters: All, Vietnam, Global, US, Europe
+- region filters: All, Vietnam, US, Europe, Asia, Mideast, Africa, LatAm, Oceania, Global
 - category filters: All Topics, Markets, Economy, Business, Geopolitics, Tech
+- optional custom RSS/Atom feed inputs on the monitor and map widgets
 - live article links
 - source homepage links
 - RSS/Atom feed links
@@ -120,7 +124,7 @@ The widget suite exposes:
 Widget responsibilities:
 
 - `world_news_monitor`: full live headline list with article/source/feed links.
-- `world_news_map`: map-first view of source geography, article density, top sources, top category, and latest articles.
+- `world_news_map`: map-first SVG world map with graticule, recognizable land masses, regional view controls, source/coverage geography, article density, top sources, top category, latest articles, and custom RSS/Atom input.
 - `world_news_live_stream`: compact polling headline stream for fresh market-risk monitoring.
 - `world_news_sources`: source-audit registry for homepage/feed/geography/tier/category/language transparency.
 
@@ -183,6 +187,14 @@ Run results after source-registry widget on 2026-05-02:
 - Passed: `pnpm --filter frontend test -- --runTestsByPath src/components/widgets/WorldNewsMonitorWidget.test.tsx src/components/widgets/WorldNewsMapWidget.test.tsx`
 - Passed: `pnpm --filter frontend exec tsc --noEmit`
 - Passed: `pnpm --filter frontend lint`
+
+Run results after map/source/dedupe update on 2026-05-04:
+
+- Passed: `python -m ruff check apps/api/vnibb/services/world_news_service.py apps/api/vnibb/api/v1/news.py apps/api/tests/test_api/test_world_news_service.py`
+- Passed: `python -m pytest apps/api/tests/test_api/test_world_news_service.py -v`
+- Passed: `pnpm --filter frontend exec tsc --noEmit`
+- Passed: `pnpm --filter frontend lint`
+- Passed: `pnpm --filter frontend test -- --runTestsByPath src/components/widgets/WorldNewsMonitorWidget.test.tsx src/components/widgets/WorldNewsMapWidget.test.tsx`
 
 Notes:
 

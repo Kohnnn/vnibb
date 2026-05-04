@@ -7,6 +7,8 @@ from vnibb.services.world_news_service import (
     FeedFetchResult,
     WorldNewsArticle,
     WorldNewsSourceConfig,
+    _custom_source_from_url,
+    _dedupe_articles,
     _parse_feed,
     get_world_news_feed,
     get_world_news_map,
@@ -50,6 +52,73 @@ def test_parse_feed_preserves_live_links_and_classifies_vietnam_markets():
     assert articles[0].category == "markets"
     assert "vietnam" in articles[0].tags
     assert articles[0].live is True
+
+
+def test_dedupe_articles_filters_similar_headlines_across_sources():
+    now = datetime.now(UTC)
+    articles = [
+        WorldNewsArticle(
+            id="a-1",
+            title="Fed holds rates as markets wait for Powell signal",
+            source_id="source_a",
+            source="Source A",
+            source_domain="a.example",
+            source_url="https://a.example",
+            feed_url="https://a.example/rss.xml",
+            url="https://a.example/story-a",
+            published_at=now,
+            region="global",
+            category="markets",
+            language="en",
+            tags=["markets"],
+            relevance_score=0.9,
+        ),
+        WorldNewsArticle(
+            id="b-1",
+            title="Markets wait for Powell signal after Fed holds rates",
+            source_id="source_b",
+            source="Source B",
+            source_domain="b.example",
+            source_url="https://b.example",
+            feed_url="https://b.example/rss.xml",
+            url="https://b.example/story-b",
+            published_at=now - timedelta(minutes=3),
+            region="global",
+            category="markets",
+            language="en",
+            tags=["markets"],
+            relevance_score=0.8,
+        ),
+    ]
+
+    deduped = _dedupe_articles(articles)
+
+    assert len(deduped) == 1
+    assert deduped[0].id == "a-1"
+
+
+def test_custom_source_rejects_local_urls_and_uses_request_filters():
+    rejected = _custom_source_from_url(
+        "http://localhost:8000/rss.xml",
+        name="Local",
+        region="asia",
+        category="technology",
+        language="en",
+    )
+    accepted = _custom_source_from_url(
+        "https://example.com/rss.xml",
+        name="Example Feed",
+        region="asia",
+        category="technology",
+        language="en",
+    )
+
+    assert rejected is None
+    assert accepted is not None
+    assert accepted.name == "Example Feed"
+    assert accepted.region == "asia"
+    assert accepted.category == "technology"
+    assert accepted.feed_urls == ("https://example.com/rss.xml",)
 
 
 @pytest.mark.asyncio

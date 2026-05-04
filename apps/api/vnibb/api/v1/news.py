@@ -227,7 +227,7 @@ class HeatmapResponse(BaseModel):
 async def get_world_news_api(
     region: str | None = Query(
         default=None,
-        pattern=r"^(vietnam|asia|us|europe|global)$",
+        pattern=r"^(vietnam|asia|us|europe|middleeast|africa|latam|oceania|global)$",
         description="Optional source region filter",
     ),
     category: str | None = Query(
@@ -244,6 +244,16 @@ async def get_world_news_api(
         default=None,
         description="Optional source id or domain filter, for example cafef_markets or bbc.co.uk",
     ),
+    custom_feed_url: str | None = Query(
+        default=None,
+        max_length=500,
+        description="Optional custom RSS/Atom feed URL to include in this response",
+    ),
+    custom_source_name: str | None = Query(
+        default=None,
+        max_length=80,
+        description="Optional display name for the custom RSS/Atom feed",
+    ),
     limit: int = Query(default=40, ge=1, le=100),
     freshness_hours: int = Query(default=72, ge=1, le=168),
 ) -> WorldNewsFeedResponse:
@@ -252,6 +262,8 @@ async def get_world_news_api(
         category=category,
         language=language,
         source=source,
+        custom_feed_url=custom_feed_url,
+        custom_source_name=custom_source_name,
         limit=limit,
         freshness_hours=freshness_hours,
     )
@@ -267,7 +279,7 @@ async def get_world_news_api(
 async def get_world_news_map_api(
     region: str | None = Query(
         default=None,
-        pattern=r"^(vietnam|asia|us|europe|global)$",
+        pattern=r"^(vietnam|asia|us|europe|middleeast|africa|latam|oceania|global)$",
         description="Optional source region filter",
     ),
     category: str | None = Query(
@@ -280,6 +292,16 @@ async def get_world_news_map_api(
         pattern=r"^(vi|en)$",
         description="Optional language filter",
     ),
+    custom_feed_url: str | None = Query(
+        default=None,
+        max_length=500,
+        description="Optional custom RSS/Atom feed URL to include in map buckets",
+    ),
+    custom_source_name: str | None = Query(
+        default=None,
+        max_length=80,
+        description="Optional display name for the custom RSS/Atom feed",
+    ),
     limit: int = Query(default=100, ge=1, le=200),
     freshness_hours: int = Query(default=72, ge=1, le=168),
 ) -> WorldNewsMapResponse:
@@ -287,6 +309,8 @@ async def get_world_news_map_api(
         region=region,
         category=category,
         language=language,
+        custom_feed_url=custom_feed_url,
+        custom_source_name=custom_source_name,
         limit=limit,
         freshness_hours=freshness_hours,
     )
@@ -302,7 +326,7 @@ async def get_world_news_map_api(
 async def get_world_news_sources_api(
     region: str | None = Query(
         default=None,
-        pattern=r"^(vietnam|asia|us|europe|global)$",
+        pattern=r"^(vietnam|asia|us|europe|middleeast|africa|latam|oceania|global)$",
         description="Optional source region filter",
     ),
     category: str | None = Query(

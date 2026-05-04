@@ -485,7 +485,7 @@ export async function getCompanyNews(
     });
 }
 
-export type WorldNewsRegion = 'vietnam' | 'asia' | 'us' | 'europe' | 'global';
+export type WorldNewsRegion = 'vietnam' | 'asia' | 'us' | 'europe' | 'middleeast' | 'africa' | 'latam' | 'oceania' | 'global';
 export type WorldNewsCategory = 'markets' | 'economy' | 'business' | 'geopolitics' | 'technology';
 export type WorldNewsLanguage = 'vi' | 'en';
 
@@ -580,6 +580,8 @@ export async function getWorldNews(options?: {
     category?: WorldNewsCategory;
     language?: WorldNewsLanguage;
     source?: string;
+    customFeedUrl?: string;
+    customSourceName?: string;
     limit?: number;
     freshnessHours?: number;
     signal?: AbortSignal;
@@ -590,6 +592,8 @@ export async function getWorldNews(options?: {
             category: options?.category,
             language: options?.language,
             source: options?.source,
+            custom_feed_url: options?.customFeedUrl,
+            custom_source_name: options?.customSourceName,
             limit: options?.limit,
             freshness_hours: options?.freshnessHours,
         },
@@ -619,6 +623,8 @@ export async function getWorldNewsMap(options?: {
     region?: WorldNewsRegion;
     category?: WorldNewsCategory;
     language?: WorldNewsLanguage;
+    customFeedUrl?: string;
+    customSourceName?: string;
     limit?: number;
     freshnessHours?: number;
     signal?: AbortSignal;
@@ -628,6 +634,8 @@ export async function getWorldNewsMap(options?: {
             region: options?.region,
             category: options?.category,
             language: options?.language,
+            custom_feed_url: options?.customFeedUrl,
+            custom_source_name: options?.customSourceName,
             limit: options?.limit,
             freshness_hours: options?.freshnessHours,
         },

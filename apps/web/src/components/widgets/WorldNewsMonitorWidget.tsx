@@ -1,8 +1,8 @@
 'use client';
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Clock, ExternalLink, Globe2, Newspaper, Radio, Rss } from 'lucide-react';
+import { Clock, ExternalLink, Globe2, Newspaper, Radio, Rss, X } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -21,9 +21,14 @@ type CategoryFilter = 'all' | WorldNewsCategory;
 const REGION_FILTERS: Array<{ value: RegionFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'vietnam', label: 'Vietnam' },
-  { value: 'global', label: 'Global' },
   { value: 'us', label: 'US' },
   { value: 'europe', label: 'Europe' },
+  { value: 'asia', label: 'Asia' },
+  { value: 'middleeast', label: 'Mideast' },
+  { value: 'africa', label: 'Africa' },
+  { value: 'latam', label: 'LatAm' },
+  { value: 'oceania', label: 'Oceania' },
+  { value: 'global', label: 'Global' },
 ];
 
 const CATEGORY_FILTERS: Array<{ value: CategoryFilter; label: string }> = [
@@ -48,6 +53,13 @@ function getInitialCategory(config?: Record<string, unknown>): CategoryFilter {
   return VALID_CATEGORIES.has(value as CategoryFilter) ? (value as CategoryFilter) : 'all';
 }
 
+function getInitialCustomFeed(config?: Record<string, unknown>) {
+  const url = typeof config?.customFeedUrl === 'string' ? config.customFeedUrl.trim() : '';
+  if (!url) return null;
+  const name = typeof config?.customSourceName === 'string' ? config.customSourceName.trim() : '';
+  return { url, name };
+}
+
 function getNumberConfig(config: Record<string, unknown> | undefined, key: string, fallback: number) {
   const value = Number(config?.[key]);
   return Number.isFinite(value) && value > 0 ? value : fallback;
@@ -70,6 +82,15 @@ function formatCategory(value: string) {
   return value.replace(/_/g, ' ');
 }
 
+function isValidCustomFeedUrl(value: string) {
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 function WorldNewsMonitorWidgetComponent({
   id,
   config,
@@ -83,12 +104,20 @@ function WorldNewsMonitorWidgetComponent({
 }) {
   const [region, setRegion] = useState<RegionFilter>(() => getInitialRegion(config));
   const [category, setCategory] = useState<CategoryFilter>(() => getInitialCategory(config));
+  const [customFeed, setCustomFeed] = useState<{ url: string; name: string } | null>(() => getInitialCustomFeed(config));
+  const [customUrlInput, setCustomUrlInput] = useState(() => getInitialCustomFeed(config)?.url || '');
+  const [customNameInput, setCustomNameInput] = useState(() => getInitialCustomFeed(config)?.name || '');
+  const [customError, setCustomError] = useState<string | null>(null);
   const limit = getNumberConfig(config, 'limit', 50);
   const freshnessHours = getNumberConfig(config, 'freshnessHours', 72);
 
   useEffect(() => {
     setRegion(getInitialRegion(config));
     setCategory(getInitialCategory(config));
+    const initialCustomFeed = getInitialCustomFeed(config);
+    setCustomFeed(initialCustomFeed);
+    setCustomUrlInput(initialCustomFeed?.url || '');
+    setCustomNameInput(initialCustomFeed?.name || '');
   }, [config]);
 
   const {
@@ -99,10 +128,12 @@ function WorldNewsMonitorWidgetComponent({
     isFetching,
     dataUpdatedAt,
   } = useQuery({
-    queryKey: ['world-news-monitor', region, category, limit, freshnessHours],
+    queryKey: ['world-news-monitor', region, category, limit, freshnessHours, customFeed?.url || '', customFeed?.name || ''],
     queryFn: ({ signal }) => getWorldNews({
       region: region === 'all' ? undefined : region,
       category: category === 'all' ? undefined : category,
+      customFeedUrl: customFeed?.url,
+      customSourceName: customFeed?.name,
       limit,
       freshnessHours,
       signal,
@@ -115,12 +146,28 @@ function WorldNewsMonitorWidgetComponent({
   const hasData = articles.length > 0;
   const isFallback = Boolean(error && hasData);
   const sourceNote = data
-    ? `${data.source_count} sources / ${data.feed_count} live feeds${data.failed_feed_count ? ` / ${data.failed_feed_count} failed` : ''}`
+    ? `${data.source_count} sources / ${data.feed_count} live feeds${customFeed ? ' / custom RSS' : ''}${data.failed_feed_count ? ` / ${data.failed_feed_count} failed` : ''}`
     : 'Live RSS/Atom sources';
   const exportRows = articles.map((article) => ({
     ...article,
     tags: article.tags.join(', '),
   }));
+
+  function applyCustomFeed(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextUrl = customUrlInput.trim();
+    if (!nextUrl) {
+      setCustomFeed(null);
+      setCustomError(null);
+      return;
+    }
+    if (!isValidCustomFeedUrl(nextUrl)) {
+      setCustomError('Enter a valid http(s) RSS or Atom feed URL.');
+      return;
+    }
+    setCustomFeed({ url: nextUrl, name: customNameInput.trim() });
+    setCustomError(null);
+  }
 
   return (
     <WidgetContainer
@@ -174,6 +221,53 @@ function WorldNewsMonitorWidgetComponent({
               </button>
             ))}
           </div>
+
+          <form onSubmit={applyCustomFeed} className="mt-2 grid gap-1 md:grid-cols-[minmax(0,1fr)_130px_auto]">
+            <input
+              aria-label="Custom RSS feed URL"
+              value={customUrlInput}
+              onChange={(event) => setCustomUrlInput(event.target.value)}
+              placeholder="Ask a custom RSS feed..."
+              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-blue-400/50"
+            />
+            <input
+              aria-label="Custom RSS source name"
+              value={customNameInput}
+              onChange={(event) => setCustomNameInput(event.target.value)}
+              placeholder="Source name"
+              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-blue-400/50"
+            />
+            <div className="flex gap-1">
+              <button
+                type="submit"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-blue-400/30 bg-blue-400/10 px-2 text-[10px] font-black uppercase text-blue-100 hover:bg-blue-400/20"
+              >
+                <Radio className="h-3 w-3" />
+                Use Feed
+              </button>
+              {customFeed && (
+                <button
+                  type="button"
+                  aria-label="Clear custom RSS feed"
+                  onClick={() => {
+                    setCustomFeed(null);
+                    setCustomUrlInput('');
+                    setCustomNameInput('');
+                    setCustomError(null);
+                  }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </form>
+          {customError && <div className="mt-1 text-[10px] font-semibold text-red-300">{customError}</div>}
+          {customFeed && (
+            <div className="mt-1 truncate text-[10px] text-blue-200/80">
+              Custom RSS active: {customFeed.name || customFeed.url}
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-auto scrollbar-hide">
