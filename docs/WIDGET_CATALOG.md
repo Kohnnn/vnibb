@@ -108,11 +108,11 @@ For current TradingView-native coverage, use:
 - New widgets now available:
   - `financial_snapshot`: a 4-panel financial table covering P&L, balance sheet, cash flow, and ratios.
   - `earnings_release_recap`: a latest-quarter recap that combines statement deltas, cash-flow context, quality checks, and linked news/events.
-  - `world_news_monitor`: live Vietnam and global RSS/Atom headlines with article, source, and feed links.
-  - `world_news_map`: source-geography article density and latest-headline drilldown for the live world-news feed.
+  - `world_news_monitor`: live Vietnam and global RSS/Atom headlines with article, source, feed links, stronger duplicate filtering, and request-scoped custom RSS input.
+  - `world_news_map`: SVG world-map article density and latest-headline drilldown with graticule, regional views, source/coverage geography, and request-scoped custom RSS input.
   - `world_news_live_stream`: polling headline stream for fresh global and Vietnam market-risk signals.
   - `world_news_sources`: auditable maintained source registry with homepage, feed, geography, tier, region, category, and language metadata.
-- The World Monitor suite is intentionally source-transparent: every headline surface keeps original article, source homepage, and feed links visible, and `world_news_sources` exposes the registry behind those links.
+- The World Monitor suite is intentionally source-transparent: every headline surface keeps original article, source homepage, and feed links visible, `world_news_sources` exposes the registry behind those links, and custom RSS feeds remain request-scoped rather than silently joining the maintained registry.
 - Financial statement widgets now default to chronological ascending period ordering while preserving growth comparison against the older adjacent period.
 - Screener Pro now uses backend filter JSON plus backend sort and persists saved screens in widget config.
 - Financial tables now render in chronological ascending order from oldest to newest, but they auto-scroll to the newest periods on first open so history remains easy to inspect by scrolling back.

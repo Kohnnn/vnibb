@@ -22,9 +22,14 @@ type LanguageFilter = 'all' | WorldNewsLanguage;
 const REGION_FILTERS: Array<{ value: RegionFilter; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'vietnam', label: 'Vietnam' },
-  { value: 'global', label: 'Global' },
   { value: 'us', label: 'US' },
   { value: 'europe', label: 'Europe' },
+  { value: 'asia', label: 'Asia' },
+  { value: 'middleeast', label: 'Mideast' },
+  { value: 'africa', label: 'Africa' },
+  { value: 'latam', label: 'LatAm' },
+  { value: 'oceania', label: 'Oceania' },
+  { value: 'global', label: 'Global' },
 ];
 
 const CATEGORY_FILTERS: Array<{ value: CategoryFilter; label: string }> = [
