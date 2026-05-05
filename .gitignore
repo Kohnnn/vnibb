@@ -20,6 +20,12 @@ apps/api/.env
 apps/api/.env.*
 apps/web/.env
 apps/web/.env.*
+!.env.example
+!.env.*.example
+!apps/api/.env.example
+!apps/api/.env.*.example
+!apps/web/.env.example
+!apps/web/.env.*.example
 
 # IDEs
 .vscode/
@@ -48,6 +54,8 @@ coverage/
 *.log
 apps/web/playwright-report/
 apps/web/test-results/
+.playwright-cli/
+tmp_local_logs/
 
 # Database
 *.db
@@ -59,6 +67,7 @@ apps/web/test-results/
 .cache/
 *.cache
 .turbo/
+.ruff_cache/
 
 # Python
 *.pyc
@@ -68,21 +77,24 @@ pip-wheel-metadata/
 
 # Local development only
 .agent/
+.agents/
+.crush/
+.kilocode/
 .kiro/
 .opencode/
+AGENTS.md
+skills-lock.json
 temp_vnstock_installer/
 server.log
 apps/api/nul
 image/
+screenshots/
+.tmp_backfill/
+.vercel/
 
 # Local test artifacts (not for production)
 test.db
-test_*.sh
 api_test_results.json
-*.test.ts
-*.test.tsx
-*.spec.ts
-*.spec.tsx
 
 DEPLOYMENT.md
 
