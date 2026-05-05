@@ -1,0 +1,296 @@
+# Oracle Runbook
+
+## 1. Provision Oracle VM
+
+### Recommended shape
+
+- Preferred: Oracle Always Free Ampere A1 VM
+- Fallback: an Always Free x86 VM if Ampere capacity is unavailable
+
+### Recommended OS
+
+- Ubuntu 24.04 LTS
+
+### Boot volume guidance
+
+- Keep the boot volume lean and avoid extra paid block volumes unless necessary.
+- Use Docker volumes for runtime state that must survive container recreation.
+
+### Public IP guidance
+
+- Attach a reserved public IP so DNS cutover does not depend on a transient address.
+
+### SSH restriction
+
+- Restrict port `22` to operator IP ranges only.
+
+### Base package install
+
+```bash
+sudo apt-get update
+sudo apt-get upgrade -y
+sudo apt-get install -y ca-certificates curl gnupg ufw git jq
+```
+
+### Docker install
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker "$USER"C.![alt text](image.png)
+newgrp docker
+docker version
+docker compose version
+```
+
+## 2. Configure Network
+
+- Allow inbound `80/tcp` from `0.0.0.0/0`
+- Allow inbound `443/tcp` from `0.0.0.0/0`
+- Restrict inbound `22/tcp` to operator IPs
+- Do not expose `8000/tcp` publicly
+- Create DNS records for:
+  - stable hostname: `api.example.com`
+  - canary hostname: `oracle-api.example.com`
+
+## 3. Deploy Runtime
+
+### Prepare deployment files
+
+```bash
+cp deployment/env.oracle.example deployment/env.oracle
+```
+
+Edit `deployment/env.oracle` and set:
+
+- `SITE_HOSTNAME`
+- `ACME_EMAIL`
+- `DATABASE_URL`
+- `DATABASE_URL_SYNC`
+- `DATA_BACKEND=hybrid`
+- `APPWRITE_WRITE_ENABLED=false` for the current month
+- `ALLOW_ANONYMOUS_DASHBOARD_WRITES=true`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_JWT_SECRET`
+- `APPWRITE_ENDPOINT`
+- `APPWRITE_PROJECT_ID`
+- `APPWRITE_API_KEY`
+- `APPWRITE_DATABASE_ID` (reuse the existing VNIBB Appwrite database)
+- `APPWRITE_SYSTEM_TEMPLATES_COLLECTION_ID=system_dashboard_templates`
+- `VNIBB_MCP_URL=http://mcp:8001/mcp`
+- `VNIBB_MCP_SHARED_BEARER_TOKEN`
+- `MCP_PUBLIC_BIND=127.0.0.1`
+- `MCP_PUBLIC_PORT=8001`
+- `REDIS_URL` if Redis remains enabled
+- `SENTRY_DSN`
+- `ADMIN_API_KEY`
+- `LOG_FORMAT=json`
+- `CORS_ORIGINS`
+
+### Create the Appwrite collection
+
+For the exact click-by-click setup, see `docs/appwrite_system_layouts_manual_setup.md`.
+
+Before expecting admin draft/publish to work, create collection `system_dashboard_templates` in the existing VNIBB Appwrite database with these attributes:
+
+- `dashboard_key` string
+- `status` string
+- `version` integer
+- `dashboard_json` string
+- `notes` string
+- `updated_by` string
+- `updated_at` string
+- `published_at` string
+
+Recommended indexes:
+
+- `dashboard_key + status`
+- `dashboard_key + version`
+
+### Admin-first workflow result
+
+After deploy, admins can save the platform admin key in the web UI and manage locked Initial layouts without SSH access or code edits.
+
+### Start the stack
+
+```bash
+git pull --ff-only
+docker compose -f docker-compose.oracle.yml up -d --build
+```
+
+If health checks still show old runtime behavior after env changes, rebuild without cache and force recreation:
+
+```bash
+git pull --ff-only
+docker compose -f docker-compose.oracle.yml build --no-cache api mcp
+docker compose -f docker-compose.oracle.yml up -d --force-recreate api mcp caddy
+```
+
+### Verify container health
+
+```bash
+docker compose -f docker-compose.oracle.yml ps
+docker compose -f docker-compose.oracle.yml logs api --tail=200
+docker compose -f docker-compose.oracle.yml logs caddy --tail=200
+```
+
+### Verify TLS
+
+- Wait for Caddy to obtain certificates.
+- Confirm the canary hostname answers on `https://`.
+
+## 4. Verify Service
+
+### Health checks
+
+```bash
+bash scripts/oracle/healthcheck.sh
+bash scripts/oracle/smoke_test.sh
+bash scripts/oracle/runtime_verify.sh
+bash scripts/oracle/mcp_smoke_test.sh
+BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
+BASE_URL=https://oracle-api.example.com bash scripts/oracle/healthcheck.sh
+CORS_TEST_ORIGIN=https://vnibb.vercel.app BASE_URL=https://oracle-api.example.com bash scripts/oracle/smoke_test.sh
+BASE_URL=https://oracle-api.example.com bash scripts/oracle/runtime_verify.sh
+BASE_URL=https://oracle-api.example.com bash scripts/oracle/mcp_smoke_test.sh
+```
+
+Notes:
+
+- The scripts default to `http://127.0.0.1:8000`, which is useful for local VM rehearsal before DNS is live.
+- The MCP smoke script now defaults to `http://127.0.0.1:8001`, which matches the host-published `vnibb-mcp` port on OCI.
+- Override `CORS_TEST_ORIGIN` when validating a non-default frontend origin.
+- Set `VNIBB_MCP_SHARED_BEARER_TOKEN` in the shell before running the MCP smoke script against a protected deployment.
+
+### Log review
+
+```bash
+docker compose -f docker-compose.oracle.yml logs api --tail=200
+docker compose -f docker-compose.oracle.yml logs caddy --tail=200
+```
+
+### What to confirm
+
+- `/live`, `/ready`, `/health/`, and `/api/v1/health` return `200`
+- `/health/` reports `providers.data_backend=hybrid`
+- `/health/` reports `providers.appwrite_write_enabled=false`
+- `/health/` reports `providers.allow_anonymous_dashboard_writes=true`
+- `/api/v1/dashboard/` returns `200` when called with `X-VNIBB-Client-ID`
+- `/mcp-health` returns `200`
+- `/mcp` accepts MCP initialization and `get_appwrite_status`
+- Appwrite is reported as connected
+- CORS preflight succeeds for `https://vnibb-web.vercel.app`
+- Key API endpoints succeed
+- Websocket probe succeeds or is explicitly skipped with a known reason
+
+## 5. Cutover Procedure
+
+1. Freeze backend changes.
+2. Re-run Oracle health and smoke checks.
+3. Re-run health checks against any rollback target that is still being kept warm.
+4. Confirm the stable hostname TTL is already `60`.
+5. Switch the stable hostname from the previous backend or OCI canary hostname to the Oracle reserved IP.
+6. Wait for DNS propagation.
+7. Test the production Vercel frontend against the stable hostname.
+8. Confirm the frontend build is using `NEXT_PUBLIC_AUTH_PROVIDER=supabase` by verifying the browser no longer calls `/account/jwts` on Appwrite during dashboard load.
+9. Monitor minute 0-15:
+   - uptime
+   - 5xx rate
+   - p95 latency
+   - websocket reconnects
+   - Appwrite connectivity
+10. Declare success only after the 15-minute window stays green.
+
+### Required confirmation roles
+
+- Operator confirms deployment health
+- Application owner confirms Vercel frontend behavior
+- Incident owner confirms metrics/logs are acceptable
+
+## 6. Incident Procedure
+
+### First checks
+
+```bash
+docker compose -f docker-compose.oracle.yml ps
+docker compose -f docker-compose.oracle.yml logs api --tail=200
+docker compose -f docker-compose.oracle.yml logs caddy --tail=200
+BASE_URL=https://api.example.com bash scripts/oracle/healthcheck.sh
+```
+
+### Safe restarts
+
+```bash
+docker compose -f docker-compose.oracle.yml restart api
+docker compose -f docker-compose.oracle.yml restart caddy
+```
+
+### When to rollback
+
+- `/ready` or `/api/v1/health` is non-200 after restart attempts
+- sustained 5xx errors
+- broken Appwrite auth/session behavior
+- websocket instability severe enough to degrade user experience
+- latency regression that breaches the agreed threshold
+
+See [oracle_rollback_plan.md](./oracle_rollback_plan.md) for the exact rollback sequence.
+
+## 7. Maintenance
+
+### Patch cadence
+
+- Apply OS security updates weekly
+- Rebuild containers for dependency updates on a planned maintenance window
+
+### Log rotation
+
+- Monitor Docker log growth
+- Rotate or cap logs before disk pressure becomes an incident
+
+### Disk checks
+
+```bash
+df -h
+docker system df
+```
+
+### Certificate validation
+
+- Confirm Caddy certificate renewals continue automatically
+- Review Caddy logs after renewals or DNS changes
+
+### Oracle quota checks
+
+- Review the current Always Free allowance before resizing or adding volumes
+- Reference:
+  - [Oracle Cloud Free Tier](https://www.oracle.com/cloud/free/)
+  - [Oracle Compute shapes documentation](https://docs.oracle.com/iaas/Content/Compute/References/computeshapes.htm)
+
+### Cost overrun quick check (Always Free)
+
+Use this checklist before and after each deployment to confirm OCI usage remains in Always Free.
+
+Official Always Free thresholds (home region):
+- Compute (A1 Flex): up to 4 OCPUs and 24 GB RAM equivalent usage
+- Block + boot volumes combined: up to 200 GB
+- Outbound data transfer: up to 10 TB/month
+
+Console path for all checks:
+- `Governance & Administration -> Limits, Quotas and Usage`
+
+What to verify:
+1. Compute usage is below A1 Always Free limits (OCPU + memory)
+2. No accidental paid shapes are running (non-Always-Free compute)
+3. Boot + block volumes combined remain <= 200 GB
+4. Monthly outbound data transfer remains <= 10 TB
+5. Resources are provisioned in the tenancy home region when required by Always Free
+
+Recommended VNIBB guardrails:
+- Keep one primary `VM.Standard.A1.Flex` backend host
+- Keep default/lean boot volumes and avoid extra block volumes
+- Use one reserved public IP for stable DNS cutover
+- Treat additional compute nodes, larger volumes, and managed OCI add-ons as potential paid expansion
+
+Pass/fail rule:
+- PASS: all five checks are within thresholds
+- FAIL: any single threshold is exceeded or paid shape usage appears

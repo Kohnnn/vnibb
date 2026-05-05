@@ -1,0 +1,61 @@
+name: Reliability Gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 * * * *"
+
+env:
+  RELIABILITY_BASE_URL: ${{ vars.VNIBB_RELIABILITY_BASE_URL }}
+
+jobs:
+  no-502-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install API dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "apps/api[dev]"
+
+      - name: Require configured base URL
+        run: |
+          if [ -z "${RELIABILITY_BASE_URL}" ]; then
+            echo "Set repository variable VNIBB_RELIABILITY_BASE_URL before running this workflow."
+            exit 1
+          fi
+
+      - name: Preflight public status codes
+        run: |
+          set +e
+          BASE_URL="${RELIABILITY_BASE_URL%/}"
+          echo "health: $(curl -s -o /dev/null -w '%{http_code}' ${BASE_URL}/health/)"
+          echo "live: $(curl -s -o /dev/null -w '%{http_code}' ${BASE_URL}/live)"
+          echo "ready: $(curl -s -o /dev/null -w '%{http_code}' ${BASE_URL}/ready)"
+          set -e
+
+      - name: Run core endpoint gate
+        working-directory: apps/api
+        run: |
+          BASE_URL="${RELIABILITY_BASE_URL%/}"
+          python scripts/widget_health_matrix.py \
+            --base-url "${BASE_URL}" \
+            --repeats 5 \
+            --timeout 10 \
+            --fail-on-error \
+            --output-json scripts/v34_widget_health_after.json
+
+      - name: Upload reliability artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reliability-gate-${{ github.run_id }}
+          path: apps/api/scripts/v34_widget_health_after.json
+          if-no-files-found: warn

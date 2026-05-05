@@ -1,0 +1,152 @@
+# Widget Catalog (Legacy Snapshot)
+
+Date: 2026-04-04
+
+This file predates the TradingView native widget expansion and should be treated as a legacy snapshot.
+
+For current TradingView-native coverage, use:
+
+- `docs/TRADINGVIEW_WIDGET_CATALOG.md`
+- `apps/web/src/data/widgetDefinitions.ts`
+- `apps/web/src/lib/tradingViewWidgets.ts`
+
+## Category summary
+
+- `core_data`: 39
+- `charting`: 3
+- `calendar`: 7
+- `ownership`: 8
+- `estimates`: 1
+- `screener`: 1
+- `analysis`: 2
+
+## Widgets
+
+| Widget | Type | Category | Primary data source |
+|---|---|---|---|
+| Ticker Info | `ticker_info` | core_data | `GET /equity/{symbol}/quote` |
+| Company Profile | `ticker_profile` | core_data | `GET /equity/{symbol}/profile` |
+| Key Metrics | `key_metrics` | core_data | `GET /equity/{symbol}/ratios`, `GET /equity/{symbol}/metrics/history` |
+| Share Statistics | `share_statistics` | core_data | `GET /equity/{symbol}/trading-stats`, `GET /equity/{symbol}/ownership` |
+| Company News | `news_feed` | core_data | `GET /equity/{symbol}/news` |
+| Price Chart | `price_chart` | charting | `GET /equity/historical` |
+| Valuation Multiples Chart | `valuation_multiples_chart` | charting | `GET /equity/{symbol}/ratios/history` |
+| Earnings History | `earnings_history` | calendar | `GET /equity/{symbol}/financials` |
+| Events Calendar | `events_calendar` | calendar | `GET /equity/{symbol}/events` |
+| Dividend Payment | `dividend_payment` | calendar | `GET /equity/{symbol}/dividends` |
+| Stock Splits | `stock_splits` | calendar | `GET /equity/{symbol}/events` |
+| Company Filings | `company_filings` | calendar | `GET /equity/{symbol}/events`, provider-derived filings feed |
+| Institutional Ownership | `institutional_ownership` | ownership | `GET /equity/{symbol}/ownership` |
+| Insider Trading | `insider_trading` | ownership | `GET /insider/{symbol}/deals`, `GET /insider/recent` |
+| Major Shareholders | `major_shareholders` | ownership | `GET /equity/{symbol}/shareholders` |
+| Officers & Management | `officers_management` | ownership | `GET /equity/{symbol}/officers` |
+| Analyst Estimates | `analyst_estimates` | estimates | `GET /analysis/*`, provider-derived estimate snapshots |
+| Stock Screener | `screener` | screener | `GET /screener` |
+| Intraday Trades | `intraday_trades` | core_data | `GET /equity/{symbol}/intraday` |
+| Financial Ratios | `financial_ratios` | core_data | `GET /equity/{symbol}/ratios`, `GET /equity/{symbol}/growth`, `GET /equity/{symbol}/ttm` |
+| Foreign Trading | `foreign_trading` | ownership | `GET /equity/{symbol}/foreign-trading` |
+| Subsidiaries | `subsidiaries` | ownership | `GET /equity/{symbol}/subsidiaries` |
+| Balance Sheet | `balance_sheet` | core_data | `GET /equity/{symbol}/balance-sheet` |
+| Income Statement | `income_statement` | core_data | `GET /equity/{symbol}/income-statement` |
+| Cash Flow | `cash_flow` | core_data | `GET /equity/{symbol}/cash-flow` |
+| Market Overview | `market_overview` | core_data | `GET /market/indices` |
+| Market Breadth | `market_breadth` | core_data | `GET /market/top-movers`, `GET /market/sector-performance` |
+| Watchlist | `watchlist` | core_data | Local dashboard state + quote/profile endpoints |
+| Peer Comparison | `peer_comparison` | core_data | `GET /equity/{symbol}/peers`, `GET /comparison` |
+| Top Gainers/Losers | `top_movers` | core_data | `GET /market/top-movers` |
+| World Indices | `world_indices` | core_data | `GET /market/world-indices` |
+| Sector Performance | `sector_performance` | core_data | `GET /market/sector-performance`, `GET /market/heatmap` |
+| Sector Rotation Radar | `sector_rotation_radar` | core_data | `GET /market/sector-performance`, `GET /sectors` |
+| Market Movers & Sectors | `market_movers_sectors` | core_data | `GET /market/top-movers`, `GET /trading/sector-top-movers` |
+| Portfolio Tracker | `portfolio_tracker` | core_data | Local portfolio state + quote endpoints |
+| Price Alerts | `price_alerts` | core_data | `GET /alerts/insider`, `POST /alerts/{id}/read`, local notification state |
+| Economic Calendar | `economic_calendar` | calendar | `GET /equity/{symbol}/events`, calendar composites |
+| Dividend Ladder | `dividend_ladder` | calendar | `GET /equity/{symbol}/dividends` |
+| Volume Analysis | `volume_analysis` | core_data | `GET /equity/historical`, `GET /equity/{symbol}/intraday` |
+| Technical Summary | `technical_summary` | core_data | `GET /analysis/ta/{symbol}/full` |
+| Technical Snapshot | `technical_snapshot` | charting | `GET /analysis/ta/{symbol}/history` |
+| Forex Rates | `forex_rates` | core_data | `GET /market/forex-rates` |
+| Commodities | `commodities` | core_data | `GET /market/commodities` |
+| Similar Stocks | `similar_stocks` | core_data | `GET /equity/{symbol}/peers` + local similarity heuristics |
+| Quick Stats | `quick_stats` | core_data | Quote, profile, and ratios composite calls |
+| Notes | `notes` | core_data | Local dashboard persistence |
+| Research Browser | `research_browser` | analysis | External URLs in embedded browser + local saved links |
+| Insider Deal Timeline | `insider_deal_timeline` | ownership | `GET /insider/{symbol}/deals`, `GET /insider/recent` |
+| Ownership Changes | `ownership_changes` | ownership | `GET /equity/{symbol}/ownership` |
+| Data Browser | `database_inspector` | core_data | `GET /admin/data-health`, admin table/query endpoints |
+| Order Book | `orderbook` | core_data | `GET /equity/{symbol}/orderbook` |
+| Index Comparison | `index_comparison` | core_data | `GET /market/indices`, `GET /market/world-indices` |
+| Market News | `market_news` | core_data | `GET /news/*`, `GET /market/research/rss-feed` |
+| World News Monitor | `world_news_monitor` | global_markets | `GET /news/world`, `GET /news/world/sources` |
+| World News Map | `world_news_map` | global_markets | `GET /news/world/map`, `GET /news/world` |
+| World News Live Stream | `world_news_live_stream` | global_markets | `GET /news/world` |
+| World News Sources | `world_news_sources` | global_markets | `GET /news/world/sources` |
+| Sector Breakdown | `sector_breakdown` | core_data | `GET /market/heatmap`, `GET /sectors` |
+| Comparison Analysis | `comparison_analysis` | core_data | `GET /comparison`, `GET /comparison/performance` |
+| News Flow | `news_flow` | core_data | `GET /news/*`, `GET /equity/{symbol}/news` |
+| News + Corporate Actions | `news_corporate_actions` | core_data | `GET /equity/{symbol}/news`, `GET /equity/{symbol}/events`, insider feeds |
+| AI Analysis | `ai_analysis` | analysis | `POST /copilot/chat/stream`, `GET /copilot/suggestions`, OpenRouter-backed VNIBB database-first analysis |
+| Sector Top Movers | `sector_top_movers` | core_data | `GET /trading/sector-top-movers`, `GET /sectors/{sector}/stocks` |
+
+## Notes
+
+- This document reflects registered widget definitions, not all component files under `src/components/widgets`.
+- Some widgets combine multiple APIs and local dashboard state for filtering, caching, and layout persistence.
+- Source providers include vnstock-backed services and cached VNIBB API responses.
+- Market Overview and header index chips share `GET /market/indices` as the baseline snapshot. The frontend can then overlay WebSocket index updates during market hours.
+- `GET /market/indices` prefers Yahoo Finance for mapped index symbols and falls back to `vnstock` for any missing required indices before using persisted DB snapshots.
+- Canonical widget IDs are now `ticker_profile`, `unified_financials`, `major_shareholders`, and `database_inspector`. Legacy aliases such as `company_profile`, `financials`, `institutional_ownership`, and `database_browser` are migrated out of saved dashboards.
+- Widget library metadata should be sourced from `apps/web/src/data/widgetDefinitions.ts`. Runtime component mapping lives in `apps/web/src/components/widgets/WidgetRegistry.ts`. Autofit/base sizing lives in `apps/web/src/lib/dashboardLayout.ts`.
+- Runtime widget resizing is no longer capped by the behavior table's old width limits. Base sizes still matter for autofit and initial placement, but users can expand widgets more freely unless a widget instance has an explicit max constraint.
+- Notes, watchlist, price-alert, peer-comparison, and research-browser state now persist via widget config so they travel with dashboard layout persistence instead of separate widget-specific browser storage keys.
+- Browser-only persistence is now reserved for cases that are genuinely device-local, such as notification permission hints and non-dashboard UI niceties like recent widget picks.
+- Legacy saved widget layout caps are stripped during dashboard migration, so old `maxW`/`maxH` values no longer block manual resizing of widgets like Transaction Flow, Major Shareholders, and Officers & Management.
+- Prompt Library is now VniAgent-owned. Global "Prompts" actions open the VniAgent sidebar and then open the contextual prompt library there instead of using a disconnected standalone modal.
+- Dashboard template surfaces should consume `apps/web/src/types/dashboard-templates.ts` as the canonical template dataset. Category presentation is now aligned around `market`, `fundamentals`, `technical`, `quant`, `research`, and `global`.
+- `AppsLibrary` and `TemplateSelector` now read from the same template catalog instead of maintaining separate template inventories.
+- The final resize sweep also reduced fixed inner chart heights and aggressive text truncation across additional quant, comparison, research, and market widgets so manual resize produces meaningfully usable content.
+- New widgets now available:
+  - `financial_snapshot`: a 4-panel financial table covering P&L, balance sheet, cash flow, and ratios.
+  - `earnings_release_recap`: a latest-quarter recap that combines statement deltas, cash-flow context, quality checks, and linked news/events.
+  - `world_news_monitor`: live Vietnam and global RSS/Atom headlines with article, source, feed links, stronger duplicate filtering, and request-scoped custom RSS input.
+  - `world_news_map`: SVG world-map article density and latest-headline drilldown with graticule, regional views, source/coverage geography, and request-scoped custom RSS input.
+  - `world_news_live_stream`: polling headline stream for fresh global and Vietnam market-risk signals.
+  - `world_news_sources`: auditable maintained source registry with homepage, feed, geography, tier, region, category, and language metadata.
+- The World Monitor suite is intentionally source-transparent: every headline surface keeps original article, source homepage, and feed links visible, `world_news_sources` exposes the registry behind those links, and custom RSS feeds remain request-scoped rather than silently joining the maintained registry.
+- Financial statement widgets now default to chronological ascending period ordering while preserving growth comparison against the older adjacent period.
+- Screener Pro now uses backend filter JSON plus backend sort and persists saved screens in widget config.
+- Financial tables now render in chronological ascending order from oldest to newest, but they auto-scroll to the newest periods on first open so history remains easy to inspect by scrolling back.
+- History caps are intentionally retained for performance: current plan is capped annual and quarterly windows first, with broader 10Y normalization and heavier optimization deferred to a future roadmap.
+- Statement and unified financial widgets now depend on canonical quarter identities instead of raw mixed provider period strings, which reduces duplicate/out-of-order quarter columns and quarter-specific blank states.
+- Dashboard shell behavior now preserves the last active dashboard and the last active tab per dashboard locally, and low-resolution layouts treat VniAgent as an overlay sooner to protect workspace width.
+- USD display mode is now available for financial and fundamental statement widgets. Users can override USD/VND by year locally; admin settings now provide both yearly defaults and a global fallback rate.
+- Effective USD/VND precedence is `local year override -> admin year default -> admin global fallback -> hardcoded fallback`.
+- TradingView-native widgets now render a loading overlay while upstream embeds initialize, which reduces blank-widget false positives during slow third-party loads.
+- `Technical Summary` now includes a visual signal-distribution gauge instead of only text counts.
+- `Order Book` now includes a cumulative depth chart above the order table.
+- `Relative Rotation` now renders the actual quadrant map and retains a scaffold overlay when the backend cannot provide enough benchmark-relative data.
+- The TradingView `Market Data` macro preset now uses quote-friendly treasury and dollar futures proxies for the rates/dollar rows, which avoids sparse blank cells from unsupported `TVC:` quote-table entries.
+- TradingView settings on shipped system dashboards are now consistently admin-only until Admin Mode is enabled, and the modal shows the effective runtime payload preview plus an official docs link.
+- The site settings `Data` tab now keeps `Currency & FX` visible even when the current display unit is still `VND`, so yearly USD/VND overrides are always discoverable.
+- Widget-library size badges now come from the shared dashboard layout contract instead of stale definition-only defaults.
+- The shipped Fundamental, Technical, and Quant system tabs were rebalanced to reduce whitespace, remove duplicated market widgets, and give statement/order-flow widgets more usable height.
+- `Market Heatmap` now uses live container dimensions for its D3 treemap, and `Sector Board` now expands columns to fill wide layouts more naturally.
+- VniAgent settings now expose a clearer runtime summary, and the main sidebar now includes recent-session restore for symbol/context-specific research threads.
+- USD/FX coverage now extends beyond statement widgets into selected quote, comparison, and market-value surfaces such as ticker price panels, peer market caps, transaction-flow value mode, and market-cap-driven heatmap summaries.
+- Shared widget health badges and explanatory empty states now cover first-wave sparse/fallback widgets such as market breadth, relative rotation, transaction flow, and foreign trading.
+- Dashboard intelligence now adds tab-level duplicate/dead-space recommendations and edit-time widget fit guidance based on the shared size contracts.
+- Risk surfaces now include benchmark-relative and downside-tail metrics such as relative drawdown, beta, tracking error, downside deviation, and VaR/CVaR.
+- Discovery surfaces now include `Market Sentiment` plus a stronger `Listing Browser` with saved views and multi-axis filtering.
+- Discovery/fundamental surfaces now also include `TTM Snapshot` and `Growth Bridge` for fast trailing-twelve-month and growth-momentum review.
+- Ownership surfaces now include `Ownership Rating Summary` for concentration, foreign flow, and insider-bias synthesis.
+- Derivatives coverage now includes `Derivatives Analytics` for front-contract pulse and short-curve structure, beyond the base contracts board and price-history widgets.
+- The widget drawer now includes recommended bundles, visible add actions, and metadata chips for scope, data source, and default size.
+- The template gallery now supports template/widget search, actual layout previews, visible `Use Template` CTAs, workflow-intent badges, and included-widget summaries.
+- Broader USD conversion for quote and market widgets is intentionally deferred to the roadmap.
+- Additional widgets now exposed in the widget library:
+  - `block_trade`
+  - `earnings_release_recap`
+  - `financial_snapshot`
+  - `derivatives_contracts_board`
+  - `derivatives_price_history`
+  - `listing_browser`

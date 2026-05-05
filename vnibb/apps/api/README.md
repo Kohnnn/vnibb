@@ -1,0 +1,270 @@
+# VNIBB API - Backend Service
+
+<div align="center">
+
+**FastAPI Backend for VNIBB Financial Platform**
+
+[![Deploy Target](https://img.shields.io/badge/Deploy-Oracle%20Cloud%20Always%20Free-F80000)](../../docs/oracle_runbook.md)
+[![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green)](https://fastapi.tiangolo.com/)
+
+[Oracle Runbook](../../docs/oracle_runbook.md) · [Report Bug](https://github.com/Kohnnn/vnibb-api/issues) · [Request Feature](https://github.com/Kohnnn/vnibb-api/issues)
+
+</div>
+
+---
+
+## 📋 Overview
+
+High-performance REST API providing Vietnamese stock market data. Built with FastAPI, powered by vnstock, and prepared for Oracle Cloud Always Free compute hosting behind a stable custom API hostname.
+
+---
+
+## 🚀 Features
+
+- **50+ API Endpoints** - Stocks, financials, news, sectors
+- **Real-time Data** - vnstock Golden Sponsor integration
+- **Database** - PostgreSQL with SQLAlchemy ORM
+- **Caching** - Redis for performance
+- **Docs** - Auto-generated Swagger/OpenAPI
+
+---
+
+## 🛠️ Tech Stack
+
+- **Framework:** FastAPI 0.110
+- **Language:** Python 3.12
+- **Database:** Appwrite (primary) / PostgreSQL (fallback)
+- **ORM:** SQLAlchemy 2.0 (async)
+- **Cache:** Redis (Upstash)
+- **Data:** vnstock post-3.4.2 / 3.5.x runtime line (KBS-first, TCBS removed)
+
+---
+
+## VNStock Alignment
+
+- Public upstream docs and version history at `vnstocks.com` currently document stable releases through `v3.4.2`.
+- Upstream GitHub `main` includes newer March 2026 changes, including TCBS removal and KBS-first runtime behavior.
+- VNIBB currently pins `vnstock>=3.5.0,<3.6` in `apps/api/pyproject.toml`, so this backend assumes the post-TCBS source set: `KBS` (default), `VCI`, and `DNSE`.
+- `mrgoonie/vnstock-agent` is the MCP/CLI companion project. Its README defaults `VNSTOCK_SOURCE=VCI`, so set `KBS` explicitly when you want parity with VNIBB.
+
+---
+
+## 📁 Project Structure
+
+```
+vnibb/
+├── api/              # FastAPI routers
+│   └── v1/           # API v1 endpoints
+├── core/             # Config, database
+├── models/           # SQLAlchemy models
+├── providers/        # Data providers (vnstock)
+├── services/         # Business logic
+└── scripts/          # Utility scripts
+```
+
+---
+
+## 🏃 Quick Start
+
+### Prerequisites
+- Python 3.12+
+- PostgreSQL or Appwrite account
+
+### Installation
+
+```bash
+# Clone repository
+git clone https://github.com/Kohnnn/vnibb-api.git
+cd vnibb-api
+
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+.venv\Scripts\activate     # Windows
+
+# Install dependencies
+pip install -e ".[dev]"
+
+# Setup environment
+cp .env.example .env
+
+# Run migrations
+alembic upgrade head
+
+# Start server
+uvicorn vnibb.api.main:app --reload
+```
+
+Open [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+## 🌐 Deployment
+
+### Deploy to Oracle Cloud
+
+Follow [docs/oracle_runbook.md](../../docs/oracle_runbook.md) for the Oracle VM deploy, verify, cutover, and rollback sequence.
+
+### Environment Variables
+
+```env
+DATABASE_URL=postgresql+asyncpg://...
+CACHE_BACKEND=auto  # auto|redis|memory|appwrite
+DATA_BACKEND=hybrid  # postgres primary; Appwrite read fallback only when configured
+SUPABASE_JWT_SECRET=your-supabase-jwt-secret
+ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
+APPWRITE_WRITE_ENABLED=false  # keep Appwrite writes frozen unless running a controlled backfill
+APPWRITE_POPULATE_MAX_ROWS=1000
+REDIS_URL=redis://localhost:6379/0
+VNSTOCK_API_KEY=vnstock_xxx
+VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
+VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple  # Optional premium index for vnii bootstrap
+ALEMBIC_STRICT=1  # Recommended for Oracle cutover so failed migrations do not boot a partial runtime
+CORS_ORIGINS=["https://vnibb.vercel.app"]
+CORS_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$|^https://[a-z0-9-]+\\.vercel\\.app$
+ENVIRONMENT=production
+OPENROUTER_API_KEY=your_openrouter_api_key
+LLM_PROVIDER=openrouter
+LLM_MODEL=openai/gpt-4o-mini
+ENABLE_AI_SENTIMENT_ANALYSIS=0  # keep market news sentiment paused for stability-first deploys
+# Optional OpenRouter attribution headers:
+# OPENROUTER_SITE_URL=https://your-app.example.com
+# OPENROUTER_APP_NAME=VNIBB
+
+# Appwrite primary runtime datastore
+# APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
+# APPWRITE_PROJECT_ID=your-appwrite-project-id
+# APPWRITE_API_KEY=your-appwrite-server-api-key
+# APPWRITE_DATABASE_ID=your-appwrite-database-id
+# Optional alias names used by MCP helper scripts:
+# APPWRITE_NAME=your-appwrite-project-id
+# APPWRITE_SECRET=your-appwrite-server-api-key
+```
+
+If `OPENROUTER_API_KEY` is not set, the copilot falls back to a configuration warning until you add the key or use a browser-local OpenRouter key in Settings.
+
+Set `ENABLE_AI_SENTIMENT_ANALYSIS=0` to pause news sentiment processing entirely; crawled articles will be marked neutral so the news feed still works without AI load.
+
+Appwrite is now the expected primary runtime backend. Keep `DATABASE_URL` configured so Postgres/Supabase can act as the fallback source and Appwrite population bridge.
+
+### Read-only MCP companion
+
+This backend now includes a dedicated read-only MCP server for Appwrite-backed VNIBB access.
+
+Local stdio usage:
+
+```bash
+vnibb-mcp --transport stdio
+```
+
+Remote HTTP usage:
+
+```bash
+vnibb-mcp --transport streamable-http --host 0.0.0.0 --port 8001
+```
+
+Key env values:
+- `VNIBB_MCP_TRANSPORT=stdio|streamable-http`
+- `VNIBB_MCP_PORT=8001`
+- `VNIBB_MCP_URL=http://127.0.0.1:8001/mcp` for local API-to-MCP calls, or `http://mcp:8001/mcp` on OCI
+- `VNIBB_MCP_SHARED_BEARER_TOKEN=<shared secret for remote deployments>`
+
+When `VNIBB_MCP_URL` is configured, VniAgent runtime context reads use the MCP companion for selected Appwrite-backed reads instead of direct Appwrite access.
+
+Canonical implementation notes live in `../../docs/VNIBB_MCP_READONLY.md`.
+
+Premium package strategy:
+- Default `Dockerfile` keeps runtime installer disabled (`VNSTOCK_RUNTIME_INSTALL=0`) to avoid cold-start CPU spikes.
+- Use `Dockerfile.premium` for prebuilt premium layers when `VNSTOCK_API_KEY` is available at build time.
+
+VNStock alignment notes:
+- Stable public docs currently point to `v3.4.2`, while GitHub `main` carries newer runtime changes used by VNIBB.
+- `TCBS` is removed in the newer upstream runtime line and should not be configured here.
+- Use `VNSTOCK_SOURCE=KBS` (recommended), `VCI`, or `DNSE`.
+- OSS screener coverage changed upstream; keep premium modules installed (`vnstock_data`, `vnstock_ta`, `vnstock_pipeline`, `vnstock_news`, `vnii`) for full legacy screener parity.
+
+---
+
+## � API Documentation
+
+### Key Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/api/v1/screener` | GET | Stock screener |
+| `/api/v1/stocks/{symbol}` | GET | Stock details |
+| `/api/v1/financials/{symbol}` | GET | Financial statements |
+| `/api/v1/sectors/top-movers` | GET | Sector performance |
+
+**Full Docs:** `/docs` (Swagger UI)
+
+Workspace docs:
+- `../../docs/API_REFERENCE.md`
+- `../../docs/v47_production_health.md`
+- `../../CHANGELOG.md`
+- `docs/vnstock_api_documentation.md`
+
+---
+
+## Sprint V34 Ops Scripts
+
+```bash
+# 1) Core endpoint + widget health gate (returns non-zero on failure)
+VNIBB_BASE_URL=https://api.example.com python scripts/widget_health_matrix.py --repeats 5 --timeout 10 --fail-on-error --output-json scripts/v34_widget_health_after.json
+
+# 2) Resumable historical backfill (top 200, 5 years) - always timebox this run
+python scripts/backfill_historical_v34.py --years 5 --limit 200 --batch-size 10 --max-runtime-minutes 20 --call-timeout-seconds 90 --hard-timeout-grace-seconds 30 --report-json scripts/v36_price_backfill_run.json
+
+# 3) Resumable fundamentals/news/events recovery (timeboxed)
+python scripts/backfill_fundamentals_v34.py --limit 200 --batch-size 10 --types ratios --max-runtime-minutes 15 --call-timeout-seconds 60 --report-json scripts/v36_ratios_backfill_run.json
+
+# 4) Coverage delta vs V34 baseline
+python scripts/v34_coverage_delta.py --run-current-audit --min-5y-improvement 1 --fail-on-miss
+
+# 5) Daily coverage + freshness quality check
+python scripts/data_quality_check.py --top-limit 200 --max-stale-days 7 --output-json scripts/data_quality_report.json
+```
+
+Notes:
+- Never run unbounded backfills in shared/dev sessions; use `--max-runtime-minutes` on every run.
+- `backfill_historical_v34.py` now includes a hard-timeout watchdog that force-exits after the runtime window + grace period and still writes checkpoint/report.
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run tests
+pytest
+
+# Coverage
+pytest --cov=vnibb
+
+# Lint
+ruff check .
+```
+
+---
+
+## � License
+
+MIT License - see [LICENSE](LICENSE)
+
+---
+
+## 🔗 Related Repos
+
+- [vnibb-web](https://github.com/Kohnnn/vnibb-web) - Frontend app
+- [vnibb-providers](https://github.com/Kohnnn/vnibb-providers) - Data providers
+- [vnibb](https://github.com/Kohnnn/vnibb) - Main hub
+- [mrgoonie/vnstock-agent](https://github.com/mrgoonie/vnstock-agent) - MCP/CLI wrapper around vnstock
+
+---
+
+<div align="center">
+
+**Part of the [VNIBB](https://github.com/Kohnnn/vnibb) project**
+
+</div>

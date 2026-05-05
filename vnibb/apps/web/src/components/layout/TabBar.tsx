@@ -1,0 +1,448 @@
+// Tab Navigation Bar - Enhanced with inline rename, drag-drop reorder, keyboard shortcuts
+
+'use client';
+
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Settings2, Plus, X, GripVertical } from 'lucide-react';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { ManageTabsModal } from '@/components/modals/ManageTabsModal';
+import { useTouchGestures } from '@/hooks/useTouchGestures';
+import type { DashboardTab } from '@/types/dashboard';
+
+const MAX_TABS = 12;
+const CREATE_TAB_LOCK_MS = 300;
+
+function getNextTabName(tabs: DashboardTab[]): string {
+    const highestTabNumber = tabs.reduce((maxValue, tab) => {
+        const match = tab.name.trim().match(/^tab\s+(\d+)$/i);
+        if (!match) return maxValue;
+        const parsed = Number.parseInt(match[1], 10);
+        return Number.isFinite(parsed) ? Math.max(maxValue, parsed) : maxValue;
+    }, 0);
+
+    return `Tab ${highestTabNumber + 1}`;
+}
+
+interface TabBarProps {
+    symbol?: string;
+}
+
+export function TabBar(_props: TabBarProps) {
+    const [isManageModalOpen, setIsManageModalOpen] = useState(false);
+    const [editingTabId, setEditingTabId] = useState<string | null>(null);
+    const [editingName, setEditingName] = useState('');
+    const [isCreatingTab, setIsCreatingTab] = useState(false);
+    const [deleteConfirmTabId, setDeleteConfirmTabId] = useState<string | null>(null);
+    const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
+    const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
+
+    const editInputRef = useRef<HTMLInputElement>(null);
+    const deleteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const createTabLockRef = useRef(false);
+    const createTabTimeoutRef = useRef<number | null>(null);
+
+    const {
+        activeDashboard,
+        activeTab,
+        setActiveTab,
+        createTab,
+        updateTab,
+        deleteTab,
+        reorderTabs,
+    } = useDashboard();
+
+    // Focus input when editing starts
+    useEffect(() => {
+        if (editingTabId && editInputRef.current) {
+            editInputRef.current.focus();
+            editInputRef.current.select();
+        }
+    }, [editingTabId]);
+
+    // Clear delete confirmation after timeout
+    useEffect(() => {
+        if (deleteConfirmTabId) {
+            deleteTimeoutRef.current = setTimeout(() => {
+                setDeleteConfirmTabId(null);
+            }, 3000);
+        }
+        return () => {
+            if (deleteTimeoutRef.current) {
+                clearTimeout(deleteTimeoutRef.current);
+            }
+        };
+    }, [deleteConfirmTabId]);
+
+    useEffect(() => {
+        return () => {
+            if (createTabTimeoutRef.current) {
+                clearTimeout(createTabTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    // Keyboard shortcuts: Ctrl+T (new tab), Ctrl+W (close tab)
+    useEffect(() => {
+        if (!activeDashboard) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Don't trigger if user is typing in an input
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+                return;
+            }
+
+            // Ctrl+T: New tab
+            if (e.ctrlKey && e.key === 't') {
+                e.preventDefault();
+                handleAddTab();
+            }
+
+            // Ctrl+W: Close current tab (if more than 1 tab)
+            if (e.ctrlKey && e.key === 'w') {
+                if (activeDashboard.tabs.length > 1 && activeTab) {
+                    e.preventDefault();
+                    handleDeleteTab(activeTab.id);
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [activeDashboard, activeTab]);
+
+    if (!activeDashboard) {
+        return (
+            <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80 h-9 flex items-center px-4">
+                <span className="text-[var(--text-muted)] text-xs">No dashboard selected</span>
+            </div>
+        );
+    }
+
+    const sortedTabs = [...activeDashboard.tabs].sort((a, b) => a.order - b.order);
+    const dashboardEditable = activeDashboard.adminUnlocked === true || (activeDashboard.isEditable ?? true) !== false;
+    const reachedTabLimit = sortedTabs.length >= MAX_TABS;
+
+    // Swipe gesture handlers for mobile tab navigation
+    const handleSwipeLeft = useCallback(() => {
+        if (!activeTab) return;
+        const currentIndex = sortedTabs.findIndex(t => t.id === activeTab.id);
+        if (currentIndex < sortedTabs.length - 1) {
+            setActiveTab(sortedTabs[currentIndex + 1].id);
+        }
+    }, [activeTab, sortedTabs, setActiveTab]);
+
+    const handleSwipeRight = useCallback(() => {
+        if (!activeTab) return;
+        const currentIndex = sortedTabs.findIndex(t => t.id === activeTab.id);
+        if (currentIndex > 0) {
+            setActiveTab(sortedTabs[currentIndex - 1].id);
+        }
+    }, [activeTab, sortedTabs, setActiveTab]);
+
+    const swipeHandlers = useTouchGestures({
+        onSwipeLeft: handleSwipeLeft,
+        onSwipeRight: handleSwipeRight,
+    });
+
+    const handleTabClick = (tabId: string) => {
+        if (editingTabId !== tabId) {
+            setActiveTab(tabId);
+        }
+    };
+
+    const handleAddTab = () => {
+        if (!dashboardEditable || isCreatingTab || createTabLockRef.current || reachedTabLimit) {
+            return;
+        }
+
+        createTabLockRef.current = true;
+        setIsCreatingTab(true);
+
+        try {
+            const tabName = getNextTabName(sortedTabs);
+            const tab = createTab(activeDashboard.id, tabName);
+            setActiveTab(tab.id);
+            // Auto-start editing the new tab name
+            setEditingTabId(tab.id);
+            setEditingName(tabName);
+        } finally {
+            if (createTabTimeoutRef.current) {
+                clearTimeout(createTabTimeoutRef.current);
+            }
+
+            createTabTimeoutRef.current = window.setTimeout(() => {
+                createTabLockRef.current = false;
+                setIsCreatingTab(false);
+                createTabTimeoutRef.current = null;
+            }, CREATE_TAB_LOCK_MS);
+        }
+    };
+
+    // Double-click to start inline rename
+    const handleDoubleClick = (tab: DashboardTab) => {
+        if (!dashboardEditable) return;
+        setEditingTabId(tab.id);
+        setEditingName(tab.name);
+    };
+
+    // Confirm rename
+    const handleRenameConfirm = () => {
+        if (editingTabId && editingName.trim()) {
+            updateTab(activeDashboard.id, editingTabId, { name: editingName.trim() });
+        }
+        setEditingTabId(null);
+        setEditingName('');
+    };
+
+    // Cancel rename
+    const handleRenameCancel = () => {
+        setEditingTabId(null);
+        setEditingName('');
+    };
+
+    // Handle rename input keydown
+    const handleRenameKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleRenameConfirm();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            handleRenameCancel();
+        }
+    };
+
+    // Delete tab with confirmation
+    const handleDeleteTab = (tabId: string) => {
+        if (activeDashboard.tabs.length <= 1) return;
+
+        if (deleteConfirmTabId === tabId) {
+            // Second click - actually delete
+            const deletedTabIndex = sortedTabs.findIndex((tab) => tab.id === tabId);
+            const remainingTabs = sortedTabs.filter((tab) => tab.id !== tabId);
+            deleteTab(activeDashboard.id, tabId);
+            setDeleteConfirmTabId(null);
+
+            // Switch to adjacent tab if we deleted the active one
+            if (activeTab?.id === tabId) {
+                if (remainingTabs.length > 0) {
+                    const nextIndex = deletedTabIndex > 0 ? deletedTabIndex - 1 : 0;
+                    const nextTab = remainingTabs[nextIndex] || remainingTabs[0];
+                    setActiveTab(nextTab.id);
+                }
+            }
+        } else {
+            // First click - show confirmation
+            setDeleteConfirmTabId(tabId);
+        }
+    };
+
+    // Drag and drop handlers
+    const handleDragStart = (e: React.DragEvent, tabId: string) => {
+        setDraggedTabId(tabId);
+        e.dataTransfer.effectAllowed = 'move';
+        // Add a slight delay to show drag effect
+        setTimeout(() => {
+            const element = e.target as HTMLElement;
+            element.style.opacity = '0.5';
+        }, 0);
+    };
+
+    const handleDragEnd = (e: React.DragEvent) => {
+        const element = e.target as HTMLElement;
+        element.style.opacity = '1';
+
+        if (draggedTabId && dragOverTabId && draggedTabId !== dragOverTabId) {
+            // Reorder tabs
+            const draggedIndex = sortedTabs.findIndex(t => t.id === draggedTabId);
+            const dropIndex = sortedTabs.findIndex(t => t.id === dragOverTabId);
+
+            if (draggedIndex !== -1 && dropIndex !== -1) {
+                const newTabs = [...sortedTabs];
+                const [dragged] = newTabs.splice(draggedIndex, 1);
+                newTabs.splice(dropIndex, 0, dragged);
+
+                // Update order values
+                const reorderedTabs = newTabs.map((tab, i) => ({ ...tab, order: i }));
+                reorderTabs(activeDashboard.id, reorderedTabs);
+            }
+        }
+
+        setDraggedTabId(null);
+        setDragOverTabId(null);
+    };
+
+    const handleDragOver = (e: React.DragEvent, tabId: string) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (draggedTabId && draggedTabId !== tabId) {
+            setDragOverTabId(tabId);
+        }
+    };
+
+    const handleDragLeave = () => {
+        setDragOverTabId(null);
+    };
+
+    const handleSaveTabs = (tabs: DashboardTab[]) => {
+        reorderTabs(activeDashboard.id, tabs);
+        // If active tab was deleted, switch to first tab
+        const tabIds = tabs.map(t => t.id);
+        if (activeTab && !tabIds.includes(activeTab.id)) {
+            setActiveTab(tabs[0]?.id || '');
+        }
+    };
+
+    return (
+        <>
+            <div data-tour="tab-bar" className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80" {...swipeHandlers}>
+                <div className="flex items-center gap-0.5 px-2 sm:px-3">
+                    {/* Tabs */}
+                    <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
+                        {sortedTabs.map((tab, index) => {
+                            const isActive = activeTab?.id === tab.id;
+                            const isEditing = editingTabId === tab.id;
+                            const isDragging = draggedTabId === tab.id;
+                            const isDragOver = dragOverTabId === tab.id;
+                            const isDeleteConfirm = deleteConfirmTabId === tab.id;
+
+                            return (
+                                <div
+                                    key={tab.id}
+                                    draggable={dashboardEditable && !isEditing}
+                                    onDragStart={dashboardEditable ? (e) => handleDragStart(e, tab.id) : undefined}
+                                    onDragEnd={dashboardEditable ? handleDragEnd : undefined}
+                                    onDragOver={dashboardEditable ? (e) => handleDragOver(e, tab.id) : undefined}
+                                    onDragLeave={dashboardEditable ? handleDragLeave : undefined}
+                                    className={`
+                                        group relative flex items-center gap-1 px-1 py-1 text-xs font-medium 
+                                        transition-all whitespace-nowrap rounded-t cursor-pointer
+                                        ${isActive
+                                            ? 'text-[var(--text-primary)] bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]'
+                                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/50'
+                                        }
+                                        ${isDragging ? 'opacity-50' : ''}
+                                        ${isDragOver ? 'ring-2 ring-blue-500 ring-inset' : ''}
+                                    `}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            handleTabClick(tab.id);
+                                        }
+                                    }}
+                                    onClick={() => handleTabClick(tab.id)}
+                                    onDoubleClick={() => handleDoubleClick(tab)}
+                                >
+                                    {/* Drag handle (visible on hover) */}
+                                    {dashboardEditable ? (
+                                        <span className="opacity-0 group-hover:opacity-50 cursor-grab active:cursor-grabbing">
+                                            <GripVertical size={12} />
+                                        </span>
+                                    ) : null}
+
+                                    {/* Tab name or edit input */}
+                                    {isEditing ? (
+                                        <input
+                                            ref={editInputRef}
+                                            type="text"
+                                            value={editingName}
+                                            aria-label="Tab name"
+                                            onChange={(e) => setEditingName(e.target.value)}
+                                            onBlur={handleRenameConfirm}
+                                            onKeyDown={handleRenameKeyDown}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="w-20 bg-[var(--bg-secondary)] border border-blue-500 rounded px-1 py-0.5 text-xs text-[var(--text-primary)] focus:outline-none"
+                                        />
+                                    ) : (
+                                        <span className="flex items-center gap-1 px-1">
+                                            <span>{tab.name}</span>
+                                            {index < 9 && (
+                                                <span className="text-[10px] text-[var(--text-muted)]">⌘{index + 1}</span>
+                                            )}
+                                        </span>
+                                    )}
+
+                                    {/* Close button (visible on hover for active tab or when confirming delete) */}
+                                    {sortedTabs.length > 1 && (isActive || isDeleteConfirm) && !isEditing && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteTab(tab.id);
+                                            }}
+                                            className={`
+                                                p-0.5 rounded transition-colors
+                                                ${isDeleteConfirm
+                                                    ? 'text-red-400 bg-red-500/20 hover:bg-red-500/30'
+                                                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]/70 opacity-0 group-hover:opacity-100'
+                                                }
+                                            `}
+                                            title={isDeleteConfirm ? 'Click again to confirm delete' : 'Close tab'}
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* Add tab button */}
+                    {dashboardEditable ? (
+                        <>
+                            <button
+                                onClick={handleAddTab}
+                                disabled={reachedTabLimit || isCreatingTab}
+                                className={`ml-1 shrink-0 rounded p-1.5 transition-colors ${
+                                    reachedTabLimit || isCreatingTab
+                                        ? 'text-[var(--text-muted)]/50 cursor-not-allowed'
+                                        : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60'
+                                }`}
+                                title={reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : 'Add new tab (Ctrl+T)'}
+                            >
+                                <Plus size={14} />
+                            </button>
+
+                            <button
+                                onClick={() => {
+                                    captureAnalyticsEvent(ANALYTICS_EVENTS.tabManagementOpened, {
+                                        dashboard_id: activeDashboard.id,
+                                        dashboard_name: activeDashboard.name,
+                                        tab_count: activeDashboard.tabs.length,
+                                    });
+                                    setIsManageModalOpen(true);
+                                }}
+                                className="hidden shrink-0 rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-secondary)] sm:block"
+                                title="Manage tabs"
+                            >
+                                <Settings2 size={14} />
+                            </button>
+                        </>
+                    ) : null}
+
+                    {/* Spacer */}
+                    <div className="flex-1" />
+
+                    {/* Keyboard shortcuts hint */}
+                    <div className="mr-2 hidden shrink-0 items-center gap-2 text-[10px] text-[var(--text-muted)] xl:flex">
+                        <span className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded">⌘1-9</span>
+                        <span>quick switch</span>
+                        {reachedTabLimit && <span className="text-amber-400">max {MAX_TABS} tabs</span>}
+                    </div>
+                </div>
+            </div>
+
+            {/* Manage Tabs Modal */}
+            <ManageTabsModal
+                isOpen={isManageModalOpen}
+                onClose={() => setIsManageModalOpen(false)}
+                tabs={activeDashboard.tabs}
+                onSave={handleSaveTabs}
+            />
+        </>
+    );
+}
+
+// Re-export the DashboardTab type for backwards compatibility
+export type { DashboardTab };

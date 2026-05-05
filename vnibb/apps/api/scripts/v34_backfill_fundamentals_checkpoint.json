@@ -1,0 +1,15 @@
+{
+  "stage": "company_news",
+  "next_batch": 0,
+  "total_symbols": 200,
+  "completed_symbols": 200,
+  "failed_symbols": [],
+  "stage_stats": {
+    "company_news": {
+      "success_symbols": 200,
+      "failed_symbols": 0,
+      "completed_batches": 8
+    }
+  },
+  "updated_at": "2026-04-03T00:44:06.272956+00:00"
+}

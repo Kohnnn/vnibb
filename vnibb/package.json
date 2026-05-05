@@ -1,0 +1,33 @@
+{
+    "name": "vnibb",
+    "version": "1.0.0",
+    "private": true,
+    "workspaces": [
+        "apps/*",
+        "packages/*"
+    ],
+    "scripts": {
+        "dev": "turbo run dev",
+        "build": "turbo run build",
+        "lint": "turbo run lint",
+        "test": "turbo run test",
+        "dev:web": "pnpm --filter frontend dev",
+        "dev:api": "pnpm --filter api dev",
+        "build:web": "pnpm --filter frontend build",
+        "build:api": "pnpm --filter api build",
+        "ci:gate": "node ./scripts/ci-gate.mjs",
+        "ci:gate:win": "node ./scripts/ci-gate.mjs",
+        "gate:no502": "python apps/api/scripts/widget_health_matrix.py --repeats 5 --timeout 10 --fail-on-error --output-json apps/api/scripts/v34_widget_health_after.json",
+        "gate:widgets:strict": "python apps/api/scripts/widget_health_matrix.py --repeats 5 --timeout 10 --fail-on-error --strict-widget-state --output-json apps/api/scripts/v34_widget_health_strict.json"
+    },
+    "devDependencies": {
+        "@typescript-eslint/parser": "^8.54.0",
+        "node-appwrite": "^22.1.3",
+        "pg": "^8.20.0",
+        "turbo": "^2.0.0"
+    },
+    "engines": {
+        "node": ">=18"
+    },
+    "packageManager": "pnpm@9.15.4"
+}

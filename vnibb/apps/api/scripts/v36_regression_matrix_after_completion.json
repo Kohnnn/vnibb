@@ -1,0 +1,152 @@
+{
+  "generated_at": "2026-02-12T17:41:41.209330+00:00",
+  "base_url": "https://vnibb.zeabur.app",
+  "repeats": 3,
+  "rows": [
+    {
+      "widget": "health",
+      "path": "/health/",
+      "attempts": 3,
+      "ok_attempts": 3,
+      "all_ok": true,
+      "statuses": [
+        200,
+        200,
+        200
+      ],
+      "avg_latency_ms": 256.21,
+      "max_latency_ms": 276.6,
+      "widget_state": "loaded",
+      "state_reason": "Health endpoint returned connected status",
+      "last_error": null
+    },
+    {
+      "widget": "live",
+      "path": "/live",
+      "attempts": 3,
+      "ok_attempts": 3,
+      "all_ok": true,
+      "statuses": [
+        200,
+        200,
+        200
+      ],
+      "avg_latency_ms": 190.77,
+      "max_latency_ms": 212.08,
+      "widget_state": "loaded",
+      "state_reason": "Liveness probe is healthy",
+      "last_error": null
+    },
+    {
+      "widget": "ready",
+      "path": "/ready",
+      "attempts": 3,
+      "ok_attempts": 3,
+      "all_ok": true,
+      "statuses": [
+        200,
+        200,
+        200
+      ],
+      "avg_latency_ms": 1165.52,
+      "max_latency_ms": 1566.96,
+      "widget_state": "loaded",
+      "state_reason": "Readiness probe is healthy",
+      "last_error": null
+    },
+    {
+      "widget": "screener",
+      "path": "/api/v1/screener/?limit=20",
+      "attempts": 3,
+      "ok_attempts": 3,
+      "all_ok": true,
+      "statuses": [
+        200,
+        200,
+        200
+      ],
+      "avg_latency_ms": 1104.93,
+      "max_latency_ms": 1294.37,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": null
+    },
+    {
+      "widget": "profile",
+      "path": "/api/v1/equity/VNM/profile",
+      "attempts": 3,
+      "ok_attempts": 3,
+      "all_ok": true,
+      "statuses": [
+        200,
+        200,
+        200
+      ],
+      "avg_latency_ms": 251.01,
+      "max_latency_ms": 254.85,
+      "widget_state": "loaded",
+      "state_reason": "Profile payload includes symbol metadata",
+      "last_error": null
+    },
+    {
+      "widget": "quote",
+      "path": "/api/v1/equity/VNM/quote",
+      "attempts": 3,
+      "ok_attempts": 3,
+      "all_ok": true,
+      "statuses": [
+        200,
+        200,
+        200
+      ],
+      "avg_latency_ms": 264.88,
+      "max_latency_ms": 273.08,
+      "widget_state": "loaded",
+      "state_reason": "Quote payload includes price",
+      "last_error": null
+    },
+    {
+      "widget": "ratios",
+      "path": "/api/v1/equity/VNM/ratios?period=year",
+      "attempts": 3,
+      "ok_attempts": 3,
+      "all_ok": true,
+      "statuses": [
+        200,
+        200,
+        200
+      ],
+      "avg_latency_ms": 292.34,
+      "max_latency_ms": 302.84,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": null
+    },
+    {
+      "widget": "historical",
+      "path": "/api/v1/equity/historical?symbol=VNM&period=1Y",
+      "attempts": 3,
+      "ok_attempts": 3,
+      "all_ok": true,
+      "statuses": [
+        200,
+        200,
+        200
+      ],
+      "avg_latency_ms": 272.31,
+      "max_latency_ms": 282.26,
+      "widget_state": "unknown",
+      "state_reason": "No JSON payload sample from successful response",
+      "last_error": null
+    }
+  ],
+  "state_counts": {
+    "loaded": 5,
+    "empty": 0,
+    "error": 0,
+    "unknown": 3
+  },
+  "endpoint_ok": true,
+  "widget_state_ok": true,
+  "overall_ok": true
+}

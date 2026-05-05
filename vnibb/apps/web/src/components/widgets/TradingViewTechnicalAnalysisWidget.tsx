@@ -1,0 +1,1 @@
+export { TradingViewTechnicalAnalysisWidget } from './TradingViewNativeWidgets';

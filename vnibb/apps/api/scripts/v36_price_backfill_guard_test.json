@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-02-12T17:11:54.487628+00:00",
+  "years": 5,
+  "limit": 1,
+  "batch_size": 1,
+  "max_runtime_minutes": 0.02,
+  "max_batches": null,
+  "call_timeout_seconds": 300.0,
+  "hard_timeout_grace_seconds": 2.0,
+  "processed_batches": 0,
+  "elapsed_seconds": 3.22,
+  "stop_reason": "hard_timeout_forced_exit",
+  "checkpoint_file": "scripts\\v36_test_checkpoint.json",
+  "checkpoint": {
+    "next_index": 0,
+    "total_symbols": 1,
+    "completed_symbols": 0,
+    "failed_symbols": [],
+    "updated_at": "2026-02-12T17:11:54.408795+00:00"
+  }
+}

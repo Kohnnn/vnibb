@@ -1,0 +1,384 @@
+'use client';
+
+import { useState, useCallback, useMemo, useEffect, memo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Plus, TrendingUp, TrendingDown, Minus, Star, Trash2 } from 'lucide-react';
+import { getSymbols } from '@/lib/api';
+import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { WidgetEmpty } from '@/components/ui/widget-states';
+import { useWebSocket } from '@/lib/hooks/useWebSocket';
+import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { useDashboard } from '@/contexts/DashboardContext';
+import { useDashboardWidget } from '@/hooks/useDashboardWidget';
+import type { WidgetGroupId } from '@/types/widget';
+
+const STORAGE_KEY = 'vnibb-watchlist-v1';
+const SORT_STORAGE_KEY = 'vnibb-watchlist-sort-v1';
+
+interface WatchlistItem {
+    symbol: string;
+    name: string;
+    price: number;
+    change: number;
+    changePercent: number;
+    volume?: number;
+    isLoading?: boolean;
+    error?: string;
+}
+
+type SortField = 'symbol' | 'price' | 'changePercent' | 'volume';
+type SortOrder = 'asc' | 'desc';
+
+interface SortConfig {
+    field: SortField;
+    order: SortOrder;
+}
+
+interface WatchlistWidgetProps {
+    id: string;
+    symbol?: string;
+    config?: Record<string, unknown>;
+    isEditing?: boolean;
+    widgetGroup?: WidgetGroupId;
+}
+
+function hasOwnConfigKey(config: Record<string, unknown> | undefined, key: string): boolean {
+    return Boolean(config) && Object.prototype.hasOwnProperty.call(config, key);
+}
+
+function parseLegacySymbols(): string[] {
+    if (typeof window === 'undefined') return [];
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        return stored ? (JSON.parse(stored) as string[]).filter((value): value is string => typeof value === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
+function parseLegacySortConfig(): SortConfig {
+    if (typeof window === 'undefined') return { field: 'symbol', order: 'asc' };
+    try {
+        const stored = localStorage.getItem(SORT_STORAGE_KEY);
+        if (!stored) return { field: 'symbol', order: 'asc' };
+        const parsed = JSON.parse(stored) as Partial<SortConfig>;
+        return {
+            field: parsed.field === 'price' || parsed.field === 'changePercent' || parsed.field === 'volume' ? parsed.field : 'symbol',
+            order: parsed.order === 'desc' ? 'desc' : 'asc',
+        };
+    } catch {
+        return { field: 'symbol', order: 'asc' };
+    }
+}
+
+function parseWatchlistSymbols(config: Record<string, unknown> | undefined): string[] {
+    const rawValue = config?.watchlistSymbols;
+    if (!Array.isArray(rawValue)) {
+        return hasOwnConfigKey(config, 'watchlistSymbols') ? [] : parseLegacySymbols();
+    }
+
+    return rawValue
+        .filter((value): value is string => typeof value === 'string' && Boolean(value))
+        .map((value) => value.toUpperCase());
+}
+
+function parseWatchlistSort(config: Record<string, unknown> | undefined): SortConfig {
+    const rawValue = config?.watchlistSort;
+    if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) {
+        return hasOwnConfigKey(config, 'watchlistSort') ? { field: 'symbol', order: 'asc' } : parseLegacySortConfig();
+    }
+
+    const parsed = rawValue as Partial<SortConfig>;
+    return {
+        field: parsed.field === 'price' || parsed.field === 'changePercent' || parsed.field === 'volume' ? parsed.field : 'symbol',
+        order: parsed.order === 'desc' ? 'desc' : 'asc',
+    };
+}
+
+function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup }: WatchlistWidgetProps & { onRemove?: () => void }) {
+    const { updateWidget } = useDashboard();
+    const widgetLocation = useDashboardWidget(id);
+    const persistedSymbols = useMemo(() => parseWatchlistSymbols(config), [config]);
+    const persistedSortConfig = useMemo(() => parseWatchlistSort(config), [config]);
+    const [symbols, setSymbols] = useState<string[]>(persistedSymbols);
+    const [sortConfig, setSortConfig] = useState<SortConfig>(persistedSortConfig);
+
+    const [newSymbol, setNewSymbol] = useState('');
+    const [showAddInput, setShowAddInput] = useState(false);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const [lastTick, setLastTick] = useState<number | null>(null);
+
+    const { data: validSymbolsData } = useQuery({
+        queryKey: ['symbols'],
+        queryFn: () => getSymbols({ limit: 2000 }),
+        staleTime: 30 * 60 * 1000,
+    });
+
+    const symbolNameMap = useMemo(() => {
+        if (!validSymbolsData?.data) return new Map<string, string>();
+        return new Map(validSymbolsData.data.map(s => [s.symbol.toUpperCase(), s.organ_name]));
+    }, [validSymbolsData]);
+
+    const { prices: livePrices, isConnected } = useWebSocket({ symbols });
+    const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'watchlist' });
+
+    useEffect(() => {
+        setSymbols((current) => JSON.stringify(current) === JSON.stringify(persistedSymbols) ? current : persistedSymbols);
+    }, [persistedSymbols]);
+
+    useEffect(() => {
+        setSortConfig((current) => JSON.stringify(current) === JSON.stringify(persistedSortConfig) ? current : persistedSortConfig);
+    }, [persistedSortConfig]);
+
+    useEffect(() => {
+        if (!widgetLocation) return;
+
+        const currentConfig = widgetLocation.widget.config || {};
+        const nextConfig = {
+            ...currentConfig,
+            watchlistSymbols: symbols,
+            watchlistSort: sortConfig,
+        };
+
+        if (
+            JSON.stringify(currentConfig.watchlistSymbols ?? []) === JSON.stringify(symbols)
+            && JSON.stringify(currentConfig.watchlistSort ?? {}) === JSON.stringify(sortConfig)
+        ) {
+            return;
+        }
+
+        updateWidget(widgetLocation.dashboardId, widgetLocation.tabId, id, {
+            config: nextConfig,
+        });
+    }, [id, sortConfig, symbols, updateWidget, widgetLocation]);
+
+    useEffect(() => {
+        if (livePrices.size > 0) {
+            setLastTick(Date.now());
+        }
+    }, [livePrices]);
+
+    const watchlist = useMemo<WatchlistItem[]>(() => {
+        return symbols.map((sym) => {
+            const quoteData = livePrices.get(sym);
+            const name = symbolNameMap.get(sym) || 'Unknown';
+
+            return {
+                symbol: sym,
+                name: name,
+                price: quoteData?.price ?? 0,
+                change: quoteData?.change ?? 0,
+                changePercent: quoteData?.change_pct ?? 0,
+                volume: quoteData?.volume ?? undefined,
+                isLoading: !quoteData && symbols.length > 0,
+            };
+        });
+    }, [symbols, livePrices, symbolNameMap]);
+
+    const sortedWatchlist = useMemo(() => {
+        const sorted = [...watchlist];
+        sorted.sort((a, b) => {
+            let comparison = 0;
+            switch (sortConfig.field) {
+                case 'symbol':
+                    comparison = a.symbol.localeCompare(b.symbol);
+                    break;
+                case 'price':
+                    comparison = a.price - b.price;
+                    break;
+                case 'changePercent':
+                    comparison = a.changePercent - b.changePercent;
+                    break;
+                case 'volume':
+                    comparison = (a.volume ?? 0) - (b.volume ?? 0);
+                    break;
+            }
+            return sortConfig.order === 'asc' ? comparison : -comparison;
+        });
+        return sorted;
+    }, [watchlist, sortConfig]);
+
+    const hasSymbols = symbols.length > 0;
+    const connectionNote = hasSymbols ? (isConnected ? 'Live feed' : 'Disconnected') : 'Add symbols to begin';
+    const showCached = hasSymbols && !isConnected;
+
+    const handleAddSymbol = useCallback(() => {
+        if (!newSymbol.trim()) return;
+        const symbolUpper = newSymbol.toUpperCase().trim();
+        if (symbols.includes(symbolUpper)) {
+            setNewSymbol('');
+            setShowAddInput(false);
+            return;
+        }
+        setSymbols(prev => [...prev, symbolUpper]);
+        setNewSymbol('');
+        setShowAddInput(false);
+    }, [newSymbol, symbols, setSymbols]);
+
+    const handleRemoveSymbol = useCallback((symbolToRemove: string) => {
+        setSymbols(prev => prev.filter(s => s !== symbolToRemove));
+    }, [setSymbols]);
+
+    const handleClearAll = useCallback(() => {
+        setSymbols([]);
+        setShowClearConfirm(false);
+    }, []);
+
+    const handleSort = useCallback((field: SortField) => {
+        setSortConfig(prev => ({
+            field,
+            order: prev.field === field && prev.order === 'asc' ? 'desc' : 'asc'
+        }));
+    }, [setSortConfig]);
+
+    const handleSymbolSelect = useCallback((symbol: string) => {
+        setLinkedSymbol(symbol);
+    }, [setLinkedSymbol]);
+
+    const formatPrice = (price: number) => new Intl.NumberFormat('vi-VN').format(price);
+    const formatChange = (change: number, percent: number) => {
+        const sign = change >= 0 ? '+' : '';
+        return `${sign}${percent.toFixed(2)}%`;
+    };
+    const getChangeColor = (change: number) => {
+        if (change > 0) return 'text-green-400';
+        if (change < 0) return 'text-red-400';
+        return 'text-yellow-400';
+    };
+    const getChangeIcon = (change: number) => {
+        if (change > 0) return <TrendingUp size={14} className="text-green-400" />;
+        if (change < 0) return <TrendingDown size={14} className="text-red-400" />;
+        return <Minus size={14} className="text-yellow-400" />;
+    };
+    const getSortIcon = (field: SortField) => {
+        if (sortConfig.field !== field) return null;
+        return sortConfig.order === 'asc' ? '↑' : '↓';
+    };
+
+    return (
+        <WidgetContainer
+            title="Watchlist"
+            onClose={onRemove}
+            noPadding
+            widgetId={id}
+        >
+            <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-color)]">
+                    <div className="flex items-center gap-2">
+                        <Star size={14} className="text-yellow-400" />
+                        <span className="text-xs text-[var(--text-muted)] font-bold uppercase tracking-tighter">{symbols.length} symbols</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <button onClick={() => setShowAddInput(!showAddInput)} className="p-1 text-[var(--text-muted)] hover:text-blue-400 transition-colors">
+                            <Plus size={14} />
+                        </button>
+                        {symbols.length > 0 && (
+                            <button onClick={() => setShowClearConfirm(true)} className="p-1 text-[var(--text-muted)] hover:text-red-400 transition-colors">
+                                <Trash2 size={14} />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                <div className="px-3 py-1.5 border-b border-[var(--border-color)]/70 bg-[var(--bg-primary)]">
+                    <WidgetMeta
+                        updatedAt={lastTick}
+                        isCached={showCached}
+                        note={connectionNote}
+                        sourceLabel="WebSocket"
+                        align="right"
+                    />
+                </div>
+
+                {showClearConfirm && (
+                    <div className="px-3 py-2 border-b border-red-900/20 bg-red-900/10 text-left">
+                        <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-red-400 font-bold uppercase">Clear watchlist?</span>
+                            <div className="flex gap-2">
+                                <button onClick={handleClearAll} className="bg-red-600 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase">Clear</button>
+                                <button onClick={() => setShowClearConfirm(false)} className="text-[var(--text-secondary)] text-[10px] font-bold uppercase">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {showAddInput && (
+                    <div className="px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/40">
+                        <div className="flex gap-1">
+                            <input
+                                type="text"
+                                value={newSymbol}
+                                onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddSymbol()}
+                                className="flex-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-2 py-1 text-xs text-[var(--text-primary)] uppercase font-bold focus:border-blue-500 outline-none"
+                                placeholder="SYMBOL"
+                                autoFocus
+                            />
+                            <button onClick={handleAddSymbol} className="bg-blue-600 text-white px-2 py-1 rounded text-[10px] font-black uppercase tracking-tighter">Add</button>
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex-1 overflow-y-auto scrollbar-hide">
+                    {!hasSymbols ? (
+                        <WidgetEmpty
+                            message="Your watchlist is empty."
+                            action={{ label: 'Add symbol', onClick: () => setShowAddInput(true) }}
+                        />
+                    ) : (
+                        <table className="data-table w-full text-[11px] text-left border-collapse">
+                            <thead className="sticky top-0 bg-[var(--bg-primary)] text-[var(--text-muted)] z-10">
+                                <tr className="border-b border-[var(--border-color)]">
+                                    <th className="px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors" onClick={() => handleSort('symbol')}>
+                                        Symbol {getSortIcon('symbol')}
+                                    </th>
+                                    <th className="text-right px-2 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors" onClick={() => handleSort('price')}>
+                                        Price {getSortIcon('price')}
+                                    </th>
+                                    <th className="text-right px-3 py-2 font-black uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors" onClick={() => handleSort('changePercent')}>
+                                        Chg% {getSortIcon('changePercent')}
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="text-left">
+                                {sortedWatchlist.map((item, index) => (
+                                    <tr
+                                        key={`${item.symbol}-${index}`}
+                                        onClick={() => handleSymbolSelect(item.symbol)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                event.preventDefault();
+                                                handleSymbolSelect(item.symbol);
+                                            }
+                                        }}
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-label={`View ${item.symbol}`}
+                                        className="border-b border-[var(--border-color)]/70 hover:bg-[var(--bg-secondary)]/50 transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                                    >
+                                        <td className="px-3 py-2">
+                                            <div className="flex items-center gap-2">
+                                                {getChangeIcon(item.change)}
+                                                <span className="font-black text-blue-400 group-hover:text-blue-300 transition-colors">{item.symbol}</span>
+                                            </div>
+                                        </td>
+                                        <td className="text-right px-2 py-2 font-mono text-[var(--text-primary)]">
+                                            {formatPrice(item.price)}
+                                        </td>
+                                        <td className={`text-right px-3 py-2 font-mono ${getChangeColor(item.change)}`}>
+                                            {formatChange(item.change, item.changePercent)}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        </WidgetContainer>
+    );
+}
+
+export const WatchlistWidget = memo(WatchlistWidgetComponent);
+export default WatchlistWidget;

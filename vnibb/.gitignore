@@ -1,0 +1,122 @@
+# Dependencies
+node_modules/
+.venv/
+.venv*/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Environment variables (NEVER COMMIT)
+.env
+.env.*
+.env.local
+.env.production
+.env.development
+backend/.env
+frontend/.env
+apps/api/.env
+apps/api/.env.*
+apps/web/.env
+apps/web/.env.*
+!.env.example
+!.env.*.example
+!apps/api/.env.example
+!apps/api/.env.*.example
+!apps/web/.env.example
+!apps/web/.env.*.example
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build outputs
+frontend/dist/
+frontend/build/
+backend/dist/
+.next/
+out/
+dist/
+build/
+
+# Test outputs
+coverage/
+.pytest_cache/
+.nyc_output/
+*.log
+apps/web/playwright-report/
+apps/web/test-results/
+.playwright-cli/
+tmp_local_logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+
+# Cache
+.cache/
+*.cache
+.turbo/
+.ruff_cache/
+.next/
+
+# Python
+*.pyc
+*.pyo
+*.egg-info/
+pip-wheel-metadata/
+
+# Local development only
+.agent/
+.agents/
+.crush/
+.kilocode/
+.kiro/
+.opencode/
+AGENTS.md
+skills-lock.json
+temp_vnstock_installer/
+server.log
+apps/api/nul
+image/
+screenshots/
+.tmp_backfill/
+.vercel/
+*.db
+
+# Local test artifacts (not for production)
+test.db
+api_test_results.json
+
+DEPLOYMENT.md
+
+DEPLOYMENT_GUIDE_V2.md
+.vercel
+.env*.local
+apps/api/scripts/v34_widget_health_after.json
+apps/api/scripts/v34_widget_health_strict.json
+apps/api/scripts/v120_cross_symbol_gate.json
+apps/api/scripts/v120_data_quality_report.json
+apps/api/migrations/versions/20260303_2230_cleanup_invalid_financial_ratio_periods.py
+apps/api/tests/test_integration/test_api_integration.py
+docs/sql/financial_ratios_ghost_period_purge.sql
+
+# Appwrite migration runtime artifacts
+scripts/appwrite/migration_state*.json
+scripts/appwrite/supabase_baseline.json
+apps/api/migrations/versions/20260313_0105_ensure_block_trades_side_column.py
+apps/api/scripts/production_endpoint_probe.py
+apps/api/scripts/production_endpoint_probe.latest.json
+apps/api/tests/test_api/test_equity_profile_transform.py
+docs/NEXT_PHASES_EXECUTION_PLAN.md
+docs/NEXT_PHASES_EXECUTION_PLAN.md

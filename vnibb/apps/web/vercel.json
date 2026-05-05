@@ -1,0 +1,8 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "framework": "nextjs",
+  "git": {
+    "ignoreCommand": "npx turbo-ignore"
+  }
+}

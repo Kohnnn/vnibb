@@ -1,0 +1,1 @@
+export { TradingViewTickerTapeWidget } from './TradingViewNativeWidgets';

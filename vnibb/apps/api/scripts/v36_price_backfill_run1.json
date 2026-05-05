@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-02-12T16:55:18.027046+00:00",
+  "years": 5,
+  "limit": 200,
+  "batch_size": 10,
+  "max_runtime_minutes": 20.0,
+  "max_batches": null,
+  "call_timeout_seconds": 90.0,
+  "processed_batches": 1,
+  "elapsed_seconds": 1200.35,
+  "stop_reason": "max_runtime_reached",
+  "checkpoint_file": "scripts\\v34_backfill_historical_checkpoint.json",
+  "checkpoint": {
+    "next_index": 1,
+    "total_symbols": 200,
+    "completed_symbols": 14,
+    "failed_symbols": [
+      "PDB",
+      "DRH",
+      "SMB"
+    ],
+    "updated_at": "2026-02-12T16:55:18.026053+00:00"
+  }
+}

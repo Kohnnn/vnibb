@@ -1,0 +1,313 @@
+'use client';
+
+import { useEffect, useMemo } from 'react';
+import { Newspaper, BadgeDollarSign } from 'lucide-react';
+import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
+import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { useCompanyNews, useDividends, useInsiderDeals } from '@/lib/queries';
+import { formatTimestamp } from '@/lib/format';
+import { formatNumber, formatPercent, formatVND } from '@/lib/formatters';
+import type { DividendRecord } from '@/lib/api';
+import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+
+interface NewsCorporateActionsWidgetProps {
+  id: string;
+  symbol: string;
+  onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
+}
+
+function getSentimentClasses(sentiment: string | null | undefined): string {
+  const normalized = String(sentiment || 'neutral').toLowerCase();
+  if (normalized === 'bullish' || normalized === 'positive') {
+    return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
+  }
+  if (normalized === 'bearish' || normalized === 'negative') {
+    return 'border-rose-500/20 bg-rose-500/10 text-rose-300';
+  }
+  return 'border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-muted)]';
+}
+
+function formatDividendType(type: string | null | undefined): string {
+  const normalized = String(type || '').toLowerCase();
+  if (normalized === 'cash') return 'Cash';
+  if (normalized === 'stock') return 'Stock';
+  if (normalized === 'mixed') return 'Mixed';
+  return 'Other';
+}
+
+function formatDividendValue(row: DividendRecord): string {
+  if (row.cash_dividend !== null && row.cash_dividend !== undefined) {
+    return formatVND(row.cash_dividend);
+  }
+  if (row.stock_dividend !== null && row.stock_dividend !== undefined) {
+    return `${row.stock_dividend.toFixed(2)}% stock`;
+  }
+  if (row.dividend_ratio !== null && row.dividend_ratio !== undefined) {
+    return String(row.dividend_ratio);
+  }
+  if (row.value !== null && row.value !== undefined) {
+    return formatVND(row.value);
+  }
+  return '-';
+}
+
+export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange }: NewsCorporateActionsWidgetProps) {
+  const {
+    data: newsData,
+    isLoading: newsLoading,
+    error: newsError,
+    refetch: refetchNews,
+    isFetching: newsFetching,
+    dataUpdatedAt: newsUpdatedAt,
+  } = useCompanyNews(symbol, { limit: 6, enabled: Boolean(symbol) });
+
+  const {
+    data: dividendData,
+    isLoading: dividendsLoading,
+    error: dividendsError,
+    refetch: refetchDividends,
+    isFetching: dividendsFetching,
+    dataUpdatedAt: dividendsUpdatedAt,
+  } = useDividends(symbol, Boolean(symbol));
+
+  const {
+    data: insiderData,
+    isLoading: insiderLoading,
+    error: insiderError,
+    refetch: refetchInsider,
+    isFetching: insiderFetching,
+    dataUpdatedAt: insiderUpdatedAt,
+  } = useInsiderDeals(symbol, { limit: 6, enabled: Boolean(symbol) });
+
+  const news = newsData?.data ?? [];
+  const dividends = dividendData?.data ?? [];
+  const insiderDeals = insiderData ?? [];
+
+  const hasNews = news.length > 0;
+  const hasActions = dividends.length > 0 || insiderDeals.length > 0;
+  const hasData = hasNews || hasActions;
+
+  const isLoading = newsLoading || dividendsLoading || insiderLoading;
+  const isFetching = newsFetching || dividendsFetching || insiderFetching;
+  const error = newsError || dividendsError || insiderError;
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+
+  const updatedAt = [newsUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
+    .filter(Boolean)
+    .sort((a, b) => Number(b) - Number(a))[0];
+  const recentNewsCount = useMemo(() => {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return news.filter((item) => {
+      const rawDate = item.published_at || item.published_date;
+      if (!rawDate) return false;
+      const parsed = new Date(rawDate).getTime();
+      return Number.isFinite(parsed) && parsed >= cutoff;
+    }).length;
+  }, [news]);
+
+  useEffect(() => {
+    onDataChange?.({
+      __widgetRuntime: {
+        layoutHint: {
+          empty: !hasData,
+          compactHeight: 4,
+        },
+      },
+    });
+  }, [hasData, onDataChange]);
+
+  if (!symbol) {
+    return <WidgetEmpty message="Select a symbol to view news and actions" />;
+  }
+
+  return (
+    <WidgetContainer
+      title="News + Corporate Actions"
+      symbol={symbol}
+      onRefresh={() => {
+        refetchNews();
+        refetchDividends();
+        refetchInsider();
+      }}
+      onClose={onRemove}
+      isLoading={isLoading && !hasData}
+      noPadding
+      widgetId={id}
+    >
+      <div aria-label="News and corporate actions" className="h-full flex flex-col bg-[var(--bg-primary)]">
+        <div className="px-3 py-2 border-b border-[var(--border-color)]">
+          <WidgetMeta
+            updatedAt={updatedAt}
+            isFetching={isFetching && hasData}
+            isCached={Boolean(error && hasData)}
+            note="Company news + actions"
+            align="right"
+          />
+        </div>
+
+        {timedOut && isLoading && !hasData ? (
+          <WidgetError
+            title="Loading timed out"
+            error={new Error('News and corporate actions took too long to load.')}
+            onRetry={() => {
+              resetTimeout();
+              refetchNews();
+              refetchDividends();
+              refetchInsider();
+            }}
+          />
+        ) : isLoading && !hasData ? (
+          <div className="p-3">
+            <WidgetSkeleton lines={6} />
+          </div>
+        ) : error && !hasData ? (
+          <WidgetError error={error as Error} onRetry={() => refetchNews()} />
+        ) : !hasData ? (
+          <WidgetEmpty message="No news or corporate actions available" icon={<Newspaper size={18} />} />
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-[var(--border-color)] flex-1">
+            <section className="p-3 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Newspaper size={14} className="text-blue-400" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Company News</span>
+                </div>
+                <span className="text-[10px] text-[var(--text-muted)]">{recentNewsCount}/{news.length} in 7d</span>
+              </div>
+
+              {newsLoading && !hasNews ? (
+                <WidgetSkeleton lines={4} />
+              ) : newsError && !hasNews ? (
+                <WidgetError error={newsError as Error} onRetry={() => refetchNews()} />
+              ) : !hasNews ? (
+                <div className="text-xs text-[var(--text-muted)]">No news available yet.</div>
+              ) : (
+                <div className="space-y-2">
+                  {news.map((item, idx) => (
+                    <a
+                      key={`${item.title}-${idx}`}
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors"
+                    >
+                      <div className="text-xs font-semibold text-[var(--text-primary)] line-clamp-2">{item.title}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
+                        <span className={`rounded border px-1.5 py-0.5 font-semibold uppercase ${getSentimentClasses(item.sentiment)}`}>
+                          {item.sentiment || 'neutral'}
+                          {typeof item.sentiment_score === 'number' ? ` ${Math.round(item.sentiment_score)}` : ''}
+                        </span>
+                        {typeof item.relevance_score === 'number' && item.relevance_score > 0 ? (
+                          <span className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 font-semibold uppercase text-blue-300">
+                            {(item.relevance_score * 100).toFixed(0)}% match
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                        {item.source && <span>{item.source}</span>}
+                        {item.published_at && <span>• {formatTimestamp(item.published_at)}</span>}
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="p-3 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BadgeDollarSign size={14} className="text-emerald-400" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Corporate Actions</span>
+                </div>
+                <span className="text-[10px] text-[var(--text-muted)]">{dividends.length + insiderDeals.length} items</span>
+              </div>
+
+              {dividendsLoading && insiderLoading && !hasActions ? (
+                <WidgetSkeleton lines={4} />
+              ) : dividendsError && insiderError && !hasActions ? (
+                <WidgetError error={(dividendsError || insiderError) as Error} onRetry={() => refetchDividends()} />
+              ) : (
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Dividends</div>
+                    {dividends.length === 0 ? (
+                      <div className="text-xs text-[var(--text-muted)]">No dividends available yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {dividends.slice(0, 4).map((dividend, idx) => (
+                          <div
+                            key={`${dividend.ex_date}-${idx}`}
+                            className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
+                          >
+                            <div className="space-y-1">
+                              <div className="text-xs font-semibold text-[var(--text-primary)]">
+                                {formatDividendValue(dividend)}
+                              </div>
+                              <div className="text-[10px] text-[var(--text-muted)]">
+                                {formatDividendType(dividend.dividend_type || dividend.type)}
+                                {dividend.dividend_yield !== null && dividend.dividend_yield !== undefined
+                                  ? ` • ${formatPercent(dividend.dividend_yield)}`
+                                  : ''}
+                                {dividend.ex_date ? ` • Ex ${formatTimestamp(dividend.ex_date)}` : ''}
+                              </div>
+                            </div>
+                            {dividend.payment_date && (
+                              <div className="text-[10px] text-[var(--text-muted)]">Pay {formatTimestamp(dividend.payment_date)}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Insider Deals</div>
+                    {insiderDeals.length === 0 ? (
+                      <div className="text-xs text-[var(--text-muted)]">No insider deals available yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {insiderDeals.slice(0, 4).map((deal) => {
+                          const action = deal.deal_action?.toUpperCase() || 'DEAL';
+                          const isBuy = action.includes('BUY');
+                          return (
+                            <div
+                              key={deal.id}
+                              className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
+                            >
+                              <div>
+                                <div className="text-xs font-semibold text-[var(--text-primary)]">
+                                  {deal.insider_name || 'Insider'}
+                                </div>
+                                <div className="text-[10px] text-[var(--text-muted)]">
+                                  {deal.insider_position || '—'}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className={`text-[10px] font-bold ${isBuy ? 'text-green-400' : 'text-red-400'}`}>
+                                  {action}
+                                </div>
+                                <div className="text-[10px] text-[var(--text-muted)]">
+                                  {formatNumber(deal.deal_quantity)} @ {formatVND(deal.deal_price)}
+                                </div>
+                                <div className="text-[10px] text-[var(--text-muted)]">{formatTimestamp(deal.announce_date)}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </div>
+    </WidgetContainer>
+  );
+}
+
+export default NewsCorporateActionsWidget;
