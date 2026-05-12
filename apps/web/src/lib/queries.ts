@@ -109,6 +109,7 @@ export const queryKeys = {
     taIchimoku: (symbol: string, period: string) => ['taIchimoku', symbol, period] as const,
     taFibonacci: (symbol: string, lookbackDays: number, direction: string) =>
         ['taFibonacci', symbol, lookbackDays, direction] as const,
+    microstructure: (symbol: string, params?: Record<string, unknown>) => ['microstructure', symbol, params] as const,
     // RS Rating System (Phase 2)
     rsLeaders: (limit: number, sector?: string) => ['rsLeaders', limit, sector] as const,
     rsLaggards: (limit: number, sector?: string) => ['rsLaggards', limit, sector] as const,
@@ -855,6 +856,34 @@ export function usePriceDepth(symbol: string, enabled = true) {
         queryFn: () => api.getPriceDepth(symbol),
         enabled: enabled && !!symbol,
         staleTime: 5 * 1000, // 5 seconds - real-time order book
+    });
+}
+
+export function useMicrostructureAnalysis(
+    symbol: string,
+    options?: {
+        interval?: string;
+        lookbackDays?: number;
+        valueAreaPct?: number;
+        fractalWindow?: number;
+        imbalanceRatio?: number;
+        enabled?: boolean;
+    }
+) {
+    const params = {
+        interval: options?.interval ?? '5m',
+        lookbackDays: options?.lookbackDays ?? 7,
+        valueAreaPct: options?.valueAreaPct ?? 0.7,
+        fractalWindow: options?.fractalWindow ?? 2,
+        imbalanceRatio: options?.imbalanceRatio ?? 3,
+    };
+
+    return useQuery({
+        queryKey: queryKeys.microstructure(symbol, params),
+        queryFn: () => api.getMicrostructureAnalysis(symbol, params),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 30 * 1000,
+        retry: 1,
     });
 }
 

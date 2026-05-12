@@ -7,7 +7,8 @@ services:
     hostname: vnibb-api
     restart: unless-stopped
     env_file:
-      - ./deployment/env.oracle
+      - path: ./deployment/env.oracle
+        required: false
     environment:
       PORT: ${PORT:-8000}
       UVICORN_PROXY_HEADERS: ${UVICORN_PROXY_HEADERS:-1}
@@ -35,7 +36,8 @@ services:
     hostname: vnibb-mcp
     restart: unless-stopped
     env_file:
-      - ./deployment/env.oracle
+      - path: ./deployment/env.oracle
+        required: false
     environment:
       VNIBB_MCP_HOST: ${VNIBB_MCP_HOST:-0.0.0.0}
       VNIBB_MCP_PORT: ${VNIBB_MCP_PORT:-8001}
@@ -63,7 +65,8 @@ services:
       api:
         condition: service_healthy
     env_file:
-      - ./deployment/env.oracle
+      - path: ./deployment/env.oracle
+        required: false
     environment:
       SITE_HOSTNAME: ${SITE_HOSTNAME:-api.example.com}
       API_UPSTREAM: ${API_UPSTREAM:-api:8000}

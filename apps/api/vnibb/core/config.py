@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=("../../../.env", "../.env", ".env", "apps/api/.env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -119,6 +119,14 @@ class Settings(BaseSettings):
     data_backend: str = (
         "postgres"  # postgres primary, appwrite optional projection, hybrid legacy alias
     )
+
+    # ==========================================================================
+    # MongoDB Analytical Source
+    # ==========================================================================
+    mongodb_url: Optional[str] = None
+    mongodb_database: str = "frb"
+    mongodb_enabled: bool = True
+    mongodb_timeout_ms: int = 10000
 
     # ==========================================================================
     # Redis Cache

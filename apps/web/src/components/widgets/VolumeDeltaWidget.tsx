@@ -1,7 +1,7 @@
 'use client'
 
 import { ArrowDownToLine, ArrowUpToLine, Scale } from 'lucide-react'
-import { useHistoricalPrices } from '@/lib/queries'
+import { useHistoricalPrices, useMicrostructureAnalysis } from '@/lib/queries'
 import type { OHLCData } from '@/lib/chartUtils'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
@@ -157,17 +157,48 @@ export function VolumeDeltaWidget({ symbol }: VolumeDeltaWidgetProps) {
     }
   )
 
+  const {
+    data: microstructure,
+    isLoading: isMicroLoading,
+    error: microError,
+    refetch: refetchMicro,
+    isFetching: isMicroFetching,
+    dataUpdatedAt: microUpdatedAt,
+  } = useMicrostructureAnalysis(upperSymbol, {
+    interval: '5m',
+    lookbackDays: 7,
+    enabled: Boolean(upperSymbol),
+  })
+
   const candles = (data?.data || []) as OHLCData[]
-  const deltaSeries = calculateVolumeDelta(candles)
-  const hasData = deltaSeries.length > 30
-  const isFallback = Boolean(error && hasData)
-  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+  const microBars = microstructure?.data?.deep_trades?.bars || []
+  const hasMicroData = microBars.length > 0
+  const deltaSeries = hasMicroData
+    ? microBars.map((bar) => ({
+        time: bar.time,
+        close: 0,
+        delta: Number(bar.delta) || 0,
+        cumulativeDelta: Number(bar.cumulative_delta) || 0,
+        closePosition: 0.5,
+      }))
+    : calculateVolumeDelta(candles)
+  const hasData = hasMicroData ? deltaSeries.length > 0 : deltaSeries.length > 30
+  const isFallback = Boolean((error || microError || !hasMicroData) && hasData)
+  const primaryLoading = isMicroLoading || (!hasMicroData && isLoading)
+  const { timedOut, resetTimeout } = useLoadingTimeout(primaryLoading && !hasData, { timeoutMs: 8_000 })
 
   const lastPoint = deltaSeries[deltaSeries.length - 1]
   const rollingDelta = deltaSeries
     .slice(-LOOKBACK_DAYS)
     .reduce((sum, point) => sum + point.delta, 0)
-  const divergence = getDivergenceSignal(deltaSeries)
+  const divergence = hasMicroData
+    ? {
+        label: 'Mongo match-type flow',
+        className: lastPoint?.cumulativeDelta >= 0 ? 'text-emerald-300' : 'text-red-300',
+        priceChange: 0,
+        deltaChange: lastPoint?.cumulativeDelta ?? 0,
+      }
+    : getDivergenceSignal(deltaSeries)
   const monthlyAverages = calculateMonthlyAverageDelta(deltaSeries).slice(-6)
 
   const recentPoints = deltaSeries.slice(-12)
@@ -182,31 +213,32 @@ export function VolumeDeltaWidget({ symbol }: VolumeDeltaWidgetProps) {
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Scale size={12} className="text-cyan-400" />
-          <span>Volume Delta ({LOOKBACK_DAYS}D)</span>
+          <span>{hasMicroData ? 'Volume Delta (Mongo)' : `Volume Delta (${LOOKBACK_DAYS}D)`}</span>
         </div>
         <WidgetMeta
-          updatedAt={dataUpdatedAt}
-          isFetching={isFetching && hasData}
+          updatedAt={hasMicroData ? microUpdatedAt : dataUpdatedAt}
+          isFetching={(hasMicroData ? isMicroFetching : isFetching) && hasData}
           isCached={isFallback}
-          note="Order-flow proxy"
+          note={hasMicroData ? 'Mongo match-type proxy' : 'OHLC proxy'}
           align="right"
         />
       </div>
 
       <div className="flex-1 overflow-auto space-y-1 pr-1">
-        {timedOut && isLoading && !hasData ? (
+        {timedOut && primaryLoading && !hasData ? (
           <WidgetError
             title="Loading timed out"
             error={new Error('Volume delta data took too long to load.')}
             onRetry={() => {
               resetTimeout()
+              refetchMicro()
               refetch()
             }}
           />
-        ) : isLoading && !hasData ? (
+        ) : primaryLoading && !hasData ? (
           <WidgetSkeleton lines={8} />
-        ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => refetch()} />
+        ) : (microError || error) && !hasData ? (
+          <WidgetError error={(microError || error) as Error} onRetry={() => { refetchMicro(); refetch() }} />
         ) : !hasData ? (
           <WidgetEmpty message="Not enough historical candles" icon={<Scale size={18} />} size="compact" />
         ) : (
@@ -227,8 +259,10 @@ export function VolumeDeltaWidget({ symbol }: VolumeDeltaWidgetProps) {
                 </div>
               </div>
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-                <div className="text-[var(--text-muted)] uppercase tracking-widest">Close Pos</div>
-                <div className="font-mono text-cyan-300">{((lastPoint?.closePosition ?? 0) * 100).toFixed(0)}%</div>
+                <div className="text-[var(--text-muted)] uppercase tracking-widest">{hasMicroData ? 'CVD' : 'Close Pos'}</div>
+                <div className="font-mono text-cyan-300">
+                  {hasMicroData ? formatCompact(lastPoint?.cumulativeDelta ?? 0) : `${((lastPoint?.closePosition ?? 0) * 100).toFixed(0)}%`}
+                </div>
               </div>
             </div>
 
@@ -236,9 +270,8 @@ export function VolumeDeltaWidget({ symbol }: VolumeDeltaWidgetProps) {
               <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Flow Signal</div>
               <div className={`text-sm font-semibold ${divergence.className}`}>{divergence.label}</div>
               <div className="grid grid-cols-2 gap-2 mt-1 text-[10px]">
-                <div className={divergence.priceChange >= 0 ? 'text-emerald-300' : 'text-red-300'}>
-                  Price: {divergence.priceChange >= 0 ? '+' : ''}
-                  {divergence.priceChange.toFixed(2)}%
+                  <div className={hasMicroData ? 'text-cyan-300' : divergence.priceChange >= 0 ? 'text-emerald-300' : 'text-red-300'}>
+                  {hasMicroData ? 'Mode: tick proxy' : `Price: ${divergence.priceChange >= 0 ? '+' : ''}${divergence.priceChange.toFixed(2)}%`}
                 </div>
                 <div className={divergence.deltaChange >= 0 ? 'text-emerald-300' : 'text-red-300'}>
                   Delta: {divergence.deltaChange >= 0 ? '+' : ''}

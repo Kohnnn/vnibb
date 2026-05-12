@@ -1258,6 +1258,88 @@ export interface TradingStatsResponse {
     };
 }
 
+export interface MicrostructureResponse {
+    error: boolean;
+    data: {
+        symbol: string;
+        source: string;
+        data_quality: Record<string, string>;
+        unsupported_reasons: string[];
+        deep_trades: {
+            quality: string;
+            latest_cvd: number;
+            total_aggressive_buy_volume: number;
+            total_aggressive_sell_volume: number;
+            bars: Array<{
+                time: string;
+                aggressive_buy_volume: number;
+                aggressive_sell_volume: number;
+                unknown_volume: number;
+                delta: number;
+                cumulative_delta: number;
+                trade_count: number;
+            }>;
+        };
+        volume_profile: {
+            quality: string;
+            poc_price: number | null;
+            vah_price: number | null;
+            val_price: number | null;
+            total_volume: number;
+            bins: Array<{
+                price: number;
+                volume: number;
+                buy_volume?: number;
+                sell_volume?: number;
+            }>;
+        };
+        vwap: {
+            quality: string;
+            points: Array<{
+                time: string;
+                volume: number;
+                vwap: number | null;
+                upper1: number | null;
+                lower1: number | null;
+                upper2: number | null;
+                lower2: number | null;
+            }>;
+        };
+        price_action: {
+            quality: string;
+            trend: string;
+            candles: Array<Record<string, unknown>>;
+            swings: Array<Record<string, unknown>>;
+        };
+        footprint: {
+            quality: string;
+            bars: Array<Record<string, unknown>>;
+        };
+    };
+}
+
+export async function getMicrostructureAnalysis(
+    symbol: string,
+    options?: {
+        interval?: string;
+        lookbackDays?: number;
+        valueAreaPct?: number;
+        fractalWindow?: number;
+        imbalanceRatio?: number;
+    }
+): Promise<MicrostructureResponse> {
+    return fetchAPI<MicrostructureResponse>(`/microstructure/${symbol}`, {
+        params: {
+            interval: options?.interval,
+            lookback_days: options?.lookbackDays,
+            value_area_pct: options?.valueAreaPct,
+            fractal_window: options?.fractalWindow,
+            imbalance_ratio: options?.imbalanceRatio,
+        },
+        timeout: 45000,
+    });
+}
+
 export async function getPriceDepth(symbol: string): Promise<PriceDepthResponse> {
     return fetchAPI<PriceDepthResponse>(`/equity/${symbol}/orderbook`);
 }

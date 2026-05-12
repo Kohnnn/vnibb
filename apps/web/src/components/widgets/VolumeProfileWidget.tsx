@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { BarChart2 } from 'lucide-react';
-import { useHistoricalPrices } from '@/lib/queries';
+import { useHistoricalPrices, useMicrostructureAnalysis } from '@/lib/queries';
 import { calculateVolumeProfile, type OHLCData } from '@/lib/chartUtils';
 import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -89,6 +89,20 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
     enabled: Boolean(upperSymbol),
   });
 
+  const {
+    data: microstructure,
+    isLoading: isMicroLoading,
+    error: microError,
+    refetch: refetchMicro,
+    isFetching: isMicroFetching,
+    dataUpdatedAt: microUpdatedAt,
+  } = useMicrostructureAnalysis(upperSymbol, {
+    interval: '5m',
+    lookbackDays: 7,
+    valueAreaPct: 0.7,
+    enabled: Boolean(upperSymbol),
+  });
+
   const candles = ((data?.data || []) as OHLCData[])
     .map((row) => {
       const close = Number(row.close);
@@ -108,23 +122,31 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
     })
     .filter((row): row is OHLCData => row !== null);
 
-  const profile = calculateVolumeProfile(candles, 24) as VolumeBin[];
+  const microProfile = microstructure?.data?.volume_profile;
+  const hasMicroProfile = Boolean(microProfile?.bins?.length);
+  const profile = hasMicroProfile
+    ? ((microProfile?.bins || []).map((bin) => ({ price: Number(bin.price), volume: Number(bin.volume) })) as VolumeBin[])
+    : (calculateVolumeProfile(candles, 24) as VolumeBin[]);
   const hasData = profile.length > 0;
-  const isFallback = Boolean(error && hasData);
-  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+  const isFallback = Boolean((error || microError || !hasMicroProfile) && hasData);
+  const primaryLoading = isMicroLoading || (!hasMicroProfile && isLoading);
+  const { timedOut, resetTimeout } = useLoadingTimeout(primaryLoading && !hasData, { timeoutMs: 8_000 });
 
   const maxVolume = profile.reduce((max, bin) => Math.max(max, bin.volume), 0);
-  const { pocPrice, vahPrice, valPrice } = calculateValueArea(profile, 0.7);
+  const fallbackValueArea = calculateValueArea(profile, 0.7);
+  const pocPrice = hasMicroProfile ? microProfile?.poc_price ?? null : fallbackValueArea.pocPrice;
+  const vahPrice = hasMicroProfile ? microProfile?.vah_price ?? null : fallbackValueArea.vahPrice;
+  const valPrice = hasMicroProfile ? microProfile?.val_price ?? null : fallbackValueArea.valPrice;
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume profile" icon={<BarChart2 size={18} />} />;
   }
 
-  if (timedOut && isLoading && !hasData) {
-    return <WidgetError title="Loading timed out" error={new Error('Volume profile data took too long to load.')} onRetry={() => { resetTimeout(); refetch(); }} />;
+  if (timedOut && primaryLoading && !hasData) {
+    return <WidgetError title="Loading timed out" error={new Error('Volume profile data took too long to load.')} onRetry={() => { resetTimeout(); refetchMicro(); refetch(); }} />;
   }
 
-  if (isLoading && !hasData) {
+  if (primaryLoading && !hasData) {
     return (
       <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
@@ -138,8 +160,8 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
     );
   }
 
-  if (error && !hasData) {
-    return <WidgetError error={error as Error} onRetry={() => refetch()} />;
+  if ((microError || error) && !hasData) {
+    return <WidgetError error={(microError || error) as Error} onRetry={() => { refetchMicro(); refetch(); }} />;
   }
 
   if (!hasData) {
@@ -167,10 +189,10 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
             ))}
           </div>
           <WidgetMeta
-            updatedAt={dataUpdatedAt}
-            isFetching={isFetching && hasData}
+            updatedAt={hasMicroProfile ? microUpdatedAt : dataUpdatedAt}
+            isFetching={(hasMicroProfile ? isMicroFetching : isFetching) && hasData}
             isCached={isFallback}
-            note={`${period} • 24 bins`}
+            note={hasMicroProfile ? `Mongo • ${microProfile?.quality || 'profile'}` : `${period} • 24 bins`}
             align="right"
           />
         </div>

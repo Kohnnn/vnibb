@@ -114,6 +114,7 @@ import {
     tradingViewWidgetNames,
 } from '@/lib/tradingViewWidgets';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import type { DynamicOptionsLoadingProps } from 'next/dynamic';
 import { createElement, type ComponentType } from 'react';
 import dynamic from 'next/dynamic';
 
@@ -128,12 +129,12 @@ export interface WidgetProps {
     widgetGroup?: WidgetGroupId;
 }
 
-function DynamicWidgetLoading() {
-    return createElement(WidgetSkeleton, { lines: 6 });
+const DynamicWidgetLoading: (loadingProps: DynamicOptionsLoadingProps) => React.ReactNode = () => {
+    return createElement(WidgetSkeleton, { lines: 6 }) as unknown as React.ReactNode;
 }
 
-function DynamicChartWidgetLoading() {
-    return createElement(WidgetSkeleton, { variant: 'chart' });
+const DynamicChartWidgetLoading: (loadingProps: DynamicOptionsLoadingProps) => React.ReactNode = () => {
+    return createElement(WidgetSkeleton, { variant: 'chart' }) as unknown as React.ReactNode;
 }
 
 function createTradingViewDynamicWidget(exportName: string): ComponentType<WidgetProps> {

@@ -29,6 +29,7 @@ CACHE_TTLS: Dict[str, int] = {
     "market_indices": 60,
     "world_indices": 300,
     "market_heatmap": 120,
+    "microstructure": 60,
     "ratios": 86400,
     "ratios_history": 86400,
     "financials": 86400,
@@ -57,6 +58,7 @@ CACHE_PREFIX_SHORT = {
     "market_indices": "mi",
     "world_indices": "wi",
     "market_heatmap": "mh",
+    "microstructure": "ms",
 }
 
 # In-memory fallback cache: {key: (data, expiry)}
@@ -77,7 +79,7 @@ def _env_int(name: str, default: int, minimum: int) -> int:
 
 
 _MEMORY_CACHE_MAX_ENTRIES = _env_int("MEMORY_CACHE_MAX_ENTRIES", 500, 50)
-_MEMORY_CACHE_MAX_ENTRY_BYTES = _env_int("MEMORY_CACHE_MAX_ENTRY_BYTES", 262_144, 4_096)
+_MEMORY_CACHE_MAX_ENTRY_BYTES = _env_int("MEMORY_CACHE_MAX_ENTRY_BYTES", 1_048_576, 4_096)
 
 
 async def _prune_memory_cache_locked(now: datetime) -> None:
@@ -139,7 +141,7 @@ def cached(
                 return await func(*args, **kwargs)
 
             redis_enabled = _redis_cache_enabled()
-            redis_available = redis_enabled
+            redis_available = redis_enabled and redis_client._client is not None
 
             effective_ttl = (
                 ttl if ttl is not None else CACHE_TTLS.get(key_prefix, settings.redis_cache_ttl)
@@ -223,7 +225,7 @@ def cached(
                     await _prune_memory_cache_locked(datetime.now())
 
             try:
-                if redis_enabled:
+                if redis_available:
                     try:
                         cached_data = await redis_client.get_json(cache_key)
                         if cached_data is not None:

@@ -53,6 +53,7 @@ expect_ok "api_health" "/api/v1/health"
 expect_ok "profile" "/api/v1/equity/VNM/profile"
 expect_ok "quote" "/api/v1/equity/VNM/quote"
 expect_ok "screener" "/api/v1/screener/?limit=5"
+expect_ok "microstructure" "/api/v1/microstructure/VNM?lookback_days=7"
 
 echo "Checking CORS preflight"
 cors_headers="$("$CURL_BIN" -ksS -D - -o "$NULL_SINK" --max-time "$TIMEOUT" \

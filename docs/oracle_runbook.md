@@ -36,7 +36,7 @@ sudo apt-get install -y ca-certificates curl gnupg ufw git jq
 
 ```bash
 curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker "$USER"C.![alt text](image.png)
+sudo usermod -aG docker "$USER"
 newgrp docker
 docker version
 docker compose version
@@ -69,6 +69,9 @@ Edit `deployment/env.oracle` and set:
 - `DATA_BACKEND=hybrid`
 - `APPWRITE_WRITE_ENABLED=false` for the current month
 - `ALLOW_ANONYMOUS_DASHBOARD_WRITES=true`
+- `MONGODB_URL` for shared market/raw analytical records used by microstructure widgets
+- `MONGODB_DATABASE=frb`
+- `MONGODB_ENABLED=true`
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`
 - `SUPABASE_JWT_SECRET`
@@ -82,6 +85,7 @@ Edit `deployment/env.oracle` and set:
 - `MCP_PUBLIC_BIND=127.0.0.1`
 - `MCP_PUBLIC_PORT=8001`
 - `REDIS_URL` if Redis remains enabled
+- `MEMORY_CACHE_MAX_ENTRY_BYTES=1048576` or larger if Redis is disabled and microstructure payloads must fit memory fallback
 - `SENTRY_DSN`
 - `ADMIN_API_KEY`
 - `LOG_FORMAT=json`
@@ -115,23 +119,23 @@ After deploy, admins can save the platform admin key in the web UI and manage lo
 
 ```bash
 git pull --ff-only
-docker compose -f docker-compose.oracle.yml up -d --build
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build
 ```
 
 If health checks still show old runtime behavior after env changes, rebuild without cache and force recreation:
 
 ```bash
 git pull --ff-only
-docker compose -f docker-compose.oracle.yml build --no-cache api mcp
-docker compose -f docker-compose.oracle.yml up -d --force-recreate api mcp caddy
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml build --no-cache api mcp
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --force-recreate api mcp caddy
 ```
 
 ### Verify container health
 
 ```bash
-docker compose -f docker-compose.oracle.yml ps
-docker compose -f docker-compose.oracle.yml logs api --tail=200
-docker compose -f docker-compose.oracle.yml logs caddy --tail=200
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml ps
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs api --tail=200
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs caddy --tail=200
 ```
 
 ### Verify TLS
@@ -165,8 +169,8 @@ Notes:
 ### Log review
 
 ```bash
-docker compose -f docker-compose.oracle.yml logs api --tail=200
-docker compose -f docker-compose.oracle.yml logs caddy --tail=200
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs api --tail=200
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs caddy --tail=200
 ```
 
 ### What to confirm
@@ -212,17 +216,17 @@ docker compose -f docker-compose.oracle.yml logs caddy --tail=200
 ### First checks
 
 ```bash
-docker compose -f docker-compose.oracle.yml ps
-docker compose -f docker-compose.oracle.yml logs api --tail=200
-docker compose -f docker-compose.oracle.yml logs caddy --tail=200
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml ps
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs api --tail=200
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs caddy --tail=200
 BASE_URL=https://api.example.com bash scripts/oracle/healthcheck.sh
 ```
 
 ### Safe restarts
 
 ```bash
-docker compose -f docker-compose.oracle.yml restart api
-docker compose -f docker-compose.oracle.yml restart caddy
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml restart api
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml restart caddy
 ```
 
 ### When to rollback

@@ -224,3 +224,12 @@ api_router.include_router(
     prefix="/quant",
     tags=["Quant"],
 )
+
+# Mongo-backed market microstructure analytics
+from vnibb.api.v1.microstructure import router as microstructure_router
+
+api_router.include_router(
+    microstructure_router,
+    prefix="/microstructure",
+    tags=["Market Microstructure"],
+)

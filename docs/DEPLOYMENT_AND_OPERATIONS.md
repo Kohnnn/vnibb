@@ -512,9 +512,9 @@ That makes it a reasonable production default when the goal is graceful degradat
 ### Memory cache fallback settings
 
 - `MEMORY_CACHE_MAX_ENTRIES=200`
-- `MEMORY_CACHE_MAX_ENTRY_BYTES=131072`
+- `MEMORY_CACHE_MAX_ENTRY_BYTES=1048576`
 
-These only matter when the in-process fallback cache is used. They are defensive limits and are fine to keep in production.
+These only matter when the in-process fallback cache is used. The 1MB entry cap allows Mongo-backed microstructure payloads to cache when Redis is unavailable while still bounding memory use.
 
 ### Startup tuning settings
 
