@@ -109,6 +109,8 @@ export type WidgetType =
     | 'atr_regime'
     | 'gap_fill_stats'
     | 'volume_delta'
+    | 'vwap_bands'
+    | 'footprint_proxy'
     | 'amihud_illiquidity'
     | 'drawdown_deep_dive'
     | 'hurst_market_structure'

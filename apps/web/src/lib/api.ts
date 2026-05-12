@@ -1321,6 +1321,7 @@ export interface MicrostructureResponse {
 export async function getMicrostructureAnalysis(
     symbol: string,
     options?: {
+        features?: string[];
         interval?: string;
         lookbackDays?: number;
         valueAreaPct?: number;
@@ -1330,6 +1331,7 @@ export async function getMicrostructureAnalysis(
 ): Promise<MicrostructureResponse> {
     return fetchAPI<MicrostructureResponse>(`/microstructure/${symbol}`, {
         params: {
+            features: options?.features?.join(','),
             interval: options?.interval,
             lookback_days: options?.lookbackDays,
             value_area_pct: options?.valueAreaPct,

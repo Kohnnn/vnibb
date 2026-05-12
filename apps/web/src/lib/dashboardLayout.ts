@@ -135,6 +135,8 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   ema_respect: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   obv_divergence: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   volume_delta: { preferredW: 8, preferredH: 8, minW: 6, minH: 7, orientation: 'vertical', expandPriority: 2 },
+  vwap_bands: { preferredW: 8, preferredH: 8, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  footprint_proxy: { preferredW: 8, preferredH: 9, minW: 6, minH: 7, orientation: 'vertical', expandPriority: 2 },
   gap_fill_stats: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   hurst_market_structure: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
   parkinson_volatility: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },

@@ -89,6 +89,7 @@ class MicrostructureAnalysisService:
         self,
         symbol: str,
         *,
+        features: set[str] | None = None,
         interval: str = "5m",
         lookback_days: int = 7,
         value_area_pct: float = 0.7,
@@ -96,14 +97,15 @@ class MicrostructureAnalysisService:
         imbalance_ratio: float = 3.0,
     ) -> dict[str, Any]:
         symbol_upper = symbol.upper()
-        raw_trades, raw_depth, eod_prices = await self._load_inputs(symbol_upper, lookback_days)
+        requested = self._normalize_features(features)
+        raw_trades, raw_depth, eod_prices = await self._load_inputs(symbol_upper, lookback_days, requested)
         trades = [trade for row in raw_trades if (trade := _normalize_trade(row))]
 
-        deep_trades = self._calculate_deep_trades(trades, interval)
-        volume_profile = self._calculate_volume_profile(raw_depth, trades, value_area_pct)
-        vwap = self._calculate_vwap(trades, interval)
-        price_action = self._calculate_price_action(eod_prices, fractal_window)
-        footprint = self._calculate_footprint(trades, interval, imbalance_ratio)
+        deep_trades = self._calculate_deep_trades(trades, interval) if "deep_trades" in requested else self._empty_deep_trades()
+        volume_profile = self._calculate_volume_profile(raw_depth, trades, value_area_pct) if "volume_profile" in requested else self._empty_volume_profile()
+        vwap = self._calculate_vwap(trades, interval) if "vwap" in requested else self._empty_vwap()
+        price_action = self._calculate_price_action(eod_prices, fractal_window) if "price_action" in requested else self._empty_price_action()
+        footprint = self._calculate_footprint(trades, interval, imbalance_ratio) if "footprint" in requested else self._empty_footprint()
 
         unsupported = []
         if not trades:
@@ -131,17 +133,56 @@ class MicrostructureAnalysisService:
             "footprint": footprint,
         }
 
+    def _normalize_features(self, features: set[str] | None) -> set[str]:
+        aliases = {
+            "cvd": "deep_trades",
+            "delta": "deep_trades",
+            "profile": "volume_profile",
+            "volume": "volume_profile",
+            "pa": "price_action",
+            "price": "price_action",
+        }
+        all_features = {"deep_trades", "volume_profile", "vwap", "price_action", "footprint"}
+        if not features:
+            return all_features
+        normalized = {aliases.get(feature, feature) for feature in features}
+        selected = normalized & all_features
+        return selected or all_features
+
     async def _load_inputs(
         self,
         symbol: str,
         lookback_days: int,
+        features: set[str],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        needs_trades = bool(features & {"deep_trades", "volume_profile", "vwap", "footprint"})
+        needs_depth = "volume_profile" in features
+        needs_eod = "price_action" in features
+
         raw_trades, raw_depth, eod_prices = await asyncio.gather(
-            self.mongo.get_intraday_trades(symbol, lookback_days=lookback_days),
-            self.mongo.get_price_depth(symbol),
-            self.mongo.get_eod_prices(symbol, lookback_days=max(lookback_days, 365)),
+            self.mongo.get_intraday_trades(symbol, lookback_days=lookback_days) if needs_trades else self._empty_async_list(),
+            self.mongo.get_price_depth(symbol) if needs_depth else self._empty_async_list(),
+            self.mongo.get_eod_prices(symbol, lookback_days=max(lookback_days, 365)) if needs_eod else self._empty_async_list(),
         )
         return raw_trades, raw_depth, eod_prices
+
+    async def _empty_async_list(self) -> list[dict[str, Any]]:
+        return []
+
+    def _empty_deep_trades(self) -> dict[str, Any]:
+        return {"quality": "not_requested", "bars": [], "latest_cvd": 0, "total_aggressive_buy_volume": 0, "total_aggressive_sell_volume": 0}
+
+    def _empty_volume_profile(self) -> dict[str, Any]:
+        return {"quality": "not_requested", "bins": [], "poc_price": None, "vah_price": None, "val_price": None, "total_volume": 0}
+
+    def _empty_vwap(self) -> dict[str, Any]:
+        return {"quality": "not_requested", "points": []}
+
+    def _empty_price_action(self) -> dict[str, Any]:
+        return {"quality": "not_requested", "trend": "neutral", "candles": [], "swings": []}
+
+    def _empty_footprint(self) -> dict[str, Any]:
+        return {"quality": "not_requested", "bars": []}
 
     def _calculate_deep_trades(self, trades: list[dict[str, Any]], interval: str) -> dict[str, Any]:
         bars: dict[str, dict[str, Any]] = {}

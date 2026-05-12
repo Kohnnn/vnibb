@@ -49,6 +49,8 @@ import { OBVDivergenceWidget } from './OBVDivergenceWidget';
 import { ATRRegimeWidget } from './ATRRegimeWidget';
 import { GapFillStatsWidget } from './GapFillStatsWidget';
 import { VolumeDeltaWidget } from './VolumeDeltaWidget';
+import { VWAPBandsWidget } from './VWAPBandsWidget';
+import { FootprintProxyWidget } from './FootprintProxyWidget';
 import { AmihudIlliquidityWidget } from './AmihudIlliquidityWidget';
 import { DrawdownDeepDiveWidget } from './DrawdownDeepDiveWidget';
 import { HurstMarketStructureWidget } from './HurstMarketStructureWidget';
@@ -390,6 +392,8 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     atr_regime: ATRRegimeWidget as ComponentType<WidgetProps>,
     gap_fill_stats: GapFillStatsWidget as ComponentType<WidgetProps>,
     volume_delta: VolumeDeltaWidget as ComponentType<WidgetProps>,
+    vwap_bands: VWAPBandsWidget as ComponentType<WidgetProps>,
+    footprint_proxy: FootprintProxyWidget as ComponentType<WidgetProps>,
     amihud_illiquidity: AmihudIlliquidityWidget as ComponentType<WidgetProps>,
     drawdown_deep_dive: DrawdownDeepDiveWidget as ComponentType<WidgetProps>,
     hurst_market_structure: HurstMarketStructureWidget as ComponentType<WidgetProps>,
@@ -503,6 +507,8 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     atr_regime: { w: 6, h: 7, minW: 4, minH: 5 },
     gap_fill_stats: { w: 8, h: 9, minW: 6, minH: 7 },
     volume_delta: { w: 6, h: 7, minW: 4, minH: 5 },
+    vwap_bands: { w: 8, h: 8, minW: 6, minH: 6 },
+    footprint_proxy: { w: 8, h: 9, minW: 6, minH: 7 },
     amihud_illiquidity: { w: 6, h: 7, minW: 4, minH: 5 },
     drawdown_deep_dive: { w: 8, h: 7, minW: 6, minH: 5 },
     hurst_market_structure: { w: 6, h: 7, minW: 4, minH: 5 },
@@ -664,6 +670,8 @@ export const widgetNames: Record<WidgetType, string> = {
     atr_regime: 'ATR Regime',
     gap_fill_stats: 'Gap Fill Stats',
     volume_delta: 'Volume Delta',
+    vwap_bands: 'VWAP Bands',
+    footprint_proxy: 'Footprint Proxy',
     amihud_illiquidity: 'Amihud Illiquidity',
     drawdown_deep_dive: 'Drawdown Deep Dive',
     hurst_market_structure: 'Hurst Market Structure',
@@ -785,6 +793,8 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     atr_regime: 'ATR volatility regime and model sizing',
     gap_fill_stats: 'Gap fill probability and fill timing',
     volume_delta: 'Buy/sell pressure proxy with cumulative delta divergence',
+    vwap_bands: 'Intraday VWAP with trade-tick standard-deviation bands',
+    footprint_proxy: 'Match-type proxy footprint by bar and price level',
     amihud_illiquidity: 'Price impact per traded value with rolling liquidity trend',
     drawdown_deep_dive: 'Underwater drawdown curve with depth and recovery statistics',
     hurst_market_structure: 'Hurst exponent with persistence and mean-reversion structure clues',

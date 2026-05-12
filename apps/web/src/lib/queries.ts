@@ -862,6 +862,7 @@ export function usePriceDepth(symbol: string, enabled = true) {
 export function useMicrostructureAnalysis(
     symbol: string,
     options?: {
+        features?: string[];
         interval?: string;
         lookbackDays?: number;
         valueAreaPct?: number;
@@ -871,6 +872,7 @@ export function useMicrostructureAnalysis(
     }
 ) {
     const params = {
+        features: options?.features,
         interval: options?.interval ?? '5m',
         lookbackDays: options?.lookbackDays ?? 7,
         valueAreaPct: options?.valueAreaPct ?? 0.7,

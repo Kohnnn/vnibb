@@ -592,6 +592,24 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
     },
     {
+        type: 'vwap_bands',
+        name: 'VWAP Bands',
+        description: 'Intraday VWAP with standard-deviation bands from Mongo trade ticks',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 8, minW: 6, minH: 6 },
+        searchKeywords: ['vwap', 'bands', 'microstructure', 'execution', 'intraday']
+    },
+    {
+        type: 'footprint_proxy',
+        name: 'Footprint Proxy',
+        description: 'Match-type proxy footprint by bar and price level from Mongo intraday trades',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 8, h: 9, minW: 6, minH: 7 },
+        searchKeywords: ['footprint', 'order flow', 'microstructure', 'delta', 'intraday']
+    },
+    {
         type: 'amihud_illiquidity',
         name: 'Amihud Illiquidity',
         description: 'Rolling 20-day illiquidity ratio to track market depth changes',
