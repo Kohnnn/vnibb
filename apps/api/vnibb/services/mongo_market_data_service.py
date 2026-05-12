@@ -52,13 +52,50 @@ class MongoMarketDataService:
         lookback_days: int = 7,
         limit: int = 5000,
     ) -> list[dict[str, Any]]:
-        """Return normalized tick-like trade rows from raw premium records."""
+        """Return tick-like trade rows, preferring the typed derived read model."""
 
         symbol_upper = symbol.upper()
         lookback_start = datetime.now(timezone.utc) - timedelta(days=max(1, lookback_days))
         limit = max(1, min(limit, 20000))
 
-        def _read() -> list[dict[str, Any]]:
+        def _read_derived() -> list[dict[str, Any]]:
+            coll = self._get_collection("market_intraday_trades")
+            cursor = (
+                coll.find(
+                    {
+                        "symbol": symbol_upper,
+                        "tradeTime": {"$gte": lookback_start.replace(tzinfo=None)},
+                    },
+                    {
+                        "_id": 0,
+                        "tradeTime": 1,
+                        "price": 1,
+                        "volume": 1,
+                        "matchType": 1,
+                        "tradeId": 1,
+                        "symbol": 1,
+                    },
+                )
+                .sort("tradeTime", 1)
+                .limit(limit)
+            )
+            return [
+                {
+                    "observedAt": row.get("tradeTime"),
+                    "raw": {
+                        "time": row.get("tradeTime"),
+                        "price": row.get("price"),
+                        "volume": row.get("volume"),
+                        "match_type": row.get("matchType"),
+                        "id": row.get("tradeId"),
+                        "symbol": row.get("symbol"),
+                    },
+                    "sourceCollection": "market_intraday_trades",
+                }
+                for row in cursor
+            ]
+
+        def _read_raw() -> list[dict[str, Any]]:
             coll = self._get_collection("market_vnstock_premium_records")
             cursor = (
                 coll.find(
@@ -84,10 +121,17 @@ class MongoMarketDataService:
             return list(cursor)
 
         try:
-            return await asyncio.to_thread(_read)
+            rows = await asyncio.to_thread(_read_derived)
+            if rows:
+                return rows
+            return await asyncio.to_thread(_read_raw)
         except Exception as exc:
-            logger.warning("Mongo intraday read failed for %s: %s", symbol_upper, exc)
-            return []
+            logger.warning("Mongo derived intraday read failed for %s: %s", symbol_upper, exc)
+            try:
+                return await asyncio.to_thread(_read_raw)
+            except Exception as raw_exc:
+                logger.warning("Mongo raw intraday read failed for %s: %s", symbol_upper, raw_exc)
+                return []
 
     async def get_price_depth(self, symbol: str, *, limit: int = 500) -> list[dict[str, Any]]:
         """Return normalized volume-at-price rows from raw price-depth records."""
