@@ -1,8 +1,9 @@
 {
-  "buildCommand": "npm run build",
+  "installCommand": "cd ../.. && corepack enable && pnpm install --frozen-lockfile",
+  "buildCommand": "cd ../.. && corepack enable && pnpm --filter frontend build",
   "outputDirectory": ".next",
   "framework": "nextjs",
   "git": {
-    "ignoreCommand": "npx turbo-ignore"
+    "ignoreCommand": "cd ../.. && corepack enable && pnpm dlx turbo-ignore"
   }
 }
