@@ -116,6 +116,8 @@ export const queryKeys = {
     rsGainers: (limit: number, lookbackDays: number) => ['rsGainers', limit, lookbackDays] as const,
     quant: (symbol: string, period: string, metrics: string[], source: string) =>
         ['quant', symbol, period, metrics.join(','), source] as const,
+    seasonalityMatrix: (symbol: string, granularity: string, period: string, source: string, adjustmentMode: string) =>
+        ['seasonalityMatrix', symbol, granularity, period, source, adjustmentMode] as const,
     gammaExposure: (symbol: string, period: string, source: string, adjustmentMode: string) =>
         ['gammaExposure', symbol, period, source, adjustmentMode] as const,
     momentumProfile: (symbol: string, period: string, source: string, adjustmentMode: string) =>
@@ -1287,6 +1289,31 @@ export function useQuantMetrics(
         queryFn: () => api.getQuantMetrics(symbol, { period, metrics, source, adjustmentMode }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
+        retry: 2,
+    });
+}
+
+export function useSeasonalityMatrix(
+    symbol: string,
+    options?: {
+        granularity?: api.SeasonalityGranularity;
+        period?: api.QuantPeriod;
+        source?: 'KBS' | 'VCI' | 'DNSE';
+        adjustmentMode?: 'raw' | 'adjusted';
+        enabled?: boolean;
+    }
+) {
+    const preferredSource = useVnstockSource();
+    const granularity = options?.granularity || 'monthly';
+    const period = options?.period || '5Y';
+    const source = options?.source || preferredSource;
+    const adjustmentMode = options?.adjustmentMode || 'adjusted';
+
+    return useQuery({
+        queryKey: queryKeys.seasonalityMatrix(symbol, granularity, period, source, adjustmentMode),
+        queryFn: () => api.getSeasonalityMatrix(symbol, { granularity, period, source, adjustmentMode }),
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: granularity === 'hourly' ? 60 * 1000 : 5 * 60 * 1000,
         retry: 2,
     });
 }

@@ -1936,6 +1936,7 @@ export async function getPeerCompanies(symbol: string, limit = 5): Promise<Peers
 // ============ Quant API ============
 
 export type QuantPeriod = '1M' | '6M' | '1Y' | '3Y' | '5Y' | 'ALL'
+export type SeasonalityGranularity = 'monthly' | 'weekly' | 'daily' | 'hourly'
 
 export type QuantMetric =
     | 'seasonality'
@@ -1968,6 +1969,38 @@ export interface QuantResponse {
     error?: string | null
 }
 
+export interface SeasonalityMatrixRow {
+    row_key: string
+    column: string
+    label: string
+    start_date?: string
+    return_pct: number | null
+}
+
+export interface SeasonalityMatrixResponse {
+    data: {
+        symbol: string
+        period: QuantPeriod
+        granularity: SeasonalityGranularity
+        adjustment_mode?: 'raw' | 'adjusted'
+        computed_at: string
+        last_data_date?: string | null
+        source: string
+        columns: string[]
+        rows: SeasonalityMatrixRow[]
+        averages: Record<string, number | null>
+        best_period?: string | null
+        worst_period?: string | null
+        hit_rate_pct?: number | null
+        current_period?: SeasonalityMatrixRow | null
+        warning?: string | null
+    }
+    meta?: {
+        count?: number
+    }
+    error?: string | null
+}
+
 export async function getQuantMetrics(
     symbol: string,
     options?: {
@@ -1985,6 +2018,26 @@ export async function getQuantMetrics(
             adjustment_mode: options?.adjustmentMode,
         },
         timeout: 30000,
+    })
+}
+
+export async function getSeasonalityMatrix(
+    symbol: string,
+    options?: {
+        granularity?: SeasonalityGranularity
+        period?: QuantPeriod
+        source?: 'KBS' | 'VCI' | 'DNSE'
+        adjustmentMode?: 'raw' | 'adjusted'
+    }
+): Promise<SeasonalityMatrixResponse> {
+    return fetchAPI<SeasonalityMatrixResponse>(`/quant/${symbol}/seasonality-matrix`, {
+        params: {
+            granularity: options?.granularity ?? 'monthly',
+            period: options?.period ?? '5Y',
+            source: options?.source,
+            adjustment_mode: options?.adjustmentMode,
+        },
+        timeout: 45000,
     })
 }
 

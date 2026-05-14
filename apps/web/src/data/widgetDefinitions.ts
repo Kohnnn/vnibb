@@ -636,7 +636,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'seasonality_heatmap',
         name: 'Seasonality Heatmap',
-        description: 'Year x month return matrix for recurring seasonal patterns',
+        description: 'Month, week, weekday, and intraday-hour return matrix for recurring seasonal patterns',
         category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }

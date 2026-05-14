@@ -55,7 +55,7 @@ Regime, rotation, and seasonality:
 - `hurst_market_structure`
 - `relative_rotation`
 - `correlation_matrix`
-- `seasonality_heatmap`
+- `seasonality_heatmap` keeps one widget ID and now supports monthly, weekly, daily/weekday, and hourly modes. Monthly, weekly, and daily use adjusted historical prices; hourly uses Mongo intraday trades.
 - `rsi_seasonal`
 - `market_breadth`
 - `sector_rotation_radar`

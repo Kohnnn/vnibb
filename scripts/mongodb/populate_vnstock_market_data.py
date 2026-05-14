@@ -177,14 +177,22 @@ def dataframe_to_records(df: Any, limit: int | None = None) -> list[dict[str, An
     return records
 
 
-def fetch_dataset(symbol: str, dataset: str, source: str, limit: int, history_start: str, history_end: str) -> list[dict[str, Any]]:
+def fetch_dataset(
+    symbol: str,
+    dataset: str,
+    source: str,
+    limit: int,
+    history_start: str,
+    history_end: str,
+    intraday_page_size: int,
+) -> list[dict[str, Any]]:
     from vnstock import Vnstock
 
     stock = Vnstock().stock(symbol=symbol.upper(), source=source.upper())
     if dataset == "quote.history":
         return dataframe_to_records(stock.quote.history(start=history_start, end=history_end, interval="1D"), limit)
     if dataset == "quote.intraday":
-        return dataframe_to_records(stock.quote.intraday(page_size=max(limit, 1000)), limit)
+        return dataframe_to_records(stock.quote.intraday(page_size=max(intraday_page_size, limit, 1000)), limit)
     if dataset == "quote.price_depth":
         return dataframe_to_records(stock.quote.price_depth(), limit)
     if dataset == "trading.price_board":
@@ -293,6 +301,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--database", default=os.getenv("MONGODB_DATABASE", "frb"))
     parser.add_argument("--collection", default="market_vnstock_premium_records")
     parser.add_argument("--limit", type=int, default=1000)
+    parser.add_argument("--intraday-page-size", type=int, default=10000)
     parser.add_argument("--history-start", default="2020-01-01")
     parser.add_argument("--history-end", default=datetime.now().strftime("%Y-%m-%d"))
     parser.add_argument("--calls-per-minute", type=int, default=int(os.getenv("VNSTOCK_CALLS_PER_MINUTE", "120") or 120))
@@ -389,7 +398,15 @@ def main() -> int:
         for dataset in per_symbol_datasets:
             started = time.monotonic()
             try:
-                rows = fetch_dataset(symbol, dataset, args.source, args.limit, args.history_start, args.history_end)
+                rows = fetch_dataset(
+                    symbol,
+                    dataset,
+                    args.source,
+                    args.limit,
+                    args.history_start,
+                    args.history_end,
+                    args.intraday_page_size,
+                )
             except Exception as exc:
                 print(json.dumps({"symbol": symbol, "dataset": dataset, "error": str(exc)}, default=str))
                 continue

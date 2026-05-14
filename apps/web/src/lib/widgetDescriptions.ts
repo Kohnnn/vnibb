@@ -115,15 +115,16 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     interpretation: 'Concentrated ownership can support strong trends but can also reduce float and increase gap risk if sentiment changes.',
   },
   seasonality_heatmap: {
-    purpose: 'Shows how the stock has historically performed by month so you can spot recurring seasonal strength and weakness.',
-    calculation: 'Groups daily price history by month and year, then calculates each month\'s return and the long-run monthly averages.',
-    interpretation: 'Greener months have historically been stronger. Redder months have historically been weaker. Use it as context, not a standalone trigger.',
+    purpose: 'Shows recurring return patterns across month, week, weekday, and intraday-hour views in one heatmap.',
+    calculation: 'Groups adjusted daily price history into monthly, weekly, or weekday return buckets; hourly mode uses Mongo intraday trades.',
+    interpretation: 'Greener cells have historically been stronger. Redder cells have historically been weaker. Toggle modes to see whether a pattern persists across time scales.',
     advanced_insights: [
       'In Vietnam, some stronger seasonal windows can cluster around AGM season, dividend announcements, and post-Tet liquidity normalization.',
-      'The current month is often the most valuable row because it shows how the live month is tracking versus its long-run tendency.',
+      'Monthly patterns are the most stable. Weekly, weekday, and hourly views are better for timing context and should be treated as lower-confidence pattern evidence.',
     ],
     limitations: [
       'Seasonality is descriptive, not predictive. One regime change can overwhelm a long-run monthly average.',
+      'Hourly mode depends on available Mongo intraday trade coverage and is not a true order-book seasonality model.',
       'Small-cap names with short histories can show noisy month effects that do not persist.',
     ],
     pro_tips: [

@@ -34,6 +34,7 @@ from vnibb.providers.vnstock.equity_historical import (
     VnstockEquityHistoricalFetcher,
 )
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
+from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -55,6 +56,7 @@ SUPPORTED_METRICS = (
 )
 DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
 ALLOWED_QUANT_PERIODS = ("1M", "6M", "1Y", "3Y", "5Y", "ALL")
+ALLOWED_SEASONALITY_GRANULARITIES = ("monthly", "weekly", "daily", "hourly")
 QUANT_STALE_DAYS_THRESHOLD = 7
 ALL_HISTORY_START_DATE = date(1970, 1, 1)
 METRIC_ALIASES = {
@@ -121,6 +123,24 @@ class QuantResponseData(BaseModel):
     warning: str | None = None
 
 
+class SeasonalityMatrixResponseData(BaseModel):
+    symbol: str
+    period: str
+    granularity: str
+    adjustment_mode: str = "raw"
+    computed_at: datetime
+    last_data_date: datetime | None = None
+    source: str
+    columns: List[str]
+    rows: List[Dict[str, Any]]
+    averages: Dict[str, float | None]
+    best_period: str | None = None
+    worst_period: str | None = None
+    hit_rate_pct: float | None = None
+    current_period: Dict[str, Any] | None = None
+    warning: str | None = None
+
+
 def _safe_float(value: Any, decimals: int = 4) -> float | None:
     if value is None:
         return None
@@ -169,6 +189,36 @@ def _normalize_quant_period(period: str) -> str:
 def _normalize_metric_name(value: str) -> str:
     normalized = value.strip().lower()
     return METRIC_ALIASES.get(normalized, normalized.replace("-", "_"))
+
+
+def _normalize_seasonality_granularity(value: str | None) -> str:
+    normalized = str(value or "monthly").strip().lower().replace("-", "_")
+    aliases = {
+        "month": "monthly",
+        "months": "monthly",
+        "week": "weekly",
+        "weeks": "weekly",
+        "weekday": "daily",
+        "day": "daily",
+        "days": "daily",
+        "hour": "hourly",
+        "hours": "hourly",
+        "intraday": "hourly",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized in ALLOWED_SEASONALITY_GRANULARITIES:
+        return normalized
+
+    allowed = ", ".join(ALLOWED_SEASONALITY_GRANULARITIES)
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "code": "INVALID_SEASONALITY_GRANULARITY",
+            "message": f"Seasonality granularity must be one of {allowed}.",
+            "allowed_granularities": list(ALLOWED_SEASONALITY_GRANULARITIES),
+            "requested_granularity": normalized or None,
+        },
+    )
 
 
 def _get_quant_calculators() -> Dict[str, Callable[[pd.DataFrame], Dict[str, Any]]]:
@@ -675,6 +725,164 @@ def _compute_seasonality(frame: pd.DataFrame) -> Dict[str, Any]:
         "hit_rate_pct": _safe_float(hit_rate, 2),
         "current_month": monthly_returns[-1] if monthly_returns else None,
     }
+
+
+def _build_seasonality_matrix_from_period_returns(
+    period_returns: list[dict[str, Any]],
+    columns: list[str],
+) -> dict[str, Any]:
+    returns_df = pd.DataFrame(period_returns)
+    if returns_df.empty:
+        return {
+            "columns": columns,
+            "rows": [],
+            "averages": {column: None for column in columns},
+            "best_period": None,
+            "worst_period": None,
+            "hit_rate_pct": None,
+            "current_period": None,
+        }
+
+    averages: dict[str, float | None] = {}
+    for column in columns:
+        values = returns_df.loc[returns_df["column"] == column, "return_pct"].dropna()
+        averages[column] = _safe_float(values.mean(), 2) if not values.empty else None
+
+    non_null_averages = {key: value for key, value in averages.items() if value is not None}
+    positive_values = returns_df["return_pct"].dropna()
+
+    return {
+        "columns": columns,
+        "rows": period_returns,
+        "averages": averages,
+        "best_period": max(non_null_averages, key=non_null_averages.get) if non_null_averages else None,
+        "worst_period": min(non_null_averages, key=non_null_averages.get) if non_null_averages else None,
+        "hit_rate_pct": _safe_float((positive_values.gt(0).sum() / len(positive_values)) * 100, 2)
+        if len(positive_values)
+        else None,
+        "current_period": period_returns[-1] if period_returns else None,
+    }
+
+
+def _compute_calendar_seasonality_matrix(frame: pd.DataFrame, granularity: str) -> dict[str, Any]:
+    enriched = frame.copy()
+    enriched["time"] = pd.to_datetime(enriched["time"], errors="coerce")
+    enriched["close"] = pd.to_numeric(enriched["close"], errors="coerce")
+    enriched = enriched.dropna(subset=["time", "close"]).sort_values("time")
+    if enriched.empty:
+        columns = list(MONTH_LABELS.values()) if granularity == "monthly" else []
+        if granularity == "weekly":
+            columns = [f"W{week:02d}" for week in range(1, 54)]
+        if granularity == "daily":
+            columns = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+        return _build_seasonality_matrix_from_period_returns([], columns)
+
+    if granularity == "monthly":
+        columns = [MONTH_LABELS[month] for month in range(1, 13)]
+        grouper = enriched["time"].dt.to_period("M")
+    elif granularity == "weekly":
+        columns = [f"W{week:02d}" for week in range(1, 54)]
+        grouper = enriched["time"].dt.to_period("W-FRI")
+    else:
+        columns = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+        grouper = enriched["time"].dt.to_period("D")
+
+    period_returns: list[dict[str, Any]] = []
+    for period_key, period_frame in enriched.groupby(grouper):
+        closes = period_frame["close"].astype(float)
+        if closes.empty:
+            continue
+        first_close = closes.iloc[0]
+        last_close = closes.iloc[-1]
+        if not first_close or np.isnan(first_close):
+            continue
+
+        period_start = pd.Timestamp(period_key.start_time)
+        if granularity == "monthly":
+            column = MONTH_LABELS.get(int(period_start.month), str(period_start.month))
+            row_key = str(int(period_start.year))
+            sort_key = int(period_start.year) * 100 + int(period_start.month)
+            label = f"{column} {row_key}"
+        elif granularity == "weekly":
+            iso = period_start.isocalendar()
+            column = f"W{int(iso.week):02d}"
+            row_key = str(int(iso.year))
+            sort_key = int(iso.year) * 100 + int(iso.week)
+            label = f"{column} {row_key}"
+        else:
+            weekday = int(period_start.weekday())
+            if weekday > 4:
+                continue
+            column = columns[weekday]
+            row_key = period_start.strftime("%Y-%m")
+            sort_key = int(period_start.strftime("%Y%m%d"))
+            label = period_start.strftime("%d %b %Y")
+
+        period_returns.append(
+            {
+                "row_key": row_key,
+                "column": column,
+                "label": label,
+                "start_date": period_start.strftime("%Y-%m-%d"),
+                "return_pct": _safe_float(((last_close - first_close) / first_close) * 100, 2),
+                "sort_key": sort_key,
+            }
+        )
+
+    period_returns.sort(key=lambda row: int(row.get("sort_key") or 0))
+    for row in period_returns:
+        row.pop("sort_key", None)
+
+    return _build_seasonality_matrix_from_period_returns(period_returns, columns)
+
+
+def _compute_hourly_seasonality_matrix(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    columns = [f"{hour:02d}:00" for hour in range(9, 16)]
+    trades = pd.DataFrame(
+        [
+            {
+                "time": row.get("observedAt") or (row.get("raw") or {}).get("time"),
+                "price": (row.get("raw") or {}).get("price"),
+            }
+            for row in rows
+        ]
+    )
+    if trades.empty:
+        return _build_seasonality_matrix_from_period_returns([], columns)
+
+    trades["time"] = pd.to_datetime(trades["time"], errors="coerce")
+    trades["price"] = pd.to_numeric(trades["price"], errors="coerce")
+    trades = trades.dropna(subset=["time", "price"]).sort_values("time")
+    if trades.empty:
+        return _build_seasonality_matrix_from_period_returns([], columns)
+
+    period_returns: list[dict[str, Any]] = []
+    for period_key, period_frame in trades.groupby(trades["time"].dt.floor("h")):
+        prices = period_frame["price"].astype(float)
+        first_price = prices.iloc[0]
+        last_price = prices.iloc[-1]
+        if not first_price or np.isnan(first_price):
+            continue
+        timestamp = pd.Timestamp(period_key)
+        column = f"{int(timestamp.hour):02d}:00"
+        if column not in columns:
+            continue
+        period_returns.append(
+            {
+                "row_key": timestamp.strftime("%Y-%m-%d"),
+                "column": column,
+                "label": timestamp.strftime("%d %b %H:00"),
+                "start_date": timestamp.strftime("%Y-%m-%d"),
+                "return_pct": _safe_float(((last_price - first_price) / first_price) * 100, 2),
+                "sort_key": int(timestamp.strftime("%Y%m%d%H")),
+            }
+        )
+
+    period_returns.sort(key=lambda row: int(row.get("sort_key") or 0))
+    for row in period_returns:
+        row.pop("sort_key", None)
+
+    return _build_seasonality_matrix_from_period_returns(period_returns, columns)
 
 
 async def _get_quant_metric_alias_response(
@@ -2806,6 +3014,90 @@ async def get_quant_metrics(
             count=len(computed_metrics),
             symbol=symbol_upper,
             data_points=observed_points,
+            last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+        ),
+    )
+
+
+@router.get(
+    "/{symbol}/seasonality-matrix",
+    response_model=StandardResponse[SeasonalityMatrixResponseData],
+)
+async def get_seasonality_matrix(
+    symbol: str,
+    granularity: str = Query(default="monthly"),
+    period: str = Query(default="5Y"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    symbol_upper = symbol.upper().strip()
+    if not symbol_upper:
+        raise HTTPException(status_code=400, detail="Symbol is required")
+
+    granularity_value = _normalize_seasonality_granularity(granularity)
+    period_upper = _normalize_quant_period(period)
+    end_date = date.today()
+    start_date = _resolve_start_date(period_upper, end_date)
+    warning: str | None = None
+    last_data_timestamp: datetime | None = None
+
+    if granularity_value == "hourly":
+        lookback_days = max(1, min((end_date - start_date).days or 1, 365 * 5))
+        trades = await get_mongo_market_data_service().get_intraday_trades(
+            symbol_upper,
+            lookback_days=lookback_days,
+            limit=20000,
+        )
+        matrix = _compute_hourly_seasonality_matrix(trades)
+        times = pd.to_datetime(
+            [row.get("observedAt") or (row.get("raw") or {}).get("time") for row in trades],
+            errors="coerce",
+        )
+        valid_times = times.dropna() if hasattr(times, "dropna") else []
+        if len(valid_times):
+            last_data_timestamp = pd.Timestamp(valid_times.max()).to_pydatetime()
+        if not trades:
+            warning = "No Mongo intraday trades found for hourly seasonality."
+        source_name = "mongo_intraday_trades"
+    else:
+        frame, warning = await _load_quant_frame_with_warning(
+            db=db,
+            symbol=symbol_upper,
+            start_date=start_date,
+            end_date=end_date,
+            source=source,
+            period=period_upper,
+            adjustment_mode=adjustment_mode,
+        )
+        last_data_timestamp = _resolve_frame_last_timestamp(frame)
+        matrix = _compute_calendar_seasonality_matrix(frame, granularity_value)
+        source_name = "historical_prices"
+
+    payload = SeasonalityMatrixResponseData(
+        symbol=symbol_upper,
+        period=period_upper,
+        granularity=granularity_value,
+        adjustment_mode=_normalize_adjustment_mode(adjustment_mode),
+        computed_at=last_data_timestamp or datetime.utcnow(),
+        last_data_date=last_data_timestamp,
+        source=source_name,
+        columns=matrix["columns"],
+        rows=matrix["rows"],
+        averages=matrix["averages"],
+        best_period=matrix["best_period"],
+        worst_period=matrix["worst_period"],
+        hit_rate_pct=matrix["hit_rate_pct"],
+        current_period=matrix["current_period"],
+        warning=warning,
+    )
+
+    return StandardResponse(
+        data=payload,
+        meta=MetaData(
+            count=len(payload.rows),
+            symbol=symbol_upper,
+            data_points=len(payload.rows),
             last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
         ),
     )
