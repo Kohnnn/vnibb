@@ -1,9 +1,9 @@
 {
-  "installCommand": "cd ../.. && corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm install --frozen-lockfile",
-  "buildCommand": "cd ../.. && corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm --filter frontend build",
+  "installCommand": "cd ../.. && corepack enable && corepack pnpm@9.15.4 install --no-frozen-lockfile",
+  "buildCommand": "cd ../.. && corepack enable && corepack pnpm@9.15.4 --filter frontend build",
   "outputDirectory": ".next",
   "framework": "nextjs",
   "git": {
-    "ignoreCommand": "cd ../.. && corepack enable && corepack prepare pnpm@9.15.4 --activate && pnpm dlx turbo-ignore"
+    "ignoreCommand": "cd ../.. && corepack enable && corepack pnpm@9.15.4 dlx turbo-ignore"
   }
 }
