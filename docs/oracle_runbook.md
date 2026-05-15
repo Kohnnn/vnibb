@@ -142,6 +142,7 @@ docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml log
 
 - Wait for Caddy to obtain certificates.
 - Confirm the canary hostname answers on `https://`.
+- If the browser console shows `net::ERR_SSL_PROTOCOL_ERROR` for every `/api/v1/*` request, the frontend is pointed at a host/port that is not terminating TLS. Fix `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` to use the public Caddy HTTPS hostname, then redeploy the frontend.
 
 ## 4. Verify Service
 

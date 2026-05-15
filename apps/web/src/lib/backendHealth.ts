@@ -1,6 +1,7 @@
 import { env } from '@/lib/env'
 
 const LOCALHOST_OR_LOOPBACK_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i
+const SSLIP_HOST_RE = /^[0-9]+(?:[.-][0-9]+){3}\.sslip\.io$/i
 
 function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '')
@@ -22,6 +23,14 @@ export function getRuntimeApiBaseUrl(input?: string): string {
     raw.startsWith('http://') &&
     !LOCALHOST_OR_LOOPBACK_RE.test(raw)
   ) {
+    try {
+      if (SSLIP_HOST_RE.test(new URL(raw).hostname)) {
+        return raw
+      }
+    } catch {
+      return raw
+    }
+
     return raw.replace(/^http:/, 'https:')
   }
 

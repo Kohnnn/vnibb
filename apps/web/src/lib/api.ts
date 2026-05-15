@@ -12,6 +12,7 @@ import { isSupabaseConfigured, supabase } from './supabase';
 import type { AISettings } from './aiSettings';
 
 const LOCALHOST_OR_LOOPBACK_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i
+const SSLIP_HOST_RE = /^[0-9]+(?:[.-][0-9]+){3}\.sslip\.io$/i
 
 function getRuntimeApiBaseUrl(rawValue: string): string {
     const trimmed = rawValue.replace(/\/$/, '')
@@ -22,15 +23,22 @@ function getRuntimeApiBaseUrl(rawValue: string): string {
     }
 
     const pageIsHttps = window.location.protocol === 'https:'
-    const pageIsLocal = /^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)
     const targetIsHttp = trimmed.startsWith('http://')
     const targetIsLocal = LOCALHOST_OR_LOOPBACK_RE.test(trimmed)
+    const targetUrl = (() => {
+        try {
+            return new URL(trimmed)
+        } catch {
+            return null
+        }
+    })()
+    const targetIsSslipIp = targetUrl ? SSLIP_HOST_RE.test(targetUrl.hostname) : false
 
     if (!pageIsHttps || !targetIsHttp) {
         return trimmed
     }
 
-    return targetIsLocal ? trimmed : trimmed.replace(/^http:/, 'https:')
+    return targetIsLocal || targetIsSslipIp ? trimmed : trimmed.replace(/^http:/, 'https:')
 }
 
 export const API_BASE_URL = `${getRuntimeApiBaseUrl(env.apiUrl)}/api/v1`;

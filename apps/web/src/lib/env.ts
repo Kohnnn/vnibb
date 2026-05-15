@@ -5,15 +5,9 @@ const isProdEnv = process.env.NODE_ENV === 'production';
 const defaultApiUrl = isProdEnv ? '' : 'http://localhost:8000';
 const defaultWsUrl = isProdEnv ? '' : 'ws://localhost:8000/api/v1/ws/prices';
 const rawApiUrl = (process.env.NEXT_PUBLIC_API_URL || defaultApiUrl).trim();
-const shouldForceHttps = isProdEnv
-  && rawApiUrl.startsWith('http://')
-  && !/localhost|127\.0\.0\.1/.test(rawApiUrl);
-const apiUrl = shouldForceHttps ? rawApiUrl.replace(/^http:/, 'https:') : rawApiUrl;
+const apiUrl = rawApiUrl;
 const rawWsUrl = (process.env.NEXT_PUBLIC_WS_URL || defaultWsUrl).trim();
-const shouldForceWss = isProdEnv
-  && rawWsUrl.startsWith('ws://')
-  && !/localhost|127\.0\.0\.1/.test(rawWsUrl);
-const wsUrl = shouldForceWss ? rawWsUrl.replace(/^ws:/, 'wss:') : rawWsUrl;
+const wsUrl = rawWsUrl;
 const wsBaseUrl = wsUrl.replace(/\/$/, '');
 const wsPriceUrl = /\/ws\/prices$/.test(wsBaseUrl)
   ? wsBaseUrl
