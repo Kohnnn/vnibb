@@ -79,7 +79,7 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
             <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-2">
                 <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                     <Users size={12} />
-                    <span>{shareholders.length} shareholders</span>
+                    <span>{hasMeaningfulData ? shareholders.length : 0} shareholders</span>
                 </div>
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}

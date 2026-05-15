@@ -1115,6 +1115,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <p className="mt-1 text-[10px] text-cyan-300">
                       Admin fallback: {formatNumber(globalUsdVndDefaultRate, { decimals: 0 })} VND/USD. Shared yearly defaults loaded for {Object.keys(adminUsdVndRatesByYear).length} years.
                     </p>
+                    {Object.keys(adminUsdVndRatesByYear).length === 0 ? (
+                      <p className="mt-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+                        Historical USD conversion is using one global fallback for every year. Add yearly FX defaults before relying on long-range USD comparisons.
+                      </p>
+                    ) : null}
                     {unitConfig.display !== 'USD' ? (
                       <p className="mt-1 text-[10px] text-amber-300">
                         These FX overrides take effect when Display Units is set to USD.

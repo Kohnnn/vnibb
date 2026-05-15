@@ -21,6 +21,14 @@ function toPositiveNumber(value: unknown): number | null {
   return parsed
 }
 
+function firstPositiveNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    const parsed = toPositiveNumber(value)
+    if (parsed !== null) return parsed
+  }
+  return null
+}
+
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0
   return Math.min(100, Math.max(0, value))
@@ -144,8 +152,16 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     (screenerRow?.industry_name as string | undefined) ||
     null
 
-  const rangeLow = toPositiveNumber(tradingStats?.data?.low_52w)
-  const rangeHigh = toPositiveNumber(tradingStats?.data?.high_52w)
+  const quoteRow = quote as unknown as Record<string, unknown>
+  const screenerRowRecord = screenerRow as Record<string, unknown> | undefined
+  const tradingStatsRow = tradingStats?.data as unknown as Record<string, unknown> | undefined
+
+  const dayHigh = firstPositiveNumber(quote?.high, quoteRow.day_high, quoteRow.high_price, screenerRowRecord?.high, screenerRowRecord?.day_high)
+  const dayLow = firstPositiveNumber(quote?.low, quoteRow.day_low, quoteRow.low_price, screenerRowRecord?.low, screenerRowRecord?.day_low)
+  const openPrice = firstPositiveNumber(quote?.open, quoteRow.day_open, quoteRow.open_price, screenerRowRecord?.open, screenerRowRecord?.day_open)
+  const previousClose = firstPositiveNumber(quote?.prevClose, quoteRow.prev_close, quoteRow.reference_price, quoteRow.ref_price, screenerRowRecord?.prev_close, screenerRowRecord?.reference_price)
+  const rangeLow = firstPositiveNumber(tradingStats?.data?.low_52w, tradingStatsRow?.['52w_low'], tradingStatsRow?.low52w, screenerRowRecord?.low_52w, screenerRowRecord?.['52w_low'])
+  const rangeHigh = firstPositiveNumber(tradingStats?.data?.high_52w, tradingStatsRow?.['52w_high'], tradingStatsRow?.high52w, screenerRowRecord?.high_52w, screenerRowRecord?.['52w_high'])
   const rangePrice = toPositiveNumber(price)
   const hasRange = Boolean(rangeLow && rangeHigh && rangePrice && rangeHigh > rangeLow)
   const rangePosition = hasRange
@@ -217,13 +233,13 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
 
         <div className="grid grid-cols-2 gap-2">
             {[
-            { label: 'Day High', value: formatPriceValueForUnit(quote?.high, unitConfig) },
-            { label: 'Day Low', value: formatPriceValueForUnit(quote?.low, unitConfig) },
+            { label: 'Day High', value: formatPriceValueForUnit(dayHigh, unitConfig) },
+            { label: 'Day Low', value: formatPriceValueForUnit(dayLow, unitConfig) },
             { label: '52W High', value: formatPriceValueForUnit(rangeHigh, unitConfig) },
             { label: '52W Low', value: formatPriceValueForUnit(rangeLow, unitConfig) },
             { label: 'Volume', value: formatNumber(quote?.volume) },
-            { label: 'Prev Close', value: formatPriceValueForUnit(quote?.prevClose, unitConfig) },
-            { label: 'Open', value: formatPriceValueForUnit(quote?.open, unitConfig) },
+            { label: 'Prev Close', value: formatPriceValueForUnit(previousClose, unitConfig) },
+            { label: 'Open', value: formatPriceValueForUnit(openPrice, unitConfig) },
             {
               label: 'Mkt Cap',
               value: formatCompactValueForUnit(marketCap, unitConfig),

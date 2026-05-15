@@ -231,7 +231,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div>
                       <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Peer Matrix</div>
-                      <div className="text-xs text-[var(--text-secondary)]">Upper triangle only to reduce duplicate noise</div>
+                      <div className="text-xs text-[var(--text-secondary)]">Top {orderedTickers.length} by correlation · upper triangle only</div>
                     </div>
                     <div className="text-[10px] text-[var(--text-muted)]">Hover a peer to cross-highlight</div>
                   </div>

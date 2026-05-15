@@ -119,9 +119,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   }, [open]);
 
   const trimmedSearch = search.trim();
+  const normalizedTickerSearch = trimmedSearch.toUpperCase();
   const tickerQuery = useQuery({
-    queryKey: ['command-palette-tickers', trimmedSearch],
-    queryFn: () => searchTickers(trimmedSearch, { limit: 12 }),
+    queryKey: ['command-palette-tickers', normalizedTickerSearch],
+    queryFn: () => searchTickers(normalizedTickerSearch, { limit: 12 }),
     enabled: open,
     staleTime: 5 * 60 * 1000,
   });
@@ -522,7 +523,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             ref={inputRef}
             value={search}
             onChange={(event) => {
-              setSearch(event.target.value);
+              setSearch(event.target.value.toUpperCase());
               setSelectedIndex(0);
             }}
             placeholder="Search tickers, crypto, indices, or commands..."
@@ -543,7 +544,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           {flatItems.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-[var(--text-muted)]">
               <Search className="h-8 w-8 opacity-30" />
-              <span>No results found for "{trimmedSearch}"</span>
+              <span>No results found for "{normalizedTickerSearch}"</span>
             </div>
           ) : (
             sections.map((section) => (

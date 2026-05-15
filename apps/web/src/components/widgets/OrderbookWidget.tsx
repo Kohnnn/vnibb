@@ -20,6 +20,27 @@ interface OrderbookWidgetProps {
 
 type DepthEntry = PriceDepthResponse['data']['entries'][number];
 
+function toFiniteNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function getEntryPrice(entry: DepthEntry): number | null {
+  const row = entry as DepthEntry & Record<string, unknown>;
+  return toFiniteNumber(
+    row.price,
+    row.bid_price,
+    row.ask_price,
+    row.bidPrice,
+    row.askPrice,
+    row.match_price,
+    row.matchPrice,
+  );
+}
+
 function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataChange }: OrderbookWidgetProps) {
   const {
     data: orderbook,
@@ -43,8 +64,13 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
     );
   }, [entries]);
 
+  const normalizedEntries = useMemo(
+    () => entries.map((entry) => ({ ...entry, price: getEntryPrice(entry) })),
+    [entries]
+  );
+
   const depthSeries = useMemo(() => {
-    const normalized = entries
+    const normalized = normalizedEntries
       .map((entry) => ({
         price: Number(entry.price),
         bidVol: Number(entry.bid_vol) || 0,
@@ -73,7 +99,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
       bidCumulative: bidCumulative[index],
       askCumulative: askCumulative[index],
     }));
-  }, [entries]);
+  }, [normalizedEntries]);
 
   useEffect(() => {
     onDataChange?.({
@@ -189,7 +215,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
             </div>
 
             <div className="flex-1 overflow-auto scrollbar-hide">
-              {entries.map((entry, i) => (
+              {normalizedEntries.map((entry, i) => (
                 <div key={i} className="relative grid grid-cols-[minmax(0,1fr)_74px_minmax(0,1fr)] items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-1.5">
                   <div
                     className="absolute left-0 top-0 h-full bg-green-500/10"
@@ -204,7 +230,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
                     {entry.bid_vol?.toLocaleString() || '--'}
                   </div>
                   <div className="text-center text-xs text-[var(--text-primary)] font-bold relative z-10">
-                    {entry.price?.toLocaleString() || '--'}
+                    {entry.price !== null ? entry.price.toLocaleString() : '--'}
                   </div>
                   <div className="min-w-0 break-all text-right text-xs text-red-400 font-mono relative z-10">
                     {entry.ask_vol?.toLocaleString() || '--'}

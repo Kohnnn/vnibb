@@ -7,6 +7,7 @@ import { WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useFinancialRatios, useProfile, useScreenerData } from '@/lib/queries';
+import { latestByFinancialPeriod } from '@/lib/financialPeriods';
 import {
   TradingViewAdvancedChart,
   type AdvancedChartMode,
@@ -89,7 +90,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
 
   const exchange = profileData?.data?.exchange;
   const metrics = screenerData?.data?.[0] as ScreenerData | undefined;
-  const latestRatio = ratiosData?.data?.[0] as FinancialRatioData | undefined;
+  const latestRatio = latestByFinancialPeriod(ratiosData?.data) as FinancialRatioData | undefined;
   const snapshotMetrics: SnapshotMetric = {
     pe: firstFinite(latestRatio?.pe, metrics?.pe),
     pb: firstFinite(latestRatio?.pb, metrics?.pb),

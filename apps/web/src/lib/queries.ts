@@ -1027,7 +1027,7 @@ export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Pro
     const quoteData = response.data ?? {};
     const price = quoteData.price ?? null;
     const change = quoteData.change ?? quoteData.change_1d ?? null;
-    const prevClose = quoteData.prevClose ?? quoteData.prev_close ?? null;
+    const prevClose = quoteData.prevClose ?? quoteData.prev_close ?? quoteData.reference_price ?? quoteData.ref_price ?? null;
     const derivedChangePct =
         change !== null && prevClose !== null && Number(prevClose) !== 0
             ? (Number(change) / Number(prevClose)) * 100
@@ -1042,9 +1042,9 @@ export async function fetchStockQuote(symbol: string, signal?: AbortSignal): Pro
         prevClose,
         volume: quoteData.volume ?? null,
         value: quoteData.value ?? null,
-        high: quoteData.high ?? null,
-        low: quoteData.low ?? null,
-        open: quoteData.open ?? null,
+        high: quoteData.high ?? quoteData.day_high ?? null,
+        low: quoteData.low ?? quoteData.day_low ?? null,
+        open: quoteData.open ?? quoteData.day_open ?? null,
         updatedAt: quoteData.updatedAt ?? quoteData.updated_at ?? null,
         cached: response.cached,
     };

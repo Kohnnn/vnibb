@@ -742,38 +742,52 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
                         <WidgetEmpty message={`No financial snapshot data available for ${symbol}.`} />
                     ) : (
                         <div className="grid gap-3 xl:grid-cols-2">
-                            {sectionTables.map((section) => (
+                            {sectionTables.map((section) => {
+                                const sectionHasValues = section.rows.some((row) =>
+                                    Object.values(row.values).some((value) => typeof value === 'number' && Number.isFinite(value))
+                                );
+
+                                return (
                                 <div key={section.id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/55 p-3">
                                     <div className="mb-2 flex items-center justify-between">
                                         <div className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--text-primary)]">{section.title}</div>
                                         <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">{unitLegend}</div>
                                     </div>
-                                    <DenseFinancialTable
-                                        columns={tableColumns}
-                                        rows={section.rows}
-                                        sortable={false}
-                                        showTrend={false}
-                                        initialScrollPosition="end"
-                                        maxYears={tableColumns.length || 1}
-                                        storageKey={`financial-snapshot:${section.id}:${id}:${symbol}:${period}`}
-                                        footerNote={section.id === 'ratios' ? undefined : `Note: ${unitLegend} except per-share and ratio rows.`}
-                                        valueFormatter={(value, row) => {
-                                            const definition = SNAPSHOT_SECTIONS.find((item) => item.id === section.id)?.rows.find((item) => item.id === row.id);
-                                            if (!definition) return '-';
-                                            if (definition.kind === 'percent') {
-                                                return formatPercent(value as number | null | undefined, { decimals: 1, input: 'percent', clamp: 'margin' });
-                                            }
-                                            if (definition.kind === 'ratio') {
-                                                return formatNumber(value as number | null | undefined, { decimals: 2 });
-                                            }
-                                            if (definition.kind === 'per_share' || definition.kind === 'shares_mn') {
-                                                return formatNumber(value as number | null | undefined, { decimals: 2 });
-                                            }
-                                            return formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig);
-                                        }}
-                                    />
+                                    {sectionHasValues ? (
+                                        <DenseFinancialTable
+                                            columns={tableColumns}
+                                            rows={section.rows}
+                                            sortable={false}
+                                            showTrend={false}
+                                            initialScrollPosition="end"
+                                            maxYears={tableColumns.length || 1}
+                                            storageKey={`financial-snapshot:${section.id}:${id}:${symbol}:${period}`}
+                                            footerNote={section.id === 'ratios' ? undefined : `Note: ${unitLegend} except per-share and ratio rows.`}
+                                            valueFormatter={(value, row) => {
+                                                const definition = SNAPSHOT_SECTIONS.find((item) => item.id === section.id)?.rows.find((item) => item.id === row.id);
+                                                if (!definition) return '-';
+                                                if (definition.kind === 'percent') {
+                                                    return formatPercent(value as number | null | undefined, { decimals: 1, input: 'percent', clamp: 'margin' });
+                                                }
+                                                if (definition.kind === 'ratio') {
+                                                    return formatNumber(value as number | null | undefined, { decimals: 2 });
+                                                }
+                                                if (definition.kind === 'per_share' || definition.kind === 'shares_mn') {
+                                                    return formatNumber(value as number | null | undefined, { decimals: 2 });
+                                                }
+                                                return formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig);
+                                            }}
+                                        />
+                                    ) : (
+                                        <WidgetEmpty
+                                            message={`No ${section.title.toLowerCase()} data for ${symbol}.`}
+                                            detail="The endpoint returned periods, but no populated fields for this section."
+                                            size="compact"
+                                        />
+                                    )}
                                 </div>
-                            ))}
+                                )
+                            })}
                         </div>
                     )}
                 </div>

@@ -516,45 +516,51 @@ export function WidgetSettingsModal({
                         </div>
                     ) : null}
 
-                    <div className="border-t border-[var(--border-default)] pt-6 space-y-2">
-                        <div className="flex items-center justify-between">
-                            <label
-                                htmlFor="widget-advanced-config"
-                                className="block text-sm font-medium text-[var(--text-secondary)]"
-                            >
-                                Advanced Configuration (JSON)
-                            </label>
-                            <button
-                                onClick={handleReset}
-                                className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
-                                type="button"
-                            >
-                                <RotateCcw size={12} /> Reset
-                            </button>
-                        </div>
-                        <textarea
-                            id="widget-advanced-config"
-                            value={advancedConfig}
-                            onChange={(event) => {
-                                setAdvancedConfig(event.target.value);
-                                setError(null);
-                            }}
-                            className={`w-full h-40 bg-[var(--bg-secondary)] border ${error ? 'border-red-500' : 'border-[var(--border-default)]'} rounded-lg p-3 text-sm font-mono text-[var(--text-secondary)] focus:outline-none focus:border-blue-500 resize-none`}
-                        />
-                        {error ? <p className="text-xs text-red-400">{error}</p> : null}
-                        <p className="text-xs text-[var(--text-muted)]">
-                            {tradingViewMode
-                                ? 'This JSON is merged first, then the typed controls above win on the same keys. Use it for nested TradingView payloads and doc-only edge cases.'
-                                : 'Edit widget-specific properties directly.'}
-                        </p>
-                        {tradingViewMode && advancedConfigHints.length > 0 ? (
-                            <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]/60 px-3 py-2 text-xs text-[var(--text-secondary)]">
-                                {advancedConfigHints.map((hint) => (
-                                    <div key={hint}>{hint}</div>
-                                ))}
+                    <details className="border-t border-[var(--border-default)] pt-6">
+                        <summary className="cursor-pointer list-none rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]/55 px-4 py-3 text-sm font-medium text-[var(--text-secondary)]">
+                            Advanced Configuration
+                            <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">JSON for power users</span>
+                        </summary>
+                        <div className="mt-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                                <label
+                                    htmlFor="widget-advanced-config"
+                                    className="block text-sm font-medium text-[var(--text-secondary)]"
+                                >
+                                    Raw JSON
+                                </label>
+                                <button
+                                    onClick={handleReset}
+                                    className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                                    type="button"
+                                >
+                                    <RotateCcw size={12} /> Reset
+                                </button>
                             </div>
-                        ) : null}
-                    </div>
+                            <textarea
+                                id="widget-advanced-config"
+                                value={advancedConfig}
+                                onChange={(event) => {
+                                    setAdvancedConfig(event.target.value);
+                                    setError(null);
+                                }}
+                                className={`w-full h-40 bg-[var(--bg-secondary)] border ${error ? 'border-red-500' : 'border-[var(--border-default)]'} rounded-lg p-3 text-sm font-mono text-[var(--text-secondary)] focus:outline-none focus:border-blue-500 resize-none`}
+                            />
+                            {error ? <p className="text-xs text-red-400">{error}</p> : null}
+                            <p className="text-xs text-[var(--text-muted)]">
+                                {tradingViewMode
+                                    ? 'This JSON is merged first, then the typed controls above win on the same keys. Use it for nested TradingView payloads and doc-only edge cases.'
+                                    : 'Most users should leave this closed. Use it only for widget-specific properties that do not have controls yet.'}
+                            </p>
+                            {tradingViewMode && advancedConfigHints.length > 0 ? (
+                                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]/60 px-3 py-2 text-xs text-[var(--text-secondary)]">
+                                    {advancedConfigHints.map((hint) => (
+                                        <div key={hint}>{hint}</div>
+                                    ))}
+                                </div>
+                            ) : null}
+                        </div>
+                    </details>
 
                     {tradingViewMode ? (
                         <div className="border-t border-[var(--border-default)] pt-6 space-y-3">

@@ -118,11 +118,13 @@ export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) 
     }
   }, [trailPoints, universePoints])
   const hasChartData = universePoints.length > 0
+  const benchmarkLabel = payload?.benchmark || 'VNINDEX'
+  const coverageDetail = `Need overlapping daily history for ${upperSymbol}, ${benchmarkLabel}, and the comparison universe over the 260-day lookback. Verify Mongo EOD coverage or try another benchmark/period.`
   const healthState: WidgetHealthState | undefined = hasData && !hasChartData
     ? {
         status: 'limited',
         label: 'Limited history',
-        detail: `Need enough overlapping ${upperSymbol} and ${payload?.benchmark || 'VNINDEX'} history to plot the quadrant map.`,
+        detail: coverageDetail,
       }
     : undefined
 
@@ -187,7 +189,7 @@ export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) 
           <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 mb-2">
             <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-widest text-[var(--text-muted)]">
               <span>RRG Map</span>
-              <span>{payload?.benchmark || 'VNINDEX'} benchmark</span>
+              <span>{benchmarkLabel} benchmark</span>
             </div>
             <div className="relative">
               <ChartMountGuard className="h-[240px] min-h-[220px]" minHeight={220}>
@@ -248,7 +250,7 @@ export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) 
                   <div className="max-w-[230px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)]/94 px-4 py-3 text-center">
                     <div className="text-xs font-semibold text-[var(--text-primary)]">No relative-rotation data available</div>
                     <div className="mt-1 text-[10px] leading-5 text-[var(--text-secondary)]">
-                      Waiting for enough overlapping history between {upperSymbol} and {payload?.benchmark || 'VNINDEX'} to plot the quadrant map.
+                      {coverageDetail}
                     </div>
                   </div>
                 </div>

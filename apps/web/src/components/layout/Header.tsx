@@ -52,6 +52,10 @@ function formatHeaderPercent(value: number | null | undefined): string {
   return `${sign}${value.toFixed(2)}%`
 }
 
+function normalizeIndexName(value: string | null | undefined): string {
+  return String(value ?? '').replace(/[-_\s]/g, '').toUpperCase()
+}
+
 function getVietnamMarketStatus(reference = new Date()): { label: string; isOpen: boolean } {
   const formatter = new Intl.DateTimeFormat('en-GB', {
     timeZone: MARKET_TIMEZONE,
@@ -150,20 +154,28 @@ export function Header({
           ? 'text-rose-700'
           : 'text-rose-400'
   const marketStatus = useMemo(() => getVietnamMarketStatus(new Date(marketClock)), [marketClock])
-  const vnIndex = useMemo(
-    () => marketOverviewQuery.data?.data?.find((item) => item.index_name === 'VN-INDEX' || item.index_name === 'VNINDEX') || null,
-    [marketOverviewQuery.data?.data]
-  )
-  const vnIndexChangeClass =
-    vnIndex?.change_pct == null
+  const getIndexChangeClass = useCallback((changePct: number | null | undefined) =>
+    changePct == null
       ? 'text-[var(--text-muted)]'
-      : vnIndex.change_pct >= 0
+      : changePct >= 0
         ? resolvedTheme === 'light'
           ? 'text-emerald-700'
           : 'text-emerald-400'
         : resolvedTheme === 'light'
           ? 'text-rose-700'
-          : 'text-rose-400'
+          : 'text-rose-400',
+    [resolvedTheme]
+  )
+  const marketChips = useMemo(() => {
+    const rows = marketOverviewQuery.data?.data || []
+    const findIndex = (aliases: string[]) => rows.find((item) => aliases.includes(normalizeIndexName(item.index_name))) || null
+
+    return [
+      { label: 'VN-INDEX', data: findIndex(['VNINDEX']) },
+      { label: 'VN30', data: findIndex(['VN30', 'VN30INDEX']) },
+      { label: 'HNX', data: findIndex(['HNX', 'HNXINDEX']) },
+    ]
+  }, [marketOverviewQuery.data?.data])
 
   const healthBadge = useMemo(() => {
     if (connectionStatus === 'online') {
@@ -263,21 +275,23 @@ export function Header({
                 </div>
               </div>
             </div>
-            <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
-              <div className="min-w-0">
-                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
-                  VN-INDEX
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-[var(--text-primary)]">
-                    {formatHeaderPrice(vnIndex?.current_value)}
-                  </span>
-                  <span className={cn('text-xs font-semibold', vnIndexChangeClass)}>
-                    {formatHeaderPercent(vnIndex?.change_pct)}
-                  </span>
+            {marketChips.map((chip) => (
+              <div key={chip.label} className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
+                    {chip.label}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-[var(--text-primary)]">
+                      {formatHeaderPrice(chip.data?.current_value)}
+                    </span>
+                    <span className={cn('text-xs font-semibold', getIndexChangeClass(chip.data?.change_pct))}>
+                      {formatHeaderPercent(chip.data?.change_pct)}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            ))}
           </div>
 
           <div data-tour="header-search" className="relative min-w-[220px] flex-1">

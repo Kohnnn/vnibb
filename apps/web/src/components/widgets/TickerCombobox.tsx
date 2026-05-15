@@ -25,7 +25,8 @@ export function TickerCombobox({
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Get filtered results
-    const results = searchStocks(query, 8);
+    const normalizedQuery = query.toUpperCase();
+    const results = searchStocks(normalizedQuery, 8);
 
     // Focus input and reset state when opened
     useEffect(() => {
@@ -110,7 +111,7 @@ export function TickerCombobox({
                         type="text"
                         value={query}
                         onChange={(e) => {
-                            setQuery(e.target.value);
+                            setQuery(e.target.value.toUpperCase());
                             setSelectedIndex(0);
                         }}
                         onKeyDown={handleKeyDown}
@@ -130,7 +131,7 @@ export function TickerCombobox({
                 {/* Results List */}
                 {results.length === 0 ? (
                     <div className="px-3 py-4 text-center text-[var(--text-muted)] text-xs">
-                        No results for "{query}"
+                        No results for "{normalizedQuery}"
                     </div>
                 ) : (
                     <div className="pb-1">

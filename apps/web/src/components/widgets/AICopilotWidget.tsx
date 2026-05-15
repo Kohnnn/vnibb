@@ -105,6 +105,46 @@ function getMessageDetailsLabel(message: Message): string {
     return parts.join(' · ') || 'details';
 }
 
+function cleanModelName(model: string | null | undefined): string {
+    let value = String(model ?? '').trim();
+    const bytesMatch = value.match(/^b['"](.+)['"]$/i);
+    if (bytesMatch) value = bytesMatch[1];
+
+    try {
+        const parsed = JSON.parse(value);
+        if (typeof parsed === 'string') return parsed;
+        if (parsed && typeof parsed === 'object' && typeof parsed.MODEL === 'string') return parsed.MODEL;
+        if (parsed && typeof parsed === 'object' && typeof parsed.model === 'string') return parsed.model;
+    } catch {
+        // Non-JSON model slugs are expected.
+    }
+
+    return value.replace(/^['"]|['"]$/g, '');
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function renderContentWithCitations(message: Message): string {
+    if (!message.sources?.length || !message.content) return message.content;
+
+    const sourceIds = message.sources
+        .map((source) => String(source.id || '').trim())
+        .filter(Boolean);
+    if (!sourceIds.length) return message.content;
+
+    const sourcePattern = new RegExp(`\\[(${sourceIds.map(escapeRegExp).join('|')})\\]`, 'g');
+    const rendered = message.content.replace(sourcePattern, (_match, sourceId: string) => `[${sourceId}](#sources)`);
+    const missingSourceIds = sourceIds.filter((sourceId) => !rendered.includes(`[${sourceId}](#sources)`));
+    if (!missingSourceIds.length) return rendered;
+
+    const citations = missingSourceIds
+        .map((sourceId) => `[${sourceId}](#sources)`)
+        .join(' ');
+    return `${rendered}\n\n${citations}`;
+}
+
 export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopilotWidgetProps) {
     const [messages, setMessages] = useState<Message[]>([
         {
@@ -211,7 +251,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                         symbol: context?.symbol || DEFAULT_TICKER,
                         widget_context: context?.widgetType,
                         provider: event.responseMeta?.provider || aiSettings.provider,
-                        model: event.responseMeta?.model || aiSettings.model,
+                        model: cleanModelName(event.responseMeta?.model || aiSettings.model),
                         latency_ms: event.responseMeta?.latencyMs,
                         source_count: event.sources?.length || 0,
                         artifact_count: event.artifacts?.length || 0,
@@ -383,12 +423,18 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext }: AICopil
                             ? 'bg-blue-600 text-white'
                             : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] border border-[var(--border-subtle)]'
                             }`}>
-                            {/* Markdown content */}
-                            <div className="prose prose-sm max-w-none text-inherit prose-headings:text-[var(--text-primary)] prose-strong:text-[var(--text-primary)] prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                    {message.content || (message.isStreaming ? '...' : '')}
-                                </ReactMarkdown>
-                            </div>
+                            {message.isStreaming && !message.content ? (
+                                <div className="flex items-center gap-2 text-xs text-cyan-200">
+                                    <Loader2 size={14} className="animate-spin" />
+                                    <span>{currentStatus || 'VniAgent is analyzing...'}</span>
+                                </div>
+                            ) : (
+                                <div className="prose prose-sm max-w-none text-inherit prose-headings:text-[var(--text-primary)] prose-strong:text-[var(--text-primary)] prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-li:my-0">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                        {renderContentWithCitations(message)}
+                                    </ReactMarkdown>
+                                </div>
+                            )}
 
                             {/* Streaming indicator */}
                             {message.isStreaming && (

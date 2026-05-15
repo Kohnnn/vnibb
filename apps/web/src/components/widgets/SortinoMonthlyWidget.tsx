@@ -17,6 +17,27 @@ interface SortinoMonthlyWidgetProps {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function normalizeMonthlyMap(value: unknown): Record<string, number | null> {
+  if (!value || typeof value !== 'object') return {}
+
+  if (Array.isArray(value)) {
+    return Object.fromEntries(value.map((item) => {
+      const row = item as Record<string, unknown>
+      const month = String(row.month || row.label || '').slice(0, 3)
+      const raw = row.sortino ?? row.value ?? row.ratio
+      const parsed = typeof raw === 'number' ? raw : Number(raw)
+      return [month, Number.isFinite(parsed) ? parsed : null]
+    }).filter(([month]) => MONTHS.includes(String(month))))
+  }
+
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, raw]) => {
+    const month = key.slice(0, 3)
+    const parsed = typeof raw === 'number' ? raw : Number(raw)
+    return [month, Number.isFinite(parsed) ? parsed : null]
+  }).filter(([month]) => MONTHS.includes(String(month))))
+}
+
 export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
@@ -26,19 +47,22 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
     enabled: Boolean(upperSymbol),
   })
 
-  const metric = data?.data?.metrics?.sortino as
+  const metric = (data?.data?.metrics?.sortino ?? (data?.data as Record<string, unknown> | undefined)?.sortino ?? data?.data) as
     | {
         error?: string
         monthly_sortino?: Record<string, number | null>
         monthly_sharpe?: Record<string, number | null>
+        sortino_by_month?: unknown
+        sharpe_by_month?: unknown
+        monthly?: unknown
         best_months?: string[]
         avoid_months?: string[]
       }
     | undefined
 
   const metricError = metric?.error || data?.error || null
-  const sortino = metric?.monthly_sortino || {}
-  const sharpe = metric?.monthly_sharpe || {}
+  const sortino = normalizeMonthlyMap(metric?.monthly_sortino ?? metric?.sortino_by_month ?? metric?.monthly)
+  const sharpe = normalizeMonthlyMap(metric?.monthly_sharpe ?? metric?.sharpe_by_month)
   const rows = MONTHS.map((month) => ({
     month,
     sortino: typeof sortino[month] === 'number' ? Number(sortino[month]) : null,

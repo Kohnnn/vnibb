@@ -28,6 +28,21 @@ const FEEDBACK_REASONS = [
   { id: 'bad_artifact', label: 'Bad artifact' },
 ]
 
+function cleanModelName(model: string | null | undefined): string {
+  let value = String(model ?? '').trim();
+  const bytesMatch = value.match(/^b['"](.+)['"]$/i);
+  if (bytesMatch) value = bytesMatch[1];
+  try {
+    const parsed = JSON.parse(value);
+    if (typeof parsed === 'string') return parsed;
+    if (parsed && typeof parsed === 'object' && typeof parsed.MODEL === 'string') return parsed.MODEL;
+    if (parsed && typeof parsed === 'object' && typeof parsed.model === 'string') return parsed.model;
+  } catch {
+    // Model slugs are usually not JSON.
+  }
+  return value.replace(/^['"]|['"]$/g, '');
+}
+
 export function CopilotFeedbackBar({
   responseMeta,
   surface,
@@ -61,7 +76,7 @@ export function CopilotFeedbackBar({
         surface,
         vote,
         provider: responseMeta.provider,
-        model: responseMeta.model,
+        model: cleanModelName(responseMeta.model),
         latency_ms: responseMeta.latencyMs,
         has_notes: notes.trim().length > 0,
         reason_count: vote === 'down' ? selectedReasons.length : 0,
@@ -80,7 +95,7 @@ export function CopilotFeedbackBar({
         <div className="flex items-center gap-2 text-[var(--text-muted)]">
           <span>{responseMeta.provider}</span>
           <span>·</span>
-          <span>{responseMeta.model}</span>
+          <span>{cleanModelName(responseMeta.model)}</span>
           <span>·</span>
           <span>{responseMeta.latencyMs} ms</span>
           {statusText && (

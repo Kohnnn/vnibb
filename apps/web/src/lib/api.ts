@@ -445,10 +445,15 @@ export interface QuoteData {
     symbol: string;
     price: number | null;
     open: number | null;
+    day_open?: number | null;
     high: number | null;
+    day_high?: number | null;
     low: number | null;
+    day_low?: number | null;
     prevClose: number | null;
     prev_close?: number | null;
+    reference_price?: number | null;
+    ref_price?: number | null;
     change: number | null;
     change_1d?: number | null;
     changePct: number | null;

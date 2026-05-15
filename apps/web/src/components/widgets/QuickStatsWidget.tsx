@@ -4,6 +4,7 @@
 
 import { Activity, TrendingUp, TrendingDown, BarChart2, DollarSign } from 'lucide-react';
 import { useFinancialRatios, useHistoricalPrices, useStockQuote } from '@/lib/queries';
+import { latestByFinancialPeriod } from '@/lib/financialPeriods';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -23,7 +24,7 @@ export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
 
     const priceData = pricesQuery.data?.data || [];
     const latestQuote = quoteQuery.data;
-    const latestRatio = ratiosQuery.data?.data?.[0];
+    const latestRatio = latestByFinancialPeriod(ratiosQuery.data?.data);
 
     const latest = priceData[priceData.length - 1];
     const prev = priceData[priceData.length - 2];

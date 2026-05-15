@@ -3,6 +3,7 @@
 'use client'
 
 import { useFinancialRatios, useProfile, useScreenerData, useStockQuote } from '@/lib/queries'
+import { latestByFinancialPeriod } from '@/lib/financialPeriods'
 import { formatNumber, formatPercent, formatVND } from '@/lib/formatters'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
@@ -94,7 +95,7 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove }: Shar
   } = useFinancialRatios(symbol, { period: 'FY', enabled: !!symbol })
 
   const stock = screenerData?.data?.[0] ?? null
-  const latestRatio = ratios?.data?.[0] ?? null
+  const latestRatio = latestByFinancialPeriod(ratios?.data) ?? null
   const profileData = profile?.data ?? null
 
   const outstandingShares = resolveMetric([

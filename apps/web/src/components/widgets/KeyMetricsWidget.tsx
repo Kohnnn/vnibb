@@ -8,6 +8,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { TableSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { latestByFinancialPeriod } from '@/lib/financialPeriods';
 import { RateLimitAlert } from '@/components/ui/RateLimitAlert';
 import { RateLimitError } from '@/lib/api';
 import { Sparkline } from '@/components/ui/Sparkline';
@@ -105,7 +106,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
     const { data: quote } = useStockQuote(symbol, !!symbol);
 
     const stock = screenData?.data?.[0];
-    const latestRatio = ratiosData?.data?.[0];
+    const latestRatio = latestByFinancialPeriod(ratiosData?.data);
     const derivedMarketCap =
         toNumber(profile?.data?.outstanding_shares) && toNumber(quote?.price)
             ? (toNumber(profile?.data?.outstanding_shares) || 0) * (toNumber(quote?.price) || 0)

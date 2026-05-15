@@ -345,6 +345,12 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty message={`No ratio data for ${symbol}`} icon={<BarChart3 size={18} />} />
+                    ) : tableRows.length === 0 ? (
+                        <WidgetEmpty
+                            message={`No renderable ratio metrics for ${symbol}`}
+                            detail={`${period} ratio rows loaded, but all tracked metrics are empty in the current response.`}
+                            icon={<BarChart3 size={18} />}
+                        />
                     ) : (
                         <>
                             <DenseFinancialTable

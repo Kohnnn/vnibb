@@ -19,6 +19,14 @@ interface SimilarStocksWidgetProps {
     onRemove?: () => void;
 }
 
+function firstFiniteNumber(...values: unknown[]): number | null {
+    for (const value of values) {
+        const parsed = typeof value === 'number' ? value : Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+}
+
 export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidgetProps) {
     const upperSymbol = symbol?.toUpperCase() || '';
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'similar_stocks' });
@@ -63,7 +71,11 @@ export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidget
                 ) : !hasData ? (
                     <WidgetEmpty message={`No similar stocks found for ${upperSymbol}`} icon={<Users size={18} />} />
                 ) : (
-                    peers.map((peer, index) => (
+                    peers.map((peer, index) => {
+                        const row = peer as typeof peer & Record<string, unknown>;
+                        const peRatio = firstFiniteNumber(peer.pe_ratio, row.pe, row.peRatio, row.p_e, row.trailing_pe);
+
+                        return (
                         <button
                             key={`${peer.symbol}-${index}`}
                             type="button"
@@ -84,14 +96,15 @@ export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidget
                             </div>
                             <div className="text-right">
                                 <div className="text-xs text-[var(--text-secondary)]">
-                                    P/E: {peer.pe_ratio?.toFixed(1) || '-'}
+                                    P/E: {peRatio !== null ? peRatio.toFixed(1) : '-'}
                                 </div>
                                 <div className="text-xs text-[var(--text-secondary)]">
                                     MCap: {formatCompactValueForUnit(peer.market_cap, unitConfig)}
                                 </div>
                             </div>
                         </button>
-                    ))
+                        )
+                    })
                 )}
             </div>
         </div>

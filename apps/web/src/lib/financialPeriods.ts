@@ -191,3 +191,9 @@ export function periodSortKey(period: string | null | undefined): number {
   const numeric = Number(label)
   return Number.isFinite(numeric) ? Math.trunc(numeric) : 0
 }
+
+export function latestByFinancialPeriod<T extends { period?: string | null }>(rows: T[] | null | undefined): T | undefined {
+  return [...(rows ?? [])]
+    .filter((row) => Boolean(normalizeFinancialPeriod(row.period)))
+    .sort((left, right) => periodSortKey(right.period) - periodSortKey(left.period))[0]
+}
