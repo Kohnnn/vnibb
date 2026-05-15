@@ -4151,6 +4151,26 @@ async def get_historical_prices(
         "appwrite",
         "hybrid",
     }
+
+    mongo_data = await _load_historical_from_mongo(
+        symbol=symbol_upper,
+        start_date=start_date,
+        end_date=end_date,
+        interval=interval,
+        adjustment_mode=adjustment_mode,
+    )
+    if mongo_data:
+        mongo_data = _apply_corporate_action_adjustments(
+            mongo_data, corporate_actions, adjustment_mode
+        )
+        logger.info(
+            "Historical endpoint served Mongo EOD data (symbol=%s interval=%s rows=%s)",
+            symbol_upper,
+            interval,
+            len(mongo_data),
+        )
+        return StandardResponse(data=mongo_data, meta=MetaData(count=len(mongo_data)))
+
     cache_result = await cache_manager.get_historical_prices(
         symbol=symbol_upper,
         start_date=start_date,
@@ -4175,25 +4195,6 @@ async def get_historical_prices(
             recent_cache_data, corporate_actions, adjustment_mode
         )
         return StandardResponse(data=recent_cache_data, meta=MetaData(count=len(recent_cache_data)))
-
-    mongo_data = await _load_historical_from_mongo(
-        symbol=symbol_upper,
-        start_date=start_date,
-        end_date=end_date,
-        interval=interval,
-        adjustment_mode=adjustment_mode,
-    )
-    if mongo_data:
-        mongo_data = _apply_corporate_action_adjustments(
-            mongo_data, corporate_actions, adjustment_mode
-        )
-        logger.info(
-            "Historical endpoint served Mongo EOD data (symbol=%s interval=%s rows=%s)",
-            symbol_upper,
-            interval,
-            len(mongo_data),
-        )
-        return StandardResponse(data=mongo_data, meta=MetaData(count=len(mongo_data)))
 
     if settings.resolved_data_backend == "appwrite" and use_appwrite_data:
         appwrite_data = await _load_historical_from_appwrite(
