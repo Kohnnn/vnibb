@@ -50,8 +50,8 @@ interface SnapshotContext {
 }
 
 const SNAPSHOT_PERIOD_OPTIONS: SnapshotPeriod[] = ['FY', 'Q', 'TTM'];
-const ANNUAL_PERIOD_LIMIT = 12;
-const QUARTER_PERIOD_LIMIT = 16;
+const ANNUAL_PERIOD_LIMIT = 20;
+const QUARTER_PERIOD_LIMIT = 40;
 
 const RAW_BALANCE_ALIASES: Record<string, string[]> = {
     short_term_investment: ['short_term_investment', 'st_investment', 'short_term_investments'],

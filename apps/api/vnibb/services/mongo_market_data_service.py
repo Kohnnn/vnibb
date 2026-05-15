@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -55,7 +55,7 @@ class MongoMarketDataService:
         """Return tick-like trade rows, preferring the typed derived read model."""
 
         symbol_upper = symbol.upper()
-        lookback_start = datetime.now(timezone.utc) - timedelta(days=max(1, lookback_days))
+        lookback_start = datetime.now(UTC) - timedelta(days=max(1, lookback_days))
         limit = max(1, min(limit, 20000))
 
         def _read_derived() -> list[dict[str, Any]]:
@@ -171,7 +171,7 @@ class MongoMarketDataService:
         """Return normalized EOD OHLCV rows."""
 
         symbol_upper = symbol.upper()
-        lookback_start = datetime.now(timezone.utc) - timedelta(days=max(1, lookback_days))
+        lookback_start = datetime.now(UTC) - timedelta(days=max(1, lookback_days))
         limit = max(1, min(limit, 5000))
 
         def _read() -> list[dict[str, Any]]:
@@ -203,6 +203,54 @@ class MongoMarketDataService:
             return await asyncio.to_thread(_read)
         except Exception as exc:
             logger.warning("Mongo EOD read failed for %s: %s", symbol_upper, exc)
+            return []
+
+    async def get_eod_prices_between(
+        self,
+        symbol: str,
+        *,
+        start_date: date,
+        end_date: date,
+        limit: int = 20000,
+    ) -> list[dict[str, Any]]:
+        """Return normalized EOD OHLCV rows for an explicit date range."""
+
+        symbol_upper = symbol.upper()
+        limit = max(1, min(limit, 50000))
+        start_dt = datetime.combine(start_date, time.min)
+        end_dt = datetime.combine(end_date, time.max)
+
+        def _read() -> list[dict[str, Any]]:
+            coll = self._get_collection("market_prices_eod")
+            cursor = (
+                coll.find(
+                    {
+                        "symbol": symbol_upper,
+                        "tradeDate": {"$gte": start_dt, "$lte": end_dt},
+                    },
+                    {
+                        "_id": 0,
+                        "symbol": 1,
+                        "tradeDate": 1,
+                        "open": 1,
+                        "high": 1,
+                        "low": 1,
+                        "close": 1,
+                        "volume": 1,
+                        "value": 1,
+                        "adjClose": 1,
+                        "adj_close": 1,
+                    },
+                )
+                .sort("tradeDate", 1)
+                .limit(limit)
+            )
+            return list(cursor)
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("Mongo EOD range read failed for %s: %s", symbol_upper, exc)
             return []
 
 

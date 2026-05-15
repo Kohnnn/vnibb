@@ -762,7 +762,7 @@ export async function getSubsidiaries(symbol: string): Promise<SubsidiariesRespo
 function normalizeFinancialStatementPeriod(period?: string): string | undefined {
     if (!period) return undefined;
     if (period === 'FY') return 'year';
-    if (period === 'Q') return 'quarter';
+    if (period === 'Q') return 'Q';
     return period;
 }
 

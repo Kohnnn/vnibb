@@ -27,6 +27,7 @@ from vnibb.core.appwrite_client import get_appwrite_stock, get_appwrite_stock_pr
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
+from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
 # Providers
 from vnibb.providers.vnstock.equity_historical import (
@@ -1034,6 +1035,60 @@ def _to_historical_data(row: StockPrice, *, adjustment_mode: str = "raw") -> Equ
     )
 
 
+def _to_historical_data_from_mongo(
+    row: dict[str, Any], *, adjustment_mode: str = "raw"
+) -> Optional[EquityHistoricalData]:
+    time_value = row.get("tradeDate") or row.get("time") or row.get("date")
+    if isinstance(time_value, datetime):
+        parsed_time = time_value.date()
+    elif isinstance(time_value, date):
+        parsed_time = time_value
+    elif isinstance(time_value, str):
+        try:
+            parsed_time = date.fromisoformat(time_value[:10])
+        except ValueError:
+            return None
+    else:
+        return None
+
+    open_value = _coerce_optional_float(row.get("open"))
+    high_value = _coerce_optional_float(row.get("high"))
+    low_value = _coerce_optional_float(row.get("low"))
+    close_value = _coerce_optional_float(row.get("close"))
+    volume_value = _appwrite_optional_int(row.get("volume"))
+    adj_close_value = _coerce_optional_float(row.get("adj_close") or row.get("adjClose"))
+
+    if None in {open_value, high_value, low_value, close_value, volume_value}:
+        return None
+
+    adjusted_open, adjusted_high, adjusted_low, adjusted_close_resolved, factor, applied = (
+        _apply_adjustment_mode_to_ohlc(
+            open_value=open_value,
+            high_value=high_value,
+            low_value=low_value,
+            close_value=close_value,
+            adjusted_close=adj_close_value,
+            adjustment_mode=adjustment_mode,
+        )
+    )
+
+    return EquityHistoricalData(
+        symbol=str(row.get("symbol") or "").upper(),
+        time=parsed_time,
+        open=adjusted_open,
+        high=adjusted_high,
+        low=adjusted_low,
+        close=adjusted_close_resolved,
+        volume=volume_value,
+        value=_coerce_optional_float(row.get("value")),
+        raw_close=close_value,
+        adjusted_close=adj_close_value,
+        adjustment_factor=factor,
+        adjustment_mode=str(adjustment_mode or "raw").strip().lower() or "raw",
+        adjustment_applied=applied,
+    )
+
+
 async def _load_historical_from_db(
     db: AsyncSession,
     symbol: str,
@@ -1056,6 +1111,33 @@ async def _load_historical_from_db(
 
     rows = (await db.execute(stmt)).scalars().all()
     return [_to_historical_data(row, adjustment_mode=adjustment_mode) for row in rows]
+
+
+async def _load_historical_from_mongo(
+    symbol: str,
+    start_date: date,
+    end_date: date,
+    interval: str,
+    adjustment_mode: str = "raw",
+) -> List[EquityHistoricalData]:
+    if (interval or "1D").upper() != "1D":
+        return []
+
+    mongo = get_mongo_market_data_service()
+    if not mongo.enabled:
+        return []
+
+    docs = await mongo.get_eod_prices_between(
+        symbol,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    rows: List[EquityHistoricalData] = []
+    for doc in docs:
+        item = _to_historical_data_from_mongo(doc, adjustment_mode=adjustment_mode)
+        if item is not None:
+            rows.append(item)
+    return rows
 
 
 def _appwrite_optional_int(value: Any) -> Optional[int]:
@@ -2784,7 +2866,8 @@ async def _enrich_ratio_ev_sales_from_income(
     if not missing_rows:
         return rows
 
-    normalized_period = "year" if period in {"year", "FY"} else "quarter"
+    period_upper = str(period or "year").strip().upper()
+    normalized_period = "year" if period_upper in {"YEAR", "FY"} else "quarter"
 
     stmt = (
         select(
@@ -3957,6 +4040,25 @@ async def get_historical_prices(
         )
         return StandardResponse(data=recent_cache_data, meta=MetaData(count=len(recent_cache_data)))
 
+    mongo_data = await _load_historical_from_mongo(
+        symbol=symbol_upper,
+        start_date=start_date,
+        end_date=end_date,
+        interval=interval,
+        adjustment_mode=adjustment_mode,
+    )
+    if mongo_data:
+        mongo_data = _apply_corporate_action_adjustments(
+            mongo_data, corporate_actions, adjustment_mode
+        )
+        logger.info(
+            "Historical endpoint served Mongo EOD data (symbol=%s interval=%s rows=%s)",
+            symbol_upper,
+            interval,
+            len(mongo_data),
+        )
+        return StandardResponse(data=mongo_data, meta=MetaData(count=len(mongo_data)))
+
     if settings.resolved_data_backend == "appwrite" and use_appwrite_data:
         appwrite_data = await _load_historical_from_appwrite(
             symbol=symbol_upper,
@@ -4583,7 +4685,7 @@ async def get_financials(
     symbol: str,
     statement_type: Literal["income", "balance", "cashflow"] = Query("income"),
     period: Literal["year", "quarter", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
-    limit: int = Query(5, ge=1, le=20),
+    limit: int = Query(20, ge=1, le=80),
     db: AsyncSession = Depends(get_db),
 ):
     statement_model = {
@@ -5565,7 +5667,7 @@ async def get_financial_ratios(
             db=db,
             symbol=symbol_upper,
             period=normalized_period,
-            limit=24,
+            limit=40,
         )
 
     try:
@@ -5786,7 +5888,7 @@ async def get_metrics_history(
 async def get_income_statement(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
-    limit: int = Query(5, ge=1, le=40),
+    limit: int = Query(20, ge=1, le=80),
     db: AsyncSession = Depends(get_db),
 ):
     symbol_upper = symbol.upper()
@@ -5869,7 +5971,7 @@ async def get_income_statement(
 async def get_balance_sheet(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
-    limit: int = Query(5, ge=1, le=40),
+    limit: int = Query(20, ge=1, le=80),
     db: AsyncSession = Depends(get_db),
 ):
     last_data_date = await _get_model_last_updated(db, BalanceSheet, symbol)
@@ -5923,7 +6025,7 @@ async def get_balance_sheet(
 async def get_cash_flow(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
-    limit: int = Query(5, ge=1, le=40),
+    limit: int = Query(20, ge=1, le=80),
     db: AsyncSession = Depends(get_db),
 ):
     last_data_date = await _get_model_last_updated(db, CashFlow, symbol)

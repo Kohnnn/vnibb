@@ -67,8 +67,8 @@ const labels: Record<string, string> = {
     eps_diluted: 'Diluted EPS',
 };
 
-const TABLE_YEAR_LIMIT = 10;
-const QUARTER_PERIOD_LIMIT = 28;
+const TABLE_YEAR_LIMIT = 20;
+const QUARTER_PERIOD_LIMIT = 40;
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
 function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemove }: IncomeStatementWidgetProps) {

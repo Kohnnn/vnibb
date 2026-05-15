@@ -77,8 +77,8 @@ const ratioLabels: Record<string, string> = {
     payout_ratio: 'Payout Ratio',
 };
 
-const TABLE_YEAR_LIMIT = 10;
-const QUARTER_PERIOD_LIMIT = 28;
+const TABLE_YEAR_LIMIT = 20;
+const QUARTER_PERIOD_LIMIT = 40;
 const NULL_LIKE_RATIO_KEYS = new Set(['pe', 'pb', 'ps', 'peg_ratio', 'ev_sales', 'ev_ebitda']);
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
