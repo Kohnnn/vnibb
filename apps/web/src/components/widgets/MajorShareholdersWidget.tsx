@@ -55,7 +55,7 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
     const treatOwnershipAsRatio =
         ownershipValues.length > 0 && ownershipValues.every((value) => Math.abs(value) <= 1);
     const hasData = shareholders.length > 0;
-    const hasMeaningfulData = shareholders.length >= 2;
+    const hasSparseData = shareholders.length === 1;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
@@ -63,12 +63,12 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
         onDataChange?.({
             __widgetRuntime: {
                 layoutHint: {
-                    empty: !hasMeaningfulData,
+                    empty: !hasData,
                     compactHeight: 3,
                 },
             },
         });
-    }, [hasMeaningfulData, onDataChange]);
+    }, [hasData, onDataChange]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view shareholders" icon={<Users size={18} />} />;
@@ -79,7 +79,7 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
             <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-2">
                 <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                     <Users size={12} />
-                    <span>{hasMeaningfulData ? shareholders.length : 0} shareholders</span>
+                    <span>{shareholders.length} shareholders</span>
                 </div>
                 <WidgetMeta
                     updatedAt={dataUpdatedAt}
@@ -110,14 +110,13 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
                         icon={<Users size={18} />}
                         size="compact"
                     />
-                ) : !hasMeaningfulData ? (
-                    <WidgetEmpty
-                        message={`Data pending for ${symbol}`}
-                        detail="Ownership data is typically strongest for larger HOSE-listed issuers."
-                        icon={<Users size={18} />}
-                        size="compact"
-                    />
                 ) : (
+                    <>
+                    {hasSparseData ? (
+                        <div className="mb-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-200">
+                            Limited disclosure coverage: showing the single available shareholder row for {symbol}.
+                        </div>
+                    ) : null}
                     <table className="data-table w-full table-fixed text-xs">
                         <thead className="text-[var(--text-muted)]">
                             <tr className="border-b border-[var(--border-color)]">
@@ -175,6 +174,7 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
                             })}
                         </tbody>
                     </table>
+                    </>
                 )}
             </div>
         </div>

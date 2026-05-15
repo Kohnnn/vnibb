@@ -5,11 +5,28 @@ import pytest
 
 from vnibb.api.v1.equity import _ratio_has_metric_value, _to_ratio_data
 from vnibb.api.v1.equity import _enrich_missing_ratio_metrics
+from vnibb.api.v1.equity import _compute_rolling_high_low, _load_mongo_financial_ratio_rows, _load_mongo_financial_statement_rows
 from vnibb.models.company import Company
 from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
+
+
+class FakeMongoMarketDataService:
+    enabled = True
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.requests = []
+
+    async def get_raw_dataset_records(self, symbol, *, dataset, limit):
+        self.requests.append({"symbol": symbol, "dataset": dataset, "limit": limit})
+        return self.rows
+
+    async def get_eod_prices(self, symbol, *, lookback_days, limit):
+        self.requests.append({"symbol": symbol, "dataset": "market_prices_eod", "lookback_days": lookback_days, "limit": limit})
+        return self.rows
 
 
 def make_ratio_row(**overrides):
@@ -76,6 +93,73 @@ def test_to_ratio_data_reads_ev_sales_from_raw_data_fallback():
     row = make_ratio_row(raw_data={"evToSales": 3.25})
     result = _to_ratio_data(row)
     assert result.ev_sales == 3.25
+
+
+@pytest.mark.asyncio
+async def test_load_mongo_financial_statement_rows_transforms_raw_records(monkeypatch):
+    fake_service = FakeMongoMarketDataService(
+        [
+            {
+                "raw": {
+                    "yearReport": 2024,
+                    "revenue": 1200.0,
+                    "netIncome": 180.0,
+                }
+            },
+            {
+                "raw": {
+                    "yearReport": 2023,
+                    "revenue": 1000.0,
+                    "netIncome": 150.0,
+                }
+            },
+        ]
+    )
+    monkeypatch.setattr("vnibb.api.v1.equity.get_mongo_market_data_service", lambda: fake_service)
+
+    rows = await _load_mongo_financial_statement_rows("VCI", "income", "year", 10)
+
+    assert [row.period for row in rows] == ["2023", "2024"]
+    assert rows[-1].revenue == pytest.approx(1200.0)
+    assert rows[-1].net_income == pytest.approx(180.0)
+    assert fake_service.requests[0]["dataset"] == "finance.income_statement"
+
+
+@pytest.mark.asyncio
+async def test_load_mongo_financial_ratio_rows_transforms_and_filters_raw_records(monkeypatch):
+    fake_service = FakeMongoMarketDataService(
+        [
+            {"raw": {"yearReport": 2024, "quarter": 1, "priceToEarning": 9.2, "priceToBook": 1.4}},
+            {"raw": {"yearReport": 2024, "quarter": 2, "priceToEarning": 9.6, "priceToBook": 1.5}},
+            {"raw": {"yearReport": 2023, "quarter": 1, "priceToEarning": 8.5, "priceToBook": 1.2}},
+        ]
+    )
+    monkeypatch.setattr("vnibb.api.v1.equity.get_mongo_market_data_service", lambda: fake_service)
+
+    rows = await _load_mongo_financial_ratio_rows("VCI", "Q1", limit=10)
+
+    assert [row.period for row in rows] == ["Q1-2023", "Q1-2024"]
+    assert rows[-1].pe == pytest.approx(9.2)
+    assert rows[-1].pb == pytest.approx(1.4)
+    assert fake_service.requests[0]["dataset"] == "finance.ratio"
+
+
+@pytest.mark.asyncio
+async def test_compute_rolling_high_low_prefers_mongo_eod(monkeypatch):
+    fake_service = FakeMongoMarketDataService(
+        [
+            {"high": 10.0, "low": 8.0},
+            {"high": 15.0, "low": 7.5},
+            {"high": 12.0, "low": 9.0},
+        ]
+    )
+    monkeypatch.setattr("vnibb.api.v1.equity.get_mongo_market_data_service", lambda: fake_service)
+
+    high, low = await _compute_rolling_high_low(None, "VCI", trading_days=252)  # type: ignore[arg-type]
+
+    assert high == pytest.approx(15.0)
+    assert low == pytest.approx(7.5)
+    assert fake_service.requests[0]["dataset"] == "market_prices_eod"
 
 
 @pytest.mark.asyncio

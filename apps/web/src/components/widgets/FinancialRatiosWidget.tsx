@@ -305,6 +305,37 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
 
         return rows;
     }, [categoryLabels, categoryMetrics, ratioLookup, tableColumns, visiblePeriods]);
+
+    const dataQualityWarnings = useMemo(() => {
+        const warnings: string[] = [];
+        const missingGrossMarginPeriods = visiblePeriods.filter((periodValue) => {
+            const entry = ratioLookup.get(periodValue);
+            return entry && entry.gross_margin == null && entry.operating_margin != null;
+        });
+        if (missingGrossMarginPeriods.length > 0) {
+            warnings.push(`Gross Margin is missing for ${missingGrossMarginPeriods.slice(0, 3).join(', ')}${missingGrossMarginPeriods.length > 3 ? '...' : ''} while Operating Margin is present.`);
+        }
+
+        const addSwingWarnings = (metricKey: 'ps' | 'ev_sales', label: string) => {
+            const values = visiblePeriods
+                .map((periodValue) => ({ period: periodValue, value: ratioLookup.get(periodValue)?.[metricKey] }))
+                .filter((item): item is { period: string; value: number } => typeof item.value === 'number' && Number.isFinite(item.value) && item.value > 0);
+            for (let index = 1; index < values.length; index += 1) {
+                const previous = values[index - 1];
+                const current = values[index];
+                const multiple = Math.max(previous.value, current.value) / Math.max(Math.min(previous.value, current.value), 0.000001);
+                if (multiple >= 50) {
+                    warnings.push(`${label} changes ${multiple.toFixed(0)}x from ${previous.period} to ${current.period}; validate provider units/denominators.`);
+                    break;
+                }
+            }
+        };
+
+        addSwingWarnings('ps', 'P/S');
+        addSwingWarnings('ev_sales', 'EV/Sales');
+        return warnings.slice(0, 3);
+    }, [ratioLookup, visiblePeriods]);
+
     return (
         <WidgetContainer
             title="Financial Ratios"
@@ -353,6 +384,14 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                         />
                     ) : (
                         <>
+                            {dataQualityWarnings.length > 0 && (
+                                <div className="mb-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
+                                    <div className="font-black uppercase tracking-[0.16em] text-amber-200">Data quality notes</div>
+                                    {dataQualityWarnings.map((warning) => (
+                                        <div key={warning}>{warning}</div>
+                                    ))}
+                                </div>
+                            )}
                             <DenseFinancialTable
                                 columns={tableColumns}
                                 rows={tableRows}

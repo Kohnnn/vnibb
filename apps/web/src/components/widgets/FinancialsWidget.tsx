@@ -44,6 +44,38 @@ const STATEMENT_METRIC_KEYS: Record<'income_statement' | 'balance_sheet' | 'cash
     cash_flow: ['operating_cash_flow', 'investing_cash_flow', 'financing_cash_flow', 'free_cash_flow'],
 };
 
+const STATEMENT_METRIC_ALIASES: Record<string, string[]> = {
+    revenue: ['revenue', 'net_revenue', 'sales_revenue', 'total_revenue'],
+    gross_profit: ['gross_profit', 'grossProfit'],
+    operating_income: ['operating_income', 'operatingIncome', 'operating_profit'],
+    net_income: ['net_income', 'netIncome', 'post_tax_profit'],
+    ebitda: ['ebitda', 'EBITDA'],
+    total_assets: ['total_assets', 'totalAssets', 'asset', 'assets'],
+    total_liabilities: ['total_liabilities', 'totalLiabilities', 'liabilities', 'debt'],
+    total_equity: ['total_equity', 'totalEquity', 'equity', 'owner_equity', 'owners_equity'],
+    cash_and_equivalents: ['cash_and_equivalents', 'cashAndCashEquivalents', 'cash', 'cash_equivalents'],
+    operating_cash_flow: ['operating_cash_flow', 'operatingCashFlow', 'fromOperating', 'cash_from_operations'],
+    investing_cash_flow: ['investing_cash_flow', 'investingCashFlow', 'fromInvesting', 'cash_from_investments'],
+    financing_cash_flow: ['financing_cash_flow', 'financingCashFlow', 'fromFinancing', 'cash_from_financing'],
+    free_cash_flow: ['free_cash_flow', 'freeCashFlow', 'fcf'],
+};
+
+function readMetricValue(row: Record<string, any>, key: string): any {
+    const aliases = STATEMENT_METRIC_ALIASES[key] || [key];
+    for (const alias of aliases) {
+        const value = row[alias];
+        if (value !== null && value !== undefined && value !== '') return value;
+    }
+    const rawData = row.raw_data || row.rawData || row.raw;
+    if (rawData && typeof rawData === 'object') {
+        for (const alias of aliases) {
+            const value = rawData[alias];
+            if (value !== null && value !== undefined && value !== '') return value;
+        }
+    }
+    return null;
+}
+
 const STATEMENT_LABELS: Record<'income_statement' | 'balance_sheet' | 'cash_flow', string[]> = {
     income_statement: ['Revenue', 'Gross Profit', 'Operating Inc.', 'Net Income', 'EBITDA'],
     balance_sheet: ['Total Assets', 'Total Liab.', 'Total Equity', 'Cash & Eq.'],
@@ -184,9 +216,14 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                         }
                         const currentVal = activeTab === 'ratios'
                             ? d[m.key]
-                            : convertFinancialValueForUnit(d[m.key], unitConfig, periodLabel);
+                            : convertFinancialValueForUnit(readMetricValue(d, m.key), unitConfig, periodLabel);
                         const periodIndex = sortedPeriodIndex.get(periodLabel) ?? -1;
-                        const prevValRaw = periodIndex > 0 ? (comparisonRows[periodIndex - 1] as any)?.[m.key] : null;
+                        const prevRow = periodIndex > 0 ? (comparisonRows[periodIndex - 1] as any) : null;
+                        const prevValRaw = prevRow
+                            ? activeTab === 'ratios'
+                                ? prevRow[m.key]
+                                : readMetricValue(prevRow, m.key)
+                            : null;
                         const prevVal = activeTab === 'ratios'
                             ? prevValRaw
                             : convertFinancialValueForUnit(prevValRaw, unitConfig, comparisonRows[periodIndex - 1]?.__period);
@@ -216,6 +253,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
         }, 0)
     }, [tableData])
     const isSparseData = hasData && populatedCells > 0 && populatedCells < 8
+    const hasRenderableData = hasData && populatedCells > 0
 
     const sourceLabel =
         activeTab === 'ratios'
@@ -340,6 +378,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                     ) : !hasData ? (
                         <WidgetEmpty
                             message={`No ${tabs.find((tab) => tab.id === activeTab)?.label?.toLowerCase() || 'financial'} data for ${symbol} (${periodLabel}).`}
+                            action={{ label: 'Refresh data', onClick: () => activeQuery.refetch() }}
+                        />
+                    ) : !hasRenderableData ? (
+                        <WidgetEmpty
+                            message={`${tabs.find((tab) => tab.id === activeTab)?.label || 'Financial'} periods loaded, but tracked metrics are empty for ${symbol} (${periodLabel}).`}
                             action={{ label: 'Refresh data', onClick: () => activeQuery.refetch() }}
                         />
                     ) : (

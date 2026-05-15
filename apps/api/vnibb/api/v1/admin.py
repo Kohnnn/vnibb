@@ -23,6 +23,7 @@ from vnibb.services.ai_prompt_library_service import ai_prompt_library_service
 from vnibb.services.ai_runtime_config_service import ai_runtime_config_service
 from vnibb.services.ai_telemetry_service import ai_telemetry_service
 from vnibb.services.unit_runtime_config_service import unit_runtime_config_service
+from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.system_layout_template_service import (
     SYSTEM_DASHBOARD_KEYS,
     SystemLayoutTemplateBundleResponse,
@@ -244,6 +245,34 @@ async def get_provider_status() -> Dict[str, Any]:
         },
         "appwrite": appwrite_health,
         "appwrite_runtime": appwrite_runtime_summary(),
+    }
+
+
+@router.get("/mongo/collections", dependencies=[Depends(require_admin_access)])
+async def inspect_mongo_collections(
+    name_filter: Optional[str] = Query(default=None, description="Optional case-insensitive collection-name filter"),
+    sample_limit: int = Query(default=5, ge=1, le=20),
+) -> Dict[str, Any]:
+    """Inspect configured Mongo analytical collections without exposing raw documents."""
+
+    service = get_mongo_market_data_service()
+    if not service.enabled:
+        return {
+            "enabled": False,
+            "database": settings.mongodb_database,
+            "collections": [],
+            "error": "MongoDB analytical source is not configured",
+        }
+
+    collections = await service.inspect_collections(
+        name_filter=name_filter,
+        sample_limit=sample_limit,
+    )
+    return {
+        "enabled": True,
+        "database": settings.mongodb_database,
+        "collections": collections,
+        "count": len(collections),
     }
 
 

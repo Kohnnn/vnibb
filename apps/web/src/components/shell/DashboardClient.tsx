@@ -85,6 +85,11 @@ const QUANT_DASHBOARD_ID = 'default-quant';
 const GLOBAL_MARKETS_DASHBOARD_ID = 'default-global-markets';
 const FUNDAMENTALS_TAB_NAME = 'Fundamentals';
 const FUNDAMENTALS_PERIOD_SYNC_GROUP = 'fundamental-core';
+type TemplateApplyStatus = {
+    message: string;
+    tone: 'success' | 'warning';
+};
+
 const ADMIN_MANAGED_SYSTEM_IDS = new Set([
     MAIN_FUNDAMENTAL_DASHBOARD_ID,
     TECHNICAL_DASHBOARD_ID,
@@ -133,6 +138,7 @@ function DashboardContent() {
     const [adminLayoutKey, setAdminLayoutKey] = useState('');
     const [adminLayoutControlsVisible, setAdminLayoutControlsVisible] = useState(false);
     const [adminLayoutStatus, setAdminLayoutStatus] = useState<string | null>(null);
+    const [templateApplyStatus, setTemplateApplyStatus] = useState<TemplateApplyStatus | null>(null);
     const [isPublishingSystemLayout, setIsPublishingSystemLayout] = useState(false);
     const [draggingPane, setDraggingPane] = useState<'left' | 'right' | null>(null);
     const [widgetSettingsState, setWidgetSettingsState] = useState<{
@@ -152,6 +158,9 @@ function DashboardContent() {
             .map((id) => DASHBOARD_TEMPLATES.find((template) => template.id === id))
             .filter((template): template is DashboardTemplate => Boolean(template));
     }, []);
+    const templateApplyStatusClass = templateApplyStatus?.tone === 'warning'
+        ? 'border-amber-500/25 bg-amber-500/10 text-amber-100'
+        : 'border-blue-500/20 bg-blue-500/10 text-blue-200';
 
     const updateViewport = useCallback(() => {
         if (typeof window !== 'undefined') {
@@ -263,6 +272,12 @@ function DashboardContent() {
         const timeoutId = window.setTimeout(() => setAdminLayoutStatus(null), 2600);
         return () => window.clearTimeout(timeoutId);
     }, [adminLayoutStatus]);
+
+    useEffect(() => {
+        if (!templateApplyStatus) return;
+        const timeoutId = window.setTimeout(() => setTemplateApplyStatus(null), 3200);
+        return () => window.clearTimeout(timeoutId);
+    }, [templateApplyStatus]);
 
     useEffect(() => {
         if (!activeDashboard || !ADMIN_MANAGED_SYSTEM_IDS.has(activeDashboard.id)) return;
@@ -742,7 +757,15 @@ function DashboardContent() {
     }, [activeDashboard?.id, activeTab]);
 
     const handleApplyTemplate = useCallback((template: DashboardTemplate) => {
-        if (!activeDashboard || !activeTab || !canEditCurrentDashboard) return;
+        if (!activeDashboard || !activeTab) return;
+        if (!canEditCurrentDashboard) {
+            setTemplateApplyStatus({ message: 'Unlock or create a custom workspace before applying templates.', tone: 'warning' });
+            return;
+        }
+        if (template.widgets.length === 0) {
+            setTemplateApplyStatus({ message: 'This template has no widgets to apply.', tone: 'warning' });
+            return;
+        }
 
         const tab = createTab(activeDashboard.id, template.name);
         template.widgets.forEach(w => {
@@ -754,6 +777,8 @@ function DashboardContent() {
             });
         });
         setActiveTab(tab.id);
+        setIsTemplateSelectorOpen(false);
+        setTemplateApplyStatus({ message: `Applied ${template.name} template.`, tone: 'success' });
         captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
             source: 'template_selector',
             template_id: template.id,
@@ -766,7 +791,19 @@ function DashboardContent() {
     }, [activeDashboard, activeTab, addWidget, canEditCurrentDashboard, createTab, setActiveTab]);
 
     const handleSeedEmptyTab = useCallback((template: DashboardTemplate) => {
-        if (!activeDashboard || !activeTab || !canEditCurrentDashboard || activeTab.widgets.length > 0) return;
+        if (!activeDashboard || !activeTab) return;
+        if (!canEditCurrentDashboard) {
+            setTemplateApplyStatus({ message: 'Unlock or create a custom workspace before applying templates.', tone: 'warning' });
+            return;
+        }
+        if (activeTab.widgets.length > 0) {
+            setTemplateApplyStatus({ message: 'Suggested layouts can only seed an empty tab.', tone: 'warning' });
+            return;
+        }
+        if (template.widgets.length === 0) {
+            setTemplateApplyStatus({ message: 'This template has no widgets to apply.', tone: 'warning' });
+            return;
+        }
 
         template.widgets.forEach((widget) => {
             addWidget(activeDashboard.id, activeTab.id, {
@@ -776,6 +813,7 @@ function DashboardContent() {
                 config: widget.config || {},
             });
         });
+        setTemplateApplyStatus({ message: `Applied ${template.name} template.`, tone: 'success' });
         captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
             source: 'empty_tab_seed',
             template_id: template.id,
@@ -802,7 +840,11 @@ function DashboardContent() {
     ];
 
     const handleQuickAddWidget = useCallback((type: WidgetType) => {
-        if (!activeDashboard || !activeTab || !canEditCurrentDashboard) return;
+        if (!activeDashboard || !activeTab) return;
+        if (!canEditCurrentDashboard) {
+            setTemplateApplyStatus({ message: 'Unlock or create a custom workspace before adding widgets.', tone: 'warning' });
+            return;
+        }
 
         const placement = findNextAvailableLayout(activeTab.widgets, type);
         const defaults = getWidgetDefaultLayout(type);
@@ -819,6 +861,7 @@ function DashboardContent() {
                 minH: defaults.minH,
             },
         });
+        setTemplateApplyStatus({ message: `Added ${getWidgetDefinition(type)?.name ?? type.replace(/_/g, ' ')}.`, tone: 'success' });
     }, [activeDashboard, activeTab, addWidget, canEditCurrentDashboard]);
 
     const memoizedLayouts = useMemo(() => {
@@ -1123,6 +1166,12 @@ function DashboardContent() {
                                         <p className="text-sm text-[var(--text-muted)]">Seed this empty tab with a balanced starter, then refine it widget by widget.</p>
                                     </div>
 
+                                    {templateApplyStatus && (
+                                        <div className={`rounded-lg border px-3 py-2 text-xs font-medium ${templateApplyStatusClass}`}>
+                                            {templateApplyStatus.message}
+                                        </div>
+                                    )}
+
                                     <div className="grid w-full gap-3 md:grid-cols-3">
                                         {starterTemplates.map((template) => (
                                             <button
@@ -1246,6 +1295,12 @@ function DashboardContent() {
                 onClose={() => setIsTemplateSelectorOpen(false)}
                 onSelectTemplate={handleApplyTemplate}
             />
+
+            {templateApplyStatus && activeTab?.widgets.length ? (
+                <div className={`fixed bottom-4 left-1/2 z-[120] -translate-x-1/2 rounded-xl border bg-slate-950/95 px-4 py-2 text-xs font-semibold shadow-2xl ${templateApplyStatusClass}`}>
+                    {templateApplyStatus.message}
+                </div>
+            ) : null}
 
             <WidgetSettingsModal
                 isOpen={Boolean(widgetSettingsState)}

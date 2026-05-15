@@ -47,7 +47,9 @@ from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily, OrderbookSnapshot
 from vnibb.providers.vnstock.financials import (
     FinancialStatementData,
+    FinancialsQueryParams,
     StatementType,
+    VnstockFinancialsFetcher,
 )
 from vnibb.services.financial_service import get_financials_with_ttm, normalize_statement_period
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher, StockQuoteData
@@ -373,6 +375,124 @@ async def _load_financial_statement_fallback(
     return fallback_rows
 
 
+async def _load_mongo_financial_statement_rows(
+    symbol: str,
+    statement_type: str,
+    period: str,
+    limit: int,
+) -> list[FinancialStatementData]:
+    """Read raw vnstock financial statement records from Mongo when configured."""
+
+    dataset_map = {
+        "income": "finance.income_statement",
+        "income_statement": "finance.income_statement",
+        "balance": "finance.balance_sheet",
+        "balance_sheet": "finance.balance_sheet",
+        "cashflow": "finance.cash_flow",
+        "cash_flow": "finance.cash_flow",
+    }
+    statement_type_map = {
+        "income": StatementType.INCOME,
+        "income_statement": StatementType.INCOME,
+        "balance": StatementType.BALANCE,
+        "balance_sheet": StatementType.BALANCE,
+        "cashflow": StatementType.CASHFLOW,
+        "cash_flow": StatementType.CASHFLOW,
+    }
+    dataset = dataset_map.get(statement_type)
+    provider_statement_type = statement_type_map.get(statement_type)
+    if dataset is None or provider_statement_type is None:
+        return []
+
+    requested_period = str(period or "year").strip().upper()
+    normalized_period = "quarter" if requested_period in {"QUARTER", "Q", "Q1", "Q2", "Q3", "Q4", "TTM"} else "year"
+    service = get_mongo_market_data_service()
+    if not service.enabled:
+        return []
+
+    raw_records = await service.get_raw_dataset_records(
+        symbol,
+        dataset=dataset,
+        limit=max(limit * 4, 80),
+    )
+    raw_rows = [row.get("raw") for row in raw_records if isinstance(row.get("raw"), dict)]
+    if not raw_rows:
+        return []
+
+    rows = VnstockFinancialsFetcher.transform_data(
+        FinancialsQueryParams(
+            symbol=symbol,
+            statement_type=provider_statement_type,
+            period=normalized_period,  # type: ignore[arg-type]
+            limit=min(max(limit, 1), 40),
+        ),
+        raw_rows,
+    )
+    if requested_period == "TTM":
+        return _build_ttm_financial_statement_rows(rows, statement_type=statement_type)
+    if requested_period in {"Q1", "Q2", "Q3", "Q4"}:
+        rows = [row for row in rows if str(row.period or "").upper().startswith(f"{requested_period}-")]
+    rows = _sort_financial_statement_rows(rows)
+    return rows[-limit:]
+
+
+async def _load_mongo_financial_ratio_rows(
+    symbol: str,
+    period: str,
+    *,
+    limit: int = 80,
+) -> list[FinancialRatioData]:
+    """Read raw vnstock financial ratio records from Mongo when configured."""
+
+    requested_period = str(period or "year").strip().upper()
+    normalized_period = "year" if requested_period in {"YEAR", "FY"} else "quarter"
+    service = get_mongo_market_data_service()
+    if not service.enabled:
+        return []
+
+    raw_records = await service.get_raw_dataset_records(
+        symbol,
+        dataset="finance.ratio",
+        limit=max(limit * 4, 120),
+    )
+    raw_rows = [row.get("raw") for row in raw_records if isinstance(row.get("raw"), dict)]
+    if not raw_rows:
+        return []
+
+    if normalized_period == "quarter":
+        prepared_rows: list[dict[str, Any]] = []
+        for raw_row in raw_rows:
+            prepared = dict(raw_row)
+            if not prepared.get("period"):
+                year_hint = prepared.get("yearReport") or prepared.get("fiscalYear") or prepared.get("year")
+                quarter_hint = prepared.get("quarter") or prepared.get("fiscalQuarter")
+                try:
+                    year_value = int(float(year_hint))
+                    quarter_value = int(float(quarter_hint))
+                except (TypeError, ValueError):
+                    year_value = 0
+                    quarter_value = 0
+                if 1900 <= year_value <= 2100 and 1 <= quarter_value <= 4:
+                    prepared["period"] = f"{year_value}-Q{quarter_value}"
+                    prepared["fiscalYear"] = year_value
+                    prepared["fiscalQuarter"] = quarter_value
+                    prepared.pop("yearReport", None)
+            prepared_rows.append(prepared)
+        raw_rows = prepared_rows
+
+    rows = VnstockFinancialRatiosFetcher.transform_data(
+        FinancialRatiosQueryParams(symbol=symbol, period=normalized_period),
+        raw_rows,
+    )
+    rows = [
+        row.model_copy(update={"period": _normalize_ratio_period(row.period) or row.period})
+        for row in rows
+    ]
+    rows = _dedupe_ratio_rows(rows)
+    rows = _filter_ratio_rows_for_period(rows, period)
+    return rows[-limit:]
+
+
 def _build_ttm_financial_statement_rows(
     rows: list[FinancialStatementData],
     *,
@@ -439,7 +559,8 @@ def _build_ttm_financial_statement_rows(
 
 
 def _build_ratio_ttm_rows(rows: List[FinancialRatioData]) -> List[FinancialRatioData]:
-    ordered_rows = sorted(rows, key=lambda item: _ratio_period_sort_key(item.period))
+    usable_rows = [row for row in rows if _ratio_has_metric_value(row)]
+    ordered_rows = sorted(usable_rows or rows, key=lambda item: _ratio_period_sort_key(item.period))
     latest = ordered_rows[-1] if ordered_rows else None
     if latest is None:
         return []
@@ -1520,6 +1641,21 @@ async def _compute_rolling_high_low(
     *,
     trading_days: int = 252,
 ) -> tuple[Optional[float], Optional[float]]:
+    mongo_service = get_mongo_market_data_service()
+    mongo_rows = await mongo_service.get_eod_prices(
+        symbol,
+        lookback_days=max(380, trading_days + 30),
+        limit=max(trading_days + 30, 320),
+    ) if mongo_service.enabled else []
+    if mongo_rows:
+        recent_rows = mongo_rows[-trading_days:]
+        mongo_highs = [_coerce_optional_float(row.get("high")) for row in recent_rows]
+        mongo_lows = [_coerce_optional_float(row.get("low")) for row in recent_rows]
+        highs = [value for value in mongo_highs if value is not None]
+        lows = [value for value in mongo_lows if value is not None]
+        if highs or lows:
+            return (max(highs) if highs else None, min(lows) if lows else None)
+
     rows = await _load_rolling_price_window(db, symbol, trading_days=trading_days)
     highs = [row.high for row in rows if row.high is not None]
     lows = [row.low for row in rows if row.low is not None]
@@ -4712,8 +4848,14 @@ async def get_financials(
             period=period,
             limit=limit,
         )
+        mongo_data = await _load_mongo_financial_statement_rows(
+            symbol=symbol,
+            statement_type=statement_type,
+            period=period,
+            limit=limit,
+        )
         if data:
-            data = _merge_financial_statement_rows(data, fallback_data)
+            data = _merge_financial_statement_rows(data, _merge_financial_statement_rows(mongo_data, fallback_data))
             data = _enrich_financial_statement_rows(data)
             if statement_type == StatementType.INCOME.value:
                 data = await _cross_fill_income_statement_rows(
@@ -4728,6 +4870,7 @@ async def get_financials(
                 meta=MetaData(count=len(data), last_data_date=last_data_date),
             )
 
+        fallback_data = _merge_financial_statement_rows(mongo_data, fallback_data)
         if fallback_data:
             fallback_data = _enrich_financial_statement_rows(fallback_data)
             if statement_type == StatementType.INCOME.value:
@@ -5654,6 +5797,7 @@ async def get_financial_ratios(
         "last_data_date": _serialize_meta_datetime(latest_price_time),
     }
     db_ratio_rows: List[FinancialRatioData] = []
+    mongo_ratio_rows: List[FinancialRatioData] = []
     provider_ratio_rows: List[FinancialRatioData] = []
     provider_error: Exception | None = None
     support_rows = {
@@ -5686,6 +5830,12 @@ async def get_financial_ratios(
     except Exception as db_error:
         logger.warning(f"Ratio DB lookup failed for {symbol_upper}: {db_error}")
 
+    mongo_ratio_rows = await _load_mongo_financial_ratio_rows(
+        symbol_upper,
+        period,
+        limit=80,
+    )
+
     should_fetch_provider = (
         not db_ratio_rows
         or normalized_period == "quarter"
@@ -5700,9 +5850,12 @@ async def get_financial_ratios(
             provider_error = exc
             logger.warning("Provider ratio fetch failed for %s: %s", symbol_upper, exc)
 
-    data = _merge_ratio_row_collections(provider_ratio_rows, db_ratio_rows)
+    data = _merge_ratio_row_collections(
+        provider_ratio_rows,
+        _merge_ratio_row_collections(mongo_ratio_rows, db_ratio_rows),
+    )
     if not data:
-        data = db_ratio_rows or provider_ratio_rows
+        data = mongo_ratio_rows or db_ratio_rows or provider_ratio_rows
     if not data:
         data = _build_placeholder_ratio_rows_from_support(
             symbol_upper,

@@ -4,6 +4,7 @@ import { memo } from 'react';
 import { ExternalLink, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatTimestamp } from '@/lib/format';
+import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
 
 interface NewsCardProps {
   news: {
@@ -23,26 +24,6 @@ interface NewsCardProps {
     relevance_score?: number | null;
     is_market_wide_fallback?: boolean;
   };
-}
-
-function normalizePublishedDate(news: NewsCardProps['news']): string | null {
-  const value = news.published_at ?? news.published_date ?? news.publishedDate ?? news.created_at ?? news.timestamp;
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'number') {
-    const millis = value > 1_000_000_000_000 ? value : value * 1000;
-    const parsed = new Date(millis);
-    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
-  }
-  const text = String(value).trim();
-  if (!text) return null;
-  if (/^\d+$/.test(text)) {
-    const numeric = Number(text);
-    const millis = numeric > 1_000_000_000_000 ? numeric : numeric * 1000;
-    const parsed = new Date(millis);
-    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
-  }
-  const parsed = new Date(text);
-  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : text;
 }
 
 const SENTIMENT_CONFIG = {
@@ -107,7 +88,7 @@ function NewsCardComponent({ news }: NewsCardProps) {
             <span className="px-1.5 py-0.5 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded text-[var(--text-secondary)]">{news.source}</span>
             <span>•</span>
             <span className="flex items-center gap-1">
-                {formatTimestamp(normalizePublishedDate(news))}
+                {formatTimestamp(normalizeNewsItemTimestamp(news as unknown as Record<string, unknown>))}
             </span>
             
             {news.symbols && news.symbols.length > 0 && (

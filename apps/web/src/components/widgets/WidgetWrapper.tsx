@@ -763,8 +763,11 @@ export function WidgetWrapper({
                             Collapsed
                         </div>
                     ) : !isContentVisible ? (
-                        <div className="flex h-full items-center justify-center">
-                            <div className="w-full max-w-sm rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)]/70">
+                        <div className="flex h-full items-center justify-center p-3">
+                            <div className="w-full max-w-sm rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)]/80 p-3 shadow-sm">
+                                <div className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                                    Preparing widget
+                                </div>
                                 <WidgetSkeleton lines={4} />
                             </div>
                         </div>

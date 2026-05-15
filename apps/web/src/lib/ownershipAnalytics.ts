@@ -25,6 +25,17 @@ function normalizeOwnershipPct(value: number | null | undefined, treatAsRatio: b
   return treatAsRatio ? value * 100 : value
 }
 
+function readOwnershipPct(holder: ShareholderData): number | null {
+  const row = holder as ShareholderData & {
+    ownership?: number | null
+    pct?: number | null
+    percent?: number | null
+    percentage?: number | null
+  }
+  const value = row.ownership_pct ?? row.ownership ?? row.pct ?? row.percent ?? row.percentage
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
 function classifyHolderType(type: string | null | undefined): 'institutional' | 'foreign' | 'insider' | 'other' {
   const normalized = String(type || '').toLowerCase()
   if (normalized.includes('foreign') || normalized.includes('state')) return 'foreign'
@@ -46,11 +57,11 @@ export function buildOwnershipSummary(
   insiderSentiment: InsiderSentiment | null | undefined,
 ): OwnershipSummary {
   const ownershipValues = shareholders
-    .map((holder) => holder.ownership_pct)
-    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    .map(readOwnershipPct)
+    .filter((value): value is number => value !== null)
   const treatAsRatio = ownershipValues.length > 0 && ownershipValues.every((value) => Math.abs(value) <= 1)
   const normalizedOwnership = shareholders
-    .map((holder) => normalizeOwnershipPct(holder.ownership_pct, treatAsRatio))
+    .map((holder) => normalizeOwnershipPct(readOwnershipPct(holder), treatAsRatio))
     .filter((value): value is number => value !== null)
     .sort((left, right) => right - left)
 

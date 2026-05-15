@@ -1,7 +1,7 @@
 'use client';
 
-import { memo, useEffect } from 'react';
-import { useStockQuote, useProfile, useScreenerData, useTradingStats } from '@/lib/queries';
+import { memo, useEffect, useMemo } from 'react';
+import { useStockQuote, useProfile, useScreenerData, useTradingStats, useHistoricalPrices } from '@/lib/queries';
 import { useUnit } from '@/contexts/UnitContext';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -72,6 +72,18 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     enabled: Boolean(symbol),
   });
   const { data: tradingStats } = useTradingStats(symbol, Boolean(symbol));
+  const historyEndDate = useMemo(() => new Date().toISOString().slice(0, 10), [])
+  const historyStartDate = useMemo(() => {
+    const start = new Date()
+    start.setFullYear(start.getFullYear() - 1)
+    return start.toISOString().slice(0, 10)
+  }, [])
+  const { data: oneYearHistory } = useHistoricalPrices(symbol, {
+    startDate: historyStartDate,
+    endDate: historyEndDate,
+    interval: '1D',
+    enabled: Boolean(symbol),
+  })
   const quantRegime = useQuantRegime(symbol, { period: '1Y', enabled: Boolean(symbol) })
   const { config: unitConfig } = useUnit();
 
@@ -160,8 +172,17 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const dayLow = firstPositiveNumber(quote?.low, quoteRow.day_low, quoteRow.low_price, screenerRowRecord?.low, screenerRowRecord?.day_low)
   const openPrice = firstPositiveNumber(quote?.open, quoteRow.day_open, quoteRow.open_price, screenerRowRecord?.open, screenerRowRecord?.day_open)
   const previousClose = firstPositiveNumber(quote?.prevClose, quoteRow.prev_close, quoteRow.reference_price, quoteRow.ref_price, screenerRowRecord?.prev_close, screenerRowRecord?.reference_price)
-  const rangeLow = firstPositiveNumber(tradingStats?.data?.low_52w, tradingStatsRow?.['52w_low'], tradingStatsRow?.low52w, screenerRowRecord?.low_52w, screenerRowRecord?.['52w_low'])
-  const rangeHigh = firstPositiveNumber(tradingStats?.data?.high_52w, tradingStatsRow?.['52w_high'], tradingStatsRow?.high52w, screenerRowRecord?.high_52w, screenerRowRecord?.['52w_high'])
+  const historyRange = useMemo(() => {
+    const rows = oneYearHistory?.data || []
+    const highs = rows.map((row) => toPositiveNumber(row.high)).filter((value): value is number => value !== null)
+    const lows = rows.map((row) => toPositiveNumber(row.low)).filter((value): value is number => value !== null)
+    return {
+      high: highs.length ? Math.max(...highs) : null,
+      low: lows.length ? Math.min(...lows) : null,
+    }
+  }, [oneYearHistory?.data])
+  const rangeLow = firstPositiveNumber(tradingStats?.data?.low_52w, tradingStatsRow?.['52w_low'], tradingStatsRow?.low52w, screenerRowRecord?.low_52w, screenerRowRecord?.['52w_low'], historyRange.low)
+  const rangeHigh = firstPositiveNumber(tradingStats?.data?.high_52w, tradingStatsRow?.['52w_high'], tradingStatsRow?.high52w, screenerRowRecord?.high_52w, screenerRowRecord?.['52w_high'], historyRange.high)
   const rangePrice = toPositiveNumber(price)
   const hasRange = Boolean(rangeLow && rangeHigh && rangePrice && rangeHigh > rangeLow)
   const rangePosition = hasRange

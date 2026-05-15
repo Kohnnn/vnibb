@@ -9,6 +9,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { API_BASE_URL } from '@/lib/api';
 import { formatTimestamp } from '@/lib/format';
+import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
 
 function decodeHtml(value: string | null | undefined): string {
   if (!value) return '';
@@ -37,26 +38,6 @@ function cleanText(value: string | null | undefined): string {
 function formatPublishedTime(value: string | null | undefined): string {
   const formatted = formatTimestamp(value);
   return formatted === '-' ? 'Unknown time' : formatted;
-}
-
-function normalizePublishedDate(item: Record<string, unknown>): string | null {
-  const value = item.published_at ?? item.published_date ?? item.publishedDate ?? item.pubDate ?? item.created_at ?? item.timestamp ?? item.date;
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'number') {
-    const millis = value > 1_000_000_000_000 ? value : value * 1000;
-    const parsed = new Date(millis);
-    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
-  }
-  const text = String(value).trim();
-  if (!text) return null;
-  if (/^\d+$/.test(text)) {
-    const numeric = Number(text);
-    const millis = numeric > 1_000_000_000_000 ? numeric : numeric * 1000;
-    const parsed = new Date(millis);
-    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
-  }
-  const parsed = new Date(text);
-  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : text;
 }
 
 function renderHighlightedText(text: string, tokens: string[]) {
@@ -144,7 +125,7 @@ function MarketNewsWidgetComponent({ symbol, config }: { symbol?: string; config
           title: cleanText(item.title || ''),
           summary: cleanText(item.summary || item.description || ''),
           source: cleanText(item.source || 'Unknown'),
-          publishedDate: normalizePublishedDate(item),
+          publishedDate: normalizeNewsItemTimestamp(item),
           url: item.url || item.link || null,
           matchedSymbols: Array.isArray(item.matched_symbols)
             ? item.matched_symbols.map((value: string) => String(value).toUpperCase())

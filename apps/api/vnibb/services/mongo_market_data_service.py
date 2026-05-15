@@ -45,6 +45,57 @@ class MongoMarketDataService:
 
         return self._client[settings.mongodb_database][name]
 
+    def _get_database(self) -> Any:
+        if not self.enabled:
+            raise RuntimeError("MongoDB analytical source is not configured")
+
+        if self._client is None:
+            self._get_collection("__connectivity_probe__")
+
+        return self._client[settings.mongodb_database]
+
+    async def inspect_collections(
+        self,
+        *,
+        name_filter: str | None = None,
+        sample_limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Return safe collection metadata for wiring decisions."""
+
+        sample_limit = max(1, min(sample_limit, 20))
+        filter_text = str(name_filter or "").strip().lower()
+
+        def _read() -> list[dict[str, Any]]:
+            db = self._get_database()
+            names = sorted(db.list_collection_names())
+            if filter_text:
+                names = [name for name in names if filter_text in name.lower()]
+
+            results: list[dict[str, Any]] = []
+            for name in names:
+                coll = db[name]
+                sample = list(coll.find({}, {"_id": 0}).limit(sample_limit))
+                field_names = sorted({field for row in sample for field in row.keys()})
+                if "dataset" in field_names:
+                    dataset_values = sorted(str(value) for value in coll.distinct("dataset") if value is not None)[:100]
+                else:
+                    dataset_values = []
+                results.append(
+                    {
+                        "name": name,
+                        "estimated_count": coll.estimated_document_count(),
+                        "sample_fields": field_names,
+                        "sample_datasets": dataset_values,
+                    }
+                )
+            return results
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("Mongo collection inspection failed: %s", exc)
+            return []
+
     async def get_intraday_trades(
         self,
         symbol: str,
@@ -159,6 +210,43 @@ class MongoMarketDataService:
             return await asyncio.to_thread(_read)
         except Exception as exc:
             logger.warning("Mongo price-depth read failed for %s: %s", symbol_upper, exc)
+            return []
+
+    async def get_raw_dataset_records(
+        self,
+        symbol: str,
+        *,
+        dataset: str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return raw shared vnstock records for a symbol/dataset pair."""
+
+        symbol_upper = symbol.upper()
+        limit = max(1, min(limit, 5000))
+
+        def _read() -> list[dict[str, Any]]:
+            coll = self._get_collection("market_vnstock_premium_records")
+            cursor = (
+                coll.find(
+                    {
+                        "dataset": dataset,
+                        "$or": [
+                            {"symbol": symbol_upper},
+                            {"scopeKey": symbol_upper},
+                            {"raw.symbol": symbol_upper},
+                        ],
+                    },
+                    {"_id": 0, "raw": 1, "observedAt": 1, "updatedAt": 1, "dataset": 1},
+                )
+                .sort([("observedAt", -1), ("updatedAt", -1)])
+                .limit(limit)
+            )
+            return list(cursor)
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("Mongo raw dataset read failed for %s %s: %s", symbol_upper, dataset, exc)
             return []
 
     async def get_eod_prices(
