@@ -193,7 +193,7 @@ export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) 
             </div>
             <div className="relative">
               <ChartMountGuard className="h-[240px] min-h-[220px]" minHeight={220}>
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <ScatterChart margin={{ top: 16, right: 16, bottom: 16, left: 0 }}>
                     <ReferenceArea x1={chartDomain.x[0]} x2={100} y1={100} y2={chartDomain.y[1]} fill="rgba(34,211,238,0.06)" />
                     <ReferenceArea x1={100} x2={chartDomain.x[1]} y1={100} y2={chartDomain.y[1]} fill="rgba(74,222,128,0.07)" />

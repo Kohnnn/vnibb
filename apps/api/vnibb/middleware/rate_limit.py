@@ -4,7 +4,8 @@ import logging
 import os
 import re
 
-from fastapi import HTTPException, Request
+from fastapi import Request
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if path.startswith("/api/v1/screener"):
             return "screener", 20
         if path.startswith("/api/v1/admin/"):
-            return "admin", 10
+            return "admin", 60
         return "default", self.default_requests_per_minute
 
     async def dispatch(self, request: Request, call_next):
@@ -105,9 +106,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 bucket,
                 requests_per_minute,
             )
-            raise HTTPException(
+            return JSONResponse(
                 status_code=429,
-                detail={
+                content={
+                    "error": "rate_limited",
                     "message": "Rate limit exceeded. Please slow down.",
                     "bucket": bucket,
                     "limit": requests_per_minute,

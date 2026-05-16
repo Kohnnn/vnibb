@@ -159,7 +159,7 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
               <div className="text-[10px] text-[var(--text-secondary)]">Z-score {Number(metric?.current_regime_z_score ?? 0).toFixed(2)}</div>
             </div>
             <ChartMountGuard className="flex-1 min-h-[160px]" minHeight={160}>
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <ComposedChart data={rows.slice(-252)}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />

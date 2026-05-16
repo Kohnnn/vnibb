@@ -184,7 +184,7 @@ export function ValuationBandWidget({ id, symbol, onRemove }: ValuationBandWidge
                 Historical {seriesConfig.label} vs statistical band
               </div>
               <ChartMountGuard className="flex-1 min-h-[180px]" minHeight={180}>
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <XAxis dataKey="period" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} width={44} />

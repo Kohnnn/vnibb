@@ -108,7 +108,7 @@ export function RSISeasonalWidget({ symbol }: RSISeasonalWidgetProps) {
               <div className="text-[10px] text-[var(--text-secondary)]">{period} profile</div>
             </div>
             <ChartMountGuard className="flex-1 min-h-[150px]" minHeight={150}>
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <ComposedChart data={rows}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.22)" vertical={false} />
                   <XAxis dataKey="month" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />

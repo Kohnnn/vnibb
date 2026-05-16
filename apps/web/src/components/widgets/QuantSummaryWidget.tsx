@@ -112,7 +112,7 @@ function averageSortino(metric: SortinoMetric | undefined): number | null {
 
 export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
-  const [period, setPeriod] = useState<QuantPeriodOption>('1Y')
+  const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
 
   const quantQuery = useQuantMetrics(upperSymbol, {
     period,
@@ -295,7 +295,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
                   <div className="text-[10px] text-[var(--text-secondary)]">8-factor blend</div>
                 </div>
                 <ChartMountGuard className="flex-1 min-h-[180px]" minHeight={180}>
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                     <RadarChart data={radarData} outerRadius="72%">
                       <PolarGrid stroke="rgba(148,163,184,0.25)" />
                       <PolarAngleAxis dataKey="metric" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
