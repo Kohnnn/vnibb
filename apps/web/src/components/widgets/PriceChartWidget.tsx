@@ -26,6 +26,7 @@ const TIMEFRAME_OPTIONS: readonly AdvancedChartTimeframe[] = [
   '1Y',
   '3Y',
   '5Y',
+  'MAX',
   'YTD',
 ];
 
@@ -69,10 +70,10 @@ function normalizeDividendYield(value: number | null | undefined): number | null
 function normalizeChartTimeframe(value: string | undefined): AdvancedChartTimeframe {
   return TIMEFRAME_OPTIONS.includes((value || '') as AdvancedChartTimeframe)
     ? (value as AdvancedChartTimeframe)
-    : '1Y';
+    : 'MAX';
 }
 
-export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: PriceChartWidgetProps) {
+export function PriceChartWidget({ id, symbol, timeframe = 'MAX', onRemove }: PriceChartWidgetProps) {
   const { data: profileData } = useProfile(symbol, !!symbol);
   const {
     data: screenerData,

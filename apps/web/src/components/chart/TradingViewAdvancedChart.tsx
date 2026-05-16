@@ -8,7 +8,7 @@ import { buildChartEventMarkers, type ChartEventMarker } from '@/lib/chartEventM
 import { cn } from '@/lib/utils';
 
 export type AdvancedChartMode = 'candles' | 'line' | 'area';
-export type AdvancedChartTimeframe = '1D' | '5D' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'YTD';
+export type AdvancedChartTimeframe = '1D' | '5D' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX' | 'YTD';
 
 interface TradingViewAdvancedChartProps {
   symbol: string;
@@ -61,6 +61,9 @@ function resolveDateRange(timeframe: AdvancedChartTimeframe): { startDate: strin
       break;
     case '5Y':
       start.setDate(end.getDate() - 365 * 5);
+      break;
+    case 'MAX':
+      start.setFullYear(2000, 0, 1);
       break;
     case 'YTD':
       start.setMonth(0, 1);

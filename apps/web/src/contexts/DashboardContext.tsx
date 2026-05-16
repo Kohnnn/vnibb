@@ -28,6 +28,7 @@ import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
 import { DEFAULT_GLOBAL_MARKETS_SYMBOL } from '@/lib/globalMarketsSymbol';
 import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync, useLoadFromBackend } from '@/lib/useDashboardSync';
+import { config } from '@/lib/config';
 import { normalizeWidgetType } from '@/data/widgetDefinitions';
 import { autoFitGridItems, compactGridItems, findNextAvailableLayout, getWidgetDefaultLayout, preserveTemplateGridItems } from '@/lib/dashboardLayout';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
@@ -2889,11 +2890,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
     useLoadFromBackend(
         mergeDashboardsFromBackend,
-        localStateReady && state.dashboards.length > 0 && !hasLocalCustomDashboards
+        config.enableDashboardBackendSync && localStateReady && state.dashboards.length > 0 && !hasLocalCustomDashboards
     );
 
     useDashboardSync(state, {
-        enabled: true,
+        enabled: config.enableDashboardBackendSync,
         onSyncSuccess: () => setSyncStatus('synced'),
         onSyncError: () => setSyncStatus('error'),
         onDashboardIdReconciled: reconcileDashboardId,

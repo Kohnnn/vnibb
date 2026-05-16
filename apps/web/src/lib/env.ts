@@ -19,6 +19,8 @@ const enableRealtimeRaw = process.env.NEXT_PUBLIC_ENABLE_REALTIME;
 const enableRealtime = enableRealtimeRaw !== undefined
   ? enableRealtimeRaw === 'true'
   : true;
+const enableDashboardBackendSync = process.env.NEXT_PUBLIC_ENABLE_DASHBOARD_BACKEND_SYNC === 'true';
+const enableAnalytics = process.env.NEXT_PUBLIC_ENABLE_ANALYTICS === 'true';
 
 // Validate at module load time (client-side only)
 const missing: string[] = [];
@@ -55,11 +57,13 @@ export const env = {
   appwriteEndpoint: process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT,
   appwriteProjectId: process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID,
   analyticsId: process.env.NEXT_PUBLIC_ANALYTICS_ID,
-  posthogHost: process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() || '',
-  posthogKey: process.env.NEXT_PUBLIC_POSTHOG_KEY?.trim() || '',
+  posthogHost: enableAnalytics ? process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() || '' : '',
+  posthogKey: enableAnalytics ? process.env.NEXT_PUBLIC_POSTHOG_KEY?.trim() || '' : '',
   isDev: process.env.NEXT_PUBLIC_ENV === 'development' || process.env.NODE_ENV === 'development',
   isProd: isProdEnv,
   enableRealtime,
+  enableDashboardBackendSync,
+  enableAnalytics,
 } as const;
 
 export type Env = typeof env;
