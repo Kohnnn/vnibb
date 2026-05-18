@@ -44,7 +44,7 @@ export const queryKeys = {
     intraday: (symbol: string) => ['intraday', symbol] as const,
     financialRatios: (symbol: string, period: string) => ['financialRatios', symbol, period] as const,
     ratioHistory: (symbol: string, period: string, ratios: string[]) => ['ratioHistory', symbol, period, ratios] as const,
-    foreignTrading: (symbol: string) => ['foreignTrading', symbol] as const,
+    foreignTrading: (symbol: string, limit?: number) => ['foreignTrading', symbol, limit] as const,
     transactionFlow: (symbol: string, days: number) => ['transactionFlow', symbol, days] as const,
     correlationMatrix: (symbol: string, days: number, topN: number) => ['correlationMatrix', symbol, days, topN] as const,
     subsidiaries: (symbol: string) => ['subsidiaries', symbol] as const,
@@ -87,7 +87,7 @@ export const queryKeys = {
     insiderDeals: (symbol: string) => ['insiderDeals', symbol] as const,
     recentInsiderDeals: (limit?: number) => ['recentInsiderDeals', limit] as const,
     insiderSentiment: (symbol: string, days: number) => ['insiderSentiment', symbol, days] as const,
-    blockTrades: (symbol?: string) => ['blockTrades', symbol] as const,
+    blockTrades: (symbol?: string, limit?: number) => ['blockTrades', symbol, limit] as const,
     insiderAlerts: (userId?: number, unreadOnly?: boolean) => ['insiderAlerts', userId, unreadOnly] as const,
     alertSettings: (userId: number) => ['alertSettings', userId] as const,
     // Dividends & Stats
@@ -306,7 +306,7 @@ export function useForeignTrading(
     options?: { limit?: number; enabled?: boolean }
 ) {
     return useQuery({
-        queryKey: queryKeys.foreignTrading(symbol),
+        queryKey: queryKeys.foreignTrading(symbol, options?.limit),
         queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // 5 minutes
@@ -399,7 +399,9 @@ export function useMarketOverview(enabled = true) {
         queryFn: ({ signal }) => api.getMarketOverview(signal),
         enabled,
         staleTime: 20 * 1000,
-        refetchInterval: enabled ? 20 * 1000 : false,
+        refetchInterval: enabled
+            ? () => getAdaptiveRefetchInterval(POLLING_PRESETS.marketOverview)
+            : false,
         refetchIntervalInBackground: false,
     });
 }
@@ -704,7 +706,9 @@ export function usePriceBoard(
         queryFn: () => api.getPriceBoard(symbols),
         enabled: options?.enabled !== false && symbols.length > 0,
         staleTime: 10 * 1000, // 10 seconds - real-time data
-        refetchInterval: options?.refetchInterval ?? 15000, // Auto-refresh every 15s
+        refetchInterval:
+            options?.refetchInterval ??
+            (() => getAdaptiveRefetchInterval(POLLING_PRESETS.priceBoard)),
         refetchIntervalInBackground: false,
         networkMode: 'online',
     });
@@ -929,7 +933,7 @@ export function useBlockTrades(
     options?: { symbol?: string; limit?: number; enabled?: boolean; refetchInterval?: number }
 ) {
     return useQuery({
-        queryKey: queryKeys.blockTrades(options?.symbol),
+        queryKey: queryKeys.blockTrades(options?.symbol, options?.limit),
         queryFn: () => api.getBlockTrades({ symbol: options?.symbol, limit: options?.limit }),
         enabled: options?.enabled !== false,
         staleTime: 30 * 1000,
@@ -1191,7 +1195,11 @@ export function useComparison(
         queryFn: () => api.compareStocks(symbols, options?.period ?? 'FY'),
         enabled: options?.enabled !== false && symbols.length > 0,
         staleTime: 60 * 1000, // 1 minute 
-        refetchInterval: options?.refetchInterval ?? 60000,
+        refetchInterval:
+            options?.refetchInterval ??
+            (() => getAdaptiveRefetchInterval(POLLING_PRESETS.movers)),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
         retry: 2,
     });
 }

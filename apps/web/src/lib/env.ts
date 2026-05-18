@@ -21,6 +21,7 @@ const enableRealtime = enableRealtimeRaw !== undefined
   : true;
 const enableDashboardBackendSync = process.env.NEXT_PUBLIC_ENABLE_DASHBOARD_BACKEND_SYNC === 'true';
 const enableAnalytics = process.env.NEXT_PUBLIC_ENABLE_ANALYTICS === 'true';
+const authBypassEnabled = process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true';
 
 // Validate at module load time (client-side only)
 const missing: string[] = [];
@@ -64,6 +65,7 @@ export const env = {
   enableRealtime,
   enableDashboardBackendSync,
   enableAnalytics,
+  authBypassEnabled,
 } as const;
 
 export type Env = typeof env;

@@ -836,7 +836,7 @@ function DashboardContent() {
         { type: 'tradingview_ticker_tape', label: 'Ticker Tape' },
         { type: 'tradingview_technical_analysis', label: 'TV Technicals' },
         { type: 'key_metrics', label: 'Key Metrics' },
-        { type: 'screener', label: 'Screener' },
+        { type: 'screener', label: 'VNIBB Screener' },
     ];
 
     const handleQuickAddWidget = useCallback((type: WidgetType) => {

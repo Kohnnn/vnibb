@@ -160,6 +160,64 @@ async def test_get_sector_averages_falls_back_to_latest_ratio_rows(
 
 
 @pytest.mark.asyncio
+async def test_get_peers_treats_zero_pe_as_missing_and_backfills_snapshot(
+    test_engine, test_db, monkeypatch
+):
+    service = ComparisonService()
+    latest_snapshot_date = date(2026, 5, 18)
+    test_db.add(
+        ScreenerSnapshot(
+            symbol="SSI",
+            snapshot_date=latest_snapshot_date,
+            company_name="SSI Securities",
+            exchange="HOSE",
+            industry="Financial Services",
+            market_cap=900.0,
+            pe=12.3,
+            roe=14.0,
+            price=28_000.0,
+            source="KBS",
+            created_at=datetime.utcnow(),
+        )
+    )
+    await test_db.commit()
+
+    async def fake_get_all_screener_data(*_args, **_kwargs):
+        return [
+            {
+                "symbol": "VCI",
+                "company_name": "Vietcap Securities",
+                "industry": "Financial Services",
+                "sector": "Financials",
+                "exchange": "HOSE",
+                "market_cap": 1_000.0,
+                "pe": 10.0,
+            },
+            {
+                "symbol": "SSI",
+                "company_name": "SSI Securities",
+                "industry": "Financial Services",
+                "sector": "Financials",
+                "exchange": "HOSE",
+                "market_cap": 900.0,
+                "pe": 0,
+            },
+        ]
+
+    monkeypatch.setattr(service, "_get_all_screener_data", fake_get_all_screener_data)
+    monkeypatch.setattr(
+        "vnibb.services.comparison_service.async_session_maker",
+        async_sessionmaker(test_engine, expire_on_commit=False),
+    )
+
+    result = await service.get_peers("VCI", limit=1)
+
+    assert result.count == 1
+    assert result.peers[0].symbol == "SSI"
+    assert result.peers[0].pe_ratio == pytest.approx(12.3)
+
+
+@pytest.mark.asyncio
 async def test_get_comparison_data_derives_missing_metrics_and_sanitizes_negative_debt_equity(
     test_engine,
     test_db,

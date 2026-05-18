@@ -240,8 +240,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
     // Screener
     {
         type: 'screener',
-        name: 'Stock Screener',
-        description: 'Filter stocks by various criteria',
+        name: 'VNIBB Screener Pro',
+        description: 'Native backend-powered Vietnam stock screener and saved scans',
         category: 'screener',
         defaultConfig: {},
         defaultLayout: { w: 12, h: 9, minW: 8, minH: 6 }

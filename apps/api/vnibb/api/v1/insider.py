@@ -238,8 +238,8 @@ async def get_block_trades(
         return [BlockTradeResponse.model_validate(trade) for trade in trades]
 
     except Exception as e:
-        logger.error(f"Error fetching block trades: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error fetching block trades: %s", e)
+        return []
 
 
 # ============================================================================

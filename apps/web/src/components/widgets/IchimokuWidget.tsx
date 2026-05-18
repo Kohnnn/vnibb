@@ -1,11 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Area,
   ComposedChart,
   Line,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -16,7 +15,7 @@ import { useIchimokuSeries } from '@/lib/queries'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
-import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { ChartSizeBox } from '@/components/ui/ChartSizeBox'
 
 const PERIOD_OPTIONS = ['1M', '3M', '6M', '1Y', '3Y', '5Y'] as const
 type PeriodOption = (typeof PERIOD_OPTIONS)[number]
@@ -33,6 +32,11 @@ function labelTone(value: string) {
   return 'text-[var(--text-secondary)]'
 }
 
+function finiteNumber(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 export function IchimokuWidget({ symbol }: IchimokuWidgetProps) {
   const [period, setPeriod] = useState<PeriodOption>('1Y')
   const upperSymbol = symbol?.toUpperCase() || ''
@@ -43,45 +47,49 @@ export function IchimokuWidget({ symbol }: IchimokuWidgetProps) {
 
   const chartData = useMemo(
     () =>
-      (data?.data || []).map((point) => {
-        const lowerCandidates = [point.senkou_span_a, point.senkou_span_b].filter(
-          (value): value is number => typeof value === 'number'
-        )
+      (data?.data || []).flatMap((point) => {
+        const close = finiteNumber(point.close)
+        if (!point.date || close === null) return []
+
+        const tenkanSen = finiteNumber(point.tenkan_sen)
+        const kijunSen = finiteNumber(point.kijun_sen)
+        const senkouSpanA = finiteNumber(point.senkou_span_a)
+        const senkouSpanB = finiteNumber(point.senkou_span_b)
+        const lowerCandidates = [senkouSpanA, senkouSpanB].filter((value): value is number => value !== null)
         const cloudLower = lowerCandidates.length ? Math.min(...lowerCandidates) : null
         const cloudUpper = lowerCandidates.length ? Math.max(...lowerCandidates) : null
         const cloudBand =
           cloudLower !== null && cloudUpper !== null ? Number((cloudUpper - cloudLower).toFixed(2)) : null
         const bullishBand =
-          cloudBand !== null && point.senkou_span_a !== null && point.senkou_span_b !== null && point.senkou_span_a >= point.senkou_span_b
+          cloudBand !== null && senkouSpanA !== null && senkouSpanB !== null && senkouSpanA >= senkouSpanB
             ? cloudBand
             : null
         const bearishBand =
-          cloudBand !== null && point.senkou_span_a !== null && point.senkou_span_b !== null && point.senkou_span_a < point.senkou_span_b
+          cloudBand !== null && senkouSpanA !== null && senkouSpanB !== null && senkouSpanA < senkouSpanB
             ? cloudBand
             : null
 
-        return {
-          ...point,
-          label: point.date,
-          cloudBase: cloudLower,
-          bullishBand,
-          bearishBand,
-        }
+        return [
+          {
+            ...point,
+            close,
+            tenkan_sen: tenkanSen,
+            kijun_sen: kijunSen,
+            senkou_span_a: senkouSpanA,
+            senkou_span_b: senkouSpanB,
+            label: point.date,
+            cloudBase: cloudLower,
+            bullishBand,
+            bearishBand,
+          },
+        ]
       }),
     [data?.data]
   )
 
   const latest = chartData[chartData.length - 1]
-  const hasData = chartData.length > 0
+  const hasData = chartData.length > 1
   const isFallback = Boolean(error && hasData)
-
-  useEffect(() => {
-    if (!hasData || typeof window === 'undefined') return
-    const timeoutId = window.setTimeout(() => {
-      window.dispatchEvent(new Event('resize'))
-    }, 120)
-    return () => window.clearTimeout(timeoutId)
-  }, [hasData, chartData.length])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Ichimoku cloud" icon={<CloudSun size={18} />} />
@@ -151,53 +159,53 @@ export function IchimokuWidget({ symbol }: IchimokuWidgetProps) {
           </div>
 
           <div className="min-h-[260px] flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
-            <ChartMountGuard className="h-full" minHeight={260}>
-              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} minTickGap={32} />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} domain={['auto', 'auto']} width={52} />
-                <Tooltip
-                  contentStyle={{
-                    background: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: '0.75rem',
-                    fontSize: '11px',
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="cloudBase"
-                  stackId="cloud"
-                  stroke="none"
-                  fill="transparent"
-                  connectNulls
-                  isAnimationActive={false}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="bullishBand"
-                  stackId="cloud"
-                  stroke="none"
-                  fill="rgba(16,185,129,0.24)"
-                  connectNulls
-                  isAnimationActive={false}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="bearishBand"
-                  stackId="cloud"
-                  stroke="none"
-                  fill="rgba(244,63,94,0.22)"
-                  connectNulls
-                  isAnimationActive={false}
-                />
-                <Line type="monotone" dataKey="close" stroke="#f8fafc" strokeWidth={2} dot={false} connectNulls />
-                <Line type="monotone" dataKey="tenkan_sen" stroke="#38bdf8" strokeWidth={1.5} dot={false} connectNulls />
-                <Line type="monotone" dataKey="kijun_sen" stroke="#f97316" strokeWidth={1.5} dot={false} connectNulls />
+            <ChartSizeBox className="h-full min-h-[260px]" minHeight={260}>
+              {({ width, height }) => (
+                <ComposedChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} minTickGap={32} />
+                  <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} domain={['auto', 'auto']} width={52} />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'var(--bg-elevated)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '0.75rem',
+                      fontSize: '11px',
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="cloudBase"
+                    stackId="cloud"
+                    stroke="none"
+                    fill="transparent"
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="bullishBand"
+                    stackId="cloud"
+                    stroke="none"
+                    fill="rgba(16,185,129,0.24)"
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="bearishBand"
+                    stackId="cloud"
+                    stroke="none"
+                    fill="rgba(244,63,94,0.22)"
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                  <Line type="monotone" dataKey="close" stroke="#f8fafc" strokeWidth={2} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="tenkan_sen" stroke="#38bdf8" strokeWidth={1.5} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="kijun_sen" stroke="#f97316" strokeWidth={1.5} dot={false} connectNulls />
                 </ComposedChart>
-              </ResponsiveContainer>
-            </ChartMountGuard>
+              )}
+            </ChartSizeBox>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-[10px]">

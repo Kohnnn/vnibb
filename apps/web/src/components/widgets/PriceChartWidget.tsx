@@ -13,7 +13,7 @@ import {
   type AdvancedChartMode,
   type AdvancedChartTimeframe,
 } from '@/components/chart/TradingViewAdvancedChart';
-import { formatPercent, formatRatio } from '@/lib/formatters';
+import { formatDividendYield, formatPercent, formatRatio, normalizeDividendYield } from '@/lib/formatters';
 import type { FinancialRatioData } from '@/types/equity';
 import type { ScreenerData } from '@/types/screener';
 
@@ -57,14 +57,6 @@ function firstFinite(...values: Array<number | null | undefined>): number | null
     }
   }
   return null;
-}
-
-function normalizeDividendYield(value: number | null | undefined): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return null;
-  }
-
-  return Math.abs(value) > 50 ? null : value;
 }
 
 function normalizeChartTimeframe(value: string | undefined): AdvancedChartTimeframe {
@@ -222,7 +214,7 @@ export function PriceChartWidget({ id, symbol, timeframe = 'MAX', onRemove }: Pr
                 { label: 'P/E', value: formatRatio(snapshotMetrics.pe), tone: 'border-sky-500/15 bg-sky-500/[0.06]' },
                 { label: 'P/B', value: formatRatio(snapshotMetrics.pb), tone: 'border-cyan-500/15 bg-cyan-500/[0.06]' },
                 { label: 'ROE', value: formatPercent(snapshotMetrics.roe), tone: 'border-emerald-500/15 bg-emerald-500/[0.06]' },
-                { label: 'Dividend Yield', value: formatPercent(snapshotMetrics.dividendYield), tone: 'border-amber-500/15 bg-amber-500/[0.06]' },
+                { label: 'Dividend Yield', value: formatDividendYield(snapshotMetrics.dividendYield), tone: 'border-amber-500/15 bg-amber-500/[0.06]' },
               ].map((item) => (
                 <div
                   key={item.label}

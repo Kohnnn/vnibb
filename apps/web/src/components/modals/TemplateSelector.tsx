@@ -6,6 +6,7 @@ import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { DASHBOARD_TEMPLATES, DASHBOARD_TEMPLATE_CATEGORIES, type DashboardTemplate, type DashboardTemplateCategory } from '@/types/dashboard-templates';
 import { cn } from '@/lib/utils';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface TemplateSelectorProps {
@@ -104,6 +105,7 @@ function TemplateLayoutPreview({ template }: { template: DashboardTemplate }) {
 function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: TemplateSelectorProps) {
   const [selectedCategory, setSelectedCategory] = useState<DashboardTemplateCategory | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open, onClose });
 
   useEffect(() => {
     if (!open) return
@@ -145,21 +147,27 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
         aria-label="Close template selector"
       />
       <motion.div 
+        ref={dialogRef}
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="template-selector-title"
+        tabIndex={-1}
         className="w-full max-w-6xl max-h-[88vh] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-[var(--border-default)] bg-[var(--bg-surface)]">
           <div>
-            <h2 className="text-xl font-black text-[var(--text-primary)] uppercase tracking-tighter flex items-center gap-2">
+            <h2 id="template-selector-title" className="text-xl font-black text-[var(--text-primary)] uppercase tracking-tighter flex items-center gap-2">
                 <Layout className="text-blue-500" size={20} />
                 Dashboard Templates
             </h2>
             <p className="text-xs text-[var(--text-muted)] font-medium">Choose by workflow, included widgets, and setup requirements.</p>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-2 hover:bg-[var(--bg-hover)] rounded-full transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             aria-label="Close template selector"
@@ -182,6 +190,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
           </div>
           <div className="flex flex-wrap gap-2">
             <button
+              type="button"
               onClick={() => setSelectedCategory(null)}
               className={cn(
                   "rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all",
@@ -197,6 +206,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
               return (
               <button
                 key={category.id}
+                type="button"
                 onClick={() => setSelectedCategory(category.id)}
                 className={cn(
                   "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all",

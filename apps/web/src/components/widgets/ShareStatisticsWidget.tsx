@@ -4,7 +4,7 @@
 
 import { useFinancialRatios, useProfile, useScreenerData, useStockQuote } from '@/lib/queries'
 import { latestByFinancialPeriod } from '@/lib/financialPeriods'
-import { formatNumber, formatPercent, formatVND } from '@/lib/formatters'
+import { formatDividendYield, formatNumber, formatPercent, formatVND, normalizeDividendYield } from '@/lib/formatters'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -140,7 +140,10 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove }: Shar
   ])
 
   const beta = resolveMetric([{ value: stock?.beta, source: 'Screener' }])
-  const dividendYield = resolveMetric([{ value: stock?.dividend_yield, source: 'Screener' }])
+  const dividendYield = resolveMetric([
+    { value: normalizeDividendYield(stock?.dividend_yield), source: 'Screener' },
+    { value: normalizeDividendYield(latestRatio?.dividend_yield), source: 'Ratios' },
+  ])
 
   const exchange =
     profileData?.exchange ||
@@ -263,7 +266,7 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove }: Shar
             <StatRow label="ROE" value={formatPercent(roe.value)} source={roe.source} />
             <StatRow
               label="Dividend Yield"
-              value={formatPercent(dividendYield.value)}
+              value={formatDividendYield(dividendYield.value)}
               source={dividendYield.source}
             />
             <StatRow

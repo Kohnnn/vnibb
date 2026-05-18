@@ -788,6 +788,12 @@ class ComparisonService:
                 except (TypeError, ValueError):
                     return None
 
+            def _positive_float(value: Any) -> float | None:
+                parsed = _to_float(value)
+                if parsed is None or parsed != parsed or parsed <= 0:
+                    return None
+                return parsed
+
             def _text(stock: Any, *keys: str) -> Optional[str]:
                 value = _value(stock, *keys)
                 if value is None:
@@ -853,7 +859,7 @@ class ComparisonService:
                     symbol=_symbol(stock) or "",
                     name=_text(stock, "company_name", "organ_name", "organName"),
                     market_cap=_market_cap(stock),
-                    pe_ratio=_to_float(_value(stock, "pe", "pe_ratio")),
+                    pe_ratio=_positive_float(_value(stock, "pe", "pe_ratio")),
                     roe=_to_float(_value(stock, "roe")),
                     price=_price(stock),
                     change_pct=_change_pct(stock),
@@ -930,7 +936,7 @@ class ComparisonService:
                             payload["exchange"] = exchange
                         if payload.get("market_cap") in (None, "") and market_cap is not None:
                             payload["market_cap"] = market_cap
-                        if payload.get("pe") in (None, "") and pe is not None:
+                        if _positive_float(payload.get("pe")) is None and _positive_float(pe) is not None:
                             payload["pe"] = pe
                         if payload.get("roe") in (None, "") and roe is not None:
                             payload["roe"] = roe

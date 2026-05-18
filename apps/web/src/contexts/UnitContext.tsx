@@ -71,6 +71,7 @@ export function UnitProvider({ children }: { children: ReactNode }) {
   const config = useMemo(() => {
     const normalized = normalizeUnitConfig(localConfig)
     const mergedUsdVndRatesByYear = {
+      ...(DEFAULT_UNIT_CONFIG.usdVndRatesByYear || {}),
       ...adminUsdVndRatesByYear,
       ...(normalized.usdVndRatesByYear || {}),
     }

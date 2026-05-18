@@ -11,6 +11,19 @@ export interface UnitConfig {
 
 export const EMPTY_VALUE = '—'
 export const DEFAULT_USD_VND_RATE = 25_000
+export const DEFAULT_USD_VND_RATES_BY_YEAR: Record<string, number> = {
+  '2016': 22_300,
+  '2017': 22_700,
+  '2018': 23_200,
+  '2019': 23_250,
+  '2020': 23_200,
+  '2021': 22_950,
+  '2022': 23_600,
+  '2023': 23_850,
+  '2024': 25_000,
+  '2025': 25_500,
+  '2026': 26_000,
+}
 
 export const DEFAULT_UNIT_CONFIG: UnitConfig = {
   display: 'auto',
@@ -18,7 +31,7 @@ export const DEFAULT_UNIT_CONFIG: UnitConfig = {
   currency: 'VND',
   locale: 'en-US',
   usdVndDefaultRate: DEFAULT_USD_VND_RATE,
-  usdVndRatesByYear: {},
+  usdVndRatesByYear: DEFAULT_USD_VND_RATES_BY_YEAR,
 }
 
 const VALID_DISPLAYS: UnitDisplay[] = ['auto', 'raw', 'K', 'M', 'B', 'USD']

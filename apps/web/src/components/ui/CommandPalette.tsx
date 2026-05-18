@@ -5,6 +5,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, TrendingUp, LayoutDashboard, BarChart3, Table, X } from 'lucide-react';
 
+function getShortcutModifierLabel(): string {
+    if (typeof navigator === 'undefined') return 'Ctrl';
+    return /Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? '⌘' : 'Ctrl';
+}
+
 interface CommandPaletteProps {
     isOpen: boolean;
     onClose: () => void;
@@ -45,6 +50,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
     const [query, setQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
+    const shortcutModifier = getShortcutModifierLabel();
 
     // Filter results based on query
     const getResults = useCallback((): SearchResult[] => {
@@ -241,7 +247,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                             <span>↑↓ Navigate</span>
                             <span>↵ Select</span>
                         </div>
-                        <span>Ctrl+K to open</span>
+                        <span>{shortcutModifier}+K to open</span>
                     </div>
                 </div>
             </div>

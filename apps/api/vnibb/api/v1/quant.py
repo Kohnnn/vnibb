@@ -2574,6 +2574,7 @@ async def get_relative_rotation(
 
     end_date = date.today()
     start_date = end_date - timedelta(days=max(lookback_days * 2, 320))
+    min_overlap_days = min(80, max(40, lookback_days // 5))
     universe_symbols = set(VN30_SYMBOLS)
     universe_symbols.add(symbol_upper)
 
@@ -2612,6 +2613,12 @@ async def get_relative_rotation(
                 "computed_at": datetime.utcnow(),
                 "selected": None,
                 "universe": [],
+                "coverage": {
+                    "lookback_days": lookback_days,
+                    "min_overlap_days": min_overlap_days,
+                    "price_symbol_count": 0 if price_frame.empty else int(price_frame["symbol"].nunique()),
+                    "benchmark_rows": 0 if index_frame.empty else int(len(index_frame.index)),
+                },
             },
             meta=MetaData(count=0),
             error="Insufficient data for relative rotation.",
@@ -2623,14 +2630,29 @@ async def get_relative_rotation(
     index_frame = index_frame.dropna(subset=["close_index"])
 
     universe_points: List[Dict[str, Any]] = []
+    skipped_symbols: List[Dict[str, Any]] = []
     for stock_symbol, group in price_frame.groupby("symbol"):
         merged = group.merge(index_frame, on="time", how="inner")
-        if len(merged) < 80:
+        if len(merged) < min_overlap_days:
+            skipped_symbols.append(
+                {
+                    "symbol": stock_symbol,
+                    "overlap_days": int(len(merged)),
+                    "reason": "insufficient_overlap",
+                }
+            )
             continue
 
         rs_series = (merged["close"] / merged["close_index"]).replace([np.inf, -np.inf], np.nan)
         rs_series = rs_series.dropna() * 100
-        if len(rs_series) < 80:
+        if len(rs_series) < min_overlap_days:
+            skipped_symbols.append(
+                {
+                    "symbol": stock_symbol,
+                    "overlap_days": int(len(rs_series)),
+                    "reason": "insufficient_clean_rs_series",
+                }
+            )
             continue
 
         rs_ratio, rs_momentum = _compute_rrg_metrics(rs_series)
@@ -2672,6 +2694,14 @@ async def get_relative_rotation(
         "computed_at": datetime.utcnow(),
         "selected": selected,
         "universe": universe_points,
+        "coverage": {
+            "lookback_days": lookback_days,
+            "min_overlap_days": min_overlap_days,
+            "price_symbol_count": int(price_frame["symbol"].nunique()),
+            "benchmark_rows": int(len(index_frame.index)),
+            "eligible_symbols": len(universe_points),
+            "skipped_symbols": skipped_symbols[:20],
+        },
     }
     return StandardResponse(data=payload, meta=MetaData(count=len(universe_points)))
 

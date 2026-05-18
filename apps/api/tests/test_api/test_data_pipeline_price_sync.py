@@ -152,6 +152,23 @@ async def test_appwrite_price_service_syncs_provider_rows(monkeypatch):
     service = AppwritePriceService(source="KBS")
     captured = {}
 
+    monkeypatch.setattr(
+        "vnibb.services.appwrite_price_service.settings.appwrite_write_enabled", True
+    )
+    monkeypatch.setattr(
+        "vnibb.services.appwrite_price_service.settings.appwrite_endpoint",
+        "https://appwrite.test/v1",
+    )
+    monkeypatch.setattr(
+        "vnibb.services.appwrite_price_service.settings.appwrite_project_id", "test-project"
+    )
+    monkeypatch.setattr(
+        "vnibb.services.appwrite_price_service.settings.appwrite_api_key", "test-key"
+    )
+    monkeypatch.setattr(
+        "vnibb.services.appwrite_price_service.settings.appwrite_database_id", "test-db"
+    )
+
     async def fake_resolve_symbols(symbols=None, max_symbols=None):
         return ["VNM"]
 

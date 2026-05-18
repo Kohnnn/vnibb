@@ -7,6 +7,7 @@ import { ExternalLink, Lock, RotateCcw, Save, X } from 'lucide-react';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useGlobalMarketsSymbol } from '@/contexts/GlobalMarketsSymbolContext';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import {
     buildTradingViewRuntimeConfig,
     buildTradingViewWebComponentAttributes,
@@ -218,6 +219,7 @@ export function WidgetSettingsModal({
 
         return buildTradingViewWebComponentAttributes(widget.type, previewConfig, effectivePreviewSymbol);
     }, [advancedConfigState.parsed, draftConfig, effectivePreviewSymbol, refreshInterval, tradingViewMetadata?.format, tradingViewMode, widget]);
+    const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: isOpen && Boolean(widget), onClose });
 
     useEffect(() => {
         if (!isOpen || !widget) {
@@ -302,10 +304,17 @@ export function WidgetSettingsModal({
 
     return (
         <div data-tour="widget-settings-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="w-full max-w-2xl bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] flex flex-col overflow-hidden">
+            <div
+                ref={dialogRef}
+                className="w-full max-w-2xl bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] flex flex-col overflow-hidden"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="widget-settings-title"
+                tabIndex={-1}
+            >
                 <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-modal)]">
                     <div>
-                        <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+                        <h2 id="widget-settings-title" className="text-lg font-semibold text-[var(--text-primary)]">
                             Settings: <span className="text-blue-400">{tradingViewMetadata?.name || widget.type}</span>
                         </h2>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -327,6 +336,7 @@ export function WidgetSettingsModal({
                         </div>
                     </div>
                     <button
+                        type="button"
                         onClick={onClose}
                         className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
                         aria-label="Close widget settings"
@@ -599,12 +609,14 @@ export function WidgetSettingsModal({
 
                 <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--border-default)] bg-[var(--bg-modal)]">
                     <button
+                        type="button"
                         onClick={onClose}
                         className="px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                     >
                         Cancel
                     </button>
                     <button
+                        type="button"
                         onClick={handleSave}
                         disabled={isWidgetSettingsReadOnly}
                         className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900/30 disabled:text-white/60 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-900/20 flex items-center gap-2"

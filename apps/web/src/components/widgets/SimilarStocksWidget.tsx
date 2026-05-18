@@ -19,10 +19,10 @@ interface SimilarStocksWidgetProps {
     onRemove?: () => void;
 }
 
-function firstFiniteNumber(...values: unknown[]): number | null {
+function firstPositiveFiniteNumber(...values: unknown[]): number | null {
     for (const value of values) {
         const parsed = typeof value === 'number' ? value : Number(value);
-        if (Number.isFinite(parsed)) return parsed;
+        if (Number.isFinite(parsed) && parsed > 0) return parsed;
     }
     return null;
 }
@@ -73,7 +73,7 @@ export function SimilarStocksWidget({ symbol, widgetGroup }: SimilarStocksWidget
                 ) : (
                     peers.map((peer, index) => {
                         const row = peer as typeof peer & Record<string, unknown>;
-                        const peRatio = firstFiniteNumber(peer.pe_ratio, row.pe, row.peRatio, row.p_e, row.trailing_pe);
+                        const peRatio = firstPositiveFiniteNumber(peer.pe_ratio, row.pe, row.peRatio, row.p_e, row.trailing_pe);
 
                         return (
                         <button

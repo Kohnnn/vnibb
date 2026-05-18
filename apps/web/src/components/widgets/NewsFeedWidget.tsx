@@ -22,6 +22,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 
 interface NewsArticle {
     id: number | string;
@@ -125,7 +126,10 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
             if (!response.ok) throw new Error('Failed to fetch news');
             return response.json();
         },
-        refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes
+        staleTime: 2 * 60 * 1000,
+        refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.news),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
     });
 
     // Fetch market sentiment
@@ -136,7 +140,10 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
             if (!response.ok) throw new Error('Failed to fetch sentiment');
             return response.json();
         },
-        refetchInterval: 10 * 60 * 1000, // Refetch every 10 minutes
+        staleTime: 5 * 60 * 1000,
+        refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.news),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
     });
 
     const newsItems: NewsArticle[] = data?.articles || [];

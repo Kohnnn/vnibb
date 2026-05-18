@@ -38,9 +38,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // Load theme from localStorage on mount
   useEffect(() => {
     try {
-      localStorage.setItem(THEME_STORAGE_KEY, 'dark');
-      setThemeState('dark');
-      setResolvedTheme('dark');
+      const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+      const nextTheme: Theme = storedTheme === 'light' || storedTheme === 'dark' ? storedTheme : 'dark';
+      setThemeState(nextTheme);
+      setResolvedTheme(nextTheme);
       setMounted(true);
     } catch (error) {
       console.error('Failed to load theme from localStorage:', error);
@@ -84,15 +85,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     };
   }, [theme, mounted]);
 
-  const setTheme = (_newTheme: Theme) => {
+  const setTheme = (newTheme: Theme) => {
     try {
-      localStorage.setItem(THEME_STORAGE_KEY, 'dark');
-      setThemeState('dark');
-      setResolvedTheme('dark');
+      localStorage.setItem(THEME_STORAGE_KEY, newTheme);
+      setThemeState(newTheme);
+      setResolvedTheme(newTheme);
     } catch (error) {
       console.error('Failed to save theme to localStorage:', error);
-      setThemeState('dark');
-      setResolvedTheme('dark');
+      setThemeState(newTheme);
+      setResolvedTheme(newTheme);
     }
   };
 
@@ -119,11 +120,11 @@ export const ThemeScript = () => {
   const script = `
     (function() {
       try {
-        localStorage.setItem('${THEME_STORAGE_KEY}', 'dark');
-        var resolved = 'dark';
+        var storedTheme = localStorage.getItem('${THEME_STORAGE_KEY}');
+        var resolved = storedTheme === 'light' || storedTheme === 'dark' ? storedTheme : 'dark';
         
         document.documentElement.classList.remove('light', 'dark');
-        document.documentElement.classList.add('dark');
+        document.documentElement.classList.add(resolved);
         document.documentElement.setAttribute('data-theme', resolved);
       } catch (e) {
         console.error('Theme initialization error:', e);

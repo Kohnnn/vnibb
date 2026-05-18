@@ -13,6 +13,11 @@ import type { DashboardTab } from '@/types/dashboard';
 const MAX_TABS = 12;
 const CREATE_TAB_LOCK_MS = 300;
 
+function getShortcutModifierLabel(): string {
+    if (typeof navigator === 'undefined') return 'Ctrl';
+    return /Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? '⌘' : 'Ctrl';
+}
+
 function getNextTabName(tabs: DashboardTab[]): string {
     const highestTabNumber = tabs.reduce((maxValue, tab) => {
         const match = tab.name.trim().match(/^tab\s+(\d+)$/i);
@@ -51,6 +56,7 @@ export function TabBar(_props: TabBarProps) {
         deleteTab,
         reorderTabs,
     } = useDashboard();
+    const shortcutModifier = getShortcutModifierLabel();
 
     // Focus input when editing starts
     useEffect(() => {
@@ -92,14 +98,14 @@ export function TabBar(_props: TabBarProps) {
                 return;
             }
 
-            // Ctrl+T: New tab
-            if (e.ctrlKey && e.key === 't') {
+            // Ctrl/Cmd+T: New tab
+            if ((e.ctrlKey || e.metaKey) && e.key === 't') {
                 e.preventDefault();
                 handleAddTab();
             }
 
-            // Ctrl+W: Close current tab (if more than 1 tab)
-            if (e.ctrlKey && e.key === 'w') {
+            // Ctrl/Cmd+W: Close current tab (if more than 1 tab)
+            if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
                 if (activeDashboard.tabs.length > 1 && activeTab) {
                     e.preventDefault();
                     handleDeleteTab(activeTab.id);
@@ -359,7 +365,7 @@ export function TabBar(_props: TabBarProps) {
                                         <span className="flex items-center gap-1 px-1">
                                             <span>{tab.name}</span>
                                             {index < 9 && (
-                                                <span className="text-[10px] text-[var(--text-muted)]">⌘{index + 1}</span>
+                                                <span className="text-[10px] text-[var(--text-muted)]">{shortcutModifier}{index + 1}</span>
                                             )}
                                         </span>
                                     )}
@@ -399,7 +405,7 @@ export function TabBar(_props: TabBarProps) {
                                         ? 'text-[var(--text-muted)]/50 cursor-not-allowed'
                                         : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60'
                                 }`}
-                                title={reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : 'Add new tab (Ctrl+T)'}
+                                title={reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : `Add new tab (${shortcutModifier}+T)`}
                             >
                                 <Plus size={14} />
                             </button>
@@ -426,7 +432,7 @@ export function TabBar(_props: TabBarProps) {
 
                     {/* Keyboard shortcuts hint */}
                     <div className="mr-2 hidden shrink-0 items-center gap-2 text-[10px] text-[var(--text-muted)] xl:flex">
-                        <span className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded">⌘1-9</span>
+                        <span className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded">{shortcutModifier}1-9</span>
                         <span>quick switch</span>
                         {reachedTabLimit && <span className="text-amber-400">max {MAX_TABS} tabs</span>}
                     </div>

@@ -65,8 +65,8 @@ interface ComparisonSet {
 }
 
 const RADAR_METRICS = [
-    { key: 'pe', label: 'P/E (Inv)', inverse: true },
-    { key: 'pb', label: 'P/B (Inv)', inverse: true },
+    { key: 'pe_ratio', label: 'P/E (Inv)', inverse: true },
+    { key: 'pb_ratio', label: 'P/B (Inv)', inverse: true },
     { key: 'roe', label: 'ROE' },
     { key: 'net_margin', label: 'Net Margin' },
     { key: 'revenue_growth', label: 'Growth' },
@@ -284,7 +284,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove }
         };
     }, [comparisonData]);
 
-    const hasData = Boolean(normalizedMetrics.length);
+    const hasData = Boolean(normalizedMetrics.length && Object.keys(comparisonData).length);
     const isFallback = Boolean(error && hasData);
 
     const allMetricValues = useMemo(() => {

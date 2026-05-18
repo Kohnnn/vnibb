@@ -521,6 +521,16 @@ export interface WorldNewsArticle {
     live: boolean;
 }
 
+export interface WorldNewsFailedFeed {
+    source_id: string;
+    source: string;
+    source_domain: string;
+    source_url: string;
+    feed_url: string;
+    failed_at: string;
+    reason: string;
+}
+
 export interface WorldNewsFeedResponse {
     articles: WorldNewsArticle[];
     total: number;
@@ -528,6 +538,7 @@ export interface WorldNewsFeedResponse {
     source_count: number;
     feed_count: number;
     failed_feed_count: number;
+    failed_feeds?: WorldNewsFailedFeed[];
     region: WorldNewsRegion | null;
     category: WorldNewsCategory | null;
     language: WorldNewsLanguage | null;
@@ -568,6 +579,7 @@ export interface WorldNewsMapBucket {
     article_count: number;
     source_count: number;
     failed_feed_count: number;
+    failed_feeds?: WorldNewsFailedFeed[];
     top_category: WorldNewsCategory | null;
     top_sources: string[];
     latest_headline: string | null;
@@ -581,6 +593,7 @@ export interface WorldNewsMapResponse {
     source_count: number;
     feed_count: number;
     failed_feed_count: number;
+    failed_feeds?: WorldNewsFailedFeed[];
     fetched_at: string;
     region: WorldNewsRegion | null;
     category: WorldNewsCategory | null;
@@ -2192,6 +2205,18 @@ export interface RelativeRotationPayload {
     computed_at: string;
     selected: RelativeRotationPoint | null;
     universe: RelativeRotationPoint[];
+    coverage?: {
+        lookback_days?: number;
+        min_overlap_days?: number;
+        price_symbol_count?: number;
+        benchmark_rows?: number;
+        eligible_symbols?: number;
+        skipped_symbols?: Array<{
+            symbol: string;
+            overlap_days?: number;
+            reason?: string;
+        }>;
+    };
 }
 
 export interface RelativeRotationResponse {

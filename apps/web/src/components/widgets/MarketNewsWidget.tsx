@@ -10,6 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { API_BASE_URL } from '@/lib/api';
 import { formatTimestamp } from '@/lib/format';
 import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 
 function decodeHtml(value: string | null | undefined): string {
   if (!value) return '';
@@ -137,7 +138,10 @@ function MarketNewsWidgetComponent({ symbol, config }: { symbol?: string; config
         mode: (data?.mode || mode) as 'all' | 'related',
       } satisfies MarketNewsFeed;
     },
-    refetchInterval: 60000,
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.news),
+    refetchIntervalInBackground: false,
+    networkMode: 'online',
   });
 
   const articles = news?.articles || [];

@@ -8,6 +8,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { formatTimestamp } from '@/lib/format';
+import { getAdaptiveRefetchInterval } from '@/lib/pollingPolicy';
 import {
   getWorldNews,
   type WorldNewsArticle,
@@ -114,7 +115,14 @@ function WorldNewsLiveStreamWidgetComponent({
       signal,
     }),
     staleTime: Math.min(30, pollSeconds) * 1000,
-    refetchInterval: pollSeconds * 1000,
+    refetchInterval: () => getAdaptiveRefetchInterval({
+      marketOpenMs: pollSeconds * 1000,
+      marketClosedMs: Math.max(pollSeconds * 2 * 1000, 5 * 60 * 1000),
+      hiddenMs: false,
+      offlineMs: false,
+    }),
+    refetchIntervalInBackground: false,
+    networkMode: 'online',
   });
 
   const articles = data?.articles || [];

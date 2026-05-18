@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useScreenerData, useMetricsHistory, useFinancialRatios, useProfile, useStockQuote } from '@/lib/queries';
-import { formatRatio, formatPercent } from '@/lib/formatters';
+import { formatDividendYield, formatRatio, formatPercent, normalizeDividendYield } from '@/lib/formatters';
 import { formatUnitValue } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { TableSkeleton } from '@/components/ui/widget-skeleton';
@@ -159,8 +159,8 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
             { value: derivedMarketCap, source: 'Profile+Quote', positiveOnly: true },
         ]),
         dividendYield: resolveMetric([
-            { value: latestRatio?.dividend_yield, source: 'Ratios' },
-            { value: stock?.dividend_yield, source: 'Screener' },
+            { value: normalizeDividendYield(latestRatio?.dividend_yield), source: 'Ratios' },
+            { value: normalizeDividendYield(stock?.dividend_yield), source: 'Screener' },
         ]),
         beta: resolveMetric([{ value: stock?.beta, source: 'Screener' }]),
     }
@@ -208,7 +208,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                 ]
                 : [
                     { label: 'Market Cap', value: formatUnitValue(mergedStock?.market_cap, unitConfig) },
-                    { label: 'Dividend Yield', value: formatPercent(mergedStock?.dividend_yield) },
+                    { label: 'Dividend Yield', value: formatDividendYield(mergedStock?.dividend_yield) },
                     { label: 'Beta', value: formatRatio(mergedStock?.beta) },
                 ]
 
@@ -337,7 +337,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                             {activeCategory === 'market' && (
                                 <div className="space-y-2">
                                     <MetricRow label="Market Cap" value={formatUnitValue(mergedStock?.market_cap, unitConfig)} source={metricMap.marketCap.source} />
-                                    <MetricRow label="Dividend Yield" value={formatPercent(mergedStock?.dividend_yield)} source={metricMap.dividendYield.source} />
+                                    <MetricRow label="Dividend Yield" value={formatDividendYield(mergedStock?.dividend_yield)} source={metricMap.dividendYield.source} />
                                     <MetricRow label="Beta" value={formatRatio(mergedStock?.beta)} source={metricMap.beta.source} />
                                 </div>
                             )}

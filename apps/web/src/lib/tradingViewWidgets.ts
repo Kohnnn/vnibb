@@ -1357,7 +1357,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
   },
   {
     type: 'tradingview_screener',
-    name: 'Screener',
+    name: 'TradingView Screener',
     description: 'TradingView screener for stock, forex, or crypto pair scans.',
     format: 'iframe',
     scriptSrc: `${IFRAME_BASE}/embed-widget-screener.js`,

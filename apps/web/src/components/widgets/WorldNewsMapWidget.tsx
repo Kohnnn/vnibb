@@ -8,9 +8,11 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { formatTimestamp } from '@/lib/format';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import {
   getWorldNewsMap,
   type WorldNewsCategory,
+  type WorldNewsFailedFeed,
   type WorldNewsMapBucket,
   type WorldNewsRegion,
 } from '@/lib/api';
@@ -201,6 +203,31 @@ function formatArticleTime(value: string | null) {
   return formatted === '-' ? 'Live feed' : formatted;
 }
 
+function formatFailedFeedTime(value: string) {
+  const formatted = formatTimestamp(value);
+  return formatted === '-' ? 'just now' : formatted;
+}
+
+function FailedFeedsNotice({ failedFeeds }: { failedFeeds: WorldNewsFailedFeed[] }) {
+  if (failedFeeds.length === 0) return null;
+
+  return (
+    <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-[10px] text-amber-100/85">
+      <div className="font-black uppercase tracking-[0.14em] text-amber-200">
+        {failedFeeds.length} RSS feed{failedFeeds.length === 1 ? '' : 's'} failed
+      </div>
+      <div className="mt-1 space-y-1">
+        {failedFeeds.slice(0, 3).map((feed) => (
+          <div key={`${feed.source_id}-${feed.feed_url}`} className="truncate">
+            <span className="font-semibold">{feed.source}</span> failed {formatFailedFeedTime(feed.failed_at)}: {feed.reason}
+          </div>
+        ))}
+        {failedFeeds.length > 3 ? <div>+{failedFeeds.length - 3} more failed feeds</div> : null}
+      </div>
+    </div>
+  );
+}
+
 function isValidCustomFeedUrl(value: string) {
   try {
     const parsed = new URL(value.trim());
@@ -229,6 +256,7 @@ function WorldNewsMapWidgetComponent({
   const [customUrlInput, setCustomUrlInput] = useState(() => getInitialCustomFeed(config)?.url || '');
   const [customNameInput, setCustomNameInput] = useState(() => getInitialCustomFeed(config)?.name || '');
   const [customError, setCustomError] = useState<string | null>(null);
+  const [customNotice, setCustomNotice] = useState<string | null>(null);
   const limit = getNumberConfig(config, 'limit', 160);
   const freshnessHours = getNumberConfig(config, 'freshnessHours', 72);
 
@@ -239,6 +267,7 @@ function WorldNewsMapWidgetComponent({
     setCustomFeed(initialCustomFeed);
     setCustomUrlInput(initialCustomFeed?.url || '');
     setCustomNameInput(initialCustomFeed?.name || '');
+    setCustomNotice(null);
   }, [config]);
 
   const {
@@ -268,7 +297,9 @@ function WorldNewsMapWidgetComponent({
       signal,
     }),
     staleTime: 2 * 60 * 1000,
-    refetchInterval: 5 * 60 * 1000,
+    refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.news),
+    refetchIntervalInBackground: false,
+    networkMode: 'online',
   });
 
   const buckets = data?.buckets || [];
@@ -277,6 +308,10 @@ function WorldNewsMapWidgetComponent({
   const selectedBucket = buckets.find((bucket) => bucket.id === selectedId) || activeBuckets[0] || buckets[0];
   const currentView = MAP_VIEWS.find((view) => view.value === mapView) || MAP_VIEWS[0];
   const isFallback = Boolean(error && hasData);
+  const failedFeeds = data?.failed_feeds || [];
+  const customFeedFailure = customFeed
+    ? failedFeeds.find((feed) => feed.feed_url === customFeed.url)
+    : null;
   const sourceNote = data
     ? `${data.source_count} sources / ${data.feed_count} feeds${customFeed ? ' / custom RSS' : ''}${data.failed_feed_count ? ` / ${data.failed_feed_count} failed` : ''}`
     : 'Live RSS/Atom geography';
@@ -304,14 +339,17 @@ function WorldNewsMapWidgetComponent({
     if (!nextUrl) {
       setCustomFeed(null);
       setCustomError(null);
+      setCustomNotice('Custom RSS cleared.');
       return;
     }
     if (!isValidCustomFeedUrl(nextUrl)) {
       setCustomError('Enter a valid http(s) RSS or Atom feed URL.');
+      setCustomNotice(null);
       return;
     }
     setCustomFeed({ url: nextUrl, name: customNameInput.trim() });
     setCustomError(null);
+    setCustomNotice(`Custom RSS queued: ${customNameInput.trim() || nextUrl}`);
   }
 
   function handleMarkerKeyDown(event: KeyboardEvent<SVGGElement>, bucketId: string) {
@@ -404,6 +442,7 @@ function WorldNewsMapWidgetComponent({
                     setCustomUrlInput('');
                     setCustomNameInput('');
                     setCustomError(null);
+                    setCustomNotice('Custom RSS cleared.');
                   }}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 >
@@ -412,12 +451,20 @@ function WorldNewsMapWidgetComponent({
               )}
             </div>
           </form>
-          {customError && <div className="mt-1 text-[10px] font-semibold text-red-300">{customError}</div>}
-          {customFeed && (
+          {customError && <div role="alert" className="mt-1 text-[10px] font-semibold text-red-300">{customError}</div>}
+          {!customError && customNotice && (
+            <div className="mt-1 text-[10px] font-semibold text-emerald-300">{customNotice}</div>
+          )}
+          {customFeedFailure ? (
+            <div role="alert" className="mt-1 truncate text-[10px] text-amber-200/90">
+              Custom RSS failed {formatFailedFeedTime(customFeedFailure.failed_at)}: {customFeedFailure.reason}
+            </div>
+          ) : customFeed ? (
             <div className="mt-1 truncate text-[10px] text-amber-200/80">
               Custom RSS active: {customFeed.name || customFeed.url}
             </div>
-          )}
+          ) : null}
+          <FailedFeedsNotice failedFeeds={failedFeeds} />
         </div>
 
         <div className="min-h-0 flex-1 overflow-hidden">
@@ -617,7 +664,23 @@ function WorldNewsMapWidgetComponent({
                         <div className="font-black text-white">{formatCategory(selectedBucket.top_category)}</div>
                         top topic
                       </div>
+                      {selectedBucket.failed_feed_count > 0 ? (
+                        <div className="col-span-2 border-t border-amber-400/20 pt-2 text-amber-200">
+                          <div className="font-black text-amber-100">{selectedBucket.failed_feed_count}</div>
+                          failed feed{selectedBucket.failed_feed_count === 1 ? '' : 's'} in this geography
+                        </div>
+                      ) : null}
                     </div>
+
+                    {(selectedBucket.failed_feeds || []).length > 0 ? (
+                      <div className="mt-3 rounded border border-amber-400/20 bg-amber-400/10 p-2 text-[10px] text-amber-100/85">
+                        {(selectedBucket.failed_feeds || []).slice(0, 3).map((feed) => (
+                          <div key={`${feed.source_id}-${feed.feed_url}`} className="truncate">
+                            {feed.source} failed {formatFailedFeedTime(feed.failed_at)}: {feed.reason}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
 
                     <div className="mt-3 flex flex-wrap gap-1">
                       {selectedBucket.top_sources.map((source) => (

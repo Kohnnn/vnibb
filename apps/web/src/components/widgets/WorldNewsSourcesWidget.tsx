@@ -1,15 +1,18 @@
 'use client';
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ExternalLink, Globe2, Library, Radio, Rss } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import {
   getWorldNewsSources,
+  getWorldNewsMap,
   type WorldNewsCategory,
+  type WorldNewsFailedFeed,
   type WorldNewsLanguage,
   type WorldNewsRegion,
   type WorldNewsSourceInfo,
@@ -78,6 +81,12 @@ function formatLabel(value: string) {
   return value.replace(/_/g, ' ');
 }
 
+function formatFailedFeedTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'just now';
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 function WorldNewsSourcesWidgetComponent({
   id,
   config,
@@ -115,15 +124,46 @@ function WorldNewsSourcesWidgetComponent({
       signal,
     }),
     staleTime: 30 * 60 * 1000,
-    refetchInterval: 30 * 60 * 1000,
+    refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.slowNews),
+    refetchIntervalInBackground: false,
+    networkMode: 'online',
+  });
+
+  const {
+    data: sourceHealth,
+    isFetching: isHealthFetching,
+  } = useQuery({
+    queryKey: ['world-news-source-health', region, category, language],
+    queryFn: ({ signal }) => getWorldNewsMap({
+      region: region === 'all' ? undefined : region,
+      category: category === 'all' ? undefined : category,
+      language: language === 'all' ? undefined : language,
+      limit: 1,
+      freshnessHours: 72,
+      signal,
+    }),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.slowNews),
+    refetchIntervalInBackground: false,
+    networkMode: 'online',
   });
 
   const sources = data?.sources || [];
   const hasData = sources.length > 0;
+  const failedFeeds = useMemo(() => sourceHealth?.failed_feeds || [], [sourceHealth?.failed_feeds]);
+  const failedFeedsBySourceId = useMemo(() => {
+    const grouped = new Map<string, WorldNewsFailedFeed[]>();
+    failedFeeds.forEach((feed) => {
+      const current = grouped.get(feed.source_id) || [];
+      current.push(feed);
+      grouped.set(feed.source_id, current);
+    });
+    return grouped;
+  }, [failedFeeds]);
   const feedCount = sources.reduce((total, source) => total + source.feed_urls.length, 0);
   const geographyCount = new Set(sources.map((source) => source.country_code)).size;
   const tierOneCount = sources.filter((source) => source.tier === 1).length;
-  const sourceNote = `${sources.length} sources / ${feedCount} feeds / ${geographyCount} geos`;
+  const sourceNote = `${sources.length} sources / ${feedCount} feeds / ${geographyCount} geos${failedFeeds.length ? ` / ${failedFeeds.length} failed` : ''}`;
   const exportRows = sources.map((source) => ({
     ...source,
     feed_urls: source.feed_urls.join(', '),
@@ -150,7 +190,7 @@ function WorldNewsSourcesWidgetComponent({
             </div>
             <WidgetMeta
               updatedAt={dataUpdatedAt}
-              isFetching={isFetching && hasData}
+              isFetching={(isFetching || isHealthFetching) && hasData}
               isCached={Boolean(error && hasData)}
               note={sourceNote}
               align="right"
@@ -179,7 +219,7 @@ function WorldNewsSourcesWidgetComponent({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/50 text-center">
+        <div className="grid grid-cols-4 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/50 text-center">
           <div className="px-2 py-2">
             <div className="text-lg font-black leading-none text-[var(--text-primary)]">{sources.length}</div>
             <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Sources</div>
@@ -191,6 +231,10 @@ function WorldNewsSourcesWidgetComponent({
           <div className="px-2 py-2">
             <div className="text-lg font-black leading-none text-[var(--text-primary)]">{tierOneCount}</div>
             <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Tier 1</div>
+          </div>
+          <div className="border-l border-[var(--border-subtle)] px-2 py-2">
+            <div className="text-lg font-black leading-none text-amber-300">{failedFeeds.length}</div>
+            <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Failed</div>
           </div>
         </div>
 
@@ -208,7 +252,10 @@ function WorldNewsSourcesWidgetComponent({
             />
           ) : (
             <div className="divide-y divide-[var(--border-subtle)]">
-              {sources.map((source: WorldNewsSourceInfo) => (
+              {sources.map((source: WorldNewsSourceInfo) => {
+                const sourceFailedFeeds = failedFeedsBySourceId.get(source.id) || [];
+
+                return (
                 <article key={source.id} className="p-3 transition-colors hover:bg-[var(--bg-tertiary)]/30">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -225,6 +272,11 @@ function WorldNewsSourcesWidgetComponent({
                         <span className="rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)]">
                           {source.language}
                         </span>
+                        {sourceFailedFeeds.length > 0 ? (
+                          <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-200">
+                            {sourceFailedFeeds.length} failed
+                          </span>
+                        ) : null}
                       </div>
                       <h3 className="mt-1.5 truncate text-sm font-black text-[var(--text-primary)]">
                         {source.name}
@@ -250,21 +302,29 @@ function WorldNewsSourcesWidgetComponent({
                   </div>
 
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    {source.feed_urls.map((feedUrl, index) => (
+                    {source.feed_urls.map((feedUrl, index) => {
+                      const failedFeed = sourceFailedFeeds.find((feed) => feed.feed_url === feedUrl);
+
+                      return (
                       <a
                         key={feedUrl}
                         href={feedUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex max-w-full items-center gap-1 rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-200 hover:border-emerald-300/50"
+                        title={failedFeed ? `${failedFeed.reason} at ${formatFailedFeedTime(failedFeed.failed_at)}` : undefined}
+                        className={failedFeed
+                          ? 'inline-flex max-w-full items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-200 hover:border-amber-300/50'
+                          : 'inline-flex max-w-full items-center gap-1 rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-200 hover:border-emerald-300/50'}
                       >
                         <Radio className="h-2.5 w-2.5" />
-                        Feed {index + 1}
+                        Feed {index + 1}{failedFeed ? ' failed' : ''}
                       </a>
-                    ))}
+                      );
+                    })}
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

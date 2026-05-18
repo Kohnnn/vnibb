@@ -24,6 +24,7 @@ import {
   type ResearchRssFeedResponse,
 } from '@/lib/api'
 import { useProfile } from '@/lib/queries'
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy'
 import { toTradingViewSymbol } from '@/lib/tradingView'
 import { cn } from '@/lib/utils'
 import { ResearchSourceCard } from '@/components/widgets/research/ResearchSourceCard'
@@ -476,7 +477,9 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove }: Research
     queryFn: () => getResearchRssFeed(rssSource as ResearchRssSource, 8),
     enabled: Boolean(rssSource),
     staleTime: 10 * 60 * 1000,
-    refetchInterval: 15 * 60 * 1000,
+    refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.research),
+    refetchIntervalInBackground: false,
+    networkMode: 'online',
   })
 
   return (

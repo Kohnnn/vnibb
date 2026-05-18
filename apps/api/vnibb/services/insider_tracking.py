@@ -29,6 +29,31 @@ from vnibb.services.websocket_service import manager
 logger = logging.getLogger(__name__)
 
 
+def _is_missing_block_trade_column_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    missing_column_markers = (
+        "does not exist",
+        "undefinedcolumnerror",
+        "no such column",
+    )
+    modern_columns = (
+        "block_trades.side",
+        "block_trades.volume_ratio",
+        "block_trades.is_foreign",
+        "block_trades.is_proprietary",
+    )
+    return any(column in message for column in modern_columns) and any(
+        marker in message for marker in missing_column_markers
+    )
+
+
+async def _rollback_after_query_error(db: AsyncSession, context: str) -> None:
+    try:
+        await db.rollback()
+    except Exception as rollback_exc:
+        logger.warning("%s rollback failed: %s", context, rollback_exc)
+
+
 class InsiderTrackingService:
     """Service for tracking insider trading and block trades"""
     
@@ -342,18 +367,72 @@ class InsiderTrackingService:
         self,
         symbol: Optional[str] = None,
         limit: int = 50
-    ) -> List[BlockTrade]:
+    ) -> list[dict[str, Any]]:
         """Get recent block trades, optionally filtered by symbol"""
-        
-        query = select(BlockTrade).order_by(desc(BlockTrade.trade_time))
-        
+
+        query = select(
+            BlockTrade.id.label("id"),
+            BlockTrade.symbol.label("symbol"),
+            BlockTrade.side.label("side"),
+            BlockTrade.quantity.label("quantity"),
+            BlockTrade.price.label("price"),
+            BlockTrade.value.label("value"),
+            BlockTrade.trade_time.label("trade_time"),
+            BlockTrade.volume_ratio.label("volume_ratio"),
+            BlockTrade.is_foreign.label("is_foreign"),
+            BlockTrade.is_proprietary.label("is_proprietary"),
+        ).order_by(desc(BlockTrade.trade_time))
+
         if symbol:
             query = query.where(BlockTrade.symbol == symbol)
-        
+
         query = query.limit(limit)
-        
-        result = await self.db.execute(query)
-        return list(result.scalars().all())
+
+        try:
+            result = await self.db.execute(query)
+            return [dict(row) for row in result.mappings().all()]
+        except Exception as exc:
+            await _rollback_after_query_error(self.db, "Block trades query")
+
+            if not _is_missing_block_trade_column_error(exc):
+                logger.warning("Block trades query failed: %s", exc)
+                return []
+
+            logger.warning("Block trades query fell back to legacy schema: %s", exc)
+
+        fallback_query = select(
+            BlockTrade.id.label("id"),
+            BlockTrade.symbol.label("symbol"),
+            BlockTrade.quantity.label("quantity"),
+            BlockTrade.price.label("price"),
+            BlockTrade.value.label("value"),
+            BlockTrade.trade_time.label("trade_time"),
+        ).order_by(desc(BlockTrade.trade_time))
+
+        if symbol:
+            fallback_query = fallback_query.where(BlockTrade.symbol == symbol)
+
+        fallback_query = fallback_query.limit(limit)
+
+        try:
+            result = await self.db.execute(fallback_query)
+            rows: list[dict[str, Any]] = []
+            for row in result.mappings().all():
+                item = dict(row)
+                item.update(
+                    {
+                        "side": None,
+                        "volume_ratio": None,
+                        "is_foreign": False,
+                        "is_proprietary": False,
+                    }
+                )
+                rows.append(item)
+            return rows
+        except Exception as exc:
+            await _rollback_after_query_error(self.db, "Legacy block trades fallback")
+            logger.warning("Legacy block trades fallback failed: %s", exc)
+            return []
     
     async def get_user_alerts(
         self,

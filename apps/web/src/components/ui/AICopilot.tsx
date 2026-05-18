@@ -21,6 +21,7 @@ import {
     History,
     Database,
     Clock3,
+    AlertTriangle,
     type LucideIcon,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -115,6 +116,15 @@ const DEFAULT_PROMPTS: PromptSuggestion[] = [
     { label: "Compare", icon: Bot, prompt: "Compare with industry peers" },
     { label: "Technical", icon: SearchIcon, prompt: "What is the technical outlook for this stock?" },
 ];
+
+const LEAKED_CONFIG_KEYS = new Set([
+    'MODEL',
+    'PROVIDER',
+    'SYSTEM_PROMPT',
+    'DEVELOPER_PROMPT',
+    'OPENROUTER_API_KEY',
+    'API_KEY',
+]);
 
 const TAB_PROMPTS: Record<string, PromptSuggestion[]> = {
     financials: [
@@ -217,6 +227,74 @@ function getWidgetDataPreview(widgetSummary: ConnectedWidgetSummary | null): str
     return null;
 }
 
+function findMatchingJsonBrace(value: string): number {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = 0; index < value.length; index += 1) {
+        const char = value[index];
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (char === '\\') {
+                escaped = true;
+            } else if (char === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (char === '"') {
+            inString = true;
+        } else if (char === '{') {
+            depth += 1;
+        } else if (char === '}') {
+            depth -= 1;
+            if (depth === 0) return index;
+        }
+    }
+
+    return -1;
+}
+
+function objectHasLeakedConfigKey(value: unknown): boolean {
+    if (!value || typeof value !== 'object') return false;
+    return Object.keys(value as Record<string, unknown>).some((key) => LEAKED_CONFIG_KEYS.has(key.toUpperCase()));
+}
+
+function sanitizeCopilotContent(content: string): string {
+    let sanitized = content.trimStart();
+
+    while (sanitized.startsWith('{')) {
+        const endIndex = findMatchingJsonBrace(sanitized);
+        if (endIndex === -1) break;
+
+        const candidate = sanitized.slice(0, endIndex + 1);
+        try {
+            const parsed = JSON.parse(candidate) as unknown;
+            if (!objectHasLeakedConfigKey(parsed)) break;
+            sanitized = sanitized.slice(endIndex + 1).trimStart();
+        } catch {
+            break;
+        }
+    }
+
+    return sanitized
+        .split('\n')
+        .filter((line) => {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return true;
+            try {
+                return !objectHasLeakedConfigKey(JSON.parse(trimmed) as unknown);
+            } catch {
+                return true;
+            }
+        })
+        .join('\n')
+        .trim();
+}
+
 function getSessionKey(symbol: string, widgetContext?: string, activeTabName?: string): string {
     const widgetKey = normalizeWidgetKey(widgetContext) || 'general';
     const tabKey = normalizeTabKey(activeTabName);
@@ -227,8 +305,8 @@ function toPersistedMessage(message: Message): PersistedMessage {
     return {
         id: message.id,
         role: message.role,
-        content: message.content,
-        reasoning: message.reasoning,
+        content: sanitizeCopilotContent(message.content),
+        reasoning: message.reasoning ? sanitizeCopilotContent(message.reasoning) : undefined,
         usedSourceIds: message.usedSourceIds,
         sources: message.sources,
         artifacts: message.artifacts,
@@ -243,8 +321,8 @@ function fromPersistedMessage(message: PersistedMessage): Message {
     return {
         id: message.id,
         role: message.role,
-        content: message.content,
-        reasoning: message.reasoning,
+        content: sanitizeCopilotContent(message.content),
+        reasoning: message.reasoning ? sanitizeCopilotContent(message.reasoning) : undefined,
         usedSourceIds: message.usedSourceIds,
         sources: message.sources,
         artifacts: message.artifacts,
@@ -256,8 +334,9 @@ function fromPersistedMessage(message: PersistedMessage): Message {
 }
 
 function appendSourcesForExport(message: Message): string {
+    const cleanContent = sanitizeCopilotContent(message.content);
     if (!message.sources?.length) {
-        return message.content;
+        return cleanContent;
     }
 
     const sourceLines = message.sources.map((source) => {
@@ -267,7 +346,7 @@ function appendSourcesForExport(message: Message): string {
         return `- [${source.id}] ${source.label || source.kind || 'Source'}${meta ? ` (${meta})` : ''}`;
     });
 
-    return `${message.content}\n\n## Sources\n${sourceLines.join('\n')}`;
+    return `${cleanContent}\n\n## Sources\n${sourceLines.join('\n')}`;
 }
 
 function appendReasoningStep(existing: string | undefined, step: CopilotReasoningStep): string {
@@ -395,8 +474,8 @@ export function AICopilot({
         [currentSymbol, recentSessions]
     );
     const activeModelLabel = aiSettings.mode === 'browser_key'
-        ? aiSettings.model
-        : runtimeConfig?.model || latestResolvedResponseMeta?.model || 'global model';
+        ? aiSettings.model || 'browser model not set'
+        : latestResolvedResponseMeta?.model || runtimeConfig?.model || 'global model';
 
     // Scroll to bottom when new messages arrive
     useEffect(() => {
@@ -582,7 +661,7 @@ export function AICopilot({
             };
 
             // Prepare messages for API
-            const history = messages.slice(-20).map(m => ({ role: m.role, content: m.content }));
+            const history = messages.slice(-20).map(m => ({ role: m.role, content: sanitizeCopilotContent(m.content) }));
 
             // Use new SSE streaming endpoint
             const response = await openCopilotChatStream({
@@ -597,9 +676,10 @@ export function AICopilot({
             await consumeCopilotStream(response, {
                 onChunk: (chunk) => {
                     fullContent += chunk;
+                    const cleanContent = sanitizeCopilotContent(fullContent);
                     setMessages((prev) => prev.map((msg) =>
                         msg.id === assistantMsgId
-                            ? { ...msg, content: fullContent }
+                            ? { ...msg, content: cleanContent }
                             : msg
                     ));
                 },
@@ -607,7 +687,7 @@ export function AICopilot({
                     setCurrentStatus(reasoning.message);
                     setMessages((prev) => prev.map((msg) =>
                         msg.id === assistantMsgId
-                            ? { ...msg, reasoning: appendReasoningStep(msg.reasoning, reasoning) }
+                            ? { ...msg, reasoning: sanitizeCopilotContent(appendReasoningStep(msg.reasoning, reasoning)) }
                             : msg
                     ));
                 },
@@ -628,6 +708,8 @@ export function AICopilot({
                         msg.id === assistantMsgId
                             ? {
                                 ...msg,
+                                content: sanitizeCopilotContent(msg.content),
+                                reasoning: msg.reasoning ? sanitizeCopilotContent(msg.reasoning) : undefined,
                                 usedSourceIds: event.usedSourceIds || [],
                                 sources: event.sources || [],
                                 artifacts: event.artifacts || [],
@@ -760,7 +842,7 @@ export function AICopilot({
                 {
                     id: `${Date.now()}-document-error`,
                     role: 'assistant',
-                    content: `**Document upload failed:** ${String(error)}`,
+                    content: sanitizeCopilotContent(`**Document upload failed:** ${String(error)}`),
                     timestamp: new Date(),
                 },
             ]);
@@ -859,6 +941,14 @@ export function AICopilot({
                             : 'Fresh context for this symbol'}
                     </span>
                 </div>
+                {aiSettings.mode === 'browser_key' ? (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100/85">
+                        <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-300" />
+                        <span>
+                            Browser Key mode uses a localStorage credential in this browser profile. Avoid shared devices and prefer restricted provider keys.
+                        </span>
+                    </div>
+                ) : null}
             </div>
 
             {widgetContext && (
@@ -991,7 +1081,7 @@ export function AICopilot({
                             >
                                 <div className="text-sm text-[var(--text-primary)] prose prose-sm max-w-none">
                                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                        {message.content}
+                                        {sanitizeCopilotContent(message.content)}
                                     </ReactMarkdown>
                                 </div>
                             </div>

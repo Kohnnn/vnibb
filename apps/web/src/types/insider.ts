@@ -17,7 +17,7 @@ export interface InsiderTrade {
 export interface BlockTrade {
     id: number;
     symbol: string;
-    side: TradeSide;
+    side: TradeSide | null;
     quantity: number;
     price: number;
     value: number;

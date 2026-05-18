@@ -137,6 +137,14 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
         calls.append("indices")
         return make_result(4)
 
+    async def fake_sync_all_profiles(self, *, symbols=None, max_symbols=None):
+        calls.append(("profiles", tuple(symbols or []), max_symbols))
+        return make_result(2)
+
+    async def fake_sync_all_financials(self, *, symbols=None, max_symbols=None):
+        calls.append(("financials", tuple(symbols or []), max_symbols))
+        return make_result(6)
+
     async def fake_sync_dividends(symbols=None):
         calls.append(("dividends", tuple(symbols or [])))
         return 2
@@ -156,6 +164,8 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
     monkeypatch.setattr(FullMarketSync, "run_full_sync", fail_run_full_sync)
     monkeypatch.setattr(FullMarketSync, "sync_all_prices", fake_sync_all_prices)
     monkeypatch.setattr(FullMarketSync, "sync_all_indices", fake_sync_all_indices)
+    monkeypatch.setattr(FullMarketSync, "sync_all_profiles", fake_sync_all_profiles)
+    monkeypatch.setattr(FullMarketSync, "sync_all_financials", fake_sync_all_financials)
     monkeypatch.setattr(data_pipeline, "sync_dividends", fake_sync_dividends)
     monkeypatch.setattr(data_pipeline, "sync_company_events", fake_sync_company_events)
     monkeypatch.setattr(
@@ -165,11 +175,20 @@ async def test_run_daily_market_sync_uses_gap_fill_window(monkeypatch):
 
     results = await run_daily_market_sync()
 
-    assert list(results.keys()) == ["prices", "indices", "rs_ratings", "corporate_actions"]
+    assert list(results.keys()) == [
+        "prices",
+        "indices",
+        "profiles",
+        "financials",
+        "rs_ratings",
+        "corporate_actions",
+    ]
     assert calls == [
         "seeded",
         ("prices", ("VNM", "FPT"), True, 21),
         "indices",
+        ("profiles", ("VNM", "FPT"), None),
+        ("financials", ("VNM", "FPT"), None),
         ("rs_ratings", None),
         ("dividends", ("VNM", "FPT")),
         ("company_events", ("VNM", "FPT")),

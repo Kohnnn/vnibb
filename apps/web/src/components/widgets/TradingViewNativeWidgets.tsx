@@ -27,6 +27,9 @@ interface TradingViewNativeWidgetProps {
 }
 
 const webComponentLoaders = new Map<string, Promise<void>>();
+const SCRIPT_LOAD_TIMEOUT_MS = 12000;
+const IFRAME_WIDGET_TIMEOUT_MS = 10000;
+const WEB_COMPONENT_READY_DELAY_MS = 600;
 
 function toKebabCase(value: string): string {
   return value.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
@@ -45,6 +48,16 @@ function loadTradingViewWebComponentModule(src: string): Promise<void> {
   const promise = new Promise<void>((resolve, reject) => {
     const existingScript = document.querySelector<HTMLScriptElement>(`script[data-tv-widget-src="${src}"]`);
     const script = existingScript ?? document.createElement('script');
+    let timeoutId: number | null = null;
+
+    const cleanup = () => {
+      script.removeEventListener('load', handleLoad);
+      script.removeEventListener('error', handleError);
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
 
     if (existingScript?.dataset.loaded === 'true') {
       resolve();
@@ -52,14 +65,22 @@ function loadTradingViewWebComponentModule(src: string): Promise<void> {
     }
 
     const handleLoad = () => {
+      cleanup();
       script.dataset.loaded = 'true';
       resolve();
     };
 
     const handleError = () => {
+      cleanup();
       webComponentLoaders.delete(src);
       reject(new Error(`Failed to load TradingView module: ${src}`));
     };
+
+    timeoutId = window.setTimeout(() => {
+      cleanup();
+      webComponentLoaders.delete(src);
+      reject(new Error(`Timed out loading TradingView module: ${src}`));
+    }, SCRIPT_LOAD_TIMEOUT_MS);
 
     script.addEventListener('load', handleLoad, { once: true });
     script.addEventListener('error', handleError, { once: true });
@@ -157,8 +178,18 @@ function TradingViewNativeWidget({
 
       const fallbackTimer = window.setTimeout(() => {
         frameObserver.disconnect();
-        stopLoading();
-      }, 8000);
+        if (!cancelled && !host.querySelector('iframe')) {
+          captureAnalyticsEvent(ANALYTICS_EVENTS.widgetLoadFailed, {
+            widget_id: id,
+            widget_type: widgetType,
+            widget_title: metadata.name,
+            symbol: resolvedSymbol,
+            error_type: 'iframe_widget_timeout',
+          });
+          setLoadError(new Error(`${metadata.name} timed out while loading. TradingView may be blocked or temporarily unavailable.`));
+          setIsLoading(false);
+        }
+      }, IFRAME_WIDGET_TIMEOUT_MS);
 
       const script = document.createElement('script');
       script.async = true;
@@ -204,7 +235,7 @@ function TradingViewNativeWidget({
 
         hostRef.current.innerHTML = '';
         hostRef.current.appendChild(element);
-        window.setTimeout(stopLoading, 600);
+        window.setTimeout(stopLoading, WEB_COMPONENT_READY_DELAY_MS);
       } catch (error) {
         if (!cancelled) {
           captureAnalyticsEvent(ANALYTICS_EVENTS.widgetLoadFailed, {

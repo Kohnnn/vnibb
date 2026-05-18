@@ -70,12 +70,26 @@ export const useComparison = (
                     period,
                 },
             });
-            const stocks: StockMetrics[] = Array.isArray(data?.stocks) ? data.stocks : [];
+            const dataMap = data?.data && typeof data.data === 'object' && !Array.isArray(data.data)
+                ? data.data as Record<string, StockMetrics>
+                : {};
+            const stocks: StockMetrics[] = Array.isArray(data?.stocks)
+                ? data.stocks
+                : Object.entries(dataMap).map(([symbol, stock]) => ({
+                    symbol: stock?.symbol || symbol,
+                    company_name: stock?.company_name,
+                    name: stock?.company_name || stock?.name,
+                    industry: stock?.industry,
+                    exchange: stock?.exchange,
+                    metrics: stock?.metrics || {},
+                }));
             const mappedData = stocks.reduce((acc: Record<string, StockMetrics>, stock: StockMetrics) => {
                 acc[stock.symbol] = {
                     symbol: stock.symbol,
                     company_name: stock.company_name,
                     name: stock.company_name || stock.name,
+                    industry: stock.industry,
+                    exchange: stock.exchange,
                     metrics: stock.metrics || {},
                 };
                 return acc;
@@ -112,7 +126,11 @@ export const useComparison = (
                 data: mappedData,
                 metrics: normalizedMetrics,
                 sectorAverages,
-                priceHistory: Array.isArray(data?.priceHistory) ? data.priceHistory : [],
+                priceHistory: Array.isArray(data?.priceHistory)
+                    ? data.priceHistory
+                    : Array.isArray(data?.price_history)
+                        ? data.price_history
+                        : [],
             };
         },
         enabled: enabled && normalizedSymbols.length > 0,

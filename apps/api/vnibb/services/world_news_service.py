@@ -71,6 +71,16 @@ class WorldNewsArticle(BaseModel):
     live: bool = True
 
 
+class WorldNewsFailedFeed(BaseModel):
+    source_id: str
+    source: str
+    source_domain: str
+    source_url: str
+    feed_url: str
+    failed_at: datetime
+    reason: str
+
+
 class WorldNewsSourceInfo(BaseModel):
     id: str
     name: str
@@ -95,6 +105,7 @@ class WorldNewsFeedResponse(BaseModel):
     source_count: int
     feed_count: int
     failed_feed_count: int = 0
+    failed_feeds: list[WorldNewsFailedFeed] = Field(default_factory=list)
     region: str | None = None
     category: str | None = None
     language: str | None = None
@@ -118,6 +129,7 @@ class WorldNewsMapBucket(BaseModel):
     article_count: int
     source_count: int
     failed_feed_count: int = 0
+    failed_feeds: list[WorldNewsFailedFeed] = Field(default_factory=list)
     top_category: str | None = None
     top_sources: list[str] = Field(default_factory=list)
     latest_headline: str | None = None
@@ -131,6 +143,7 @@ class WorldNewsMapResponse(BaseModel):
     source_count: int
     feed_count: int
     failed_feed_count: int = 0
+    failed_feeds: list[WorldNewsFailedFeed] = Field(default_factory=list)
     fetched_at: datetime
     region: str | None = None
     category: str | None = None
@@ -142,6 +155,7 @@ class WorldNewsMapResponse(BaseModel):
 class FeedFetchResult:
     articles: list[WorldNewsArticle]
     failed: bool = False
+    failed_feed: WorldNewsFailedFeed | None = None
 
 
 WORLD_NEWS_SOURCES: tuple[WorldNewsSourceConfig, ...] = (
@@ -1394,6 +1408,7 @@ async def get_world_news_feed(
             )
         )
 
+    failed_feeds = [result.failed_feed for result in results if result.failed_feed is not None]
     failed_feed_count = sum(1 for result in results if result.failed)
     cutoff = now - timedelta(hours=freshness_hours)
     articles: list[WorldNewsArticle] = []
@@ -1416,6 +1431,7 @@ async def get_world_news_feed(
         source_count=len(selected_sources),
         feed_count=feed_count,
         failed_feed_count=failed_feed_count,
+        failed_feeds=failed_feeds,
         region=region,
         category=category,
         language=language,
@@ -1467,6 +1483,7 @@ async def get_world_news_map(
     bucket_sources: dict[str, dict[str, int]] = {}
     bucket_categories: dict[str, dict[str, int]] = {}
     bucket_articles: dict[str, list[WorldNewsArticle]] = {}
+    bucket_failed_feeds: dict[str, list[WorldNewsFailedFeed]] = {}
 
     for source in selected_sources:
         bucket_id, geo = _source_bucket(source)
@@ -1474,6 +1491,15 @@ async def get_world_news_map(
         bucket_sources.setdefault(bucket_id, {})[source.name] = 0
         bucket_categories.setdefault(bucket_id, {})
         bucket_articles.setdefault(bucket_id, [])
+        bucket_failed_feeds.setdefault(bucket_id, [])
+
+    for failed_feed in feed.failed_feeds:
+        source = source_by_id.get(failed_feed.source_id)
+        if source is None:
+            continue
+        bucket_id, geo = _source_bucket(source)
+        bucket_meta[bucket_id] = geo
+        bucket_failed_feeds.setdefault(bucket_id, []).append(failed_feed)
 
     for article in feed.articles:
         source = source_by_id.get(article.source_id)
@@ -1493,6 +1519,7 @@ async def get_world_news_map(
         articles = sorted(bucket_articles.get(bucket_id, []), key=_article_sort_key, reverse=True)
         category_counts = bucket_categories.get(bucket_id, {})
         source_counts = bucket_sources.get(bucket_id, {})
+        failed_feeds = bucket_failed_feeds.get(bucket_id, [])
         top_category = None
         if category_counts:
             top_category = max(category_counts.items(), key=lambda item: (item[1], item[0]))[0]
@@ -1508,6 +1535,8 @@ async def get_world_news_map(
                 longitude=float(geo["longitude"]),
                 article_count=len(articles),
                 source_count=len(source_counts),
+                failed_feed_count=len(failed_feeds),
+                failed_feeds=failed_feeds,
                 top_category=top_category,
                 top_sources=[
                     source_name
@@ -1536,6 +1565,7 @@ async def get_world_news_map(
         source_count=feed.source_count,
         feed_count=feed.feed_count,
         failed_feed_count=feed.failed_feed_count,
+        failed_feeds=feed.failed_feeds,
         fetched_at=feed.fetched_at,
         region=region,
         category=category,
@@ -1637,6 +1667,34 @@ def _clean_custom_source_name(name: str | None, domain: str) -> str:
     return cleaned or f"Custom RSS ({domain.removeprefix('www.')})"
 
 
+def _feed_error_reason(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    if isinstance(exc, httpx.TimeoutException):
+        return "Request timed out"
+    if isinstance(exc, httpx.RequestError):
+        return exc.__class__.__name__
+
+    return re.sub(r"\s+", " ", str(exc)).strip()[:240] or "Feed fetch failed"
+
+
+def _failed_feed(
+    source: WorldNewsSourceConfig,
+    feed_url: str,
+    *,
+    reason: str,
+) -> WorldNewsFailedFeed:
+    return WorldNewsFailedFeed(
+        source_id=source.id,
+        source=source.name,
+        source_domain=source.domain,
+        source_url=source.homepage_url,
+        feed_url=feed_url,
+        failed_at=datetime.now(UTC),
+        reason=reason,
+    )
+
+
 async def _fetch_feed(
     client: httpx.AsyncClient,
     source: WorldNewsSourceConfig,
@@ -1650,9 +1708,21 @@ async def _fetch_feed(
             "World news feed fetch failed",
             extra={"source": source.id, "feed_url": feed_url, "error": str(exc)},
         )
-        return FeedFetchResult(articles=[], failed=True)
+        return FeedFetchResult(
+            articles=[],
+            failed=True,
+            failed_feed=_failed_feed(source, feed_url, reason=_feed_error_reason(exc)),
+        )
 
-    return FeedFetchResult(articles=_parse_feed(response.text, source=source, feed_url=feed_url))
+    articles = _parse_feed(response.text, source=source, feed_url=feed_url)
+    if articles is None:
+        return FeedFetchResult(
+            articles=[],
+            failed=True,
+            failed_feed=_failed_feed(source, feed_url, reason="Invalid RSS/Atom XML"),
+        )
+
+    return FeedFetchResult(articles=articles)
 
 
 def _parse_feed(
@@ -1660,7 +1730,7 @@ def _parse_feed(
     *,
     source: WorldNewsSourceConfig,
     feed_url: str,
-) -> list[WorldNewsArticle]:
+) -> list[WorldNewsArticle] | None:
     try:
         root = ET.fromstring(xml_text.encode("utf-8"))
     except ET.ParseError as exc:
@@ -1668,7 +1738,7 @@ def _parse_feed(
             "World news feed XML parse failed",
             extra={"source": source.id, "feed_url": feed_url, "error": str(exc)},
         )
-        return []
+        return None
 
     articles: list[WorldNewsArticle] = []
     for item in _iter_feed_items(root):

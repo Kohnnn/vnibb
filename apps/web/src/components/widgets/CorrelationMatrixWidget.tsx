@@ -83,8 +83,13 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
 
   const mostCorrelated = peerPairs.find((pair) => pair.value !== null) || null
   const leastCorrelated = [...peerPairs].reverse().find((pair) => pair.value !== null) || null
-  const hasData = orderedTickers.length > 1 && matrix.length > 0
+  const hasMatrixValues = matrix.some((cell) => cell.x !== cell.y && cell.value !== null && Number.isFinite(cell.value))
+  const hasData = orderedTickers.length > 1 && hasMatrixValues
   const clusterRead = getSectorRead(clusterScore)
+  const minOverlapDays = Math.max(10, Math.floor(days / 3))
+  const coverageDetail = payload?.returns_count
+    ? `Only ${payload.returns_count} aligned return rows passed validation. Need at least ${minOverlapDays} overlapping daily returns for ${upperSymbol} and peers; try a longer window or refresh Mongo EOD prices.`
+    : `No overlapping daily price history found for ${upperSymbol} and its peer universe. Refresh Mongo EOD prices or try another symbol.`
 
   return (
     <WidgetContainer
@@ -153,7 +158,12 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
           ) : error && !hasData ? (
             <WidgetError error={error as Error} onRetry={() => refetch()} />
           ) : !hasData ? (
-            <WidgetEmpty message={`No peer correlation data available for ${upperSymbol}.`} icon={<Grid3X3 size={18} />} />
+            <WidgetEmpty
+              message={`No peer correlation data available for ${upperSymbol}.`}
+              detail={coverageDetail}
+              icon={<Grid3X3 size={18} />}
+              action={{ label: 'Refresh', onClick: () => refetch() }}
+            />
           ) : (
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-2 xl:grid-cols-4">

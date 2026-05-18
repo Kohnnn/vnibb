@@ -28,6 +28,33 @@ interface ChartPoint {
 }
 
 const REQUEST_TIMEOUT_MS = 20000;
+const MIN_CHART_DIMENSION_PX = 8;
+const MAX_CHART_SIZE_RETRIES = 90;
+
+function getSafeChartSize(element: HTMLElement | null): { width: number; height: number } | null {
+  if (!element) return null;
+
+  const rect = element.getBoundingClientRect();
+  const width = Math.floor(rect.width);
+  const height = Math.floor(rect.height);
+
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= MIN_CHART_DIMENSION_PX ||
+    height <= MIN_CHART_DIMENSION_PX
+  ) {
+    return null;
+  }
+
+  return { width, height };
+}
+
+function isChartDimensionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  const normalized = message.toLowerCase();
+  return normalized.includes('width') && normalized.includes('height') && normalized.includes('greater than 0');
+}
 
 function toDateInput(value: Date): string {
   return value.toISOString().split('T')[0];
@@ -205,6 +232,9 @@ export function TradingViewAdvancedChart({
 
     let disposed = false;
     let resizeObserver: ResizeObserver | null = null;
+    let retryFrame: number | null = null;
+    let retryCount = 0;
+    let isRendering = false;
 
     const removeChart = (chart: IChartApi | null) => {
       if (!chart) return;
@@ -215,149 +245,209 @@ export function TradingViewAdvancedChart({
       }
     };
 
-    const renderChart = async () => {
-      const { createChart, ColorType, CrosshairMode } = await import('lightweight-charts');
-      if (disposed || !containerRef.current) return;
-
-      const initialWidth = containerRef.current.clientWidth;
-      const initialHeight = containerRef.current.clientHeight;
-      if (initialWidth <= 0 || initialHeight <= 0) {
-        window.requestAnimationFrame(() => {
-          if (!disposed) {
-            renderChart();
-          }
-        });
-        return;
-      }
-
-      removeChart(chartRef.current);
-      chartRef.current = null;
-      mainSeriesRef.current = null;
-      volumeSeriesRef.current = null;
-
-      const cssVars = getComputedStyle(document.documentElement);
-      const bgPrimary = cssVars.getPropertyValue('--bg-primary').trim() || '#0b1220';
-      const bgSecondary = cssVars.getPropertyValue('--bg-secondary').trim() || '#111827';
-      const textMuted = cssVars.getPropertyValue('--text-muted').trim() || '#94a3b8';
-      const borderColor = cssVars.getPropertyValue('--border-color').trim() || '#334155';
-      const borderSubtle = cssVars.getPropertyValue('--border-subtle').trim() || '#1f2937';
-
-      const chart = createChart(containerRef.current, {
-        width: initialWidth,
-        height: initialHeight,
-        layout: {
-          background: { type: ColorType.Solid, color: bgPrimary },
-          textColor: textMuted,
-          fontSize: 11,
-        },
-        grid: {
-          vertLines: { color: borderSubtle },
-          horzLines: { color: borderSubtle },
-        },
-        crosshair: {
-          mode: CrosshairMode.Normal,
-          vertLine: { color: textMuted, width: 1, style: 3, labelBackgroundColor: bgSecondary },
-          horzLine: { color: textMuted, width: 1, style: 3, labelBackgroundColor: bgSecondary },
-        },
-        rightPriceScale: {
-          borderColor,
-          scaleMargins: { top: 0.08, bottom: 0.24 },
-        },
-        timeScale: {
-          borderColor,
-          timeVisible: timeframe !== '5Y',
-          rightOffset: 4,
-        },
-        handleScroll: { vertTouchDrag: false },
-      });
-
-      if (disposed) {
-        removeChart(chart);
-        return;
-      }
-
-      chartRef.current = chart;
-
-      let series: ISeriesApi<'Candlestick'> | ISeriesApi<'Line'> | ISeriesApi<'Area'>;
-      if (mode === 'line') {
-        series = chart.addLineSeries({
-          color: '#38bdf8',
-          lineWidth: 2,
-          crosshairMarkerVisible: true,
-          crosshairMarkerRadius: 4,
-        });
-        series.setData(points.map((point) => ({ time: point.time, value: point.close })));
-      } else if (mode === 'area') {
-        series = chart.addAreaSeries({
-          topColor: 'rgba(56, 189, 248, 0.35)',
-          bottomColor: 'rgba(56, 189, 248, 0.04)',
-          lineColor: '#38bdf8',
-          lineWidth: 2,
-        });
-        series.setData(points.map((point) => ({ time: point.time, value: point.close })));
-      } else {
-        series = chart.addCandlestickSeries({
-          upColor: '#22c55e',
-          downColor: '#ef4444',
-          borderUpColor: '#22c55e',
-          borderDownColor: '#ef4444',
-          wickUpColor: '#22c55e',
-          wickDownColor: '#ef4444',
-        });
-        series.setData(
-          points.map((point) => ({
-            time: point.time,
-            open: point.open,
-            high: point.high,
-            low: point.low,
-            close: point.close,
-          }))
-        );
-      }
-      mainSeriesRef.current = series;
-      series.setMarkers(
-        eventMarkers.map((marker) => ({
-          time: marker.date,
-          position: marker.position,
-          color: marker.color,
-          shape: marker.shape,
-          text: marker.shortLabel,
-        }))
-      );
-
-      const volumeSeries = chart.addHistogramSeries({
-        color: '#475569',
-        priceFormat: { type: 'volume' },
-        priceScaleId: 'volume',
-      });
-      chart.priceScale('volume').applyOptions({
-        scaleMargins: { top: 0.8, bottom: 0 },
-      });
-      volumeSeries.setData(
-        points.map((point) => ({
-          time: point.time,
-          value: point.volume,
-          color: point.close >= point.open ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)',
-        }))
-      );
-      volumeSeriesRef.current = volumeSeries;
-
-      chart.timeScale().fitContent();
-
-      resizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[0];
-        if (!entry || disposed || chartRef.current !== chart) return;
-        const { width, height } = entry.contentRect;
-        if (width <= 0 || height <= 0) return;
-        chart.applyOptions({ width, height });
-      });
-      resizeObserver.observe(containerRef.current);
+    const clearRetryFrame = () => {
+      if (retryFrame === null) return;
+      window.cancelAnimationFrame(retryFrame);
+      retryFrame = null;
     };
 
-    renderChart();
+    const scheduleRenderRetry = () => {
+      if (disposed || retryFrame !== null || retryCount >= MAX_CHART_SIZE_RETRIES) return;
+
+      retryCount += 1;
+      retryFrame = window.requestAnimationFrame(() => {
+        retryFrame = null;
+        if (!disposed) {
+          void renderChart();
+        }
+      });
+    };
+
+    const renderChart = async () => {
+      if (isRendering) return;
+
+      if (disposed || !containerRef.current) return;
+
+      const initialSize = getSafeChartSize(containerRef.current);
+      if (!initialSize) {
+        scheduleRenderRetry();
+        return;
+      }
+
+      isRendering = true;
+
+      try {
+        const { createChart, ColorType, CrosshairMode } = await import('lightweight-charts');
+        if (disposed || !containerRef.current) return;
+
+        const safeSize = getSafeChartSize(containerRef.current);
+        if (!safeSize) {
+          scheduleRenderRetry();
+          return;
+        }
+
+        clearRetryFrame();
+        retryCount = 0;
+
+        removeChart(chartRef.current);
+        chartRef.current = null;
+        mainSeriesRef.current = null;
+        volumeSeriesRef.current = null;
+
+        const cssVars = getComputedStyle(document.documentElement);
+        const bgPrimary = cssVars.getPropertyValue('--bg-primary').trim() || '#0b1220';
+        const bgSecondary = cssVars.getPropertyValue('--bg-secondary').trim() || '#111827';
+        const textMuted = cssVars.getPropertyValue('--text-muted').trim() || '#94a3b8';
+        const borderColor = cssVars.getPropertyValue('--border-color').trim() || '#334155';
+        const borderSubtle = cssVars.getPropertyValue('--border-subtle').trim() || '#1f2937';
+
+        const chart = createChart(containerRef.current, {
+          width: safeSize.width,
+          height: safeSize.height,
+          layout: {
+            background: { type: ColorType.Solid, color: bgPrimary },
+            textColor: textMuted,
+            fontSize: 11,
+          },
+          grid: {
+            vertLines: { color: borderSubtle },
+            horzLines: { color: borderSubtle },
+          },
+          crosshair: {
+            mode: CrosshairMode.Normal,
+            vertLine: { color: textMuted, width: 1, style: 3, labelBackgroundColor: bgSecondary },
+            horzLine: { color: textMuted, width: 1, style: 3, labelBackgroundColor: bgSecondary },
+          },
+          rightPriceScale: {
+            borderColor,
+            scaleMargins: { top: 0.08, bottom: 0.24 },
+          },
+          timeScale: {
+            borderColor,
+            timeVisible: timeframe !== '5Y',
+            rightOffset: 4,
+          },
+          handleScroll: { vertTouchDrag: false },
+        });
+
+        if (disposed) {
+          removeChart(chart);
+          return;
+        }
+
+        chartRef.current = chart;
+
+        let series: ISeriesApi<'Candlestick'> | ISeriesApi<'Line'> | ISeriesApi<'Area'>;
+        if (mode === 'line') {
+          series = chart.addLineSeries({
+            color: '#38bdf8',
+            lineWidth: 2,
+            crosshairMarkerVisible: true,
+            crosshairMarkerRadius: 4,
+          });
+          series.setData(points.map((point) => ({ time: point.time, value: point.close })));
+        } else if (mode === 'area') {
+          series = chart.addAreaSeries({
+            topColor: 'rgba(56, 189, 248, 0.35)',
+            bottomColor: 'rgba(56, 189, 248, 0.04)',
+            lineColor: '#38bdf8',
+            lineWidth: 2,
+          });
+          series.setData(points.map((point) => ({ time: point.time, value: point.close })));
+        } else {
+          series = chart.addCandlestickSeries({
+            upColor: '#22c55e',
+            downColor: '#ef4444',
+            borderUpColor: '#22c55e',
+            borderDownColor: '#ef4444',
+            wickUpColor: '#22c55e',
+            wickDownColor: '#ef4444',
+          });
+          series.setData(
+            points.map((point) => ({
+              time: point.time,
+              open: point.open,
+              high: point.high,
+              low: point.low,
+              close: point.close,
+            }))
+          );
+        }
+        mainSeriesRef.current = series;
+        series.setMarkers(
+          eventMarkers.map((marker) => ({
+            time: marker.date,
+            position: marker.position,
+            color: marker.color,
+            shape: marker.shape,
+            text: marker.shortLabel,
+          }))
+        );
+
+        const volumeSeries = chart.addHistogramSeries({
+          color: '#475569',
+          priceFormat: { type: 'volume' },
+          priceScaleId: 'volume',
+        });
+        chart.priceScale('volume').applyOptions({
+          scaleMargins: { top: 0.8, bottom: 0 },
+        });
+        volumeSeries.setData(
+          points.map((point) => ({
+            time: point.time,
+            value: point.volume,
+            color: point.close >= point.open ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)',
+          }))
+        );
+        volumeSeriesRef.current = volumeSeries;
+
+        chart.timeScale().fitContent();
+      } catch (chartError) {
+        removeChart(chartRef.current);
+        chartRef.current = null;
+        mainSeriesRef.current = null;
+        volumeSeriesRef.current = null;
+
+        if (isChartDimensionError(chartError)) {
+          scheduleRenderRetry();
+          return;
+        }
+
+        setError((chartError as Error)?.message || 'Failed to render chart');
+      } finally {
+        isRendering = false;
+      }
+    };
+
+    resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry || disposed) return;
+      const safeSize = getSafeChartSize(containerRef.current);
+      if (!safeSize) return;
+
+      const chart = chartRef.current;
+      if (!chart) {
+        scheduleRenderRetry();
+        return;
+      }
+
+      try {
+        chart.applyOptions(safeSize);
+      } catch (resizeError) {
+        if (isChartDimensionError(resizeError)) {
+          scheduleRenderRetry();
+          return;
+        }
+        setError((resizeError as Error)?.message || 'Failed to resize chart');
+      }
+    });
+    resizeObserver.observe(containerRef.current);
+
+    void renderChart();
 
     return () => {
       disposed = true;
+      clearRetryFrame();
       resizeObserver?.disconnect();
       removeChart(chartRef.current);
       chartRef.current = null;

@@ -119,8 +119,12 @@ export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) 
   }, [trailPoints, universePoints])
   const hasChartData = universePoints.length > 0
   const benchmarkLabel = payload?.benchmark || 'VNINDEX'
-  const coverageDetail = `Need overlapping daily history for ${upperSymbol}, ${benchmarkLabel}, and the comparison universe over the 260-day lookback. Verify Mongo EOD coverage or try another benchmark/period.`
-  const healthState: WidgetHealthState | undefined = hasData && !hasChartData
+  const coverage = payload?.coverage
+  const selectedSkip = coverage?.skipped_symbols?.find((item) => item.symbol === upperSymbol)
+  const coverageDetail = data?.error || selectedSkip
+    ? `${upperSymbol} has ${selectedSkip?.overlap_days ?? 0} overlapping benchmark days; need at least ${coverage?.min_overlap_days ?? 40}. Refresh Mongo EOD prices or choose a symbol with longer history.`
+    : `Need overlapping daily history for ${upperSymbol}, ${benchmarkLabel}, and the comparison universe over the ${coverage?.lookback_days ?? 260}-day lookback. Verify Mongo EOD coverage or try another symbol.`
+  const healthState: WidgetHealthState | undefined = (hasData && !hasChartData) || (hasData && Boolean(data?.error))
     ? {
         status: 'limited',
         label: 'Limited history',
@@ -152,6 +156,14 @@ export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) 
         <WidgetSkeleton lines={6} />
       ) : error && !hasData ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : !hasData ? (
+        <WidgetEmpty
+          message={`No relative-rotation data available for ${upperSymbol}.`}
+          detail={coverageDetail}
+          health={{ status: 'coverage_gap', label: 'Insufficient overlap', detail: coverageDetail }}
+          icon={<Orbit size={18} />}
+          action={{ label: 'Refresh', onClick: () => refetch() }}
+        />
       ) : (
         <>
           <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">

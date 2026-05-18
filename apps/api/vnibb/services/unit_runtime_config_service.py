@@ -13,6 +13,19 @@ logger = logging.getLogger(__name__)
 
 UNIT_RUNTIME_CONFIG_KEY = "unit_runtime_config"
 DEFAULT_USD_VND_RATE = 25_000.0
+DEFAULT_USD_VND_RATES_BY_YEAR = {
+    "2016": 22_300.0,
+    "2017": 22_700.0,
+    "2018": 23_200.0,
+    "2019": 23_250.0,
+    "2020": 23_200.0,
+    "2021": 22_950.0,
+    "2022": 23_600.0,
+    "2023": 23_850.0,
+    "2024": 25_000.0,
+    "2025": 25_500.0,
+    "2026": 26_000.0,
+}
 YEAR_KEY_RE = re.compile(r"^20\d{2}$")
 
 
@@ -51,7 +64,7 @@ class UnitRuntimeConfigService:
     def _default_config(self) -> dict[str, float | str | dict[str, float] | None]:
         return {
             "usd_vnd_default_rate": DEFAULT_USD_VND_RATE,
-            "usd_vnd_rates_by_year": {},
+            "usd_vnd_rates_by_year": DEFAULT_USD_VND_RATES_BY_YEAR.copy(),
             "updated_at": None,
         }
 

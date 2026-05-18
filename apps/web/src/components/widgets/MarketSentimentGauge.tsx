@@ -5,6 +5,7 @@
 import { TrendingUp, TrendingDown, Minus, Activity } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { API_BASE_URL } from '@/lib/api';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 
 interface MarketSentiment {
     overall: string;
@@ -25,7 +26,10 @@ export function MarketSentimentGauge() {
             if (!response.ok) throw new Error('Failed to fetch sentiment');
             return response.json();
         },
-        refetchInterval: 10 * 60 * 1000, // Refetch every 10 minutes
+        staleTime: 5 * 60 * 1000,
+        refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.news),
+        refetchIntervalInBackground: false,
+        networkMode: 'online',
     });
 
     if (isLoading) {

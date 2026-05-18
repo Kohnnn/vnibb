@@ -7,7 +7,7 @@ import { useDividends } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { formatPercent, formatVND } from '@/lib/formatters';
+import { formatDividendYield, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 
 interface DividendPaymentWidgetProps {
@@ -39,11 +39,6 @@ function formatDividendValue(row: DividendRecord): string {
         return formatVND(row.value);
     }
     return '-';
-}
-
-function formatDividendYield(value: number | null | undefined): string {
-    if (value === null || value === undefined) return '-';
-    return formatPercent(value);
 }
 
 export function DividendPaymentWidget({ symbol }: DividendPaymentWidgetProps) {

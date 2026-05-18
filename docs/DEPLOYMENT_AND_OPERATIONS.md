@@ -147,6 +147,12 @@ VniAgent server context path
 | **Monorepo** | Turbo 2 | Build caching, task orchestration |
 | **Deploy** | Vercel | Frontend hosting |
 
+## Frontend auth rollout flags
+
+Production frontend builds should set `NEXT_PUBLIC_AUTH_PROVIDER=supabase` during the current Supabase auth window. Dashboard route protection is enabled by default; unauthenticated users are redirected to `/login`.
+
+Use `NEXT_PUBLIC_DISABLE_AUTH=true` only for deliberate QA or public-preview windows where the dashboard must be reachable without the login screen. Keep it unset or `false` for authenticated production deployments, and record any temporary bypass window in the deployment notes before shipping.
+
 ## Data Flow: Raw Data to Widgets
 
 The complete data pipeline from raw provider data to widget display:

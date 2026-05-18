@@ -34,6 +34,13 @@ function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value))
 }
 
+function getChangeDirection(value: number | null | undefined): 'up' | 'down' | 'flat' | 'unknown' {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'unknown'
+  if (value > 0) return 'up'
+  if (value < 0) return 'down'
+  return 'flat'
+}
+
 interface TickerInfoWidgetProps {
   id: string;
   symbol: string;
@@ -189,10 +196,12 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
     ? clampPercent((((rangePrice as number) - (rangeLow as number)) / ((rangeHigh as number) - (rangeLow as number))) * 100)
     : 0
 
-  const isPositive = (change ?? 0) >= 0;
+  const changeDirection = getChangeDirection(changePct ?? change);
+  const changeDirectionLabel = changeDirection === 'up' ? 'Up' : changeDirection === 'down' ? 'Down' : changeDirection === 'flat' ? 'Flat' : 'Unknown';
+  const ChangeIcon = changeDirection === 'up' ? TrendingUp : changeDirection === 'down' ? TrendingDown : Activity;
   const changeLabel =
     change !== null && change !== undefined && changePct !== null && changePct !== undefined
-      ? `${isPositive ? '+' : ''}${change.toLocaleString()} (${changePct.toFixed(2)}%)`
+      ? `${changeDirectionLabel} ${change > 0 ? '+' : ''}${change.toLocaleString()} (${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%)`
       : '--';
 
   return (
@@ -234,16 +243,15 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             <div
               className={cn(
                 'flex items-center gap-1.5 text-xs font-bold px-2 py-0.5 rounded-full w-fit',
-                isPositive
+                changeDirection === 'up'
                   ? 'text-emerald-300 bg-emerald-500/10 border border-emerald-500/20'
-                  : 'text-rose-300 bg-rose-500/10 border border-rose-500/20'
+                  : changeDirection === 'down'
+                    ? 'text-rose-300 bg-rose-500/10 border border-rose-500/20'
+                    : 'text-[var(--text-muted)] bg-[var(--bg-secondary)] border border-[var(--border-default)]'
               )}
+              aria-label={`Daily change: ${changeLabel}`}
             >
-              {isPositive ? (
-                <TrendingUp size={12} strokeWidth={3} />
-              ) : (
-                <TrendingDown size={12} strokeWidth={3} />
-              )}
+              <ChangeIcon size={12} strokeWidth={3} />
               <span>{changeLabel}</span>
             </div>
           </div>

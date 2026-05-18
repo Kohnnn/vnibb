@@ -8,10 +8,12 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { formatTimestamp } from '@/lib/format';
+import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import {
   getWorldNews,
   type WorldNewsArticle,
   type WorldNewsCategory,
+  type WorldNewsFailedFeed,
   type WorldNewsRegion,
 } from '@/lib/api';
 
@@ -78,6 +80,31 @@ function formatArticleTime(value: string | null) {
   return formatted === '-' ? 'Live feed' : formatted;
 }
 
+function formatFailedFeedTime(value: string) {
+  const formatted = formatTimestamp(value);
+  return formatted === '-' ? 'just now' : formatted;
+}
+
+function FailedFeedsNotice({ failedFeeds }: { failedFeeds: WorldNewsFailedFeed[] }) {
+  if (failedFeeds.length === 0) return null;
+
+  return (
+    <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-[10px] text-amber-100/85">
+      <div className="font-black uppercase tracking-[0.14em] text-amber-200">
+        {failedFeeds.length} RSS feed{failedFeeds.length === 1 ? '' : 's'} failed
+      </div>
+      <div className="mt-1 space-y-1">
+        {failedFeeds.slice(0, 3).map((feed) => (
+          <div key={`${feed.source_id}-${feed.feed_url}`} className="truncate">
+            <span className="font-semibold">{feed.source}</span> failed {formatFailedFeedTime(feed.failed_at)}: {feed.reason}
+          </div>
+        ))}
+        {failedFeeds.length > 3 ? <div>+{failedFeeds.length - 3} more failed feeds</div> : null}
+      </div>
+    </div>
+  );
+}
+
 function formatCategory(value: string) {
   return value.replace(/_/g, ' ');
 }
@@ -108,6 +135,7 @@ function WorldNewsMonitorWidgetComponent({
   const [customUrlInput, setCustomUrlInput] = useState(() => getInitialCustomFeed(config)?.url || '');
   const [customNameInput, setCustomNameInput] = useState(() => getInitialCustomFeed(config)?.name || '');
   const [customError, setCustomError] = useState<string | null>(null);
+  const [customNotice, setCustomNotice] = useState<string | null>(null);
   const limit = getNumberConfig(config, 'limit', 50);
   const freshnessHours = getNumberConfig(config, 'freshnessHours', 72);
 
@@ -118,6 +146,7 @@ function WorldNewsMonitorWidgetComponent({
     setCustomFeed(initialCustomFeed);
     setCustomUrlInput(initialCustomFeed?.url || '');
     setCustomNameInput(initialCustomFeed?.name || '');
+    setCustomNotice(null);
   }, [config]);
 
   const {
@@ -139,12 +168,18 @@ function WorldNewsMonitorWidgetComponent({
       signal,
     }),
     staleTime: 2 * 60 * 1000,
-    refetchInterval: 5 * 60 * 1000,
+    refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.news),
+    refetchIntervalInBackground: false,
+    networkMode: 'online',
   });
 
   const articles = data?.articles || [];
   const hasData = articles.length > 0;
   const isFallback = Boolean(error && hasData);
+  const failedFeeds = data?.failed_feeds || [];
+  const customFeedFailure = customFeed
+    ? failedFeeds.find((feed) => feed.feed_url === customFeed.url)
+    : null;
   const sourceNote = data
     ? `${data.source_count} sources / ${data.feed_count} live feeds${customFeed ? ' / custom RSS' : ''}${data.failed_feed_count ? ` / ${data.failed_feed_count} failed` : ''}`
     : 'Live RSS/Atom sources';
@@ -159,14 +194,17 @@ function WorldNewsMonitorWidgetComponent({
     if (!nextUrl) {
       setCustomFeed(null);
       setCustomError(null);
+      setCustomNotice('Custom RSS cleared.');
       return;
     }
     if (!isValidCustomFeedUrl(nextUrl)) {
       setCustomError('Enter a valid http(s) RSS or Atom feed URL.');
+      setCustomNotice(null);
       return;
     }
     setCustomFeed({ url: nextUrl, name: customNameInput.trim() });
     setCustomError(null);
+    setCustomNotice(`Custom RSS queued: ${customNameInput.trim() || nextUrl}`);
   }
 
   return (
@@ -254,6 +292,7 @@ function WorldNewsMonitorWidgetComponent({
                     setCustomUrlInput('');
                     setCustomNameInput('');
                     setCustomError(null);
+                    setCustomNotice('Custom RSS cleared.');
                   }}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 >
@@ -262,12 +301,20 @@ function WorldNewsMonitorWidgetComponent({
               )}
             </div>
           </form>
-          {customError && <div className="mt-1 text-[10px] font-semibold text-red-300">{customError}</div>}
-          {customFeed && (
+          {customError && <div role="alert" className="mt-1 text-[10px] font-semibold text-red-300">{customError}</div>}
+          {!customError && customNotice && (
+            <div className="mt-1 text-[10px] font-semibold text-emerald-300">{customNotice}</div>
+          )}
+          {customFeedFailure ? (
+            <div role="alert" className="mt-1 truncate text-[10px] text-amber-200/90">
+              Custom RSS failed {formatFailedFeedTime(customFeedFailure.failed_at)}: {customFeedFailure.reason}
+            </div>
+          ) : customFeed ? (
             <div className="mt-1 truncate text-[10px] text-blue-200/80">
               Custom RSS active: {customFeed.name || customFeed.url}
             </div>
-          )}
+          ) : null}
+          <FailedFeedsNotice failedFeeds={failedFeeds} />
         </div>
 
         <div className="flex-1 overflow-auto scrollbar-hide">

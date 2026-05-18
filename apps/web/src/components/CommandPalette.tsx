@@ -48,6 +48,11 @@ interface RenderItem extends CommandPaletteActionItem {
 const GLOBAL_MARKETS_DASHBOARD_NAME = 'Global Markets';
 const GLOBAL_MARKETS_TAB_NAME = 'Global Markets';
 
+function getShortcutModifierLabel(): string {
+  if (typeof navigator === 'undefined') return 'Ctrl';
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? '⌘' : 'Ctrl';
+}
+
 function getTickerIcon(type: SearchTickerResult['type']): ReactNode {
   switch (type) {
     case 'vn_stock':
@@ -93,6 +98,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const shortcutModifier = getShortcutModifierLabel();
   const {
     state,
     activeDashboard,
@@ -563,7 +569,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
         <div className="flex items-center justify-between border-t border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-4 py-2 text-[10px] text-[var(--text-muted)]">
           <div className="flex items-center gap-4">
-            <ShortcutPill label="Ctrl+K" hint="Open" />
+            <ShortcutPill label={`${shortcutModifier}+K`} hint="Open" />
             <ShortcutPill label="↑↓" hint="Navigate" />
             <ShortcutPill label="Enter" hint="Select" />
             <ShortcutPill label="Esc" hint="Close" />

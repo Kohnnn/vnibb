@@ -5,6 +5,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import {
   Command,
+  LogOut,
   Search,
   User,
   MoreHorizontal,
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react'
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useAuth, type AuthUser } from '@/contexts/AuthContext'
 import { useHistoricalPrices, useMarketOverview, useStockQuote } from '@/lib/queries'
 import { probeBackendReadiness } from '@/lib/backendHealth'
 import type { UnitDisplay } from '@/lib/units'
@@ -40,6 +42,12 @@ const UNIT_OPTIONS: Array<{ value: UnitDisplay; label: string }> = [
 const MARKET_TIMEZONE = 'Asia/Ho_Chi_Minh'
 
 type ConnectionState = 'checking' | 'online' | 'offline' | 'degraded'
+type MovementDirection = 'up' | 'down' | 'flat' | 'unknown'
+
+function getShortcutModifierLabel(): string {
+  if (typeof navigator === 'undefined') return 'Ctrl'
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? '⌘' : 'Ctrl'
+}
 
 function formatHeaderPrice(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
@@ -47,13 +55,43 @@ function formatHeaderPrice(value: number | null | undefined): string {
 }
 
 function formatHeaderPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '--'
+  if (value === null || value === undefined || !Number.isFinite(value)) return '--'
   const sign = value > 0 ? '+' : ''
   return `${sign}${value.toFixed(2)}%`
 }
 
+function getMovementDirection(value: number | null | undefined): MovementDirection {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'unknown'
+  if (value > 0) return 'up'
+  if (value < 0) return 'down'
+  return 'flat'
+}
+
+function formatHeaderMovement(value: number | null | undefined): string {
+  const direction = getMovementDirection(value)
+  if (direction === 'unknown') return '--'
+  const label = direction === 'up' ? 'Up' : direction === 'down' ? 'Down' : 'Flat'
+  return `${label} ${formatHeaderPercent(value)}`
+}
+
 function normalizeIndexName(value: string | null | undefined): string {
   return String(value ?? '').replace(/[-_\s]/g, '').toUpperCase()
+}
+
+function getUserDisplayName(user: AuthUser | null): string {
+  const metadataName = user?.user_metadata?.display_name || user?.user_metadata?.name
+  if (typeof metadataName === 'string' && metadataName.trim()) return metadataName.trim()
+  if (user?.email) return user.email.split('@')[0]
+  return 'Guest'
+}
+
+function getUserInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('') || 'U'
 }
 
 function getVietnamMarketStatus(reference = new Date()): { label: string; isOpen: boolean } {
@@ -112,7 +150,9 @@ export function Header({
   const hasActionMenu = Boolean(
     onResetLayout || onCollapseAll || onExpandAll
   )
-  const { resolvedTheme } = useTheme()
+  const { theme, setTheme, resolvedTheme } = useTheme()
+  const { user, loading: authLoading, provider, isAdmin, isGuest, signOut } = useAuth()
+  const shortcutModifier = getShortcutModifierLabel()
   const [marketClock, setMarketClock] = useState(() => Date.now())
   const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('checking')
 
@@ -142,11 +182,11 @@ export function Header({
     return ((latest - previous) / previous) * 100
   }, [historyQuery.data?.data, quote?.changePct])
 
-  const quoteIsPositive = (displayQuoteChangePct ?? 0) >= 0
+  const quoteDirection = getMovementDirection(displayQuoteChangePct)
   const quoteChangeClass =
-    displayQuoteChangePct == null
+    quoteDirection === 'unknown' || quoteDirection === 'flat'
       ? 'text-[var(--text-muted)]'
-      : quoteIsPositive
+      : quoteDirection === 'up'
         ? resolvedTheme === 'light'
           ? 'text-emerald-700'
           : 'text-emerald-400'
@@ -154,16 +194,18 @@ export function Header({
           ? 'text-rose-700'
           : 'text-rose-400'
   const marketStatus = useMemo(() => getVietnamMarketStatus(new Date(marketClock)), [marketClock])
-  const getIndexChangeClass = useCallback((changePct: number | null | undefined) =>
-    changePct == null
+  const getIndexChangeClass = useCallback((changePct: number | null | undefined) => {
+    const direction = getMovementDirection(changePct)
+    return direction === 'unknown' || direction === 'flat'
       ? 'text-[var(--text-muted)]'
-      : changePct >= 0
+      : direction === 'up'
         ? resolvedTheme === 'light'
           ? 'text-emerald-700'
           : 'text-emerald-400'
         : resolvedTheme === 'light'
           ? 'text-rose-700'
-          : 'text-rose-400',
+          : 'text-rose-400'
+  },
     [resolvedTheme]
   )
   const marketChips = useMemo(() => {
@@ -176,6 +218,10 @@ export function Header({
       { label: 'HNX', data: findIndex(['HNX', 'HNXINDEX']) },
     ]
   }, [marketOverviewQuery.data?.data])
+  const showIndexSkeletons = marketOverviewQuery.isLoading && !marketOverviewQuery.data
+  const userDisplayName = getUserDisplayName(user)
+  const userInitials = getUserInitials(userDisplayName)
+  const userRoleLabel = isAdmin ? 'Admin' : isGuest ? 'Guest' : user ? 'Member' : 'Signed out'
 
   const healthBadge = useMemo(() => {
     if (connectionStatus === 'online') {
@@ -209,6 +255,19 @@ export function Header({
   }, [connectionStatus, resolvedTheme])
 
   const healthTitle = `${marketStatus.label} • Backend ${healthBadge.label}`
+  const marketBadge = useMemo(() => {
+    if (marketStatus.isOpen) {
+      return healthBadge
+    }
+
+    return {
+      className: cn(
+        'border-slate-500/25 bg-slate-500/10',
+        resolvedTheme === 'light' ? 'text-slate-700' : 'text-slate-300'
+      ),
+      dotClassName: resolvedTheme === 'light' ? 'bg-slate-500' : 'bg-slate-400',
+    }
+  }, [healthBadge, marketStatus.isOpen, resolvedTheme])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -270,7 +329,7 @@ export function Header({
                     {formatHeaderPrice(quote?.price)}
                   </span>
                   <span className={cn('text-xs font-semibold', quoteChangeClass)}>
-                    {formatHeaderPercent(displayQuoteChangePct)}
+                    {formatHeaderMovement(displayQuoteChangePct)}
                   </span>
                 </div>
               </div>
@@ -281,14 +340,21 @@ export function Header({
                   <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
                     {chip.label}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-[var(--text-primary)]">
-                      {formatHeaderPrice(chip.data?.current_value)}
-                    </span>
-                    <span className={cn('text-xs font-semibold', getIndexChangeClass(chip.data?.change_pct))}>
-                      {formatHeaderPercent(chip.data?.change_pct)}
-                    </span>
-                  </div>
+                  {showIndexSkeletons ? (
+                    <div className="mt-1 flex items-center gap-2" aria-label={`${chip.label} loading`}>
+                      <span className="h-3 w-14 animate-pulse rounded bg-[var(--bg-hover)]" />
+                      <span className="h-3 w-9 animate-pulse rounded bg-[var(--bg-hover)]" />
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-[var(--text-primary)]">
+                        {formatHeaderPrice(chip.data?.current_value)}
+                      </span>
+                      <span className={cn('text-xs font-semibold', getIndexChangeClass(chip.data?.change_pct))}>
+                        {formatHeaderMovement(chip.data?.change_pct)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -309,7 +375,7 @@ export function Header({
                 Search tickers, commands, and workspaces
               </span>
               <span className="hidden shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] sm:inline-flex">
-                Ctrl+K
+                {shortcutModifier}+K
               </span>
             </button>
           </div>
@@ -321,11 +387,11 @@ export function Header({
                 detail: { source: 'header_button' },
               }))}
               className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              title="Open command palette (Ctrl+K)"
+              title={`Open command palette (${shortcutModifier}+K)`}
               aria-label="Open command palette"
             >
               <Command size={13} />
-              <span className="hidden md:inline">Ctrl+K</span>
+              <span className="hidden md:inline">{shortcutModifier}+K</span>
             </button>
 
           {onAIClick && (
@@ -357,7 +423,22 @@ export function Header({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-[180px]">
               <DropdownMenuItem className="text-xs text-[var(--text-muted)] focus:bg-transparent focus:text-[var(--text-muted)]">
-                Theme: Dark only
+                Theme
+              </DropdownMenuItem>
+              {(['dark', 'light'] as const).map((option) => (
+                <DropdownMenuItem
+                  key={option}
+                  onClick={() => setTheme(option)}
+                  className={cn(
+                    'text-xs capitalize',
+                    theme === option ? 'text-blue-300' : 'text-[var(--text-secondary)]'
+                  )}
+                >
+                  {option}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem className="text-[10px] text-[var(--text-muted)] focus:bg-transparent focus:text-[var(--text-muted)]">
+                Active: {resolvedTheme}
               </DropdownMenuItem>
               {onUnitDisplayChange && (
                 <>
@@ -457,7 +538,7 @@ export function Header({
           <div
             className={cn(
               'hidden items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold 2xl:inline-flex',
-              healthBadge.className,
+              marketBadge.className,
             )}
             title={healthTitle}
             aria-label={healthTitle}
@@ -465,16 +546,66 @@ export function Header({
             <span
               className={cn(
                 'h-2 w-2 rounded-full',
-                healthBadge.dotClassName,
+                marketBadge.dotClassName,
                 marketStatus.isOpen && connectionStatus === 'online' ? 'animate-pulse' : '',
               )}
             />
             <span>{marketStatus.isOpen ? 'HOSE Open' : 'HOSE Closed'}</span>
           </div>
 
-          <button className="hidden rounded-md p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:block">
-            <User size={16} />
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="hidden items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] sm:flex"
+                title="Account menu"
+                aria-label="Open account menu"
+              >
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/15 text-[10px] font-black uppercase text-blue-200">
+                  {authLoading ? <User size={13} /> : userInitials}
+                </span>
+                <span className="hidden max-w-[8rem] truncate text-[10px] font-semibold uppercase tracking-[0.12em] lg:inline">
+                  {authLoading ? 'Session' : userDisplayName}
+                </span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[220px]">
+              <DropdownMenuItem className="flex-col items-start gap-1 text-xs focus:bg-transparent">
+                <span className="font-semibold text-[var(--text-primary)]">
+                  {authLoading ? 'Checking session' : userDisplayName}
+                </span>
+                <span className="text-[10px] text-[var(--text-muted)]">
+                  {user?.email || (authLoading ? 'Loading account state' : 'No active account')}
+                </span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-xs text-[var(--text-secondary)] focus:bg-transparent">
+                {userRoleLabel} via {provider}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => window.location.assign('/settings')}
+                className="text-xs"
+              >
+                Settings
+              </DropdownMenuItem>
+              {user ? (
+                <DropdownMenuItem
+                  onClick={() => { void signOut() }}
+                  className="text-xs text-rose-300"
+                >
+                  <LogOut size={13} />
+                  Sign out
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => window.location.assign('/login')}
+                  className="text-xs"
+                >
+                  Sign in
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           </div>
         </div>
       </div>

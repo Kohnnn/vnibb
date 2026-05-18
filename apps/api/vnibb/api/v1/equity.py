@@ -1798,7 +1798,19 @@ async def _load_profile_from_appwrite(
         or _coerce_iso_date(company_row.listing_date if company_row else None)
         or _coerce_iso_date(stock_row.listing_date if stock_row else None)
     )
-    established_date = _coerce_iso_date(company_row.established_date if company_row else None)
+    established_date = (
+        _coerce_iso_date(company_row.established_date if company_row else None)
+        or _coerce_iso_date(doc.get("established_date"))
+        or _coerce_iso_date(doc.get("founded_date"))
+        or _coerce_iso_date(doc.get("founded"))
+    )
+    no_employees = _pick_optional_int(
+        doc.get("no_employees"),
+        doc.get("employees"),
+        doc.get("employee_count"),
+        doc.get("number_of_employees"),
+        doc.get("noEmployees"),
+    )
 
     outstanding_shares = _pick_optional_share_count(
         doc.get("outstanding_shares"),
@@ -1860,6 +1872,7 @@ async def _load_profile_from_appwrite(
         outstanding_shares=outstanding_shares,
         listed_shares=listed_shares,
         market_cap=market_cap,
+        no_employees=no_employees,
         address=_pick_optional_text(
             doc.get("address"), company_row.address if company_row else None
         ),
@@ -1942,6 +1955,14 @@ def _coerce_optional_int(value: Any) -> Optional[int]:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def _pick_optional_int(*values: Any) -> Optional[int]:
+    for value in values:
+        parsed = _coerce_optional_int(value)
+        if parsed is not None and parsed >= 0:
+            return parsed
+    return None
 
 
 def _pick_optional_float(*values: Any) -> Optional[float]:
@@ -4599,6 +4620,13 @@ async def get_profile(
                 address = company.address or raw_profile.get("address")
                 phone = company.phone or raw_profile.get("phone") or raw_profile.get("telephone")
                 email = company.email or raw_profile.get("email")
+                no_employees = _pick_optional_int(
+                    raw_profile.get("no_employees"),
+                    raw_profile.get("employees"),
+                    raw_profile.get("employee_count"),
+                    raw_profile.get("number_of_employees"),
+                    raw_profile.get("noEmployees"),
+                )
 
                 if cache_result.is_stale:
                     await _schedule_refresh(
@@ -4620,6 +4648,7 @@ async def get_profile(
                         outstanding_shares=outstanding_shares,
                         listed_shares=listed_shares,
                         market_cap=market_cap,
+                        no_employees=no_employees,
                         address=address,
                         phone=phone,
                         email=email,
@@ -4741,6 +4770,14 @@ async def get_profile(
                 profile_data.phone = raw_profile.get("phone") or raw_profile.get("telephone")
             if not profile_data.email:
                 profile_data.email = raw_profile.get("email")
+            if not profile_data.no_employees:
+                profile_data.no_employees = _pick_optional_int(
+                    raw_profile.get("no_employees"),
+                    raw_profile.get("employees"),
+                    raw_profile.get("employee_count"),
+                    raw_profile.get("number_of_employees"),
+                    raw_profile.get("noEmployees"),
+                )
 
             profile_data.industry = _pick_optional_text(
                 profile_data.industry,
@@ -5685,20 +5722,82 @@ async def get_transaction_flow(
     )
 
 
+async def _load_foreign_trading_fallback(
+    db: AsyncSession,
+    symbol: str,
+    limit: int,
+) -> list[ForeignTradingData]:
+    result = await db.execute(
+        select(ForeignTrading)
+        .where(ForeignTrading.symbol == symbol.upper())
+        .order_by(ForeignTrading.trade_date.desc())
+        .limit(limit)
+    )
+    rows = result.scalars().all()
+    return [
+        ForeignTradingData(
+            symbol=row.symbol,
+            date=row.trade_date.isoformat() if row.trade_date else None,
+            buy_volume=float(row.buy_volume) if row.buy_volume is not None else None,
+            sell_volume=float(row.sell_volume) if row.sell_volume is not None else None,
+            buy_value=row.buy_value,
+            sell_value=row.sell_value,
+            net_volume=float(row.net_volume) if row.net_volume is not None else None,
+            net_value=row.net_value,
+        )
+        for row in rows
+    ]
+
+
 @router.get("/{symbol}/foreign-trading", response_model=StandardResponse[List[Any]])
-async def get_foreign_trading(symbol: str, limit: int = Query(60, ge=1, le=365)):
+async def get_foreign_trading(
+    symbol: str,
+    limit: int = Query(60, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+):
+    symbol_upper = symbol.upper()
     try:
         data = await asyncio.wait_for(
             VnstockForeignTradingFetcher.fetch(
-                ForeignTradingQueryParams(symbol=symbol.upper(), limit=limit)
+                ForeignTradingQueryParams(symbol=symbol_upper, limit=min(limit, 100))
             ),
             timeout=30,
         )
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        if data:
+            return StandardResponse(data=data[:limit], meta=MetaData(count=len(data[:limit])))
+
+        fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
+        return StandardResponse(
+            data=fallback,
+            meta=MetaData(
+                count=len(fallback),
+                symbol=symbol_upper,
+                last_data_date=fallback[0].date if fallback else None,
+            ),
+            error="Live foreign trading feed returned no rows; using cached database fallback." if fallback else None,
+        )
     except (asyncio.TimeoutError, ProviderTimeoutError):
-        return StandardResponse(data=[], error="Request timed out")
+        fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
+        return StandardResponse(
+            data=fallback,
+            meta=MetaData(
+                count=len(fallback),
+                symbol=symbol_upper,
+                last_data_date=fallback[0].date if fallback else None,
+            ),
+            error="Request timed out" if not fallback else "Live foreign trading request timed out; using cached database fallback.",
+        )
     except Exception as e:
-        return StandardResponse(data=[], error=str(e))
+        fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
+        return StandardResponse(
+            data=fallback,
+            meta=MetaData(
+                count=len(fallback),
+                symbol=symbol_upper,
+                last_data_date=fallback[0].date if fallback else None,
+            ),
+            error=str(e) if not fallback else f"Live foreign trading unavailable; using cached database fallback: {e}",
+        )
 
 
 @router.get("/{symbol}/subsidiaries", response_model=StandardResponse[List[Any]])

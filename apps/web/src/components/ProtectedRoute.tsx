@@ -8,36 +8,33 @@
 "use client";
 
 import { useEffect } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { env } from '@/lib/env';
 
 interface ProtectedRouteProps {
     children: React.ReactNode;
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-    // ================================================================
-    // 🚨 TEMP: AUTH DISABLED PER USER REQUEST (2026-01-15)
-    // ================================================================
-    // User requested: "Please suspend the login screen for now, 
-    // i will enable it after site work"
-    //
-    // TO RE-ENABLE AUTH: Uncomment the code below and remove this return
-    // ================================================================
-
-    return <>{children}</>;
-
-    /* ORIGINAL AUTH CODE - COMMENTED OUT TEMPORARILY
     const { user, loading } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
 
     useEffect(() => {
+        if (env.authBypassEnabled) {
+            return;
+        }
+
         if (!loading && !user) {
             // Redirect to login with return URL
-            router.push(`/login?redirectTo=${encodeURIComponent(pathname)}`);
+            router.replace(`/login?redirectTo=${encodeURIComponent(pathname)}`);
         }
     }, [user, loading, router, pathname]);
+
+    if (env.authBypassEnabled) {
+        return <>{children}</>;
+    }
 
     // Show loading state
     if (loading) {
@@ -58,5 +55,4 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
     // Render children if authenticated
     return <>{children}</>;
-    */
 }

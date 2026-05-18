@@ -2,9 +2,10 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { X, GripVertical, Trash2, Plus } from 'lucide-react';
 import type { DashboardTab } from '@/types/dashboard';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 
 interface ManageTabsModalProps {
     isOpen: boolean;
@@ -84,17 +85,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
         setLocalTabs([...tabs].sort((a, b) => a.order - b.order));
         onClose();
     };
-
-    // Handle escape key
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && isOpen) {
-                handleCancel();
-            }
-        };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isOpen]);
+    const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: isOpen, onClose: handleCancel });
 
     if (!isOpen) return null;
 
@@ -103,28 +94,26 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
             {/* Backdrop */}
             <div
                 className="fixed inset-0 z-[100] bg-[rgba(2,6,23,0.72)] backdrop-blur-sm"
-                role="button"
-                tabIndex={0}
-                aria-label="Close manage tabs"
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleCancel();
-                    }
-                }}
+                aria-hidden="true"
                 onClick={handleCancel}
             />
 
             {/* Modal */}
             <div className="fixed inset-0 flex items-center justify-center z-[101] p-4">
                 <div
+                    ref={dialogRef}
                     className="bg-[var(--bg-modal)] border border-[var(--border-color)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] w-full max-w-md"
                     onClick={e => e.stopPropagation()}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="manage-tabs-title"
+                    tabIndex={-1}
                 >
                     {/* Header */}
                     <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-color)]">
-                        <h2 className="text-lg font-semibold text-[var(--text-primary)]">Manage Tabs</h2>
+                        <h2 id="manage-tabs-title" className="text-lg font-semibold text-[var(--text-primary)]">Manage Tabs</h2>
                         <button
+                            type="button"
                             onClick={handleCancel}
                             className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                             aria-label="Close manage tabs"
@@ -152,6 +141,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                             >
                                 {/* Drag handle */}
                                 <button
+                                    type="button"
                                     className="p-1 cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                     onMouseDown={(e) => e.stopPropagation()}
                                     aria-label="Reorder tab"
@@ -171,6 +161,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
 
                                 {/* Delete button */}
                                 <button
+                                    type="button"
                                     onClick={() => handleDelete(index)}
                                     disabled={localTabs.length <= 1}
                                     className={`
@@ -190,6 +181,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
 
                         {/* Add tab button */}
                         <button
+                            type="button"
                             onClick={handleAddTab}
                             className="w-full flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:border-blue-400/50 transition-colors"
                         >
@@ -201,12 +193,14 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                     {/* Footer */}
                     <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-[var(--border-color)]">
                         <button
+                            type="button"
                             onClick={handleCancel}
                             className="px-4 py-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                         >
                             Cancel
                         </button>
                         <button
+                            type="button"
                             onClick={handleSave}
                             className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors font-medium"
                         >

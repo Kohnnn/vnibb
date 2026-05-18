@@ -305,12 +305,12 @@ async def test_income_statement_endpoint_supports_sequential_quarter_alias(
     assert response.status_code == 200
     payload = response.json()
     assert [row["period"] for row in payload["data"]] == [
-        "2024-Q1",
-        "2024-Q2",
-        "2024-Q3",
-        "2024-Q4",
-        "2025-Q1",
-        "2025-Q2",
+        "Q1-2024",
+        "Q2-2024",
+        "Q3-2024",
+        "Q4-2024",
+        "Q1-2025",
+        "Q2-2025",
     ]
 
 

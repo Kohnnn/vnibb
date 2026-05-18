@@ -6,6 +6,7 @@ from vnibb.services import world_news_service
 from vnibb.services.world_news_service import (
     FeedFetchResult,
     WorldNewsArticle,
+    WorldNewsFailedFeed,
     WorldNewsSourceConfig,
     _custom_source_from_url,
     _dedupe_articles,
@@ -151,7 +152,19 @@ async def test_get_world_news_feed_filters_dedupes_and_reports_failed_feeds(monk
 
     async def fake_fetch_feed(_client, source, feed_url):
         if source.id == "source_b":
-            return FeedFetchResult(articles=[], failed=True)
+            return FeedFetchResult(
+                articles=[],
+                failed=True,
+                failed_feed=WorldNewsFailedFeed(
+                    source_id=source.id,
+                    source=source.name,
+                    source_domain=source.domain,
+                    source_url=source.homepage_url,
+                    feed_url=feed_url,
+                    failed_at=now,
+                    reason="HTTP 503",
+                ),
+            )
 
         return FeedFetchResult(
             articles=[
@@ -219,6 +232,8 @@ async def test_get_world_news_feed_filters_dedupes_and_reports_failed_feeds(monk
     assert response.source_count == 2
     assert response.feed_count == 2
     assert response.failed_feed_count == 1
+    assert response.failed_feeds[0].source == "Source B"
+    assert response.failed_feeds[0].reason == "HTTP 503"
     assert response.total == 1
     assert response.articles[0].id == "a-1"
     assert response.articles[0].source_url == "https://a.example"
@@ -254,7 +269,19 @@ async def test_get_world_news_map_groups_articles_by_source_geography(monkeypatc
 
     async def fake_fetch_feed(_client, source, feed_url):
         if source.id == "source_b":
-            return FeedFetchResult(articles=[], failed=True)
+            return FeedFetchResult(
+                articles=[],
+                failed=True,
+                failed_feed=WorldNewsFailedFeed(
+                    source_id=source.id,
+                    source=source.name,
+                    source_domain=source.domain,
+                    source_url=source.homepage_url,
+                    feed_url=feed_url,
+                    failed_at=now,
+                    reason="Request timed out",
+                ),
+            )
 
         return FeedFetchResult(
             articles=[
@@ -285,11 +312,14 @@ async def test_get_world_news_map_groups_articles_by_source_geography(monkeypatc
     assert response.total_articles == 1
     assert response.source_count == 2
     assert response.failed_feed_count == 1
+    assert response.failed_feeds[0].source == "Source B"
     assert len(response.buckets) == 1
     bucket = response.buckets[0]
     assert bucket.country_code == "VN"
     assert bucket.article_count == 1
     assert bucket.source_count == 2
+    assert bucket.failed_feed_count == 1
+    assert bucket.failed_feeds[0].reason == "Request timed out"
     assert bucket.top_category == "markets"
     assert bucket.top_sources == ["Source A", "Source B"]
     assert bucket.latest_headline == "VN-Index extends gains"

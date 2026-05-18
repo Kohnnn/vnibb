@@ -8,7 +8,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { Building2, Globe, Users, Calendar, MapPin, AlertTriangle } from 'lucide-react';
 import { formatTimestamp } from '@/lib/format';
-import { formatNumber, formatPercent, formatVND } from '@/lib/formatters';
+import { formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
 import { formatLargeNumber } from '@/lib/units';
 import type { DividendRecord } from '@/lib/api';
 
@@ -51,6 +51,24 @@ function formatDateOnly(value: string | number | Date | null | undefined): strin
     const stamp = formatTimestamp(value)
     if (stamp === '-') return '-'
     return stamp.split(' ')[0] || stamp
+}
+
+function getYearFromDate(value: string | number | Date | null | undefined): number | null {
+    if (!value) return null
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) {
+        const match = String(value).match(/\b(19|20)\d{2}\b/)
+        return match ? Number(match[0]) : null
+    }
+    return date.getFullYear()
+}
+
+function firstPositiveInteger(...values: unknown[]): number | null {
+    for (const value of values) {
+        const parsed = Number(value)
+        if (Number.isFinite(parsed) && parsed > 0) return Math.trunc(parsed)
+    }
+    return null
 }
 
 function formatMarketCapCompact(value: number | null | undefined): string {
@@ -137,14 +155,22 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     const industry = cleanText(profileData.industry)
     const exchange = cleanText(profileData.exchange)
     const website = cleanText(profileData.website)
-    const companyType = cleanText(profileData.company_type) || 'Company information'
-    const listedDate = cleanText(profileData.listed_date)
+    const companyType = cleanText(profileData.company_type) || cleanText(profileData.sector) || 'Company information'
+    const listedDate = cleanText(profileData.listing_date) || cleanText(profileData.listed_date)
+    const establishedDate = cleanText(profileData.established_date)
+    const establishedYear = profileData.established_year || getYearFromDate(establishedDate)
+    const employeeCount = firstPositiveInteger(
+        profileData.no_employees,
+        profileData.employees,
+        profileData.employee_count,
+        profileData.number_of_employees,
+    )
     const infoCards = [
         { label: 'Industry', value: industry || 'Unavailable', icon: Building2 },
         { label: 'Exchange', value: exchange || 'Unavailable', icon: MapPin },
         { label: 'Website', value: website ? website.replace(/^https?:\/\//, '') : 'Unavailable', icon: Globe },
-        { label: 'Employees', value: profileData.no_employees ? `${profileData.no_employees.toLocaleString()}` : 'Unavailable', icon: Users },
-        { label: 'Established', value: profileData.established_year ? `${profileData.established_year}` : 'Unavailable', icon: Calendar },
+        { label: 'Employees', value: employeeCount ? employeeCount.toLocaleString() : 'Unavailable', icon: Users },
+        { label: 'Established', value: establishedYear ? `${establishedYear}` : 'Unavailable', icon: Calendar },
         { label: 'Market Cap', value: formatMarketCapCompact(marketCapValue), icon: Building2 },
     ] as Array<{ label: string; value: string; icon: typeof Building2 }>
 
@@ -248,7 +274,7 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
                                                     <div className="text-[10px] text-[var(--text-muted)]">
                                                         {formatDividendType(dividend.dividend_type || dividend.type)}
                                                         {dividend.dividend_yield !== null && dividend.dividend_yield !== undefined
-                                                            ? ` • ${formatPercent(dividend.dividend_yield)}`
+                                                            ? ` • ${formatDividendYield(dividend.dividend_yield)}`
                                                             : ''}
                                                         {dividend.ex_date ? ` • Ex ${formatDateOnly(dividend.ex_date)}` : ''}
                                                     </div>

@@ -12,6 +12,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { searchStocks } from '@/data/stockData';
 import { DEFAULT_TICKER, normalizeTickerSymbol } from '@/lib/defaultTicker';
 import {
@@ -65,6 +66,17 @@ interface SettingsModalProps {
 }
 
 type SettingTab = 'general' | 'ai' | 'data' | 'notifications' | 'appearance' | 'admin';
+const OPENROUTER_CATALOG_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => reject(new Error(errorMessage)), timeoutMs)
+    promise
+      .then(resolve)
+      .catch(reject)
+      .finally(() => window.clearTimeout(timeoutId))
+  })
+}
 
 function toRateInputs(ratesByYear?: Record<string, number> | null): Record<string, string> {
   return Object.fromEntries(
@@ -90,6 +102,12 @@ function parseUsdRateInputs(
   }
 
   return { rates, invalidYear: null }
+}
+
+function formatAIProviderLabel(provider: string | null | undefined): string {
+  if (provider === 'openai_compatible') return 'OpenAI-Compatible'
+  if (!provider || provider === 'openrouter') return 'OpenRouter'
+  return provider
 }
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
@@ -136,9 +154,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [aiEnableSidebarWorkflowOutputs, setAiEnableSidebarWorkflowOutputs] = useState(false);
   const [openRouterModels, setOpenRouterModels] = useState<ModelOption[]>([]);
   const [isOpenRouterModelsLoading, setIsOpenRouterModelsLoading] = useState(false);
+  const [openRouterModelsError, setOpenRouterModelsError] = useState<string | null>(null);
+  const [publicRuntimeProvider, setPublicRuntimeProvider] = useState<string | null>(null);
   const [publicRuntimeModel, setPublicRuntimeModel] = useState<string | null>(null);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
-  const { resolvedTheme } = useTheme();
+  const { theme, setTheme, resolvedTheme } = useTheme();
   const {
     config: unitConfig,
     globalUsdVndDefaultRate,
@@ -168,10 +188,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const loadOpenRouterModels = useCallback(async () => {
     try {
       setIsOpenRouterModelsLoading(true)
-      const response = await getCopilotModelCatalog('openrouter')
+      setOpenRouterModelsError(null)
+      const response = await withTimeout(
+        getCopilotModelCatalog('openrouter'),
+        OPENROUTER_CATALOG_TIMEOUT_MS,
+        'OpenRouter model catalog timed out. You can still enter a model slug manually.',
+      )
       setOpenRouterModels(response.models || [])
-    } catch {
-      // Keep the UI usable with the existing input even if catalog fetch fails.
+    } catch (error) {
+      setOpenRouterModelsError(error instanceof Error ? error.message : 'OpenRouter model catalog failed to load. You can still enter a model slug manually.')
     } finally {
       setIsOpenRouterModelsLoading(false)
     }
@@ -180,8 +205,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const loadPublicRuntimeConfig = useCallback(async () => {
     try {
       const config = await getCopilotRuntimeConfig()
-      setPublicRuntimeModel(config.model)
+      setPublicRuntimeProvider(config.provider || null)
+      setPublicRuntimeModel(config.model || null)
     } catch {
+      setPublicRuntimeProvider(null)
       setPublicRuntimeModel(null)
     }
   }, [])
@@ -318,7 +345,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const endYear = new Date().getFullYear() + 1
     return Array.from({ length: endYear - startYear + 1 }, (_, index) => startYear + index)
   }, [])
-  
+  const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: isOpen, onClose });
+
   if (!isOpen) return null;
 
   const handleRestartWalkthrough = () => {
@@ -509,10 +537,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[var(--bg-modal)] rounded-xl border border-[var(--border-default)] w-full max-w-3xl max-h-[80vh] flex shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden">
+      <div
+        ref={dialogRef}
+        className="bg-[var(--bg-modal)] rounded-xl border border-[var(--border-default)] w-full max-w-3xl max-h-[80vh] flex shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-modal-title"
+        tabIndex={-1}
+      >
         {/* Sidebar */}
         <div className="w-48 bg-[var(--bg-secondary)] border-r border-[var(--border-default)] p-4 shrink-0 hidden md:block">
-          <h2 className="text-lg font-bold text-[var(--text-primary)] mb-6 flex items-center gap-2">
+          <h2 id="settings-modal-title" className="text-lg font-bold text-[var(--text-primary)] mb-6 flex items-center gap-2">
             <SettingsIcon size={20} className="text-blue-500" />
             Settings
           </h2>
@@ -543,8 +578,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               {tabs.find(t => t.id === activeTab)?.label}
             </h3>
             <button
+              type="button"
               onClick={onClose}
               className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
+              aria-label="Close settings"
             >
               <X size={20} />
             </button>
@@ -712,7 +749,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                   <div className="flex flex-wrap gap-2 text-[10px]">
                     <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                      {aiProvider === 'openai_compatible' ? 'OpenAI-Compatible' : 'OpenRouter'}
+                      {formatAIProviderLabel(aiMode === 'browser_key' ? aiProvider : publicRuntimeProvider || aiProvider)}
                     </span>
                     <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                       {aiMode === 'browser_key' ? 'Browser Key' : 'App Default'}
@@ -819,6 +856,20 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 </div>
 
+                {aiMode === 'browser_key' && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-100/90">
+                    <div className="flex items-start gap-2">
+                      <Shield size={14} className="mt-0.5 shrink-0 text-amber-300" />
+                      <div>
+                        <div className="font-bold uppercase tracking-[0.14em] text-amber-200">Browser-local key risk</div>
+                        <p className="mt-1 text-[11px] text-amber-100/80">
+                          Browser Key mode stores the provider key in localStorage and sends requests from this tab. Browser extensions, injected scripts, or shared devices can read or use that key, so prefer a restricted key and switch back to App Default on shared machines.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label
                     htmlFor="settings-ai-model"
@@ -834,6 +885,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     onChange={(event) => {
                       setAiModelInput(event.target.value)
                       if (aiSettingsError) setAiSettingsError(null)
+                      if (openRouterModelsError) setOpenRouterModelsError(null)
                     }}
                     placeholder="openai/gpt-4o-mini"
                     disabled={aiProvider === 'openrouter' && aiMode === 'app_default'}
@@ -841,7 +893,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   />
                   <p className="mt-2 text-[10px] text-[var(--text-muted)]">
                     {aiProvider === 'openrouter' && aiMode === 'app_default'
-                      ? `App Default mode uses the global VniAgent model${publicRuntimeModel ? `: ${publicRuntimeModel}` : ''}.`
+                      ? `App Default mode uses the ${formatAIProviderLabel(publicRuntimeProvider)} VniAgent runtime${publicRuntimeModel ? `: ${publicRuntimeModel}` : ''}.`
                       : aiProvider === 'openrouter'
                       ? 'Any OpenRouter model slug is allowed. Start with `openai/gpt-4o-mini` for a low-cost default.'
                       : 'Enter the model ID supported by your OpenAI-compatible provider.'}
@@ -894,6 +946,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         {isOpenRouterModelsLoading && (
                           <span className="text-[10px] text-[var(--text-muted)]">Loading OpenRouter models…</span>
                         )}
+                        {openRouterModelsError && !isOpenRouterModelsLoading && (
+                          <span className="text-[10px] text-amber-300">{openRouterModelsError}</span>
+                        )}
                       </div>
                     </>
                   )}
@@ -925,7 +980,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
                   />
                   <p className="mt-2 text-[10px] text-[var(--text-muted)]">
-                    This key stays in your browser local storage. VNIBB does not persist it server-side.
+                    This key stays in browser localStorage. VNIBB does not persist it server-side, but scripts running in this browser profile can access localStorage.
                   </p>
                 </div>
 
@@ -1270,12 +1325,29 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Theme</h4>
                   <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-                    <div className="text-sm font-bold text-blue-300">Dark mode locked for this release</div>
+                    <div className="text-sm font-bold text-blue-300">Theme mode</div>
                     <div className="mt-1 text-xs text-[var(--text-muted)]">
-                      The dashboard is currently tuned for dark surfaces so TradingView embeds, dense tables, and financial charts stay visually consistent. Light mode will return after widget color tokens and chart overlays are audited together.
+                      Choose the shell theme for this browser. Light mode uses the existing token set and can still expose widget-specific color gaps during visual QA.
                     </div>
-                    <div className="mt-3 inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[11px] font-semibold text-blue-300">
-                      Active theme: {resolvedTheme}
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {(['dark', 'light'] as const).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => setTheme(option)}
+                          className={cn(
+                            'rounded-full border px-3 py-1 text-[11px] font-semibold capitalize transition-colors',
+                            theme === option
+                              ? 'border-blue-500/30 bg-blue-500/10 text-blue-300'
+                              : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                          )}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                      <div className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[11px] font-semibold text-blue-300">
+                        Active theme: {resolvedTheme}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1473,6 +1545,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                               setIsAdminAiRuntimeSaving(true)
                               const saved = await saveAdminAIRuntimeConfig(trimmedKey, trimmedModel)
                               setAdminAiModelInput(saved.model || trimmedModel)
+                              setPublicRuntimeProvider(saved.provider || 'openrouter')
+                              setPublicRuntimeModel(saved.model || trimmedModel)
                               captureAnalyticsEvent(ANALYTICS_EVENTS.adminAiRuntimeSaved, {
                                 model: saved.model || trimmedModel,
                               })

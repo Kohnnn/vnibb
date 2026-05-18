@@ -33,8 +33,14 @@ export interface EquityProfileData {
   exchange?: string;
   website?: string;
   company_type?: string;
+  sector?: string;
+  established_date?: string;
   established_year?: number;
+  listing_date?: string;
   no_employees?: number;
+  employees?: number;
+  employee_count?: number;
+  number_of_employees?: number;
   outstanding_shares?: number;
   market_cap?: number;
   listed_date?: string;
@@ -242,6 +248,12 @@ export interface ForeignTradingResponse {
   symbol: string;
   count: number;
   data: ForeignTradingData[];
+  meta?: {
+    count: number;
+    symbol?: string;
+    last_data_date?: string | null;
+  };
+  error?: string | null;
 }
 
 export interface TransactionFlowPoint {

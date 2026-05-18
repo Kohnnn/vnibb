@@ -4,8 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { TrendingUp, TrendingDown, RefreshCw, AlertTriangle, Globe, Building2 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
-import { getBlockTrades } from '@/lib/api';
+import { useBlockTrades } from '@/lib/queries';
 import { formatTimestamp } from '@/lib/format';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -36,6 +35,16 @@ function formatQuantity(qty: number): string {
   return qty.toLocaleString();
 }
 
+function getNetBlockTradeLabel(value: number): string {
+  if (value > 0) return 'Net buy';
+  if (value < 0) return 'Net sell';
+  return 'Flat';
+}
+
+function formatNetBlockTradeValue(value: number): string {
+  return value === 0 ? 'VND0' : formatCurrency(Math.abs(value));
+}
+
 export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps) {
   const [minThreshold, setMinThreshold] = useState<number>(10); // VND billions
 
@@ -46,11 +55,7 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
     refetch,
     isFetching,
     dataUpdatedAt,
-  } = useQuery({
-    queryKey: ['block-trades', symbol],
-    queryFn: () => getBlockTrades({ symbol, limit: 50 }),
-    refetchInterval: 60000, // Refresh every minute
-  });
+  } = useBlockTrades({ symbol, limit: 50 });
 
   const trades = data || [];
   const hasData = trades.length > 0;
@@ -146,8 +151,8 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
             </div>
             <div>
               <div className="text-[var(--text-muted)] mb-0.5">Net</div>
-              <div className={`font-medium ${netValue >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {netValue >= 0 ? '+' : ''}{formatCurrency(Math.abs(netValue))}
+              <div className={`font-medium ${netValue > 0 ? 'text-green-400' : netValue < 0 ? 'text-red-400' : 'text-[var(--text-muted)]'}`}>
+                {getNetBlockTradeLabel(netValue)} {netValue > 0 ? '+' : ''}{formatNetBlockTradeValue(netValue)}
               </div>
             </div>
           </div>
@@ -159,10 +164,10 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
         {isLoading && !hasData ? (
           <WidgetSkeleton lines={5} />
         ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => refetch()} />
+          <WidgetError title="Block trades unavailable" error={error as Error} onRetry={() => refetch()} />
         ) : filteredTrades.length === 0 ? (
           <WidgetEmpty
-            message={isMissingData ? 'Block trade data not available yet' : 'No block trades match your filter'}
+            message={isMissingData ? 'Block trades currently unavailable.' : 'No block trades match your filter'}
             icon={<AlertTriangle size={18} />}
             detail={isMissingData ? 'Large negotiated prints show up here when the provider publishes them.' : undefined}
             size="compact"
@@ -172,9 +177,11 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
           <div className="space-y-1.5">
             {filteredTrades.map((trade) => {
               const isBuy = trade.side === 'BUY';
-              const SideIcon = isBuy ? TrendingUp : TrendingDown;
-              const sideColor = isBuy ? 'text-green-400' : 'text-red-400';
-              const bgColor = isBuy ? 'bg-green-500/5' : 'bg-red-500/5';
+              const isSell = trade.side === 'SELL';
+              const SideIcon = isBuy ? TrendingUp : isSell ? TrendingDown : AlertTriangle;
+              const sideLabel = isBuy ? 'Buy block' : isSell ? 'Sell block' : 'Unknown side';
+              const sideColor = isBuy ? 'text-green-400' : isSell ? 'text-red-400' : 'text-yellow-400';
+              const bgColor = isBuy ? 'bg-green-500/5' : isSell ? 'bg-red-500/5' : 'bg-yellow-500/5';
 
               return (
                 <div
@@ -185,6 +192,9 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
                     <div className="flex items-center gap-1.5">
                       <SideIcon size={12} className={sideColor} />
                       <span className="text-xs font-medium text-[var(--text-primary)]">{trade.symbol}</span>
+                      <span className={`rounded border border-[var(--border-color)] px-1.5 py-0.5 text-[9px] font-bold uppercase ${sideColor}`}>
+                        {sideLabel}
+                      </span>
                       {trade.is_foreign && (
                         <Globe size={10} className="text-blue-400" />
                       )}

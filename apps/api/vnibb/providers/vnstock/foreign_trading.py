@@ -27,6 +27,18 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
+def _row_value(row: dict[str, Any], *keys: Any) -> Any:
+    for key in keys:
+        if key in row:
+            return row.get(key)
+        if isinstance(key, tuple):
+            variants = ["_".join(map(str, key)), ".".join(map(str, key))]
+            for variant in variants:
+                if variant in row:
+                    return row.get(variant)
+    return None
+
+
 def _normalize_trade_date(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -161,17 +173,50 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
         for row in data:
             try:
                 # Extract foreign trading columns if present
-                buy_vol = row.get("foreignBuyVolume") or row.get(("match", "foreign_buy_volume"))
-                if buy_vol is None:
-                    buy_vol = row.get("buyForeignQuantity")
-
-                sell_vol = row.get("foreignSellVolume") or row.get(("match", "foreign_sell_volume"))
-                if sell_vol is None:
-                    sell_vol = row.get("sellForeignQuantity")
-
-                buy_value = row.get("foreignBuyValue") or row.get(("match", "foreign_buy_value"))
-                sell_value = row.get("foreignSellValue") or row.get(("match", "foreign_sell_value"))
-                net_value = row.get("foreignNetValue")
+                buy_vol = _row_value(
+                    row,
+                    "foreignBuyVolume",
+                    "buyForeignQuantity",
+                    "foreign_buy_volume",
+                    "foreign_buy_vol",
+                    ("match", "foreign_buy_volume"),
+                    ("foreign", "buy_volume"),
+                    ("foreign_trading", "buy_volume"),
+                )
+                sell_vol = _row_value(
+                    row,
+                    "foreignSellVolume",
+                    "sellForeignQuantity",
+                    "foreign_sell_volume",
+                    "foreign_sell_vol",
+                    ("match", "foreign_sell_volume"),
+                    ("foreign", "sell_volume"),
+                    ("foreign_trading", "sell_volume"),
+                )
+                buy_value = _row_value(
+                    row,
+                    "foreignBuyValue",
+                    "foreign_buy_value",
+                    ("match", "foreign_buy_value"),
+                    ("foreign", "buy_value"),
+                    ("foreign_trading", "buy_value"),
+                )
+                sell_value = _row_value(
+                    row,
+                    "foreignSellValue",
+                    "foreign_sell_value",
+                    ("match", "foreign_sell_value"),
+                    ("foreign", "sell_value"),
+                    ("foreign_trading", "sell_value"),
+                )
+                net_value = _row_value(
+                    row,
+                    "foreignNetValue",
+                    "foreign_net_value",
+                    ("match", "foreign_net_value"),
+                    ("foreign", "net_value"),
+                    ("foreign_trading", "net_value"),
+                )
 
                 has_foreign_fields = any(
                     value is not None
@@ -193,11 +238,15 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
                     net_value_num = buy_value_num - sell_value_num
 
                 normalized_date = _normalize_trade_date(
-                    row.get("time")
-                    or row.get("date")
-                    or row.get(("listing", "trading_date"))
-                    or row.get(("bid_ask", "trading_date"))
-                    or row.get(("bid_ask", "transaction_time"))
+                    _row_value(
+                        row,
+                        "time",
+                        "date",
+                        "trading_date",
+                        ("listing", "trading_date"),
+                        ("bid_ask", "trading_date"),
+                        ("bid_ask", "transaction_time"),
+                    )
                 )
 
                 results.append(

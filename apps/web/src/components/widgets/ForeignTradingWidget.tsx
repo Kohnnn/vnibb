@@ -27,6 +27,11 @@ function formatVolume(vol: number | null | undefined): string {
     return vol.toLocaleString();
 }
 
+function formatNetVolume(vol: number, signed = false): string {
+    if (vol === 0) return '0';
+    return `${signed && vol > 0 ? '+' : ''}${formatVolume(signed ? vol : Math.abs(vol))}`;
+}
+
 function formatDate(dateStr: string | null | undefined): string {
     if (!dateStr) return '-';
     try {
@@ -35,6 +40,18 @@ function formatDate(dateStr: string | null | undefined): string {
     } catch {
         return dateStr.slice(0, 10);
     }
+}
+
+function getNetFlowLabel(net: number): string {
+    if (net > 0) return 'Net buy';
+    if (net < 0) return 'Net sell';
+    return 'Flat';
+}
+
+function getNetFlowClass(net: number): string {
+    if (net > 0) return 'text-green-400';
+    if (net < 0) return 'text-red-400';
+    return 'text-[var(--text-muted)]';
 }
 
 function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: ForeignTradingWidgetProps) {
@@ -87,15 +104,16 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             header: 'Net',
             accessor: (row) => {
                 const net = (row.buy_volume || 0) - (row.sell_volume || 0);
+                const netLabel = getNetFlowLabel(net);
                 return (
                     <span
                         className={cn(
                             'font-bold font-mono flex items-center justify-end gap-1',
-                            net >= 0 ? 'text-green-400' : 'text-red-400'
+                            getNetFlowClass(net)
                         )}
                     >
-                        {net >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                        {formatVolume(Math.abs(net))}
+                        {net > 0 ? <TrendingUp size={10} /> : net < 0 ? <TrendingDown size={10} /> : null}
+                        {netLabel} {formatNetVolume(net)}
                     </span>
                 );
             },
@@ -104,13 +122,14 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     ], []);
 
     const hasData = trades.length > 0;
-    const isFallback = Boolean(error && hasData);
+    const responseWarning = data?.error || null;
+    const isFallback = Boolean((error || responseWarning) && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
     const healthState: WidgetHealthState | undefined = isFallback
         ? {
             status: 'cached',
             label: 'Cached snapshot',
-            detail: 'Showing the last successful foreign flow snapshot while refresh is degraded.',
+            detail: responseWarning || 'Showing the last successful foreign flow snapshot while refresh is degraded.',
         }
         : undefined
 
@@ -141,7 +160,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
                 <div className="px-3 py-2 border-b border-[var(--border-color)]/70">
                     <WidgetMeta
-                        updatedAt={dataUpdatedAt}
+                        updatedAt={data?.meta?.last_data_date || dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         health={healthState}
                         note="Net position"
@@ -157,10 +176,14 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                     <div
                         className={cn(
                             'text-xs font-black px-2 py-0.5 rounded',
-                            totals.net >= 0 ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+                            totals.net > 0
+                                ? 'bg-green-500/10 text-green-400'
+                                : totals.net < 0
+                                    ? 'bg-red-500/10 text-red-400'
+                                    : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
                         )}
                     >
-                        {totals.net >= 0 ? '+' : ''}{formatVolume(totals.net)}
+                        {getNetFlowLabel(totals.net)} {formatNetVolume(totals.net, true)}
                     </div>
                 </div>
 
@@ -181,7 +204,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                     ) : !hasData ? (
                         <WidgetEmpty
                             message={`No data for ${symbol}`}
-                            detail="Foreign flow appears here when exchange data is available."
+                            detail={responseWarning || 'Foreign flow appears here when exchange data is available.'}
                             health={{
                                 status: 'coverage_gap',
                                 label: 'Coverage gap',

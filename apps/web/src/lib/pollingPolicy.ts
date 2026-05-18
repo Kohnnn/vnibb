@@ -62,6 +62,18 @@ export function getAdaptiveRefetchInterval(config: AdaptivePollingConfig): numbe
 }
 
 export const POLLING_PRESETS = {
+  marketOverview: {
+    marketOpenMs: 20_000,
+    marketClosedMs: 180_000,
+    hiddenMs: false,
+    offlineMs: false,
+  },
+  priceBoard: {
+    marketOpenMs: 15_000,
+    marketClosedMs: 300_000,
+    hiddenMs: false,
+    offlineMs: false,
+  },
   quotes: {
     marketOpenMs: 30_000,
     marketClosedMs: 300_000,
@@ -77,6 +89,24 @@ export const POLLING_PRESETS = {
   alerts: {
     marketOpenMs: 30_000,
     marketClosedMs: 180_000,
+    hiddenMs: false,
+    offlineMs: false,
+  },
+  news: {
+    marketOpenMs: 300_000,
+    marketClosedMs: 600_000,
+    hiddenMs: false,
+    offlineMs: false,
+  },
+  slowNews: {
+    marketOpenMs: 1_800_000,
+    marketClosedMs: 3_600_000,
+    hiddenMs: false,
+    offlineMs: false,
+  },
+  research: {
+    marketOpenMs: 900_000,
+    marketClosedMs: 1_800_000,
     hiddenMs: false,
     offlineMs: false,
   },

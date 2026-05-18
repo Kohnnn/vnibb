@@ -104,9 +104,12 @@ vercel --prod
 NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/api/v1/ws/prices
 NEXT_PUBLIC_AUTH_PROVIDER=supabase
+NEXT_PUBLIC_DISABLE_AUTH=false
 NEXT_PUBLIC_APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
 NEXT_PUBLIC_APPWRITE_PROJECT_ID=your-appwrite-project-id
 ```
+
+`NEXT_PUBLIC_DISABLE_AUTH=true` is only for deliberate QA or public-preview windows. Leave it unset or `false` in authenticated production deployments so dashboard routes redirect unauthenticated users to `/login`.
 
 ---
 

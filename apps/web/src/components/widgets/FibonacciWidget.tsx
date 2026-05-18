@@ -1,12 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   CartesianGrid,
   Line,
   LineChart,
   ReferenceLine,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -16,7 +15,7 @@ import { useFibonacciRetracement } from '@/lib/queries'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
-import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { ChartSizeBox } from '@/components/ui/ChartSizeBox'
 
 const PERIOD_OPTIONS = [
   { label: '1M', days: 31 },
@@ -26,6 +25,11 @@ const PERIOD_OPTIONS = [
   { label: '3Y', days: 756 },
   { label: '5Y', days: 1260 },
 ] as const
+
+function finiteNumber(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
 
 export function FibonacciWidget({ symbol }: { symbol?: string }) {
   const [lookbackDays, setLookbackDays] = useState<number>(252)
@@ -38,26 +42,33 @@ export function FibonacciWidget({ symbol }: { symbol?: string }) {
 
   const chartData = useMemo(
     () =>
-      (data?.price_data || []).map((point) => ({
-        ...point,
-        label: point.date,
-      })),
+      (data?.price_data || []).flatMap((point) => {
+        const close = finiteNumber(point.close)
+        if (!point.date || close === null) return []
+        return [
+          {
+            ...point,
+            close,
+            label: point.date,
+          },
+        ]
+      }),
     [data?.price_data]
   )
-  const hasData = chartData.length > 0 && Boolean(data)
-  const isFallback = Boolean(error && hasData)
-
-  useEffect(() => {
-    if (!hasData || typeof window === 'undefined') return
-    const timeoutId = window.setTimeout(() => {
-      window.dispatchEvent(new Event('resize'))
-    }, 120)
-    return () => window.clearTimeout(timeoutId)
-  }, [hasData, chartData.length])
 
   const orderedLevels = useMemo(() => {
-    return Object.entries(data?.levels || {}).sort((left, right) => right[1] - left[1])
+    const levels: Array<[string, number]> = []
+    Object.entries(data?.levels || {}).forEach(([label, value]) => {
+      const parsed = finiteNumber(value)
+      if (parsed !== null) {
+        levels.push([label, parsed])
+      }
+    })
+    return levels.sort((left, right) => right[1] - left[1])
   }, [data?.levels])
+
+  const hasData = chartData.length > 1 && orderedLevels.length > 0 && Boolean(data)
+  const isFallback = Boolean(error && hasData)
 
   const activePeriod = PERIOD_OPTIONS.find((option) => option.days === lookbackDays)?.label || '1Y'
 
@@ -126,34 +137,34 @@ export function FibonacciWidget({ symbol }: { symbol?: string }) {
           </div>
 
           <div className="min-h-[260px] flex-1 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
-            <ChartMountGuard className="h-full" minHeight={260}>
-              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} minTickGap={32} />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} width={52} domain={['auto', 'auto']} />
-                <Tooltip
-                  contentStyle={{
-                    background: 'var(--bg-elevated)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: '0.75rem',
-                    fontSize: '11px',
-                  }}
-                />
-                {orderedLevels.map(([label, level]) => (
-                  <ReferenceLine
-                    key={label}
-                    y={level}
-                    stroke={label === data.nearest_level.level ? '#f59e0b' : label === '61.8%' ? '#ef4444' : label === '38.2%' ? '#22c55e' : '#64748b'}
-                    strokeDasharray={label === data.nearest_level.level ? '0' : '4 4'}
-                    strokeOpacity={label === data.nearest_level.level ? 0.95 : 0.55}
-                    label={{ value: label, position: 'insideTopRight', fontSize: 10, fill: '#cbd5e1' }}
+            <ChartSizeBox className="h-full min-h-[260px]" minHeight={260}>
+              {({ width, height }) => (
+                <LineChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} minTickGap={32} />
+                  <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} width={52} domain={['auto', 'auto']} />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'var(--bg-elevated)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '0.75rem',
+                      fontSize: '11px',
+                    }}
                   />
-                ))}
-                <Line type="monotone" dataKey="close" stroke="#f8fafc" strokeWidth={2} dot={false} />
+                  {orderedLevels.map(([label, level]) => (
+                    <ReferenceLine
+                      key={label}
+                      y={level}
+                      stroke={label === data.nearest_level.level ? '#f59e0b' : label === '61.8%' ? '#ef4444' : label === '38.2%' ? '#22c55e' : '#64748b'}
+                      strokeDasharray={label === data.nearest_level.level ? '0' : '4 4'}
+                      strokeOpacity={label === data.nearest_level.level ? 0.95 : 0.55}
+                      label={{ value: label, position: 'insideTopRight', fontSize: 10, fill: '#cbd5e1' }}
+                    />
+                  ))}
+                  <Line type="monotone" dataKey="close" stroke="#f8fafc" strokeWidth={2} dot={false} />
                 </LineChart>
-              </ResponsiveContainer>
-            </ChartMountGuard>
+              )}
+            </ChartSizeBox>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-[10px]">

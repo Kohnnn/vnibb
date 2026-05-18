@@ -59,6 +59,7 @@ class EquityProfileData(BaseModel):
     outstanding_shares: Optional[float] = Field(None, description="Outstanding shares")
     listed_shares: Optional[float] = Field(None, description="Listed shares")
     market_cap: Optional[float] = Field(None, description="Market capitalization")
+    no_employees: Optional[int] = Field(None, description="Number of employees")
 
     # Contact
     address: Optional[str] = Field(None, description="Head office address")
@@ -215,6 +216,12 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                 return None
             return number
 
+        def _coerce_int(value: Any) -> Optional[int]:
+            number = _coerce_float(value)
+            if number is None or number < 0:
+                return None
+            return int(number)
+
         def _pick_first(*values: Any) -> Optional[Any]:
             for value in values:
                 if value is None:
@@ -283,6 +290,13 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                     market_cap=_pick_first(
                         _coerce_float(row.get("market_cap")),
                         _scale_capital(row.get("charter_capital")),
+                    ),
+                    no_employees=_pick_first(
+                        _coerce_int(row.get("no_employees")),
+                        _coerce_int(row.get("employees")),
+                        _coerce_int(row.get("employee_count")),
+                        _coerce_int(row.get("number_of_employees")),
+                        _coerce_int(row.get("noEmployees")),
                     ),
                     address=row.get("address"),
                     phone=row.get("phone"),
