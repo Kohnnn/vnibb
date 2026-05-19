@@ -179,7 +179,9 @@ WORLD_NEWS_SOURCES: tuple[WorldNewsSourceConfig, ...] = (
         language="vi",
         tier=1,
         homepage_url="https://cafef.vn/kinh-te-vi-mo-dau-tu.chn",
-        feed_urls=("https://cafef.vn/kinh-te-vi-mo-dau-tu.rss",),
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:cafef.vn%20kinh%20te%20vi%20mo%20when:2d&hl=vi&gl=VN&ceid=VN:vi",
+        ),
     ),
     WorldNewsSourceConfig(
         id="vietstock_markets",
@@ -256,7 +258,9 @@ WORLD_NEWS_SOURCES: tuple[WorldNewsSourceConfig, ...] = (
         language="vi",
         tier=3,
         homepage_url="https://baodautu.vn/kinh-te-dau-tu",
-        feed_urls=("https://baodautu.vn/rss/kinh-te-dau-tu.rss",),
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:baodautu.vn%20when:2d&hl=vi&gl=VN&ceid=VN:vi",
+        ),
     ),
     WorldNewsSourceConfig(
         id="bbc_business",
@@ -289,7 +293,9 @@ WORLD_NEWS_SOURCES: tuple[WorldNewsSourceConfig, ...] = (
         language="en",
         tier=1,
         homepage_url="https://apnews.com/hub/business",
-        feed_urls=("https://apnews.com/hub/business?output=rss",),
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:apnews.com%20business%20when:1d&hl=en-US&gl=US&ceid=US:en",
+        ),
     ),
     WorldNewsSourceConfig(
         id="ap_world",
@@ -300,7 +306,9 @@ WORLD_NEWS_SOURCES: tuple[WorldNewsSourceConfig, ...] = (
         language="en",
         tier=1,
         homepage_url="https://apnews.com/hub/world-news",
-        feed_urls=("https://apnews.com/hub/world-news?output=rss",),
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:apnews.com%20world%20news%20when:1d&hl=en-US&gl=US&ceid=US:en",
+        ),
     ),
     WorldNewsSourceConfig(
         id="cnbc_markets",
@@ -1700,18 +1708,70 @@ async def _fetch_feed(
     source: WorldNewsSourceConfig,
     feed_url: str,
 ) -> FeedFetchResult:
-    try:
-        response = await client.get(feed_url)
-        response.raise_for_status()
-    except Exception as exc:
+    """Fetch a single RSS/Atom feed with bounded retries and backoff.
+
+    The world-news pipeline is fan-out (one feed per coroutine) so we cannot
+    afford long retry loops here, but a single retry covers the bulk of
+    transient 5xx / 429 / network-glitch failures we see from publisher CDNs
+    without inflating the worst-case per-request latency budget too much.
+    """
+
+    last_error: Exception | None = None
+    response: httpx.Response | None = None
+
+    # 1 attempt + 1 retry. Backoff is short because the gather is concurrent
+    # and the endpoint-level cache absorbs a fast retry on the next refresh.
+    for attempt in range(2):
+        try:
+            response = await client.get(feed_url)
+            response.raise_for_status()
+            last_error = None
+            break
+        except httpx.HTTPStatusError as exc:
+            last_error = exc
+            status = exc.response.status_code
+            # Only retry transient classes; 404 is permanent and shouldn't
+            # eat extra latency.
+            if status in (429, 500, 502, 503, 504) and attempt == 0:
+                # Honour Retry-After when sane (cap at 3s so we don't stall
+                # the whole gather on one slow feed).
+                retry_after_header = exc.response.headers.get("retry-after")
+                delay = 0.6
+                if retry_after_header:
+                    try:
+                        delay = min(max(float(retry_after_header), 0.1), 3.0)
+                    except ValueError:
+                        delay = 0.6
+                await asyncio.sleep(delay)
+                continue
+            break
+        except (httpx.TimeoutException, httpx.RequestError) as exc:
+            last_error = exc
+            if attempt == 0:
+                await asyncio.sleep(0.4)
+                continue
+            break
+        except Exception as exc:  # noqa: BLE001 - we want a hard catch-all here
+            last_error = exc
+            break
+
+    if last_error is not None or response is None:
         logger.warning(
             "World news feed fetch failed",
-            extra={"source": source.id, "feed_url": feed_url, "error": str(exc)},
+            extra={
+                "source": source.id,
+                "feed_url": feed_url,
+                "error": str(last_error) if last_error else "unknown",
+            },
         )
         return FeedFetchResult(
             articles=[],
             failed=True,
-            failed_feed=_failed_feed(source, feed_url, reason=_feed_error_reason(exc)),
+            failed_feed=_failed_feed(
+                source,
+                feed_url,
+                reason=_feed_error_reason(last_error) if last_error else "Feed fetch failed",
+            ),
         )
 
     articles = _parse_feed(response.text, source=source, feed_url=feed_url)

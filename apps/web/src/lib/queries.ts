@@ -310,6 +310,7 @@ export function useForeignTrading(
         queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // 5 minutes
+        refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.foreignTrading),
     });
 }
 

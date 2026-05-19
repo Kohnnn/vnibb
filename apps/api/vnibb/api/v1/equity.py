@@ -2761,6 +2761,34 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
     if ev_sales is None:
         ev_sales = _coerce_optional_float(raw_data.get("enterpriseValueToSales"))
 
+    # Gross margin backfill: vnstock occasionally omits gross_margin for early
+    # periods (notably 2020-2021) while still publishing operating_margin.
+    # When the underlying income-statement values are present in raw_data we
+    # can derive gross_margin = gross_profit / revenue * 100 ourselves so the
+    # FE doesn't have to render the "Data quality notes" banner for those
+    # periods. Mirrors the logic already used in `comparison_service`.
+    gross_margin_value = _pick_optional_float(row.gross_margin, raw_data.get("gross_margin"))
+    if gross_margin_value is None:
+        revenue_value = _coerce_optional_float(
+            raw_data.get("revenue")
+            or raw_data.get("net_revenue")
+            or raw_data.get("netRevenue")
+            or raw_data.get("totalRevenue")
+        )
+        gross_profit_value = _coerce_optional_float(
+            raw_data.get("gross_profit")
+            or raw_data.get("grossProfit")
+        )
+        if (
+            revenue_value is not None
+            and gross_profit_value is not None
+            and abs(revenue_value) > 1e-6
+        ):
+            derived = (gross_profit_value / revenue_value) * 100.0
+            # Guard against absurd values from corrupt raw payloads.
+            if -500.0 <= derived <= 500.0:
+                gross_margin_value = derived
+
     return FinancialRatioData(
         symbol=row.symbol,
         period=period_value,
@@ -2786,7 +2814,7 @@ def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
         current_ratio=_pick_optional_float(row.current_ratio, raw_data.get("current_ratio")),
         quick_ratio=_pick_optional_float(row.quick_ratio, raw_data.get("quick_ratio")),
         cash_ratio=_pick_optional_float(row.cash_ratio, raw_data.get("cash_ratio")),
-        gross_margin=_pick_optional_float(row.gross_margin, raw_data.get("gross_margin")),
+        gross_margin=gross_margin_value,
         net_margin=_pick_optional_float(row.net_margin, raw_data.get("net_margin")),
         operating_margin=_pick_optional_float(
             row.operating_margin,

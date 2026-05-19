@@ -379,6 +379,125 @@ const GLOBAL_MARKETS_TEMPLATE: TemplateWidget[] = [
     },
 ];
 
+// Static fallback for the Global Markets workspace's "Screener" sub-tab.
+// Mirrors the published system layout so the four-tab structure (Global
+// Markets, Screener, Cryptocurrencies, WorldNews) is preserved even when no
+// admin-published payload exists. Uses the TradingView-native screener to
+// match the workspace theme.
+const GLOBAL_MARKETS_SCREENER_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'tradingview_ticker_tape',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 24, h: 4, minW: 12, minH: 3 }
+    },
+    {
+        type: 'tradingview_screener',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 4, w: 24, h: 24, minW: 12, minH: 12 }
+    },
+];
+
+const GLOBAL_MARKETS_CRYPTO_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'tradingview_ticker_tape',
+        syncGroupId: 1,
+        config: { symbols: 'crypto' },
+        layout: { x: 0, y: 0, w: 24, h: 4, minW: 12, minH: 3 }
+    },
+    {
+        type: 'tradingview_crypto_market',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 4, w: 14, h: 14, minW: 8, minH: 8 }
+    },
+    {
+        type: 'tradingview_chart',
+        syncGroupId: 1,
+        config: { symbol: 'BINANCE:BTCUSDT' },
+        layout: { x: 14, y: 4, w: 10, h: 14, minW: 8, minH: 8 }
+    },
+    {
+        type: 'tradingview_crypto_heatmap',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 18, w: 24, h: 10, minW: 12, minH: 8 }
+    },
+];
+
+const GLOBAL_MARKETS_WORLD_NEWS_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'world_news_map',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', limit: 120, freshnessHours: 72 },
+        layout: { x: 0, y: 0, w: 14, h: 12, minW: 8, minH: 8 }
+    },
+    {
+        type: 'world_news_live_stream',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', limit: 40, freshnessHours: 24, pollSeconds: 60 },
+        layout: { x: 14, y: 0, w: 10, h: 12, minW: 6, minH: 8 }
+    },
+    {
+        type: 'world_news_monitor',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', limit: 60, freshnessHours: 72 },
+        layout: { x: 0, y: 12, w: 16, h: 10, minW: 10, minH: 8 }
+    },
+    {
+        type: 'world_news_sources',
+        syncGroupId: 1,
+        config: { region: 'all', category: 'all', language: 'all' },
+        layout: { x: 16, y: 12, w: 8, h: 10, minW: 5, minH: 8 }
+    },
+];
+
+const GLOBAL_MARKETS_OVERVIEW_TEMPLATE: TemplateWidget[] = [
+    {
+        type: 'tradingview_ticker_tape',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 0, w: 24, h: 4, minW: 12, minH: 3 }
+    },
+    {
+        type: 'tradingview_chart',
+        syncGroupId: 1,
+        config: { symbol: 'NASDAQ:VFS' },
+        layout: { x: 0, y: 4, w: 14, h: 10, minW: 10, minH: 8 }
+    },
+    {
+        type: 'tradingview_technical_analysis',
+        syncGroupId: 1,
+        config: { symbol: 'NASDAQ:VFS' },
+        layout: { x: 14, y: 4, w: 10, h: 10, minW: 8, minH: 8 }
+    },
+    {
+        type: 'tradingview_market_overview',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 14, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'tradingview_market_data',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 14, w: 12, h: 8, minW: 8, minH: 6 }
+    },
+    {
+        type: 'tradingview_forex_cross_rates',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 22, w: 12, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'tradingview_stock_heatmap',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 22, w: 12, h: 7, minW: 6, minH: 5 }
+    },
+];
+
 // Comparison Analysis Tab: Multi-ticker comparison toolkit
 const COMPARISON_TEMPLATE: TemplateWidget[] = [
     {
@@ -1673,11 +1792,28 @@ const createQuantSystemDashboard = (): Dashboard => {
 
 const createGlobalMarketsDashboard = (): Dashboard => {
     const timestamp = new Date().toISOString();
-    const tabSpec: SystemDashboardTabSpec = {
-        idSuffix: 'global-markets',
-        name: GLOBAL_MARKETS_DASHBOARD_NAME,
-        template: GLOBAL_MARKETS_TEMPLATE,
-    };
+    const tabSpecs: SystemDashboardTabSpec[] = [
+        {
+            idSuffix: 'global-markets',
+            name: GLOBAL_MARKETS_DASHBOARD_NAME,
+            template: GLOBAL_MARKETS_TEMPLATE,
+        },
+        {
+            idSuffix: 'screener',
+            name: 'Screener',
+            template: GLOBAL_MARKETS_SCREENER_TEMPLATE,
+        },
+        {
+            idSuffix: 'cryptocurrencies',
+            name: 'Cryptocurrencies',
+            template: GLOBAL_MARKETS_CRYPTO_TEMPLATE,
+        },
+        {
+            idSuffix: 'world-news',
+            name: 'WorldNews',
+            template: GLOBAL_MARKETS_WORLD_NEWS_TEMPLATE,
+        },
+    ];
 
     return {
         id: GLOBAL_MARKETS_DASHBOARD_ID,
@@ -1690,7 +1826,9 @@ const createGlobalMarketsDashboard = (): Dashboard => {
         isEditable: false,
         isDeletable: false,
         showGroupLabels: true,
-        tabs: [createSystemDashboardTab(GLOBAL_MARKETS_DASHBOARD_ID, tabSpec, 0)],
+        tabs: tabSpecs.map((spec, index) =>
+            createSystemDashboardTab(GLOBAL_MARKETS_DASHBOARD_ID, spec, index)
+        ),
         syncGroups: [
             { id: 1, name: 'Group 1', color: DEFAULT_SYNC_GROUP_COLORS[0], currentSymbol: DEFAULT_GLOBAL_MARKETS_SYMBOL },
         ],

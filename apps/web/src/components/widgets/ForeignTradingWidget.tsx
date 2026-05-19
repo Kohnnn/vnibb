@@ -125,10 +125,28 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     const responseWarning = data?.error || null;
     const isFallback = Boolean((error || responseWarning) && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+
+    // Compute the age of the displayed snapshot. The "Cached snapshot" badge
+    // previously gave no hint of how stale the data was, which felt
+    // misleading when the snapshot was many hours old. We surface a coarse
+    // age suffix (e.g. "2h", "10h", "yesterday") in the health detail.
+    const snapshotAgeHours = useMemo(() => {
+        const lastDateStr = data?.meta?.last_data_date;
+        if (!lastDateStr) return null;
+        const lastDate = new Date(lastDateStr);
+        if (Number.isNaN(lastDate.getTime())) return null;
+        const diffMs = Date.now() - lastDate.getTime();
+        if (diffMs < 0) return null;
+        return diffMs / (1000 * 60 * 60);
+    }, [data?.meta?.last_data_date]);
+
     const healthState: WidgetHealthState | undefined = isFallback
         ? {
             status: 'cached',
-            label: 'Cached snapshot',
+            label:
+                snapshotAgeHours !== null && snapshotAgeHours >= 1
+                    ? `Cached snapshot · ${snapshotAgeHours >= 24 ? `${Math.floor(snapshotAgeHours / 24)}d` : `${Math.floor(snapshotAgeHours)}h`} old`
+                    : 'Cached snapshot',
             detail: responseWarning || 'Showing the last successful foreign flow snapshot while refresh is degraded.',
         }
         : undefined

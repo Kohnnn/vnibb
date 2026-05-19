@@ -27,6 +27,7 @@ CORE_ENDPOINTS = [
     ("quote", "/api/v1/equity/VNM/quote"),
     ("ratios", "/api/v1/equity/VNM/ratios?period=year"),
     ("historical", "/api/v1/equity/historical?symbol=VNM&period=1Y"),
+    ("world_news", "/api/v1/news/world?freshness_hours=72"),
 ]
 
 MAX_SAMPLE_BYTES = 256_000

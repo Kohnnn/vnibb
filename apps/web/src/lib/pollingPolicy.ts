@@ -110,4 +110,13 @@ export const POLLING_PRESETS = {
     hiddenMs: false,
     offlineMs: false,
   },
+  foreignTrading: {
+    // Foreign-trading data is computed at end-of-session and cached at the
+    // provider layer for 60 minutes. Refetching faster than 5 min just bounces
+    // off the cache; outside trading hours we settle to 30 min.
+    marketOpenMs: 300_000,
+    marketClosedMs: 1_800_000,
+    hiddenMs: false,
+    offlineMs: false,
+  },
 } as const satisfies Record<string, AdaptivePollingConfig>
