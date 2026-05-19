@@ -68,10 +68,10 @@ services:
       - path: ./deployment/env.oracle
         required: false
     environment:
-      SITE_HOSTNAME: ${SITE_HOSTNAME:-api.example.com}
+      SITE_HOSTNAME: ${SITE_HOSTNAME:?Set SITE_HOSTNAME in deployment/env.oracle and pass --env-file deployment/env.oracle}
       API_UPSTREAM: ${API_UPSTREAM:-api:8000}
       MCP_UPSTREAM: ${MCP_UPSTREAM:-mcp:8001}
-      ACME_EMAIL: ${ACME_EMAIL:-ops@example.com}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in deployment/env.oracle and pass --env-file deployment/env.oracle}
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
     ports:
       - "80:80"

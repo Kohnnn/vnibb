@@ -122,6 +122,8 @@ git pull --ff-only
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build
 ```
 
+Always include `--env-file deployment/env.oracle`. Compose does not use the service-level `env_file` for `${...}` interpolation, and Caddy requires `SITE_HOSTNAME` plus `ACME_EMAIL` before it can obtain a public TLS certificate.
+
 If health checks still show old runtime behavior after env changes, rebuild without cache and force recreation:
 
 ```bash
@@ -143,6 +145,22 @@ docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml log
 - Wait for Caddy to obtain certificates.
 - Confirm the canary hostname answers on `https://`.
 - If the browser console shows `net::ERR_SSL_PROTOCOL_ERROR` for every `/api/v1/*` request, the frontend is pointed at a host/port that is not terminating TLS. Fix `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` to use the public Caddy HTTPS hostname, then redeploy the frontend.
+
+If the public Caddy hostname itself fails TLS with `tlsv1 alert internal error`, confirm the running compose config is using the real hostname, then recreate Caddy:
+
+```bash
+grep -E '^(SITE_HOSTNAME|ACME_EMAIL)=' deployment/env.oracle
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml config | grep -E 'SITE_HOSTNAME|ACME_EMAIL'
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --force-recreate caddy
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs caddy --tail=200
+```
+
+Then verify from outside the VM:
+
+```bash
+openssl s_client -connect "$SITE_HOSTNAME:443" -servername "$SITE_HOSTNAME" -brief
+BASE_URL="https://$SITE_HOSTNAME" bash scripts/oracle/healthcheck.sh
+```
 
 ## 4. Verify Service
 
