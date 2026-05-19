@@ -196,6 +196,25 @@ export function formatAbsoluteTimestamp(
 }
 
 /**
+ * Locale-agnostic short date helper. Emits `YYYY-MM-DD`. Use this everywhere
+ * widgets currently call `toLocaleDateString('vi-VN')` so the dashboard has a
+ * single, consistent date convention regardless of widget origin.
+ */
+export function formatShortDate(
+  date: Date | string | number | null | undefined
+): string {
+  if (date === null || date === undefined) return '-'
+  const parsed = parseFlexibleDate(date)
+  if (!parsed) return '-'
+  if (Number.isNaN(parsed.getTime())) return '-'
+
+  const yyyy = parsed.getFullYear()
+  const mm = String(parsed.getMonth() + 1).padStart(2, '0')
+  const dd = String(parsed.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/**
  * Format date to localized string
  */
 export function formatDate(

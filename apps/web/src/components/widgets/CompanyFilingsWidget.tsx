@@ -7,6 +7,7 @@ import { Calendar, FileText } from 'lucide-react';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { formatShortDate } from '@/lib/format';
 import type { CompanyEventData } from '@/types/equity';
 
 interface CompanyFilingsWidgetProps {
@@ -34,16 +35,7 @@ function getEventTypeColor(type: string): string {
 
 function formatEventDate(dateStr: string | null | undefined): string {
     if (!dateStr) return '-';
-    try {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('vi-VN', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-        });
-    } catch {
-        return dateStr;
-    }
+    return formatShortDate(dateStr);
 }
 
 function getEventDate(event: CompanyEventData): string {

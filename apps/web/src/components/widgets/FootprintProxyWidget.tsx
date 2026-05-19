@@ -28,6 +28,7 @@ export function FootprintProxyWidget({ symbol }: FootprintProxyWidgetProps) {
     enabled: Boolean(upperSymbol),
   });
   const bars = data?.data?.footprint?.bars || [];
+  const footprintSource = (data?.data?.footprint as { source?: string } | undefined)?.source;
   const hasData = bars.length > 0;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
   const recent = bars.slice(-8).reverse();
@@ -49,7 +50,20 @@ export function FootprintProxyWidget({ symbol }: FootprintProxyWidgetProps) {
   }
 
   if (!hasData) {
-    return <WidgetEmpty message="No footprint proxy data" icon={<Rows3 size={18} />} size="compact" />;
+    const isUnavailable = footprintSource === 'unavailable';
+    return (
+      <WidgetEmpty
+        message={isUnavailable ? 'Footprint proxy not available' : 'No footprint proxy data yet'}
+        detail={
+          isUnavailable
+            ? 'Footprint proxy is computed from live trade ticks. Data resumes when HOSE reopens (09:00–15:00 ICT).'
+            : 'Waiting for trade ticks. Try refresh in a few minutes.'
+        }
+        icon={<Rows3 size={18} />}
+        size="compact"
+        action={{ label: 'Refresh', onClick: () => refetch() }}
+      />
+    );
   }
 
   return (

@@ -55,7 +55,21 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
     const treatOwnershipAsRatio =
         ownershipValues.length > 0 && ownershipValues.every((value) => Math.abs(value) <= 1);
     const hasData = shareholders.length > 0;
-    const hasSparseData = shareholders.length === 1;
+    // Only flag "limited disclosure" when (a) we have a single row AND (b)
+    // that row's ownership stake is small. Many issuers genuinely have a
+    // single dominant founder/parent, and showing a yellow warning banner
+    // for those cases is misleading. The threshold (50%) is intentionally
+    // generous so we still flag the foreign-cap pseudo-row case (~30%).
+    const soleHolderPct = ownershipValues.length === 1 ? ownershipValues[0] : null;
+    const soleHolderShare =
+        soleHolderPct !== null
+            ? treatOwnershipAsRatio
+                ? soleHolderPct
+                : soleHolderPct / 100
+            : null;
+    const hasSparseData =
+        shareholders.length === 1 &&
+        (soleHolderShare === null || soleHolderShare < 0.5);
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 

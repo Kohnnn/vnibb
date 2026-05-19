@@ -88,8 +88,8 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
   const clusterRead = getSectorRead(clusterScore)
   const minOverlapDays = Math.max(10, Math.floor(days / 3))
   const coverageDetail = payload?.returns_count
-    ? `Only ${payload.returns_count} aligned return rows passed validation. Need at least ${minOverlapDays} overlapping daily returns for ${upperSymbol} and peers; try a longer window or refresh Mongo EOD prices.`
-    : `No overlapping daily price history found for ${upperSymbol} and its peer universe. Refresh Mongo EOD prices or try another symbol.`
+    ? `Only ${payload.returns_count} aligned return rows passed validation. Need at least ${minOverlapDays} overlapping daily returns for ${upperSymbol} and peers. Try a longer window or expand the peer set; daily price history may be incomplete.`
+    : `No overlapping daily price history found for ${upperSymbol} and its peer universe. Try another symbol or wait for the next EOD sync.`
 
   return (
     <WidgetContainer

@@ -9,6 +9,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { cn } from '@/lib/utils';
+import { formatShortDate } from '@/lib/format';
 import { memo, useEffect, useMemo } from 'react';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
@@ -33,13 +34,7 @@ function formatNetVolume(vol: number, signed = false): string {
 }
 
 function formatDate(dateStr: string | null | undefined): string {
-    if (!dateStr) return '-';
-    try {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('vi-VN', { month: 'short', day: 'numeric' });
-    } catch {
-        return dateStr.slice(0, 10);
-    }
+    return formatShortDate(dateStr);
 }
 
 function getNetFlowLabel(net: number): string {

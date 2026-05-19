@@ -263,11 +263,11 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
             <WidgetEmpty
               icon={<Activity size={18} />}
               message={`Investor bucket flow is not available for ${upperSymbol} yet.`}
-              detail="This stream is sparse for non-broker symbols and resumes when provider data is available."
+              detail="Investor bucket flow is reliably available for broker tickers (SSI, VND, HCM, VCI, MBS, SHS, BSI) and a handful of high-liquidity blue chips. Other symbols may show sparse buckets even when end-of-day data is fresh."
               health={{
                 status: 'coverage_gap',
                 label: 'Sparse coverage',
-                detail: 'Flow buckets are usually available only for selected broker or high-liquidity names.',
+                detail: 'Resumes automatically once the provider publishes domestic/foreign/proprietary buckets for this ticker.',
               }}
               size="compact"
             />

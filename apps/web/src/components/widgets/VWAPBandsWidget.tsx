@@ -24,6 +24,7 @@ export function VWAPBandsWidget({ symbol }: VWAPBandsWidgetProps) {
     enabled: Boolean(upperSymbol),
   });
   const points = data?.data?.vwap?.points || [];
+  const vwapSource = (data?.data?.vwap as { source?: string } | undefined)?.source;
   const hasData = points.length > 0;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
   const latest = points[points.length - 1];
@@ -50,7 +51,20 @@ export function VWAPBandsWidget({ symbol }: VWAPBandsWidgetProps) {
   }
 
   if (!hasData) {
-    return <WidgetEmpty message="No intraday VWAP data" icon={<Activity size={18} />} size="compact" />;
+    const isUnavailable = vwapSource === 'unavailable';
+    return (
+      <WidgetEmpty
+        message={isUnavailable ? 'Intraday VWAP not available' : 'No intraday VWAP data yet'}
+        detail={
+          isUnavailable
+            ? 'VWAP populates from live trade ticks. Data resumes when HOSE reopens (09:00–15:00 ICT).'
+            : 'Waiting for trade ticks. Try refresh in a few minutes.'
+        }
+        icon={<Activity size={18} />}
+        size="compact"
+        action={{ label: 'Refresh', onClick: () => refetch() }}
+      />
+    );
   }
 
   return (

@@ -11,6 +11,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { formatShortDate } from '@/lib/format';
 
 interface InsiderTradingWidgetProps {
   id?: string;
@@ -29,8 +30,7 @@ function formatCurrency(value: number | null | undefined): string {
 }
 
 function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('vi-VN');
+  return formatShortDate(dateStr);
 }
 
 function getSentimentColor(score: number): string {

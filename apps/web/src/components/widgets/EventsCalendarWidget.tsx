@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { formatShortDate } from '@/lib/format';
 
 interface EventsCalendarWidgetProps {
     symbol: string;
@@ -32,17 +33,7 @@ const eventTypeColors: Record<string, string> = {
 
 function formatDate(dateStr: string | null | undefined): string {
     if (!dateStr || dateStr === 'None' || dateStr === '') return '-';
-
-    try {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('vi-VN', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-        });
-    } catch {
-        return dateStr;
-    }
+    return formatShortDate(dateStr);
 }
 
 function getEventTypeKey(type: string | null | undefined): string {
