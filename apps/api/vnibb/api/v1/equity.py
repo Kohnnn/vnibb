@@ -75,6 +75,7 @@ from vnibb.providers.vnstock.equity_screener import VnstockScreenerFetcher, Stoc
 from vnibb.providers.vnstock.foreign_trading import (
     VnstockForeignTradingFetcher,
     ForeignTradingQueryParams,
+    ForeignTradingData,
 )
 from vnibb.providers.vnstock.subsidiaries import VnstockSubsidiariesFetcher, SubsidiariesQueryParams
 from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher

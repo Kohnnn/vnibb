@@ -21,7 +21,9 @@
 
 	@mcp path /mcp*
 	handle @mcp {
-		reverse_proxy {$MCP_UPSTREAM}
+		reverse_proxy {$MCP_UPSTREAM} {
+			header_up Host localhost:8001
+		}
 	}
 
 	handle {

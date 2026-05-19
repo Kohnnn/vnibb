@@ -29,13 +29,15 @@ CORE_ENDPOINTS = [
     ("historical", "/api/v1/equity/historical?symbol=VNM&period=1Y"),
 ]
 
+MAX_SAMPLE_BYTES = 256_000
+
 
 def fetch_status(url: str, timeout: float) -> dict[str, Any]:
     started = time.perf_counter()
     req = Request(url, headers={"User-Agent": "vnibb-health-matrix/1.0"})
     try:
         with urlopen(req, timeout=timeout) as response:
-            body = response.read(4000)
+            body = response.read(MAX_SAMPLE_BYTES)
             elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
             return {
                 "ok": 200 <= response.status < 400,
