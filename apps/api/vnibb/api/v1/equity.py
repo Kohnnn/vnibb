@@ -3368,10 +3368,14 @@ async def _enrich_missing_ratio_metrics(
             "operating_income": _coerce_optional_float(operating_income),
             "net_income": _coerce_optional_float(net_income),
             "cost_of_revenue": _coerce_optional_float(cost_of_revenue),
+            "gross_profit": _pick_optional_float(
+                _lookup_financial_metric(raw_payload, "gross_profit", "grossProfit")
+            ),
             "eps": _coerce_optional_float(eps),
             "interest_expense": _coerce_optional_float(interest_expense),
             "ebitda": _coerce_optional_float(ebitda),
             "tax_expense": _coerce_optional_float(income_tax),
+            "raw_data": raw_payload,
             "net_interest_income": _pick_optional_float(
                 _lookup_financial_metric(raw_payload, "net_interest_income")
             ),
@@ -3395,10 +3399,15 @@ async def _enrich_missing_ratio_metrics(
             "operating_income": _coerce_optional_float(statement_row.operating_income),
             "net_income": _coerce_optional_float(statement_row.net_income),
             "cost_of_revenue": _coerce_optional_float(statement_row.cost_of_revenue),
+            "gross_profit": _pick_optional_float(
+                _coerce_optional_float(getattr(statement_row, "gross_profit", None)),
+                _lookup_financial_metric(statement_row.raw_data or {}, "gross_profit", "grossProfit"),
+            ),
             "eps": _coerce_optional_float(statement_row.eps),
             "interest_expense": _coerce_optional_float(statement_row.interest_expense),
             "ebitda": _coerce_optional_float(statement_row.ebitda),
             "tax_expense": _coerce_optional_float(statement_row.tax_expense),
+            "raw_data": statement_row.raw_data or {},
             "net_interest_income": _pick_optional_float(
                 _lookup_financial_metric(statement_row.raw_data or {}, "net_interest_income")
             ),
@@ -3971,6 +3980,30 @@ async def _enrich_missing_ratio_metrics(
             and operating_income is not None
         ):
             item.operating_margin = (operating_income / revenue) * 100
+        if (
+            item.gross_margin is None
+            and revenue not in (None, 0)
+            and not is_bank_like
+        ):
+            # Prefer the explicit gross_profit value (sourced from raw_data
+            # in income_lookup), then fall back to revenue - cost_of_revenue.
+            # Banks/securities firms don't report gross_profit so we skip
+            # them via the is_bank_like guard.
+            gross_profit_value = (
+                None if income is None else _coerce_optional_float(income.get("gross_profit"))
+            )
+            if gross_profit_value is None and cost_of_revenue is not None:
+                gross_profit_value = revenue - cost_of_revenue
+            if gross_profit_value is not None:
+                derived_gross_margin = (gross_profit_value / revenue) * 100
+                if -500.0 <= derived_gross_margin <= 500.0:
+                    item.gross_margin = derived_gross_margin
+        if (
+            item.net_margin is None
+            and revenue not in (None, 0)
+            and net_income is not None
+        ):
+            item.net_margin = (net_income / revenue) * 100
         if (
             item.asset_turnover is None
             and revenue not in (None, 0)

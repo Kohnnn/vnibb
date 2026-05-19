@@ -100,24 +100,30 @@ function resolveDateRange(timeframe: AdvancedChartTimeframe): { startDate: strin
   return { startDate: toDateInput(start), endDate: toDateInput(end) };
 }
 
+function safeNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function normalizePoints(rows: Array<Record<string, unknown>>): ChartPoint[] {
   return rows
-    .map((row) => ({
-      time: String(row.time ?? ''),
-      open: Number(row.open ?? 0),
-      high: Number(row.high ?? 0),
-      low: Number(row.low ?? 0),
-      close: Number(row.close ?? 0),
-      volume: Number(row.volume ?? 0),
-    }))
-    .filter(
-      (row) =>
-        row.time &&
-        Number.isFinite(row.open) &&
-        Number.isFinite(row.high) &&
-        Number.isFinite(row.low) &&
-        Number.isFinite(row.close)
-    )
+    .map((row) => {
+      const time = String(row.time ?? '');
+      const open = safeNumber(row.open);
+      const high = safeNumber(row.high);
+      const low = safeNumber(row.low);
+      const close = safeNumber(row.close);
+      const volume = safeNumber(row.volume) ?? 0;
+      // Reject rows where any OHLC value is missing or non-finite. Returning
+      // a partial row here would crash lightweight-charts deep in its
+      // candlestick renderer with "Value is null".
+      if (open === null || high === null || low === null || close === null || !time) {
+        return null;
+      }
+      return { time, open, high, low, close, volume };
+    })
+    .filter((row): row is ChartPoint => row !== null)
     .sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime());
 }
 
@@ -148,6 +154,11 @@ function mergeQuote(points: ChartPoint[], quote: Awaited<ReturnType<typeof getQu
     return points;
   }
 
+  const quotePrice = safeNumber(quote.price);
+  if (quotePrice === null) {
+    return points;
+  }
+
   const next = [...points];
   const latest = next[next.length - 1];
   const latestTime = new Date(latest.time);
@@ -159,13 +170,21 @@ function mergeQuote(points: ChartPoint[], quote: Awaited<ReturnType<typeof getQu
   // `YYYY-MM-DD` business-day string from the quote's calendar day.
   const mergedTime = quoteDay === latestDay ? latest.time : toBusinessDayString(quoteTime);
 
+  // Coerce optional quote fields, defaulting safely to the latest historical
+  // values (which are guaranteed non-null after normalizePoints). Never
+  // allow a null/NaN to land in the merged point.
+  const quoteOpen = safeNumber(quote.open) ?? latest.close ?? quotePrice;
+  const quoteHigh = safeNumber(quote.high) ?? Math.max(latest.high, quotePrice);
+  const quoteLow = safeNumber(quote.low) ?? Math.min(latest.low, quotePrice);
+  const quoteVolume = safeNumber(quote.volume) ?? latest.volume ?? 0;
+
   const mergedPoint: ChartPoint = {
     time: mergedTime,
-    open: Number(quote.open ?? latest.close ?? quote.price),
-    high: Number(quote.high ?? Math.max(latest.high, Number(quote.price))),
-    low: Number(quote.low ?? Math.min(latest.low, Number(quote.price))),
-    close: Number(quote.price),
-    volume: Number(quote.volume ?? latest.volume ?? 0),
+    open: quoteOpen,
+    high: quoteHigh,
+    low: quoteLow,
+    close: quotePrice,
+    volume: quoteVolume,
   };
 
   if (quoteDay === latestDay) {
@@ -360,6 +379,19 @@ export function TradingViewAdvancedChart({
         chartRef.current = chart;
 
         let series: ISeriesApi<'Candlestick'> | ISeriesApi<'Line'> | ISeriesApi<'Area'>;
+        // Final defense-in-depth: lightweight-charts will throw "Value is
+        // null" deep inside its candlestick renderer if any OHLC value
+        // arrives non-finite. normalizePoints + mergeQuote already guard,
+        // but we filter once more here right before setData so any future
+        // upstream regression cannot crash the chart.
+        const safePoints = points.filter(
+          (point) =>
+            !!point.time &&
+            Number.isFinite(point.open) &&
+            Number.isFinite(point.high) &&
+            Number.isFinite(point.low) &&
+            Number.isFinite(point.close)
+        );
         if (mode === 'line') {
           series = chart.addLineSeries({
             color: '#38bdf8',
@@ -367,7 +399,7 @@ export function TradingViewAdvancedChart({
             crosshairMarkerVisible: true,
             crosshairMarkerRadius: 4,
           });
-          series.setData(points.map((point) => ({ time: point.time, value: point.close })));
+          series.setData(safePoints.map((point) => ({ time: point.time, value: point.close })));
         } else if (mode === 'area') {
           series = chart.addAreaSeries({
             topColor: 'rgba(56, 189, 248, 0.35)',
@@ -375,7 +407,7 @@ export function TradingViewAdvancedChart({
             lineColor: '#38bdf8',
             lineWidth: 2,
           });
-          series.setData(points.map((point) => ({ time: point.time, value: point.close })));
+          series.setData(safePoints.map((point) => ({ time: point.time, value: point.close })));
         } else {
           series = chart.addCandlestickSeries({
             upColor: '#22c55e',
@@ -386,7 +418,7 @@ export function TradingViewAdvancedChart({
             wickDownColor: '#ef4444',
           });
           series.setData(
-            points.map((point) => ({
+            safePoints.map((point) => ({
               time: point.time,
               open: point.open,
               high: point.high,
@@ -415,9 +447,9 @@ export function TradingViewAdvancedChart({
           scaleMargins: { top: 0.8, bottom: 0 },
         });
         volumeSeries.setData(
-          points.map((point) => ({
+          safePoints.map((point) => ({
             time: point.time,
-            value: point.volume,
+            value: Number.isFinite(point.volume) ? point.volume : 0,
             color: point.close >= point.open ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)',
           }))
         );

@@ -859,7 +859,9 @@ WORLD_NEWS_SOURCES: tuple[WorldNewsSourceConfig, ...] = (
         language="en",
         tier=1,
         homepage_url="https://www.cisa.gov/news-events/cybersecurity-advisories",
-        feed_urls=("https://www.cisa.gov/cybersecurity-advisories/all.xml",),
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:cisa.gov%20cybersecurity%20advisories%20when:7d&hl=en-US&gl=US&ceid=US:en",
+        ),
     ),
 )
 
