@@ -110,6 +110,14 @@ function TradingViewNativeWidget({
   const hasTrackedLoadRef = useRef(false);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Defer iframe-script injection until the host element is at least
+  // partially in the viewport. TradingView's iframe widgets each fetch a
+  // separate `embed-widget-*.js`, and on dashboards with many such widgets
+  // those script loads serialize over the network. Letting the browser
+  // discover them on scroll keeps the dashboard responsive and removes the
+  // 6+ second Bitcoin-spinner stall users see for the Crypto Coins Heatmap
+  // when the surrounding workspace has many TV widgets. (BUG-016)
+  const [isInView, setIsInView] = useState(false);
   const allowsOverflow = widgetType === 'tradingview_ticker_tag';
 
   const resolvedSymbol = useMemo(() => {
@@ -127,7 +135,45 @@ function TradingViewNativeWidget({
     [config, resolvedSymbol, widgetType],
   );
 
+  // IntersectionObserver guard. Once visible we never re-arm — the mount
+  // effect handles its own teardown on unmount.
   useEffect(() => {
+    if (isInView) return;
+    const host = hostRef.current;
+    if (!host) return;
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setIsInView(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setIsInView(true);
+            observer.disconnect();
+            break;
+          }
+        }
+      },
+      { rootMargin: '320px 0px' },
+    );
+    observer.observe(host);
+
+    // Safety net: if the observer never fires (e.g. inside an offscreen
+    // tab that nobody scrolls to in 8s), still mount so the user isn't
+    // stuck on the skeleton when they switch back.
+    const safetyTimer = window.setTimeout(() => setIsInView(true), 8000);
+
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(safetyTimer);
+    };
+  }, [isInView]);
+
+  useEffect(() => {
+    if (!isInView) return;
     const host = hostRef.current;
     if (!host || !metadata) {
       setIsLoading(false);
@@ -257,7 +303,7 @@ function TradingViewNativeWidget({
       cancelled = true;
       teardown();
     };
-  }, [metadata, runtimeConfig, webComponentAttributes]);
+  }, [isInView, metadata, runtimeConfig, webComponentAttributes]);
 
   if (!metadata) {
     return <WidgetError error={new Error(`Unknown TradingView widget: ${widgetType}`)} />;

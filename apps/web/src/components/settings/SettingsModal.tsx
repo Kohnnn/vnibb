@@ -8,6 +8,7 @@ import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useUiPreferences } from '@/contexts/UiPreferencesContext';
 import { useUnit } from '@/contexts/UnitContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
@@ -159,6 +160,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [publicRuntimeModel, setPublicRuntimeModel] = useState<string | null>(null);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const { theme, setTheme, resolvedTheme } = useTheme();
+  const { density, setDensity, chartStyle, setChartStyle } = useUiPreferences();
   const {
     config: unitConfig,
     globalUsdVndDefaultRate,
@@ -1351,10 +1353,62 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                   </div>
                 </div>
+                <div>
+                  <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Density</h4>
+                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <div className="text-sm font-bold text-blue-300">Layout density</div>
+                    <div className="mt-1 text-xs text-[var(--text-muted)]">
+                      Controls global spacing and row heights via the <code className="px-1 rounded bg-[var(--bg-tertiary)]">data-density</code> attribute on the document. Widgets that opt-in to density-aware styling will reflow accordingly.
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {(['compact', 'comfortable', 'spacious'] as const).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => setDensity(option)}
+                          className={cn(
+                            'rounded-full border px-3 py-1 text-[11px] font-semibold capitalize transition-colors',
+                            density === option
+                              ? 'border-blue-500/30 bg-blue-500/10 text-blue-300'
+                              : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                          )}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Chart Style</h4>
+                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <div className="text-sm font-bold text-blue-300">Default chart series</div>
+                    <div className="mt-1 text-xs text-[var(--text-muted)]">
+                      Sets the default rendering style for new price charts. Existing widgets with an explicit per-widget setting will keep their override.
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {(['candle', 'bar', 'line', 'area'] as const).map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => setChartStyle(option)}
+                          className={cn(
+                            'rounded-full border px-3 py-1 text-[11px] font-semibold capitalize transition-colors',
+                            chartStyle === option
+                              ? 'border-blue-500/30 bg-blue-500/10 text-blue-300'
+                              : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                          )}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-                  <div className="text-sm font-bold text-[var(--text-primary)]">Display controls still live in the header</div>
+                  <div className="text-sm font-bold text-[var(--text-primary)]">Display units & FX overrides</div>
                   <div className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-                    Use the header display menu for unit formatting and precision. Appearance settings will consolidate density, theme, and chart-style defaults after the visual QA pass.
+                    Display Units (K / M / B / USD / raw) and yearly USD FX overrides currently live under <span className="font-semibold text-[var(--text-secondary)]">Data Sources</span> for migration safety. Once the consolidation pass ships they will move here alongside Theme, Density, and Chart Style.
                   </div>
                 </div>
               </div>

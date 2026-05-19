@@ -10,6 +10,7 @@ import { WidgetGroupProvider } from "@/contexts/WidgetGroupContext";
 import { SymbolLinkProvider } from "@/contexts/SymbolLinkContext";
 import { GlobalMarketsSymbolProvider } from "@/contexts/GlobalMarketsSymbolContext";
 import { ThemeProvider, ThemeScript } from "@/contexts/ThemeContext";
+import { UiPreferencesProvider, UiPreferencesScript } from "@/contexts/UiPreferencesContext";
 import { CommandPaletteWrapper } from "@/components/CommandPaletteWrapper";
 import { AnalyticsBootstrap } from "@/components/analytics/AnalyticsBootstrap";
 import "./globals.css";
@@ -47,6 +48,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <ThemeScript />
+        <UiPreferencesScript />
         <title>VNIBB | Vietnam Stock Market Analytics</title>
         <meta
           name="description"
@@ -70,27 +72,29 @@ export default function RootLayout({
           Skip to main content
         </a>
         <ThemeProvider>
-          <QueryProvider>
-            <AuthProvider>
-              <DashboardProvider>
-                <WidgetGroupProvider>
-                  <SymbolLinkProvider>
-                    <GlobalMarketsSymbolProvider>
-                      <DataSourcesProvider>
-                        <UnitProvider>
-                          <Suspense fallback={null}>
-                            <AnalyticsBootstrap />
-                          </Suspense>
-                          <main id="main-content">{children}</main>
-                          <CommandPaletteWrapper />
-                        </UnitProvider>
-                      </DataSourcesProvider>
-                    </GlobalMarketsSymbolProvider>
-                  </SymbolLinkProvider>
-                </WidgetGroupProvider>
-              </DashboardProvider>
-            </AuthProvider>
-          </QueryProvider>
+          <UiPreferencesProvider>
+            <QueryProvider>
+              <AuthProvider>
+                <DashboardProvider>
+                  <WidgetGroupProvider>
+                    <SymbolLinkProvider>
+                      <GlobalMarketsSymbolProvider>
+                        <DataSourcesProvider>
+                          <UnitProvider>
+                            <Suspense fallback={null}>
+                              <AnalyticsBootstrap />
+                            </Suspense>
+                            <main id="main-content">{children}</main>
+                            <CommandPaletteWrapper />
+                          </UnitProvider>
+                        </DataSourcesProvider>
+                      </GlobalMarketsSymbolProvider>
+                    </SymbolLinkProvider>
+                  </WidgetGroupProvider>
+                </DashboardProvider>
+              </AuthProvider>
+            </QueryProvider>
+          </UiPreferencesProvider>
         </ThemeProvider>
       </body>
     </html>
