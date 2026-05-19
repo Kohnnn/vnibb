@@ -121,6 +121,23 @@ function normalizePoints(rows: Array<Record<string, unknown>>): ChartPoint[] {
     .sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime());
 }
 
+/**
+ * Format a Date as a `YYYY-MM-DD` business-day string suitable for
+ * lightweight-charts. Uses the local calendar day (matches the convention used
+ * by the historical-prices API which returns `Pydantic date` → date-only).
+ *
+ * Mixing a full ISO timestamp with date-only strings inside a single
+ * lightweight-charts series silently rejects the data (chart frame still
+ * draws but candles disappear). Always emit `YYYY-MM-DD` here so every point
+ * in the series is the same time-kind.
+ */
+function toBusinessDayString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function mergeQuote(points: ChartPoint[], quote: Awaited<ReturnType<typeof getQuote>>['data'] | null): ChartPoint[] {
   if (!quote?.price || !quote.updatedAt || points.length === 0) {
     return points;
@@ -137,8 +154,13 @@ function mergeQuote(points: ChartPoint[], quote: Awaited<ReturnType<typeof getQu
   const quoteDay = new Date(quoteTime.getFullYear(), quoteTime.getMonth(), quoteTime.getDate()).getTime();
   const latestDay = new Date(latestTime.getFullYear(), latestTime.getMonth(), latestTime.getDate()).getTime();
 
+  // For same-day merges, reuse the exact `time` of the historical bar so the
+  // string format never drifts. For new-day pushes, build a fresh
+  // `YYYY-MM-DD` business-day string from the quote's calendar day.
+  const mergedTime = quoteDay === latestDay ? latest.time : toBusinessDayString(quoteTime);
+
   const mergedPoint: ChartPoint = {
-    time: quoteTime.toISOString(),
+    time: mergedTime,
     open: Number(quote.open ?? latest.close ?? quote.price),
     high: Number(quote.high ?? Math.max(latest.high, Number(quote.price))),
     low: Number(quote.low ?? Math.min(latest.low, Number(quote.price))),

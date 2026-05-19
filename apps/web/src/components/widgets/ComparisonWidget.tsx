@@ -178,7 +178,7 @@ export function ComparisonWidget({ id, initialSymbols = [DEFAULT_TICKER, 'FPT'],
                                     </div>
                                 ) : (
                                     <ChartMountGuard className="h-full" minHeight={120}>
-                                        <ResponsiveContainer width="99%" height="100%" minWidth={260} minHeight={120}>
+                                        <ResponsiveContainer width="100%" height="100%" minWidth={260} minHeight={120}>
                                             <ReLineChart data={perfData}>
                                                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                                 <XAxis 

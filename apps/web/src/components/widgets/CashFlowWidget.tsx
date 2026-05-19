@@ -351,7 +351,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove }: Ca
                         )
                     ) : (
                     <ChartMountGuard className="h-full" minHeight={120}>
-                        <ResponsiveContainer width="99%" height="100%" minWidth={240} minHeight={120}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={240} minHeight={120}>
                             {chartType === 'overview' ? (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />

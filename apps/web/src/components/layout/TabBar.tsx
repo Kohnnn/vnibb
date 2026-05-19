@@ -370,8 +370,8 @@ export function TabBar(_props: TabBarProps) {
                                         </span>
                                     )}
 
-                                    {/* Close button (visible on hover for active tab or when confirming delete) */}
-                                    {sortedTabs.length > 1 && (isActive || isDeleteConfirm) && !isEditing && (
+                                    {/* Close button (visible on hover for any non-last tab; double-click guard prevents accidental delete) */}
+                                    {sortedTabs.length > 1 && !isEditing && (
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
@@ -380,8 +380,8 @@ export function TabBar(_props: TabBarProps) {
                                             className={`
                                                 p-0.5 rounded transition-colors
                                                 ${isDeleteConfirm
-                                                    ? 'text-red-400 bg-red-500/20 hover:bg-red-500/30'
-                                                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]/70 opacity-0 group-hover:opacity-100'
+                                                    ? 'text-red-400 bg-red-500/20 hover:bg-red-500/30 opacity-100'
+                                                    : `text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]/70 ${isActive ? 'opacity-60' : 'opacity-0'} group-hover:opacity-100`
                                                 }
                                             `}
                                             title={isDeleteConfirm ? 'Click again to confirm delete' : 'Close tab'}
