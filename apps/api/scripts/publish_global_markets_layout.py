@@ -245,10 +245,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--admin-key",
-        default=os.environ.get("VNIBB_ADMIN_LAYOUT_KEY"),
+        default=os.environ.get("VNIBB_ADMIN_LAYOUT_KEY") or os.environ.get("ADMIN_API_KEY"),
         help=(
-            "Admin layout key for the X-Admin-Layout-Key / Authorization header. "
-            "Defaults to $VNIBB_ADMIN_LAYOUT_KEY."
+            "Admin API key for the X-Admin-Key header. Defaults to "
+            "$VNIBB_ADMIN_LAYOUT_KEY or $ADMIN_API_KEY."
         ),
     )
     parser.add_argument(
@@ -302,8 +302,7 @@ def main() -> int:
         method="PUT",
         headers={
             "Content-Type": "application/json",
-            "X-Admin-Layout-Key": args.admin_key,
-            "Authorization": f"Bearer {args.admin_key}",
+            "X-Admin-Key": args.admin_key,
             "X-Admin-Actor": args.actor,
         },
     )
