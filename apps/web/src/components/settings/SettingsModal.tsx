@@ -1131,167 +1131,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <p className="text-[10px] text-[var(--text-muted)] mt-2">KBS is the recommended default for vnstock 3.5.0+</p>
                 </div>
 
-                <div>
-                  <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Display Units</h4>
-                  <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
-                    {unitOptions.map(option => (
-                      <button
-                        key={option.value}
-                        onClick={() => {
-                          captureAnalyticsEvent(ANALYTICS_EVENTS.unitDisplayChanged, {
-                            previous_display: unitConfig.display,
-                            display: option.value,
-                          })
-                          setUnit(option.value)
-                        }}
-                        className={cn(
-                          "px-3 py-2 rounded-lg border text-[11px] font-bold transition-all",
-                          unitConfig.display === option.value
-                            ? "bg-blue-600/20 border-blue-500 text-blue-400"
-                            : "bg-[var(--bg-secondary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]"
-                        )}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                  <div className="text-sm font-bold text-[var(--text-primary)]">Display Units, FX overrides, and decimal precision moved</div>
+                  <div className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+                    These controls now live under <span className="font-semibold text-[var(--text-secondary)]">Appearance</span> alongside Theme, Density, and Chart Style.
                   </div>
-                  <p className="text-[10px] text-[var(--text-muted)] mt-2">Applies to financial values across all widgets.</p>
-                </div>
-
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 space-y-4">
-                  <div>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-1 uppercase tracking-wider text-[10px]">Currency & FX</h4>
-                      <div className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                        Current display: {unitConfig.display}
-                      </div>
-                    </div>
-                    <p className="text-[10px] text-[var(--text-muted)]">
-                      Financial and fundamental widgets convert VND values to USD using the rate for each report year. You can prepare yearly overrides here even while the site is still displaying VND.
-                    </p>
-                    <p className="mt-1 text-[10px] text-cyan-300">
-                      Admin fallback: {formatNumber(globalUsdVndDefaultRate, { decimals: 0 })} VND/USD. Shared yearly defaults loaded for {Object.keys(adminUsdVndRatesByYear).length} years.
-                    </p>
-                    {Object.keys(adminUsdVndRatesByYear).length === 0 ? (
-                      <p className="mt-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
-                        Historical USD conversion is using one global fallback for every year. Add yearly FX defaults before relying on long-range USD comparisons.
-                      </p>
-                    ) : null}
-                    {unitConfig.display !== 'USD' ? (
-                      <p className="mt-1 text-[10px] text-amber-300">
-                        These FX overrides take effect when Display Units is set to USD.
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {usdRateYears.map((year) => (
-                      <label key={year} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">{year}</div>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          min="1"
-                          step="0.01"
-                          value={usdRateInputs[String(year)] ?? ''}
-                          onChange={(event) => {
-                            const nextValue = event.target.value
-                            setUsdRateInputs((prev) => ({ ...prev, [String(year)]: nextValue }))
-                            if (nextValue === '') {
-                              setUsdVndRate(year, null)
-                            }
-                          }}
-                          onBlur={() => {
-                            const rawValue = usdRateInputs[String(year)]
-                            if (!rawValue) {
-                              captureAnalyticsEvent(ANALYTICS_EVENTS.usdRateOverrideUpdated, {
-                                year,
-                                mode: 'cleared',
-                              })
-                              setUsdVndRate(year, null)
-                              return
-                            }
-                            const parsed = Number(rawValue)
-                            if (!Number.isFinite(parsed) || parsed <= 0) {
-                              setPreferenceStatus(`Invalid USD/VND rate for ${year}. Use a number greater than zero.`)
-                              return
-                            }
-                            captureAnalyticsEvent(ANALYTICS_EVENTS.usdRateOverrideUpdated, {
-                              year,
-                              mode: 'saved',
-                            })
-                            setUsdVndRate(year, parsed)
-                          }}
-                          placeholder={String(adminUsdVndRatesByYear[String(year)] || globalUsdVndDefaultRate)}
-                          className="mt-2 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
-                        />
-                        <div className="mt-1 text-[10px] text-[var(--text-muted)]">
-                          {localUsdVndRatesByYear[String(year)]
-                            ? 'Local override'
-                            : adminUsdVndRatesByYear[String(year)]
-                              ? 'Using admin yearly default'
-                              : 'Using admin global default'}
-                        </div>
-                        {!localUsdVndRatesByYear[String(year)] && adminUsdVndRatesByYear[String(year)] ? (
-                          <div className="mt-1 text-[10px] text-cyan-300">
-                            Admin default: {formatNumber(adminUsdVndRatesByYear[String(year)], { decimals: 0 })} VND/USD
-                          </div>
-                        ) : null}
-                      </label>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        captureAnalyticsEvent(ANALYTICS_EVENTS.usdRateOverridesReset, {
-                          override_count: Object.keys(localUsdVndRatesByYear).length,
-                        })
-                        clearUsdVndRates()
-                        setUsdRateInputs({})
-                        setPreferenceStatus('Local USD/VND yearly overrides cleared.')
-                      }}
-                      className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                    >
-                      Reset Local USD Overrides
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Decimal Places</h4>
-                  <div className="grid grid-cols-4 gap-2">
-                    {decimalOptions.map((value) => (
-                      <button
-                        key={value}
-                        onClick={() => {
-                          captureAnalyticsEvent(ANALYTICS_EVENTS.decimalPlacesChanged, {
-                            previous_decimal_places: unitConfig.decimalPlaces,
-                            decimal_places: value,
-                          })
-                          setDecimalPlaces(value)
-                        }}
-                        className={cn(
-                          "px-3 py-2 rounded-lg border text-[11px] font-bold transition-all",
-                          unitConfig.decimalPlaces === value
-                            ? "bg-blue-600/20 border-blue-500 text-blue-400"
-                            : "bg-[var(--bg-secondary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]"
-                        )}
-                      >
-                        {value}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-2">Preview</p>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-[var(--text-secondary)]">1,234,567,890</span>
-                    <span className="text-sm font-mono text-blue-300">
-                      {formatUnitValue(1234567890, unitConfig)}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-[var(--text-muted)] mt-2">Units: {getUnitCaption(unitConfig)}</p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('appearance')}
+                    className="mt-3 inline-flex items-center rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-[11px] font-semibold text-blue-300 hover:bg-blue-500/20"
+                  >
+                    Open Appearance →
+                  </button>
                 </div>
               </div>
             )}
@@ -1406,10 +1257,166 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 </div>
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-                  <div className="text-sm font-bold text-[var(--text-primary)]">Display units & FX overrides</div>
-                  <div className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-                    Display Units (K / M / B / USD / raw) and yearly USD FX overrides currently live under <span className="font-semibold text-[var(--text-secondary)]">Data Sources</span> for migration safety. Once the consolidation pass ships they will move here alongside Theme, Density, and Chart Style.
+                  <div className="text-sm font-bold text-[var(--text-primary)]">Display Units</div>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">Applies to financial values across all widgets.</p>
+                  <div className="mt-3 grid grid-cols-3 gap-2 md:grid-cols-6">
+                    {unitOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        onClick={() => {
+                          captureAnalyticsEvent(ANALYTICS_EVENTS.unitDisplayChanged, {
+                            previous_display: unitConfig.display,
+                            display: option.value,
+                          })
+                          setUnit(option.value)
+                        }}
+                        className={cn(
+                          'px-3 py-2 rounded-lg border text-[11px] font-bold transition-all',
+                          unitConfig.display === option.value
+                            ? 'bg-blue-600/20 border-blue-500 text-blue-400'
+                            : 'bg-[var(--bg-primary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
                   </div>
+                </div>
+
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 space-y-4">
+                  <div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-bold text-[var(--text-primary)]">Currency &amp; FX</div>
+                      <div className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                        Current display: {unitConfig.display}
+                      </div>
+                    </div>
+                    <p className="mt-1 text-[10px] text-[var(--text-muted)]">
+                      Financial and fundamental widgets convert VND values to USD using the rate for each report year. You can prepare yearly overrides here even while the site is still displaying VND.
+                    </p>
+                    <p className="mt-1 text-[10px] text-cyan-300">
+                      Admin fallback: {formatNumber(globalUsdVndDefaultRate, { decimals: 0 })} VND/USD. Shared yearly defaults loaded for {Object.keys(adminUsdVndRatesByYear).length} years.
+                    </p>
+                    {Object.keys(adminUsdVndRatesByYear).length === 0 ? (
+                      <p className="mt-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+                        Historical USD conversion is using one global fallback for every year. Add yearly FX defaults before relying on long-range USD comparisons.
+                      </p>
+                    ) : null}
+                    {unitConfig.display !== 'USD' ? (
+                      <p className="mt-1 text-[10px] text-amber-300">
+                        These FX overrides take effect when Display Units is set to USD.
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {usdRateYears.map((year) => (
+                      <label key={year} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">{year}</div>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min="1"
+                          step="0.01"
+                          value={usdRateInputs[String(year)] ?? ''}
+                          onChange={(event) => {
+                            const nextValue = event.target.value
+                            setUsdRateInputs((prev) => ({ ...prev, [String(year)]: nextValue }))
+                            if (nextValue === '') {
+                              setUsdVndRate(year, null)
+                            }
+                          }}
+                          onBlur={() => {
+                            const rawValue = usdRateInputs[String(year)]
+                            if (!rawValue) {
+                              captureAnalyticsEvent(ANALYTICS_EVENTS.usdRateOverrideUpdated, {
+                                year,
+                                mode: 'cleared',
+                              })
+                              setUsdVndRate(year, null)
+                              return
+                            }
+                            const parsed = Number(rawValue)
+                            if (!Number.isFinite(parsed) || parsed <= 0) {
+                              setPreferenceStatus(`Invalid USD/VND rate for ${year}. Use a number greater than zero.`)
+                              return
+                            }
+                            captureAnalyticsEvent(ANALYTICS_EVENTS.usdRateOverrideUpdated, {
+                              year,
+                              mode: 'saved',
+                            })
+                            setUsdVndRate(year, parsed)
+                          }}
+                          placeholder={String(adminUsdVndRatesByYear[String(year)] || globalUsdVndDefaultRate)}
+                          className="mt-2 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                        />
+                        <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                          {localUsdVndRatesByYear[String(year)]
+                            ? 'Local override'
+                            : adminUsdVndRatesByYear[String(year)]
+                              ? 'Using admin yearly default'
+                              : 'Using admin global default'}
+                        </div>
+                        {!localUsdVndRatesByYear[String(year)] && adminUsdVndRatesByYear[String(year)] ? (
+                          <div className="mt-1 text-[10px] text-cyan-300">
+                            Admin default: {formatNumber(adminUsdVndRatesByYear[String(year)], { decimals: 0 })} VND/USD
+                          </div>
+                        ) : null}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        captureAnalyticsEvent(ANALYTICS_EVENTS.usdRateOverridesReset, {
+                          override_count: Object.keys(localUsdVndRatesByYear).length,
+                        })
+                        clearUsdVndRates()
+                        setUsdRateInputs({})
+                        setPreferenceStatus('Local USD/VND yearly overrides cleared.')
+                      }}
+                      className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    >
+                      Reset Local USD Overrides
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                  <div className="text-sm font-bold text-[var(--text-primary)]">Decimal Places</div>
+                  <div className="mt-3 grid grid-cols-4 gap-2">
+                    {decimalOptions.map((value) => (
+                      <button
+                        key={value}
+                        onClick={() => {
+                          captureAnalyticsEvent(ANALYTICS_EVENTS.decimalPlacesChanged, {
+                            previous_decimal_places: unitConfig.decimalPlaces,
+                            decimal_places: value,
+                          })
+                          setDecimalPlaces(value)
+                        }}
+                        className={cn(
+                          'px-3 py-2 rounded-lg border text-[11px] font-bold transition-all',
+                          unitConfig.decimalPlaces === value
+                            ? 'bg-blue-600/20 border-blue-500 text-blue-400'
+                            : 'bg-[var(--bg-primary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
+                        )}
+                      >
+                        {value}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-2">Preview</p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-[var(--text-secondary)]">1,234,567,890</span>
+                    <span className="text-sm font-mono text-blue-300">
+                      {formatUnitValue(1234567890, unitConfig)}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-2">Units: {getUnitCaption(unitConfig)}</p>
                 </div>
               </div>
             )}
