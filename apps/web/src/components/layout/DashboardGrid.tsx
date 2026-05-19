@@ -229,6 +229,11 @@ export function DashboardGrid({
     // this, an empty widget runtime hint shrinking a cell would cascade
     // through the whole tab via vertical compaction, producing the
     // "widgets collide / blank top-left when zooming" behaviour.
+    //
+    // preventCollision is left at the RGL default (false) regardless of
+    // edit mode. Setting it to true on static layouts caused widgets that
+    // momentarily overlapped during breakpoint transitions to refuse to
+    // render, which felt like the dashboard was breaking on resize.
     const gridProps = {
         className: 'layout',
         layouts: effectiveLayouts,
@@ -244,7 +249,7 @@ export function DashboardGrid({
         resizeHandles: canEdit ? ['se', 'e', 's'] : undefined,
         isDroppable: false,
         compactType: (canEdit ? 'vertical' : null) as 'vertical' | null,
-        preventCollision: !canEdit,
+        preventCollision: false,
         margin: gridMargin,
         containerPadding: [0, 0] as [number, number],
         useCSSTransforms: true,

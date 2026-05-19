@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useDashboard } from '@/contexts/DashboardContext';
+import { cn } from '@/lib/utils';
 import type { Dashboard, DashboardFolder } from '@/types/dashboard';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 
@@ -518,7 +519,7 @@ export function Sidebar({
                     )}
                 </div>
                 {showSubTabs ? (
-                    <div className="mt-0.5 ml-2 flex flex-col gap-0.5">
+                    <div className="mt-0.5 ml-3 border-l border-[var(--border-subtle)]/60">
                         {dashboard.tabs.map((tab) => {
                             const isTabActive = activeTab?.id === tab.id;
                             return (
@@ -530,17 +531,29 @@ export function Sidebar({
                                         setActiveTab(tab.id);
                                     }}
                                     className={`
-                                        flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px]
-                                        transition-colors text-left
+                                        group/tab w-full flex items-center gap-2 rounded-r px-2 py-1 text-[11px]
+                                        transition-colors text-left -ml-px
                                         ${isTabActive
-                                            ? 'text-blue-300 bg-blue-500/10'
-                                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/40'
+                                            ? 'text-blue-300 bg-blue-500/10 border-l-2 border-blue-400 font-medium'
+                                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/40 border-l-2 border-transparent'
                                         }
                                     `}
-                                    style={{ paddingLeft: `${12 + indent * 12}px` }}
+                                    style={{ paddingLeft: `${10 + indent * 12}px` }}
+                                    title={tab.name}
                                 >
-                                    <span className={`h-1 w-1 rounded-full ${isTabActive ? 'bg-blue-400' : 'bg-[var(--text-muted)]/50'}`} />
-                                    <span className="truncate">{tab.name}</span>
+                                    <ChevronRight
+                                        size={10}
+                                        className={cn(
+                                            'shrink-0 transition-transform',
+                                            isTabActive ? 'rotate-90 text-blue-400' : 'text-[var(--text-muted)]/60'
+                                        )}
+                                    />
+                                    <span className="truncate flex-1">{tab.name}</span>
+                                    {isTabActive && (
+                                        <span className="text-[8px] uppercase tracking-wider text-blue-400/70 font-bold">
+                                            active
+                                        </span>
+                                    )}
                                 </button>
                             );
                         })}
