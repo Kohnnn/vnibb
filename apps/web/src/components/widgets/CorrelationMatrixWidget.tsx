@@ -87,6 +87,13 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
   const hasData = orderedTickers.length > 1 && hasMatrixValues
   const clusterRead = getSectorRead(clusterScore)
   const minOverlapDays = Math.max(10, Math.floor(days / 3))
+  const returnsCount = payload?.returns_count ?? 0
+  // The backend keeps the requested symbol once it has at least 5 rows of
+  // returns even if the strict `min_periods` threshold isn't met. When that
+  // happens we render the partial matrix with a yellow notice rather than
+  // bouncing the user to the empty state. Statistical caveat is surfaced
+  // explicitly so the user knows variance is wider than usual.
+  const isPartialCoverage = hasData && returnsCount > 0 && returnsCount < minOverlapDays
   const coverageDetail = payload?.returns_count
     ? `Only ${payload.returns_count} aligned return rows passed validation. Need at least ${minOverlapDays} overlapping daily returns for ${upperSymbol} and peers. Try a longer window or expand the peer set; daily price history may be incomplete.`
     : `No overlapping daily price history found for ${upperSymbol} and its peer universe. Try another symbol or wait for the next EOD sync.`
@@ -166,6 +173,11 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
             />
           ) : (
             <div className="space-y-3">
+              {isPartialCoverage ? (
+                <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
+                  Partial window: {returnsCount} aligned return rows (need {minOverlapDays} for the strict threshold). Correlations below are still computed but expect wider variance. Switch to a longer window or expand the peer set for full coverage.
+                </div>
+              ) : null}
               <div className="grid grid-cols-1 gap-2 xl:grid-cols-4">
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
                   <div className="mb-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
