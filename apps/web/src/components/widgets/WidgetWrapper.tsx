@@ -247,10 +247,26 @@ export function WidgetWrapper({
             return;
         }
 
+        // Auto-compaction is intentionally disabled for non-editable system
+        // dashboards. Shrinking an empty cell mid-render makes neighbours
+        // re-pack via react-grid-layout's vertical compaction, which produces
+        // visible "blank top-left" / "widgets colliding on zoom" behaviour
+        // that is hard for users to recover from. We still expose the hint to
+        // the runtime so editable dashboards can opt back in.
+        const dashboardIsStatic = currentDashboard?.isEditable === false;
+        if (dashboardIsStatic) {
+            return;
+        }
+
         const baseHeight = baseWidgetHeightRef.current ?? currentWidget.layout.h;
+        // Never let the auto-compact height fall below the widget's declared
+        // minH (or 5 grid rows, whichever is greater) so the toolbar always
+        // remains visible even when the inner content reports empty.
+        const declaredMinH = currentWidget.layout.minH ?? 2;
+        const safeFloor = Math.max(declaredMinH, 5);
         const compactHeight = Math.max(
-            layoutHint.compactHeight ?? currentWidget.layout.minH ?? 3,
-            currentWidget.layout.minH ?? 2,
+            layoutHint.compactHeight ?? declaredMinH,
+            safeFloor,
         );
         const currentHeight = currentWidget.layout.h;
 
@@ -291,7 +307,7 @@ export function WidgetWrapper({
                 h: baseHeight,
             },
         });
-    }, [currentWidget, dashboardId, id, internalData, tabId, updateWidgetRuntime]);
+    }, [currentWidget, currentDashboard?.isEditable, dashboardId, id, internalData, tabId, updateWidgetRuntime]);
 
     // Get current group details if assigned
     const effectiveSymbol = getSymbolForGroup(widgetGroup);

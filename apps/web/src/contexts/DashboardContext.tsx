@@ -581,7 +581,9 @@ const CALENDAR_TEMPLATE: TemplateWidget[] = [
         layout: { x: 12, y: 0, w: 12, h: 5, minW: 8, minH: 3 }
     },
     {
-        type: 'economic_calendar',
+        // Use TradingView's live Economic Calendar; the native
+        // `economic_calendar` widget still ships sample data only.
+        type: 'tradingview_economic_calendar',
         syncGroupId: 1,
         config: {},
         layout: { x: 12, y: 5, w: 12, h: 7, minW: 6, minH: 4 }

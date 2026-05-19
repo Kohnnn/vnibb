@@ -100,7 +100,9 @@ export function Sidebar({
     const {
         state,
         activeDashboard,
+        activeTab,
         setActiveDashboard,
+        setActiveTab,
         createDashboard,
         updateDashboard,
         deleteDashboard,
@@ -436,78 +438,114 @@ export function Sidebar({
         const isDragOver = dragOverId === dashboard.id;
         const isEditableDashboard = isDashboardEditable(dashboard);
         const isDeletableDashboard = isDashboardDeletable(dashboard);
+        // When the dashboard is the active one and has more than one tab, we
+        // render its tabs as a small indented list directly under the
+        // sidebar item. This keeps the sidebar in lock-step with the
+        // workspace tab bar so users always see which sub-tab is selected
+        // (BUG-012).
+        const showSubTabs = isActive && dashboard.tabs.length > 1;
 
         return (
-            <div
-                key={dashboard.id}
-                draggable={!isEditing && isEditableDashboard}
-                onDragStart={(e) => handleDragStart(e, dashboard.id)}
-                onDragEnd={handleDragEnd}
-                onDragOver={(e) => handleDragOver(e, dashboard.id, false)}
-                onDragLeave={handleDragLeave}
-                onDrop={(e) => handleDropOnDashboard(e, dashboard)}
-                className={`
-                    group flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer
-                    transition-colors text-xs
-                    ${isActive
-                        ? 'bg-blue-500/15 text-blue-400 border-l-2 border-blue-500'
-                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60'
-                    }
-                    ${isDragging ? 'opacity-50' : ''}
-                    ${isDragOver ? 'border-t border-blue-500' : ''}
-                `}
-                style={{ paddingLeft: `${6 + indent * 12}px` }}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        if (!isEditing) setActiveDashboard(dashboard.id);
-                    }
-                }}
-                onClick={() => !isEditing && setActiveDashboard(dashboard.id)}
-                onDoubleClick={() => {
-                    if (!isEditableDashboard) return;
-                    setEditingId(dashboard.id);
-                    setEditingName(dashboard.name);
-                }}
-                onContextMenu={(e) => {
-                    if (!isEditableDashboard && !isDeletableDashboard) return;
-                    handleContextMenu(e, dashboard.id, 'dashboard');
-                }}
-            >
-                <FileText size={14} className="shrink-0" />
-                {isEditing ? (
-                    <input
-                        type="text"
-                        value={editingName}
-                        aria-label="Dashboard name"
-                        onChange={(e) => setEditingName(e.target.value)}
-                        onBlur={submitRename}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') submitRename();
-                            if (e.key === 'Escape') setEditingId(null);
-                        }}
-                        className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500"
-                        autoFocus
-                        onClick={(e) => e.stopPropagation()}
-                    />
-                ) : (
-                    <>
-                        <span className="flex-1 truncate">{dashboard.name}</span>
-                        {(isEditableDashboard || isDeletableDashboard) && (
-                            <button
-                                className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleContextMenu(e, dashboard.id, 'dashboard');
-                                }}
-                            >
-                                <MoreVertical size={14} />
-                            </button>
-                        )}
-                    </>
-                )}
+            <div key={dashboard.id}>
+                <div
+                    draggable={!isEditing && isEditableDashboard}
+                    onDragStart={(e) => handleDragStart(e, dashboard.id)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => handleDragOver(e, dashboard.id, false)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDropOnDashboard(e, dashboard)}
+                    className={`
+                        group flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer
+                        transition-colors text-xs
+                        ${isActive
+                            ? 'bg-blue-500/15 text-blue-400 border-l-2 border-blue-500'
+                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60'
+                        }
+                        ${isDragging ? 'opacity-50' : ''}
+                        ${isDragOver ? 'border-t border-blue-500' : ''}
+                    `}
+                    style={{ paddingLeft: `${6 + indent * 12}px` }}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            if (!isEditing) setActiveDashboard(dashboard.id);
+                        }
+                    }}
+                    onClick={() => !isEditing && setActiveDashboard(dashboard.id)}
+                    onDoubleClick={() => {
+                        if (!isEditableDashboard) return;
+                        setEditingId(dashboard.id);
+                        setEditingName(dashboard.name);
+                    }}
+                    onContextMenu={(e) => {
+                        if (!isEditableDashboard && !isDeletableDashboard) return;
+                        handleContextMenu(e, dashboard.id, 'dashboard');
+                    }}
+                >
+                    <FileText size={14} className="shrink-0" />
+                    {isEditing ? (
+                        <input
+                            type="text"
+                            value={editingName}
+                            aria-label="Dashboard name"
+                            onChange={(e) => setEditingName(e.target.value)}
+                            onBlur={submitRename}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') submitRename();
+                                if (e.key === 'Escape') setEditingId(null);
+                            }}
+                            className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500"
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                        />
+                    ) : (
+                        <>
+                            <span className="flex-1 truncate">{dashboard.name}</span>
+                            {(isEditableDashboard || isDeletableDashboard) && (
+                                <button
+                                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleContextMenu(e, dashboard.id, 'dashboard');
+                                    }}
+                                >
+                                    <MoreVertical size={14} />
+                                </button>
+                            )}
+                        </>
+                    )}
+                </div>
+                {showSubTabs ? (
+                    <div className="mt-0.5 ml-2 flex flex-col gap-0.5">
+                        {dashboard.tabs.map((tab) => {
+                            const isTabActive = activeTab?.id === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveTab(tab.id);
+                                    }}
+                                    className={`
+                                        flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px]
+                                        transition-colors text-left
+                                        ${isTabActive
+                                            ? 'text-blue-300 bg-blue-500/10'
+                                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/40'
+                                        }
+                                    `}
+                                    style={{ paddingLeft: `${12 + indent * 12}px` }}
+                                >
+                                    <span className={`h-1 w-1 rounded-full ${isTabActive ? 'bg-blue-400' : 'bg-[var(--text-muted)]/50'}`} />
+                                    <span className="truncate">{tab.name}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                ) : null}
             </div>
         );
     };

@@ -222,6 +222,13 @@ export function DashboardGrid({
     }, [canEdit, responsiveLayouts]);
 
     // All extra props that may not be in the type definitions
+    //
+    // compactType decision: while the user is editing we keep `'vertical'`
+    // to give the familiar drag-and-drop reflow. For non-editable / static
+    // system dashboards we disable compaction (compactType=null). Without
+    // this, an empty widget runtime hint shrinking a cell would cascade
+    // through the whole tab via vertical compaction, producing the
+    // "widgets collide / blank top-left when zooming" behaviour.
     const gridProps = {
         className: 'layout',
         layouts: effectiveLayouts,
@@ -236,8 +243,8 @@ export function DashboardGrid({
         isResizable: canEdit,
         resizeHandles: canEdit ? ['se', 'e', 's'] : undefined,
         isDroppable: false,
-        compactType: 'vertical' as const,
-        preventCollision: false,
+        compactType: (canEdit ? 'vertical' : null) as 'vertical' | null,
+        preventCollision: !canEdit,
         margin: gridMargin,
         containerPadding: [0, 0] as [number, number],
         useCSSTransforms: true,
