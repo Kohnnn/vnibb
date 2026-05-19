@@ -697,31 +697,46 @@ export function Sidebar({
                     {!collapsed && (
                         <>
                             <div className="space-y-0.5" data-tour="sidebar-workspaces">
-                                <div className="mb-3 border-b border-[var(--border-color)] pb-2">
-                                    <div className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                                <div className="mb-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 p-1.5">
+                                    <div className="px-1 pb-1 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
                                         Customize
                                     </div>
-                                    <button
-                                        onClick={onOpenTemplateSelector}
-                                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
-                                    >
-                                        <AppWindow size={14} />
-                                        <span>Templates</span>
-                                    </button>
-                                    <button
-                                        onClick={onOpenWidgetLibrary}
-                                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
-                                    >
-                                        <Grid3X3 size={14} />
-                                        <span>Widgets</span>
-                                    </button>
-                                    <button
-                                        onClick={onOpenPromptsLibrary}
-                                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]"
-                                    >
-                                        <MessageSquareText size={14} />
-                                        <span>Prompts</span>
-                                    </button>
+                                    <div className="grid grid-cols-2 gap-1">
+                                        <button
+                                            onClick={onOpenTemplateSelector}
+                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-blue-500/10 hover:text-blue-300 transition-colors"
+                                            title="Browse dashboard templates"
+                                        >
+                                            <AppWindow size={13} className="shrink-0 text-blue-400/70 group-hover/btn:text-blue-300" />
+                                            <span className="truncate">Templates</span>
+                                        </button>
+                                        <button
+                                            onClick={onOpenWidgetLibrary}
+                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"
+                                            title="Browse widget library"
+                                        >
+                                            <Grid3X3 size={13} className="shrink-0 text-emerald-400/70 group-hover/btn:text-emerald-300" />
+                                            <span className="truncate">Widgets</span>
+                                        </button>
+                                        {onOpenAppsLibrary ? (
+                                            <button
+                                                onClick={onOpenAppsLibrary}
+                                                className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-fuchsia-500/10 hover:text-fuchsia-300 transition-colors"
+                                                title="Browse apps library"
+                                            >
+                                                <Layers size={13} className="shrink-0 text-fuchsia-400/70 group-hover/btn:text-fuchsia-300" />
+                                                <span className="truncate">Apps</span>
+                                            </button>
+                                        ) : null}
+                                        <button
+                                            onClick={onOpenPromptsLibrary}
+                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-amber-500/10 hover:text-amber-300 transition-colors"
+                                            title="Browse VniAgent prompts"
+                                        >
+                                            <MessageSquareText size={13} className="shrink-0 text-amber-400/70 group-hover/btn:text-amber-300" />
+                                            <span className="truncate">Prompts</span>
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
