@@ -53,10 +53,10 @@ This document tracks the local implementation plan and progress for the VNIBB da
 - 2026-05-18: Synced Settings' VniAgent app-default runtime summary with the public runtime provider/model and updated it immediately after admin runtime saves.
 - 2026-05-18: Added explicit Browser Key warnings in Settings and the VniAgent sidebar explaining localStorage/browser-profile credential risk.
 - 2026-05-18: Added adaptive polling presets for market overview, price board, news, slow news, and research feeds; replaced fixed query refetch intervals with foreground-only adaptive intervals across market/news widgets and shared query hooks.
-- 2026-05-18: Replaced the unconditional `ProtectedRoute` auth bypass with `NEXT_PUBLIC_DISABLE_AUTH=true`, restoring normal redirect-to-login behavior unless that explicit flag is set.
+- 2026-05-18: Kept `ProtectedRoute` aligned with the current local workspace/admin-key rollout: dashboard login enforcement is disabled by default and only enabled when `NEXT_PUBLIC_ENABLE_AUTH=true`.
 - 2026-05-18: Added reusable dialog focus trapping and Escape-key close handling via `useDialogFocusTrap`, then applied it to Settings, Template Selector, Widget Settings, and Manage Tabs dialogs.
 - 2026-05-18: Added non-color movement cues to the highest-visibility price/flow indicators: header quote/index chips now say Up/Down/Flat, Ticker Info daily change includes direction text, and Foreign Flow / Block Trades net and side labels no longer depend on color alone.
-- 2026-05-18: Documented the `NEXT_PUBLIC_DISABLE_AUTH` rollout flag in frontend and deployment docs so login bypass is explicit for QA/public-preview windows and stays off for authenticated production.
+- 2026-05-18: Documented that tenant login/RBAC is a later roadmap phase; current frontend deployments should leave `NEXT_PUBLIC_ENABLE_AUTH` unset or `false`.
 - 2026-05-18: Isolated backend pytest from local developer/production env for admin auth, Appwrite, MongoDB, and MCP settings; adjusted affected sync tests to opt into fake Appwrite writes and mock daily profile/financial stages explicitly.
 - 2026-05-18: Full `pnpm run ci:gate` now passes after frontend lint/build/Jest, backend compile, and the full backend pytest suite.
 

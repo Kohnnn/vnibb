@@ -149,9 +149,9 @@ VniAgent server context path
 
 ## Frontend auth rollout flags
 
-Production frontend builds should set `NEXT_PUBLIC_AUTH_PROVIDER=supabase` during the current Supabase auth window. Dashboard route protection is enabled by default; unauthenticated users are redirected to `/login`.
+VNIBB currently runs in local workspace/admin-key mode. Tenant membership, role-based login, and user-scoped layout resolution are documented as future-phase work, so dashboard route protection is disabled by default.
 
-Use `NEXT_PUBLIC_DISABLE_AUTH=true` only for deliberate QA or public-preview windows where the dashboard must be reachable without the login screen. Keep it unset or `false` for authenticated production deployments, and record any temporary bypass window in the deployment notes before shipping.
+Leave `NEXT_PUBLIC_ENABLE_AUTH` unset or `false` for the current rollout. Set `NEXT_PUBLIC_ENABLE_AUTH=true` only when the tenant/auth roadmap is ready to enforce `/login` redirects. `NEXT_PUBLIC_DISABLE_AUTH=true` still forces bypass during tests or previews.
 
 ## Data Flow: Raw Data to Widgets
 

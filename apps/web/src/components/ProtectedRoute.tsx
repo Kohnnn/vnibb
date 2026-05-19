@@ -1,8 +1,8 @@
 /**
  * Protected Route Component
  * 
- * Wraps pages that require authentication.
- * Redirects to login if user is not authenticated.
+ * Keeps dashboard routes open by default while tenant auth remains a roadmap item.
+ * Set NEXT_PUBLIC_ENABLE_AUTH=true to opt into login enforcement.
  */
 
 "use client";

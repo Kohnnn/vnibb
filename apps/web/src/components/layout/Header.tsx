@@ -18,6 +18,7 @@ import {
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useAuth, type AuthUser } from '@/contexts/AuthContext'
+import { env } from '@/lib/env'
 import { useHistoricalPrices, useMarketOverview, useStockQuote } from '@/lib/queries'
 import { probeBackendReadiness } from '@/lib/backendHealth'
 import type { UnitDisplay } from '@/lib/units'
@@ -219,9 +220,10 @@ export function Header({
     ]
   }, [marketOverviewQuery.data?.data])
   const showIndexSkeletons = marketOverviewQuery.isLoading && !marketOverviewQuery.data
-  const userDisplayName = getUserDisplayName(user)
+  const authBypassEnabled = env.authBypassEnabled
+  const userDisplayName = authBypassEnabled ? 'Local workspace' : getUserDisplayName(user)
   const userInitials = getUserInitials(userDisplayName)
-  const userRoleLabel = isAdmin ? 'Admin' : isGuest ? 'Guest' : user ? 'Member' : 'Signed out'
+  const userRoleLabel = authBypassEnabled ? 'Local tenant mode' : isAdmin ? 'Admin' : isGuest ? 'Guest' : user ? 'Member' : 'Signed out'
 
   const healthBadge = useMemo(() => {
     if (connectionStatus === 'online') {
@@ -575,12 +577,14 @@ export function Header({
                   {authLoading ? 'Checking session' : userDisplayName}
                 </span>
                 <span className="text-[10px] text-[var(--text-muted)]">
-                  {user?.email || (authLoading ? 'Loading account state' : 'No active account')}
+                  {authBypassEnabled
+                    ? 'Login disabled until tenant auth phase'
+                    : user?.email || (authLoading ? 'Loading account state' : 'No active account')}
                 </span>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-xs text-[var(--text-secondary)] focus:bg-transparent">
-                {userRoleLabel} via {provider}
+                {authBypassEnabled ? userRoleLabel : `${userRoleLabel} via ${provider}`}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => window.location.assign('/settings')}
@@ -588,7 +592,7 @@ export function Header({
               >
                 Settings
               </DropdownMenuItem>
-              {user ? (
+              {authBypassEnabled ? null : user ? (
                 <DropdownMenuItem
                   onClick={() => { void signOut() }}
                   className="text-xs text-rose-300"
