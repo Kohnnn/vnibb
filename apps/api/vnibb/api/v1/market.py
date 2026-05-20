@@ -3764,6 +3764,12 @@ async def get_flow_coverage(
     from vnibb.models.trading import OrderFlowDaily
 
     cutoff = date.today() - timedelta(days=days)
+    # Use OR across the bucket-volume columns so a symbol counts as covered if
+    # ANY bucket signal is populated (foreign_net_volume, proprietary_net_volume,
+    # or basic buy/sell volume). The daily_trading sync writes rows for every
+    # symbol but populates buckets only when the upstream provider returns
+    # non-null values; treating "row exists but all nulls" as "no coverage"
+    # keeps the supported list honest.
     stmt = (
         select(
             OrderFlowDaily.symbol,
@@ -3771,8 +3777,11 @@ async def get_flow_coverage(
         )
         .where(
             OrderFlowDaily.trade_date >= cutoff,
-            OrderFlowDaily.foreign_net_volume.is_not(None),
-            OrderFlowDaily.proprietary_net_volume.is_not(None),
+            (
+                OrderFlowDaily.foreign_net_volume.is_not(None)
+                | OrderFlowDaily.proprietary_net_volume.is_not(None)
+                | OrderFlowDaily.buy_volume.is_not(None)
+            ),
         )
         .group_by(OrderFlowDaily.symbol)
         .order_by(func.count(OrderFlowDaily.id).desc())
@@ -3783,6 +3792,8 @@ async def get_flow_coverage(
         await db.execute(
             select(func.max(OrderFlowDaily.trade_date)).where(
                 OrderFlowDaily.foreign_net_volume.is_not(None)
+                | OrderFlowDaily.proprietary_net_volume.is_not(None)
+                | OrderFlowDaily.buy_volume.is_not(None)
             )
         )
     ).scalar_one_or_none()
