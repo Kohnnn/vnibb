@@ -56,6 +56,12 @@ export class WidgetErrorBoundary extends Component<Props, State> {
     });
   };
 
+  handleHardReload = (): void => {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+  };
+
   render(): ReactNode {
     if (this.state.hasError) {
       // Custom fallback if provided
@@ -63,32 +69,46 @@ export class WidgetErrorBoundary extends Component<Props, State> {
         return this.props.fallback;
       }
 
-      // Default error UI
+      // Default error UI. Copy is intentionally calm so users don't panic
+      // on transient render hiccups; "Retry widget" reuses the same React
+      // tree (cheap), "Reload page" is a hard reset for stuck states.
       return (
         <div className="widget-error">
           <div className="widget-error__icon">
             <AlertTriangle size={32} />
           </div>
           <div className="widget-error__content">
-            <h4 className="widget-error__title">Widget crashed</h4>
+            <h4 className="widget-error__title">
+              {this.props.widgetName ? `${this.props.widgetName} hit a snag` : 'Widget hit a snag'}
+            </h4>
             <p className="widget-error__message">
-              {this.props.widgetName
-                ? `The ${this.props.widgetName} widget encountered an error.`
-                : 'This widget encountered an error.'}
+              Something went wrong while rendering. The rest of the dashboard is unaffected.
             </p>
             {this.state.error && (
-              <p className="widget-error__detail">
-                {this.state.error.message}
+              <p className="widget-error__detail" title={this.state.error.message}>
+                {this.state.error.message.length > 140
+                  ? `${this.state.error.message.slice(0, 140)}…`
+                  : this.state.error.message}
               </p>
             )}
           </div>
-          <button
-            className="widget-error__retry"
-            onClick={this.handleRetry}
-          >
-            <RefreshCw size={16} />
-            <span>Retry</span>
-          </button>
+          <div className="widget-error__actions">
+            <button
+              className="widget-error__retry"
+              onClick={this.handleRetry}
+              type="button"
+            >
+              <RefreshCw size={14} />
+              <span>Retry widget</span>
+            </button>
+            <button
+              className="widget-error__retry widget-error__retry--secondary"
+              onClick={this.handleHardReload}
+              type="button"
+            >
+              <span>Reload page</span>
+            </button>
+          </div>
         </div>
       );
     }

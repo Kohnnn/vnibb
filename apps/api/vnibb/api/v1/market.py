@@ -3807,3 +3807,130 @@ async def get_flow_coverage(
     )
 
 
+# ---------------------------------------------------------------------------
+# Public data freshness endpoint
+# ---------------------------------------------------------------------------
+#
+# Lightweight summary suitable for an unauthenticated dashboard banner. It
+# does NOT expose admin internals — only enough to answer "is what I'm
+# looking at fresh?". Three buckets are tracked because they drive the
+# widgets users notice first when they go stale: prices (charts,
+# correlation, beta), foreign trading (foreign-flow widget, transaction
+# flow), and news (Market News, Live Stream).
+#
+# Cached for 5 min server-side; the FE polls once per dashboard load.
+
+class FreshnessBucket(BaseModel):
+    label: str
+    last_data_date: Optional[date] = None
+    age_days: Optional[float] = None
+    status: str  # "fresh" | "stale" | "critical" | "unknown"
+    detail: Optional[str] = None
+
+
+class FreshnessResponse(BaseModel):
+    timestamp: datetime
+    overall: str  # "fresh" | "stale" | "critical"
+    buckets: List[FreshnessBucket]
+
+
+def _classify_age(days: Optional[float], stale_threshold: float, critical_threshold: float) -> str:
+    if days is None:
+        return "unknown"
+    if days >= critical_threshold:
+        return "critical"
+    if days >= stale_threshold:
+        return "stale"
+    return "fresh"
+
+
+@router.get("/freshness", response_model=FreshnessResponse)
+@cached(ttl=300, key_prefix="market_freshness")
+async def get_market_freshness(
+    db: AsyncSession = Depends(get_db),
+) -> FreshnessResponse:
+    from vnibb.models.trading import ForeignTrading
+    from vnibb.models.market_news import MarketNews
+
+    today = date.today()
+
+    prices_dt = (
+        await db.execute(
+            select(func.max(StockPrice.time)).where(StockPrice.interval == "1D")
+        )
+    ).scalar_one_or_none()
+
+    foreign_dt = (
+        await db.execute(
+            select(func.max(ForeignTrading.trade_date)).where(
+                ForeignTrading.buy_volume.is_not(None)
+            )
+        )
+    ).scalar_one_or_none()
+
+    news_dt = (
+        await db.execute(
+            select(func.max(MarketNews.published_date)).where(
+                MarketNews.published_date.is_not(None)
+            )
+        )
+    ).scalar_one_or_none()
+
+    def _age(value) -> Optional[float]:
+        if value is None:
+            return None
+        if hasattr(value, "date"):
+            value = value.date()
+        try:
+            return float((today - value).days)
+        except TypeError:
+            return None
+
+    prices_age = _age(prices_dt)
+    foreign_age = _age(foreign_dt)
+    news_age = _age(news_dt)
+
+    buckets = [
+        FreshnessBucket(
+            label="Daily prices",
+            last_data_date=prices_dt.date() if hasattr(prices_dt, "date") else prices_dt,
+            age_days=prices_age,
+            status=_classify_age(prices_age, stale_threshold=2, critical_threshold=7),
+            detail=(
+                "Powers price charts, correlation matrix, beta 63D, and most quant widgets."
+            ),
+        ),
+        FreshnessBucket(
+            label="Foreign trading",
+            last_data_date=foreign_dt,
+            age_days=foreign_age,
+            status=_classify_age(foreign_age, stale_threshold=2, critical_threshold=7),
+            detail="Drives foreign-flow widget and the Transaction Flow buckets.",
+        ),
+        FreshnessBucket(
+            label="Market news",
+            last_data_date=news_dt.date() if hasattr(news_dt, "date") else news_dt,
+            age_days=news_age,
+            status=_classify_age(news_age, stale_threshold=1, critical_threshold=3),
+            detail="Article timestamps in News & Events tab.",
+        ),
+    ]
+
+    statuses = [b.status for b in buckets]
+    if "critical" in statuses:
+        overall = "critical"
+    elif "stale" in statuses:
+        overall = "stale"
+    elif "unknown" in statuses:
+        overall = "stale"
+    else:
+        overall = "fresh"
+
+    return FreshnessResponse(
+        timestamp=datetime.utcnow(),
+        overall=overall,
+        buckets=buckets,
+    )
+
+
+

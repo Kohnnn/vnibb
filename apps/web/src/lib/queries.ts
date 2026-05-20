@@ -339,6 +339,21 @@ export function useFlowCoverage(options?: { days?: number; enabled?: boolean }) 
     });
 }
 
+export function useMarketFreshness(options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['marketFreshness'],
+        queryFn: () => api.getMarketFreshness(),
+        enabled: options?.enabled !== false,
+        // Backend caches 5 min, FE keeps fresh for the same window. Banner
+        // updates after a full dashboard refresh; stale-while-revalidate
+        // keeps it from flickering on tab switches.
+        staleTime: 5 * 60 * 1000,
+        // Re-poll every 10 min so users see recovery from a stale state
+        // without manually reloading the page.
+        refetchInterval: 10 * 60 * 1000,
+    });
+}
+
 export function useCorrelationMatrix(
     symbol: string,
     options?: { days?: number; topN?: number; enabled?: boolean }

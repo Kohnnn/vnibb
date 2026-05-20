@@ -75,6 +75,27 @@
     transform: scale(0.98);
 }
 
+.widget-error__actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.widget-error__retry--secondary {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-secondary);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.widget-error__retry--secondary:hover {
+    color: var(--text-primary);
+    background: transparent;
+    border-color: transparent;
+}
+
 /* === Empty State === */
 
 .widget-empty {

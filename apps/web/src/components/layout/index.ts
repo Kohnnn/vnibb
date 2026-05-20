@@ -4,4 +4,5 @@ export { Header } from './Header';
 export { TabBar } from './TabBar';
 export { RightSidebar } from './RightSidebar';
 export { MobileNav } from './MobileNav';
+export { FreshnessBanner } from './FreshnessBanner';
 

@@ -3,7 +3,7 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Sidebar, Header, TabBar, RightSidebar, MobileNav } from '@/components/layout';
+import { Sidebar, Header, TabBar, RightSidebar, MobileNav, FreshnessBanner } from '@/components/layout';
 import { OnboardingWalkthrough } from '@/components/onboarding/OnboardingWalkthrough';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
@@ -968,6 +968,8 @@ function DashboardContent() {
                     unitDisplay={unitConfig.display}
                     onUnitDisplayChange={setUnit}
                 />
+
+                <FreshnessBanner />
 
                 <TabBar symbol={stockGlobalSymbol} />
 

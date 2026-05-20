@@ -792,6 +792,24 @@ export async function getFlowCoverage(
     });
 }
 
+export interface FreshnessBucket {
+    label: string;
+    last_data_date: string | null;
+    age_days: number | null;
+    status: 'fresh' | 'stale' | 'critical' | 'unknown';
+    detail: string | null;
+}
+
+export interface FreshnessResponse {
+    timestamp: string;
+    overall: 'fresh' | 'stale' | 'critical';
+    buckets: FreshnessBucket[];
+}
+
+export async function getMarketFreshness(): Promise<FreshnessResponse> {
+    return fetchAPI<FreshnessResponse>(`/market/freshness`);
+}
+
 export async function getCorrelationMatrix(
     symbol: string,
     options?: { days?: number; top_n?: number }
