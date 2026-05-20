@@ -46,7 +46,9 @@ def _safe_date(year: int, month: int, day: int) -> Optional[datetime]:
     if not (1 <= month <= 12 and 1 <= day <= 31 and 2000 <= year <= 2030):
         return None
     try:
-        return datetime(year, month, day, tzinfo=UTC)
+        # Stored column is TIMESTAMP WITHOUT TIME ZONE; emit a naive value so
+        # asyncpg's binder doesn't reject the offset-aware UTC timestamp.
+        return datetime(year, month, day)
     except ValueError:
         return None
 

@@ -79,63 +79,109 @@ class VnstockPriceBoardFetcher:
 
         """
         Fetch real-time price board for multiple symbols.
-        
+
         Args:
             symbols: List of stock symbols (e.g., ['VNM', 'FPT', 'VIC'])
-            source: Data source (VCI recommended)
-        
+            source: Data source (KBS or VCI). KBS is the recommended primary
+                because vnstock 3.5.x ships consistent snake_case columns;
+                VCI is used as fallback when KBS is degraded.
+
         Returns:
             List of PriceBoardData records
         """
         if not symbols:
             return []
-        
-        try:
-            def _fetch():
-                from vnstock import Trading
-                trading = Trading(source=source.upper())
 
-                df = trading.price_board(
-                    symbols_list=[s.upper() for s in symbols],
-                    flatten_columns=True,
-                    drop_levels=[0],
-                )
-                return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
-            
-            loop = asyncio.get_event_loop()
-            records = await loop.run_in_executor(None, _fetch)
-            
-            # Normalize column names and build response
+        # Source fallback chain: try the requested source first, then alternate.
+        # Trading() only accepts {KBS, VCI}.
+        primary = (source or "KBS").upper()
+        if primary not in {"KBS", "VCI"}:
+            primary = "KBS"
+        fallback_chain = [primary]
+        for alt in ("KBS", "VCI"):
+            if alt not in fallback_chain:
+                fallback_chain.append(alt)
+
+        records: list = []
+        last_error: Optional[Exception] = None
+        for src in fallback_chain:
+            try:
+                def _fetch(_src: str = src):
+                    from vnstock import Trading
+                    trading = Trading(source=_src.upper())
+
+                    df = trading.price_board(
+                        symbols_list=[s.upper() for s in symbols],
+                        flatten_columns=True,
+                        drop_levels=[0],
+                    )
+                    return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
+
+                loop = asyncio.get_event_loop()
+                records = await loop.run_in_executor(None, _fetch)
+                if records:
+                    if src != primary:
+                        logger.info(
+                            "Price board recovered via fallback source %s for %d symbols",
+                            src,
+                            len(symbols),
+                        )
+                    break
+            except Exception as e:  # noqa: BLE001
+                last_error = e
+                logger.warning("Price board fetch failed via %s: %s", src, e)
+                continue
+
+        if not records:
+            if last_error is not None:
+                raise ProviderError(f"Failed to fetch price board: {last_error}")
+            return []
+
+        try:
+            # Normalize column names and build response. vnstock 3.5.x ships
+            # snake_case columns when `flatten_columns=True, drop_levels=[0]`
+            # for both KBS (foreign_buy_volume / foreign_sell_volume) and VCI
+            # (same names plus foreign_buy_value / foreign_sell_value). The
+            # earlier camelCase guesses (foreignBuyVol / fBuyVol) never match
+            # any 3.5.x output, so the fetcher silently shipped NULL foreign
+            # volumes for thousands of rows.
             result = []
             for r in records:
                 # Extract symbol from record
                 symbol = r.get("symbol") or r.get("ticker") or r.get("code")
                 if not symbol:
                     continue
-                
+
+                def _coalesce(*keys):
+                    for key in keys:
+                        value = r.get(key)
+                        if value is not None and value != "":
+                            return value
+                    return None
+
                 result.append(PriceBoardData(
                     symbol=symbol,
-                    price=r.get("price") or r.get("matchPrice") or r.get("match_price"),
-                    open=r.get("open") or r.get("openPrice"),
-                    high=r.get("high") or r.get("highPrice"),
-                    low=r.get("low") or r.get("lowPrice"),
-                    close=r.get("close") or r.get("closePrice"),
-                    prev_close=r.get("prevClose") or r.get("refPrice") or r.get("ref"),
-                    change=r.get("change") or r.get("priceChange"),
-                    percent_change=r.get("percentChange") or r.get("pctChange"),
-                    volume=r.get("volume") or r.get("nmTotalTradedQty"),
-                    value=r.get("value") or r.get("nmTotalTradedValue"),
-                    best_bid=r.get("bestBid") or r.get("bidPrice1"),
-                    best_ask=r.get("bestAsk") or r.get("offerPrice1"),
-                    best_bid_vol=r.get("bestBidVol") or r.get("bidVol1"),
-                    best_ask_vol=r.get("bestAskVol") or r.get("offerVol1"),
-                    foreign_buy_vol=r.get("foreignBuyVol") or r.get("fBuyVol"),
-                    foreign_sell_vol=r.get("foreignSellVol") or r.get("fSellVol"),
-                    ceiling=r.get("ceiling") or r.get("ceilingPrice"),
-                    floor=r.get("floor") or r.get("floorPrice"),
-                    reference=r.get("reference") or r.get("refPrice"),
+                    price=_coalesce("price", "matchPrice", "match_price", "match_price_match", "close_price", "closePrice", "close"),
+                    open=_coalesce("open", "openPrice", "open_price"),
+                    high=_coalesce("high", "highPrice", "highest", "high_price"),
+                    low=_coalesce("low", "lowPrice", "lowest", "low_price"),
+                    close=_coalesce("close", "closePrice", "close_price"),
+                    prev_close=_coalesce("prevClose", "refPrice", "ref", "ref_price", "reference_price"),
+                    change=_coalesce("change", "priceChange", "price_change"),
+                    percent_change=_coalesce("percentChange", "pctChange", "percent_change"),
+                    volume=_coalesce("volume", "nmTotalTradedQty", "accumulated_volume", "volume_accumulated"),
+                    value=_coalesce("value", "nmTotalTradedValue", "accumulated_value", "total_value"),
+                    best_bid=_coalesce("bestBid", "bidPrice1", "bid_price_1", "bid_1_price"),
+                    best_ask=_coalesce("bestAsk", "offerPrice1", "ask_price_1", "ask_1_price"),
+                    best_bid_vol=_coalesce("bestBidVol", "bidVol1", "bid_vol_1", "bid_1_volume"),
+                    best_ask_vol=_coalesce("bestAskVol", "offerVol1", "ask_vol_1", "ask_1_volume"),
+                    foreign_buy_vol=_coalesce("foreign_buy_volume", "foreignBuyVol", "fBuyVol"),
+                    foreign_sell_vol=_coalesce("foreign_sell_volume", "foreignSellVol", "fSellVol"),
+                    ceiling=_coalesce("ceiling", "ceilingPrice", "ceiling_price"),
+                    floor=_coalesce("floor", "floorPrice", "floor_price"),
+                    reference=_coalesce("reference", "refPrice", "ref_price", "reference_price"),
                 ))
-            
+
             return result
             
         except Exception as e:

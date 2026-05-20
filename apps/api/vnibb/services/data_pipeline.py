@@ -274,26 +274,77 @@ class DataPipeline:
         bypass_internal_retry: bool = False,
     ) -> pd.DataFrame:
         timeout_seconds = max(float(getattr(settings, "vnstock_timeout", 0) or 0), 1.0)
-        source = settings.vnstock_source
+        # Source fallback chain: try the configured primary first, then walk
+        # through alternates so a single-source provider regression no longer
+        # blocks the whole sync. Some symbols (eg. delisted, warrants) only
+        # ship via specific sources, and KBS / VCI rotate which one is up.
+        configured = (settings.vnstock_source or "KBS").upper()
+        fallback_sources = [configured]
+        for alt in ("KBS", "VCI"):
+            if alt not in fallback_sources:
+                fallback_sources.append(alt)
 
-        def _fetch_sync() -> pd.DataFrame:
-            from vnstock import Vnstock
+        last_error: Optional[Exception] = None
+        for source in fallback_sources:
+            def _fetch_sync(_source: str = source) -> pd.DataFrame:
+                from vnstock import Vnstock
 
-            quote = Vnstock().stock(symbol=symbol, source=source).quote
-            history_callable = quote.history
-            if bypass_internal_retry:
-                # vnstock retries every exception here, including ValueError payload failures.
-                unwrapped_history = getattr(history_callable, "__wrapped__", None)
-                if callable(unwrapped_history):
-                    return unwrapped_history(
-                        quote,
-                        start=start,
-                        end=end,
-                        interval=interval,
-                    )
-            return history_callable(start=start, end=end, interval=interval)
+                quote = Vnstock().stock(symbol=symbol, source=_source).quote
+                history_callable = quote.history
+                if bypass_internal_retry:
+                    # vnstock retries every exception here, including ValueError payload failures.
+                    unwrapped_history = getattr(history_callable, "__wrapped__", None)
+                    if callable(unwrapped_history):
+                        return unwrapped_history(
+                            quote,
+                            start=start,
+                            end=end,
+                            interval=interval,
+                        )
+                return history_callable(start=start, end=end, interval=interval)
 
-        return await asyncio.wait_for(asyncio.to_thread(_fetch_sync), timeout=timeout_seconds)
+            try:
+                df = await asyncio.wait_for(
+                    asyncio.to_thread(_fetch_sync),
+                    timeout=timeout_seconds,
+                )
+                # Defensive empty check: tests / mocks may return non-DataFrame
+                # values; treat anything without rows as success only when it's
+                # a real DataFrame with at least one row, OR a non-None
+                # truthy value (so test mocks that return a sentinel still pass
+                # through unchanged).
+                df_is_empty: bool
+                if df is None:
+                    df_is_empty = True
+                elif hasattr(df, "empty"):
+                    df_is_empty = bool(df.empty)
+                else:
+                    df_is_empty = not bool(df)
+
+                if not df_is_empty:
+                    if source != configured:
+                        logger.info(
+                            "Recovered %s prices from fallback source %s",
+                            symbol,
+                            source,
+                        )
+                    return df
+                # Empty df → try next source rather than treating as error.
+                last_error = ValueError(f"empty data ({source})")
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                logger.debug(
+                    "Quote history fetch failed for %s via %s: %s",
+                    symbol,
+                    source,
+                    exc,
+                )
+                continue
+
+        if last_error is not None:
+            raise last_error
+        # Should not reach: every iteration sets last_error or returns df.
+        return pd.DataFrame()
 
     async def _ensure_redis(self) -> bool:
         if not settings.redis_url:
