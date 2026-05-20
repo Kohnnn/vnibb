@@ -13,7 +13,12 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "2d7a4c9b8e31"
-down_revision: str | None = "7c5a9e4b2d11"
+# Earlier revisions in tree: 1aaa2a1cf198 -> 5b2c7d8f3a10 -> 9c4a12b8f2ab ->
+# 5d9f28a7e4c1 -> c4e9a2d1f7b3 -> 8b7f0c1e9d12 -> d2f6e4b1c9a8 -> here.
+# The original `7c5a9e4b2d11` parent never existed on disk (left over from
+# a deleted scratch migration); pointing to the latest available revision
+# repairs the chain so `alembic upgrade head` works again.
+down_revision: str | None = "d2f6e4b1c9a8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
