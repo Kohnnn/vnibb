@@ -167,9 +167,9 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
           <WidgetError title="Block trades unavailable" error={error as Error} onRetry={() => refetch()} />
         ) : filteredTrades.length === 0 ? (
           <WidgetEmpty
-            message={isMissingData ? 'Block trades currently unavailable.' : 'No block trades match your filter'}
+            message={isMissingData ? 'No block trades published yet today.' : 'No block trades match your filter'}
             icon={<AlertTriangle size={18} />}
-            detail={isMissingData ? 'Large negotiated prints show up here when the provider publishes them.' : undefined}
+            detail={isMissingData ? 'HOSE publishes large negotiated prints T+1 — typically after 16:00 VNT.' : undefined}
             size="compact"
             action={!isMissingData ? { label: 'Lower threshold', onClick: () => setMinThreshold(5) } : undefined}
           />

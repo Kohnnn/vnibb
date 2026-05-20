@@ -52,16 +52,24 @@ RUN pip install --no-cache-dir --extra-index-url "${VNSTOCK_EXTRA_INDEX_URL}" "v
 # Explicitly verify vnai remains importable for the installer/runtime path
 RUN python3 -c "import vnai; print(f'vnai installed at {vnai.__file__}')"
 
-# Premium runtime bootstrap is disabled by default (VNSTOCK_RUNTIME_INSTALL=0).
-# Preferred strategy: build/deploy using Dockerfile.premium so premium packages
-# are already present and startup avoids installer CPU/network overhead.
+# Premium runtime bootstrap. When VNSTOCK_API_KEY is provided as a build
+# arg, install the Golden Sponsor packages (vnstock_news, vnstock_data,
+# vnstock_ta, vnstock_pipeline) so the news crawler and insider providers
+# work out of the box. Falls back gracefully when the key is absent.
+#
+# Previously this was commented out, requiring operators to either build
+# with Dockerfile.premium or run a manual `pip install` inside the
+# container after each redeploy. That manual step kept getting missed
+# and left market_news stale for 35+ days (B1 from the QA evaluation
+# report). Re-enabling the bootstrap closes the gap.
 ARG VNSTOCK_API_KEY
-# RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
-#     echo "Installing vnstock premium packages with API key..."; \
-#     /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY"; \
-#     else \
-#     echo "WARNING: VNSTOCK_API_KEY not provided. Premium packages not installed."; \
-#     fi
+RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
+    echo "Installing vnstock premium packages with API key..."; \
+    /app/vnstock-cli-installer.run -- --api-key "$VNSTOCK_API_KEY" || \
+    echo "WARNING: vnstock-cli-installer failed; runtime will rely on free-tier sources."; \
+    else \
+    echo "WARNING: VNSTOCK_API_KEY not provided. Premium packages not installed."; \
+    fi
 
 
 # Copy entrypoint script and set permissions (as root)

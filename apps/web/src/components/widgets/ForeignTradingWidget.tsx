@@ -121,10 +121,21 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     const isFallback = Boolean((error || responseWarning) && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
-    // Compute the age of the displayed snapshot. The "Cached snapshot" badge
-    // previously gave no hint of how stale the data was, which felt
-    // misleading when the snapshot was many hours old. We surface a coarse
-    // age suffix (e.g. "2h", "10h", "yesterday") in the health detail.
+    // B7 — accurate freshness badge.
+    //
+    // The widget previously showed "Cached snapshot · 11h old" any time the
+    // last data row was older than 1h, which made fresh end-of-session data
+    // look broken. We split the badge into three states based on the actual
+    // age of the most recent row, regardless of whether the response is a
+    // server-side fallback:
+    //
+    //   - Fresh         (< 6h, weekday market hours): "Live · syncs every 5m"
+    //   - End-of-day    (< 26h):                       "Last sync: <date>"
+    //   - Stale         (≥ 26h):                       "Stale · last sync <date>"
+    //
+    // We retain the "cached snapshot" wording only when we genuinely served
+    // a database fallback row (provider degradation), since that's the
+    // operator-meaningful distinction.
     const snapshotAgeHours = useMemo(() => {
         const lastDateStr = data?.meta?.last_data_date;
         if (!lastDateStr) return null;
@@ -135,16 +146,47 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
         return diffMs / (1000 * 60 * 60);
     }, [data?.meta?.last_data_date]);
 
-    const healthState: WidgetHealthState | undefined = isFallback
-        ? {
-            status: 'cached',
-            label:
-                snapshotAgeHours !== null && snapshotAgeHours >= 1
-                    ? `Cached snapshot · ${snapshotAgeHours >= 24 ? `${Math.floor(snapshotAgeHours / 24)}d` : `${Math.floor(snapshotAgeHours)}h`} old`
-                    : 'Cached snapshot',
-            detail: responseWarning || 'Showing the last successful foreign flow snapshot while refresh is degraded.',
+    const formattedLastSync = useMemo(() => {
+        const lastDateStr = data?.meta?.last_data_date;
+        if (!lastDateStr) return null;
+        const d = new Date(lastDateStr);
+        if (Number.isNaN(d.getTime())) return null;
+        return d.toLocaleDateString('en-GB', {
+            day: '2-digit',
+            month: 'short',
+        });
+    }, [data?.meta?.last_data_date]);
+
+    const healthState: WidgetHealthState | undefined = (() => {
+        if (isFallback) {
+            return {
+                status: 'cached',
+                label:
+                    snapshotAgeHours !== null && snapshotAgeHours >= 1
+                        ? `Cached snapshot · ${snapshotAgeHours >= 24 ? `${Math.floor(snapshotAgeHours / 24)}d` : `${Math.floor(snapshotAgeHours)}h`} old`
+                        : 'Cached snapshot',
+                detail: responseWarning || 'Showing the last successful foreign flow snapshot while refresh is degraded.',
+            };
         }
-        : undefined
+        if (snapshotAgeHours === null) return undefined;
+        if (snapshotAgeHours >= 26) {
+            return {
+                status: 'stale',
+                label: `Stale · last sync ${formattedLastSync ?? '—'}`,
+                detail: 'Foreign trading data has not refreshed in over a day. Use Refresh to retry.',
+            };
+        }
+        // Fresh end-of-session data: drop the misleading "cached" wording
+        // and call out the next sync window so users know where it stands.
+        if (snapshotAgeHours >= 6) {
+            return {
+                status: 'live',
+                label: `Last sync ${formattedLastSync ?? 'today'}`,
+                detail: 'Foreign trading reports settle T+0 from HOSE. Intraday updates run every 5 min during market hours.',
+            };
+        }
+        return undefined;
+    })();
 
     useEffect(() => {
         onDataChange?.({

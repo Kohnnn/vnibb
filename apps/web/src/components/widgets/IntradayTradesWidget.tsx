@@ -36,6 +36,31 @@ function formatVolume(vol: number | null | undefined): string {
     return vol.toLocaleString('vi-VN');
 }
 
+/**
+ * Vietnam HOSE/HNX market hours: Mon–Fri, 09:00–15:00 Asia/Ho_Chi_Minh.
+ * Returns true when the local clock is outside that window so we can
+ * show a "market closed — last session" empty state instead of a
+ * generic "no trades" message during evenings/weekends.
+ */
+function isMarketClosedNowVnt(): boolean {
+    const now = new Date();
+    const vntFmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    });
+    const parts = vntFmt.formatToParts(now);
+    const weekday = parts.find((p) => p.type === 'weekday')?.value ?? '';
+    const hour = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10);
+    const minute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
+    const isWeekday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(weekday);
+    if (!isWeekday) return true;
+    const totalMin = hour * 60 + minute;
+    return totalMin < 9 * 60 || totalMin >= 15 * 60;
+}
+
 function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: IntradayTradesWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useIntraday(symbol, { limit: 1000 });
 
@@ -147,8 +172,12 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty
-                            message={`No trades for ${symbol}`}
-                            detail="Intraday tape will appear here once trade prints are available."
+                            message={isMarketClosedNowVnt() ? 'Market closed' : `No trades for ${symbol}`}
+                            detail={
+                                isMarketClosedNowVnt()
+                                    ? `Vietnam HOSE/HNX trades 09:00–15:00 VNT, Mon–Fri. The last session's tape will reload when the market opens.`
+                                    : 'Intraday tape will appear here once trade prints are available.'
+                            }
                             icon={<Activity size={18} />}
                             size="compact"
                         />

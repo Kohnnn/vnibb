@@ -141,8 +141,29 @@ class VnstockCompanyNewsFetcher(BaseFetcher[CompanyNewsQueryParams, CompanyNewsD
 
         for row in data:
             try:
-                # Handle various column name variations from vnstock
-                published = row.get("publishDate") or row.get("date") or row.get("time")
+                # Handle various column name variations from vnstock. Different
+                # KBS / VCI / DNSE news endpoints emit different keys; we try
+                # the full known set so the downstream `published_date` write
+                # is rarely null. Without this, every KBS row landed with a
+                # null timestamp because only `publishDate/date/time` were
+                # checked. (B1 from the QA evaluation report.)
+                published = (
+                    row.get("publishDate")
+                    or row.get("publish_date")
+                    or row.get("publishedDate")
+                    or row.get("published_date")
+                    or row.get("publishedAt")
+                    or row.get("published_at")
+                    or row.get("publish_time")
+                    or row.get("publicDate")
+                    or row.get("public_date")
+                    or row.get("date")
+                    or row.get("time")
+                    or row.get("createdAt")
+                    or row.get("created_at")
+                    or row.get("dateModified")
+                    or row.get("releaseDate")
+                )
                 if published and not isinstance(published, str):
                     published = str(published)
 

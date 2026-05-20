@@ -810,6 +810,29 @@ export async function getMarketFreshness(): Promise<FreshnessResponse> {
     return fetchAPI<FreshnessResponse>(`/market/freshness`);
 }
 
+// Phase 2 — public per-source freshness for the Settings → Data Sources tab.
+// Mirrors the curated source list defined in
+// `apps/api/vnibb/api/v1/market.py` (search "_PUBLIC_SOURCES").
+export interface DataSourceEntry {
+    key: string;
+    label: string;
+    description: string;
+    last_updated: string | null;
+    age_days: number | null;
+    status: 'fresh' | 'stale' | 'critical' | 'unknown';
+    next_sync: string | null;
+}
+
+export interface DataSourcesFreshnessResponse {
+    timestamp: string;
+    overall: 'fresh' | 'stale' | 'critical';
+    sources: DataSourceEntry[];
+}
+
+export async function getDataSourcesFreshness(): Promise<DataSourcesFreshnessResponse> {
+    return fetchAPI<DataSourcesFreshnessResponse>(`/market/data-sources/freshness`);
+}
+
 export async function getCorrelationMatrix(
     symbol: string,
     options?: { days?: number; top_n?: number }

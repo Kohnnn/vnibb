@@ -1737,6 +1737,49 @@ function normalizeSymbolList(value: unknown): string[] {
   return [];
 }
 
+/**
+ * TradingView symbols that are known to fail to resolve via the public
+ * embed widgets. Including them in a Ticker Tape causes inline errors
+ * like "This symbol is only available on TradingView" / "Specified
+ * symbol does not exist", which look unprofessional. We strip them at
+ * config build time so they never reach the embed.
+ *
+ * B4 from the QA evaluation report. Console-confirmed offenders:
+ *   - FX:USDVND        (no realtime feed available on free TradingView)
+ *   - ICEUS:DX1!       (paywalled futures contract)
+ *
+ * Add additional offenders here as we discover them. The intent is a
+ * minimal, evidence-based blocklist — we don't try to whitelist all of
+ * TradingView's universe.
+ */
+const TRADINGVIEW_BLOCKED_SYMBOLS: ReadonlySet<string> = new Set([
+  'FX:USDVND',
+  'ICEUS:DX1!',
+]);
+
+/**
+ * Drop any TradingView symbol present in TRADINGVIEW_BLOCKED_SYMBOLS so
+ * we don't render inline error stubs in widgets like Ticker Tape and
+ * Market Overview. Returns a new array; never mutates input.
+ *
+ * Accepts the three shapes TradingView config payloads use:
+ *  - bare proName string ("FX:USDVND")
+ *  - iframe-style `{ proName, description }`
+ *  - tabs/groups-style `{ s, d }` or `{ name, displayName }`
+ */
+function filterValidTradingViewSymbols<
+  T extends string | { proName?: string; name?: string; s?: string },
+>(list: ReadonlyArray<T>): T[] {
+  return list.filter((entry) => {
+    const proName =
+      typeof entry === 'string'
+        ? entry
+        : (entry?.proName ?? (entry as { name?: string })?.name ?? (entry as { s?: string })?.s ?? '');
+    if (!proName) return true;
+    return !TRADINGVIEW_BLOCKED_SYMBOLS.has(proName);
+  });
+}
+
 function buildSymbolOverviewSymbols(symbol: string): string[][] {
   const normalized = symbol.trim();
   if (!normalized) return [];
@@ -1789,7 +1832,52 @@ export function buildTradingViewRuntimeConfig(
 
   if (type === 'tradingview_ticker') {
     const symbolsList = normalizeSymbolList(merged.symbols);
-    merged.symbols = toIframeMultiSymbolObjects(symbolsList.length > 0 ? symbolsList : [...DEFAULT_MARKET_SYMBOLS.slice(0, 6)]);
+    const validated = filterValidTradingViewSymbols(
+      symbolsList.length > 0 ? symbolsList : [...DEFAULT_MARKET_SYMBOLS.slice(0, 6)],
+    );
+    merged.symbols = toIframeMultiSymbolObjects(validated);
+  }
+
+  // B4 — Ticker Tape inline-error fix. The Ticker Tape and Ticker Tag
+  // widgets accept a `symbols: Array<{ s; d } | { proName; description }>`
+  // payload. Drop blocklisted entries so we never render "Symbol only
+  // available on TradingView" stubs inline. We only apply this to multi-
+  // symbol widgets — the single-ticker variants pass through unchanged.
+  if (
+    type === 'tradingview_ticker_tape' ||
+    type === 'tradingview_ticker_tag' ||
+    type === 'tradingview_market_overview' ||
+    type === 'tradingview_market_data' ||
+    type === 'tradingview_market_summary' ||
+    type === 'tradingview_forex_cross_rates'
+  ) {
+    if (Array.isArray(merged.symbols)) {
+      merged.symbols = filterValidTradingViewSymbols(
+        merged.symbols as Array<{ proName?: string; name?: string; s?: string }>,
+      );
+    }
+    if (Array.isArray(merged.tabs)) {
+      merged.tabs = (merged.tabs as Array<{ symbols?: Array<{ s?: string }> }>).map((tab) =>
+        Array.isArray(tab?.symbols)
+          ? {
+              ...tab,
+              symbols: filterValidTradingViewSymbols<{ s?: string }>(tab.symbols),
+            }
+          : tab,
+      );
+    }
+    if (Array.isArray(merged.symbolsGroups)) {
+      merged.symbolsGroups = (merged.symbolsGroups as Array<{ symbols?: Array<{ name?: string }> }>).map((group) =>
+        Array.isArray(group?.symbols)
+          ? {
+              ...group,
+              symbols: filterValidTradingViewSymbols(
+                group.symbols as Array<{ name?: string }>,
+              ),
+            }
+          : group,
+      );
+    }
   }
 
   if (type === 'tradingview_top_stories') {

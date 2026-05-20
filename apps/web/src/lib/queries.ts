@@ -354,6 +354,19 @@ export function useMarketFreshness(options?: { enabled?: boolean }) {
     });
 }
 
+// Phase 2 — Settings → Data Sources tab. Polls the public per-source
+// freshness endpoint so users can see when each backend table was last
+// refreshed and when the next scheduled sync will run.
+export function useDataSourcesFreshness(options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: ['dataSourcesFreshness'],
+        queryFn: () => api.getDataSourcesFreshness(),
+        enabled: options?.enabled !== false,
+        staleTime: 5 * 60 * 1000,
+        refetchInterval: 10 * 60 * 1000,
+    });
+}
+
 export function useCorrelationMatrix(
     symbol: string,
     options?: { days?: number; topN?: number; enabled?: boolean }

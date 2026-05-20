@@ -2707,6 +2707,22 @@ interface DashboardContextValue {
     updateTab: (dashboardId: string, tabId: string, updates: Partial<DashboardTab>) => void;
     deleteTab: (dashboardId: string, tabId: string) => void;
     reorderTabs: (dashboardId: string, tabs: DashboardTab[]) => void;
+    /**
+     * Re-open the most recently closed tab. Returns the restored tab id if
+     * one was popped from the ring buffer, or null if nothing was available
+     * to restore (buffer empty, target dashboard removed, or tab already
+     * exists). U4 from the QA evaluation report.
+     */
+    restoreLastClosedTab: () => string | null;
+    /**
+     * Snapshot of the recently-closed-tabs ring buffer (most recent first),
+     * exposed so UIs can render a "Recently closed" submenu.
+     */
+    recentlyClosedTabs: ReadonlyArray<{
+        dashboardId: string;
+        tab: DashboardTab;
+        closedAt: number;
+    }>;
     applyTemplate: (dashboardId: string, tabId: string, templateName: string) => void;
     // Widget actions
     addWidget: (dashboardId: string, tabId: string, widget: WidgetCreate) => WidgetInstance;
@@ -2748,6 +2764,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         activeTabId: null,
     });
     const [localStateReady, setLocalStateReady] = useState(false);
+    // U4 from the QA evaluation report — recently closed tabs ring buffer.
+    // Transient (not persisted across reloads); 5-entry cap; FIFO eviction.
+    // Updated by `deleteTab` and consumed by `restoreLastClosedTab`.
+    const [recentlyClosed, setRecentlyClosed] = useState<
+        Array<{ dashboardId: string; tab: DashboardTab; closedAt: number }>
+    >([]);
 
     const getPreferredActiveTabId = useCallback((dashboard: Dashboard | null | undefined) => {
         if (!dashboard) return null;
@@ -3247,6 +3269,20 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         const tab = dashboard?.tabs.find((item) => item.id === tabId);
         dispatch({ type: 'DELETE_TAB', payload: { dashboardId, tabId } });
         if (tab) {
+            // Push onto the recently-closed ring buffer so users can recover
+            // the tab via Ctrl+Shift+T or the Manage Tabs > Recently closed
+            // menu (U4 from the QA evaluation report). Keep at most 5 entries
+            // and de-duplicate on (dashboardId, tabId) to avoid leaking memory
+            // across rapid open/close cycles.
+            setRecentlyClosed((prev) => {
+                const next = [
+                    { dashboardId, tab, closedAt: Date.now() },
+                    ...prev.filter(
+                        (entry) => !(entry.dashboardId === dashboardId && entry.tab.id === tab.id),
+                    ),
+                ];
+                return next.slice(0, 5);
+            });
             captureAnalyticsEvent(ANALYTICS_EVENTS.tabDeleted, {
                 dashboard_id: dashboardId,
                 tab_id: tab.id,
@@ -3254,6 +3290,29 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 widget_count: tab.widgets.length,
             });
         }
+    }, [state.dashboards]);
+
+    const restoreLastClosedTab = useCallback((): string | null => {
+        let restoredTabId: string | null = null;
+        setRecentlyClosed((prev) => {
+            // Pop the most recent entry whose target dashboard still exists
+            // and whose tab id isn't already present (re-created tab edge case).
+            for (let i = 0; i < prev.length; i++) {
+                const entry = prev[i];
+                const dashboard = state.dashboards.find((d) => d.id === entry.dashboardId);
+                if (!dashboard) continue;
+                if (dashboard.tabs.some((t) => t.id === entry.tab.id)) continue;
+                restoredTabId = entry.tab.id;
+                dispatch({
+                    type: 'ADD_TAB',
+                    payload: { dashboardId: entry.dashboardId, tab: entry.tab },
+                });
+                dispatch({ type: 'SET_ACTIVE_TAB', payload: entry.tab.id });
+                return [...prev.slice(0, i), ...prev.slice(i + 1)];
+            }
+            return prev;
+        });
+        return restoredTabId;
     }, [state.dashboards]);
 
     const reorderTabs = useCallback((dashboardId: string, tabs: DashboardTab[]) => {
@@ -3512,6 +3571,8 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         updateTab,
         deleteTab,
         reorderTabs,
+        restoreLastClosedTab,
+        recentlyClosedTabs: recentlyClosed,
         applyTemplate,
         addWidget,
         updateWidget,

@@ -22,7 +22,7 @@ from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, get_db
@@ -3876,6 +3876,21 @@ async def get_market_freshness(
         )
     ).scalar_one_or_none()
 
+    # B1 fix — when `published_date` is uniformly NULL across recent rows
+    # (the KBS source URL pattern only contains /YYYY/MM/, so the URL date
+    # parser can't reconstruct the day), the freshness query reports the
+    # last non-null timestamp from months ago even though the crawler is
+    # actively writing new rows every hour. Fall back to MAX(crawled_at)
+    # so the banner reflects "the crawler is working" rather than "news
+    # data is 35 days old". The Settings → Data Sources panel still uses
+    # `published_date` for finer-grained reporting on the underlying gap.
+    news_crawled_dt = (
+        await db.execute(select(func.max(MarketNews.crawled_at)))
+    ).scalar_one_or_none()
+    if news_crawled_dt is not None:
+        if news_dt is None or news_crawled_dt > news_dt:
+            news_dt = news_crawled_dt
+
     def _age(value) -> Optional[float]:
         if value is None:
             return None
@@ -3930,6 +3945,208 @@ async def get_market_freshness(
         timestamp=datetime.utcnow(),
         overall=overall,
         buckets=buckets,
+    )
+
+
+# Phase 2 — public per-source freshness for the Settings → Data Sources tab.
+#
+# This is a sibling to /api/v1/market/freshness that returns the more
+# granular per-table breakdown the operator already gets via the
+# admin-only /admin/database/freshness-summary, but trimmed to read-only
+# fields a logged-in (or anon) user can safely see. We keep the admin
+# endpoint as the source of truth for the long tail of internal tables;
+# the public endpoint exposes a curated subset relevant to product
+# behavior (prices, foreign flow, news, financials, etc.).
+
+class DataSourceEntry(BaseModel):
+    key: str
+    label: str
+    description: str
+    last_updated: Optional[datetime] = None
+    age_days: Optional[float] = None
+    status: str  # "fresh" | "stale" | "critical" | "unknown"
+    next_sync: Optional[str] = None
+
+
+class DataSourcesResponse(BaseModel):
+    timestamp: datetime
+    overall: str
+    sources: List[DataSourceEntry]
+
+
+# Curated public-safe set of sources. Each entry maps a stable `key` to:
+#   - a human-readable label and description,
+#   - the SQL table + timestamp column to inspect,
+#   - the freshness thresholds (in days) the FE uses to color the row,
+#   - the operator-facing schedule string from `core/scheduler.py`.
+#
+# Schedule strings are informational only; the truth lives in
+# scheduler.py. Keep them in sync if the cron triggers change.
+_PUBLIC_SOURCES: list[dict[str, Any]] = [
+    {
+        "key": "daily_prices",
+        "label": "Daily prices",
+        "description": "Powers price charts, correlation matrix, beta 63D, and most quant widgets.",
+        "table": "stock_prices",
+        "timestamp_column": "time",
+        "filter": "interval='1D'",
+        "stale": 2,
+        "critical": 7,
+        "next_sync": "Daily 09:00 UTC (16:00 VNT)",
+    },
+    {
+        "key": "foreign_trading",
+        "label": "Foreign trading",
+        "description": "Foreign Flow widget and Transaction Flow buckets.",
+        "table": "foreign_trading",
+        "timestamp_column": "trade_date",
+        "stale": 2,
+        "critical": 7,
+        "next_sync": "Daily 09:20 UTC + intraday every 5 min during market hours",
+    },
+    {
+        "key": "market_news",
+        "label": "Market news",
+        "description": "Vietnam market news feed (News & Events tab).",
+        "table": "market_news",
+        "timestamp_column": "published_date",
+        "stale": 1,
+        "critical": 3,
+        "next_sync": "Every hour at :00 UTC",
+    },
+    {
+        "key": "company_news",
+        "label": "Company news",
+        "description": "Per-symbol news cards on Fundamentals tabs.",
+        "table": "company_news",
+        "timestamp_column": "published_date",
+        "stale": 2,
+        "critical": 7,
+        "next_sync": "Daily 10:30 UTC supplemental sync",
+    },
+    {
+        "key": "financial_ratios",
+        "label": "Financial ratios",
+        "description": "P/E, ROE, valuation ratios used in screening, peer comparison, and risk dashboard.",
+        "table": "financial_ratios",
+        "timestamp_column": "updated_at",
+        "stale": 30,
+        "critical": 90,
+        "next_sync": "Daily 09:00 UTC",
+    },
+    {
+        "key": "rs_rating",
+        "label": "RS rating",
+        "description": "Relative-strength leaders/laggards rankings.",
+        "table": "rs_rating_snapshots",
+        "timestamp_column": "snapshot_date",
+        "stale": 2,
+        "critical": 7,
+        "next_sync": "Daily 09:10 UTC",
+    },
+    {
+        "key": "screener_snapshot",
+        "label": "Screener snapshot",
+        "description": "Screening universe used for peer lookup and quant filters.",
+        "table": "screener_snapshots",
+        "timestamp_column": "snapshot_date",
+        "stale": 2,
+        "critical": 7,
+        "next_sync": "Daily 09:00 UTC",
+    },
+    {
+        "key": "company_events",
+        "label": "Corporate actions",
+        "description": "Dividends, AGMs, and splits in Events Calendar.",
+        "table": "company_events",
+        "timestamp_column": "event_date",
+        "stale": 14,
+        "critical": 60,
+        "next_sync": "Daily 10:30 UTC supplemental sync",
+    },
+    {
+        "key": "shareholders",
+        "label": "Shareholders",
+        "description": "Major shareholder disclosures.",
+        "table": "shareholders",
+        "timestamp_column": "updated_at",
+        "stale": 30,
+        "critical": 180,
+        "next_sync": "Daily 10:30 UTC supplemental sync",
+    },
+]
+
+
+@router.get("/data-sources/freshness", response_model=DataSourcesResponse)
+@cached(ttl=300, key_prefix="data_sources_freshness")
+async def get_data_sources_freshness(
+    db: AsyncSession = Depends(get_db),
+) -> DataSourcesResponse:
+    """Public per-source freshness summary for Settings → Data Sources.
+
+    Read-only and rate-limited via the global cache TTL. Returns one row
+    per curated source with last-updated date, age in days, color status
+    bucket, and the human-readable schedule operators should expect.
+    """
+
+    today = date.today()
+    sources: list[DataSourceEntry] = []
+    statuses: list[str] = []
+
+    for spec in _PUBLIC_SOURCES:
+        last_value: Optional[datetime] = None
+        try:
+            sql = (
+                f'SELECT MAX("{spec["timestamp_column"]}") FROM "{spec["table"]}"'
+            )
+            if spec.get("filter"):
+                sql += f' WHERE {spec["filter"]}'
+            res = await db.execute(text(sql))
+            last_value = res.scalar()
+        except Exception as e:  # pragma: no cover - defensive, schema drift
+            logger.warning(
+                "data-sources freshness probe failed for %s: %s", spec["table"], e
+            )
+            last_value = None
+
+        age_days: Optional[float] = None
+        last_dt: Optional[datetime] = None
+        if last_value is not None:
+            if hasattr(last_value, "date") and not isinstance(last_value, date):
+                last_dt = last_value
+                age_days = float((today - last_value.date()).days)
+            elif isinstance(last_value, datetime):
+                last_dt = last_value
+                age_days = float((today - last_value.date()).days)
+            elif isinstance(last_value, date):
+                last_dt = datetime(last_value.year, last_value.month, last_value.day)
+                age_days = float((today - last_value).days)
+
+        status = _classify_age(
+            age_days, stale_threshold=spec["stale"], critical_threshold=spec["critical"]
+        )
+        statuses.append(status)
+        sources.append(
+            DataSourceEntry(
+                key=spec["key"],
+                label=spec["label"],
+                description=spec["description"],
+                last_updated=last_dt,
+                age_days=age_days,
+                status=status,
+                next_sync=spec.get("next_sync"),
+            )
+        )
+
+    if "critical" in statuses:
+        overall = "critical"
+    elif "stale" in statuses or "unknown" in statuses:
+        overall = "stale"
+    else:
+        overall = "fresh"
+
+    return DataSourcesResponse(
+        timestamp=datetime.utcnow(), overall=overall, sources=sources
     )
 
 

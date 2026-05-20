@@ -191,8 +191,16 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           <WidgetError error={error as Error} onRetry={() => refetchDeals()} />
         ) : filteredDeals.length === 0 ? (
           <WidgetEmpty
-            message="No insider trades found"
-            detail="Insider filings are only shown when official disclosures are available."
+            message={
+              filter === 'all'
+                ? 'No insider disclosures filed for this period'
+                : `No ${filter === 'buy' ? 'buy' : 'sell'} disclosures match this filter`
+            }
+            detail={
+              filter === 'all'
+                ? 'This panel shows official insider transactions filed with HOSE/HNX. Empty state means no disclosures were filed within the lookback window — not the same as "insiders never trade".'
+                : 'Try the All filter to see all recent disclosures.'
+            }
             icon={<AlertCircle size={18} />}
             size="compact"
           />

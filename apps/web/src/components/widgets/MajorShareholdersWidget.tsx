@@ -128,7 +128,12 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
                     <>
                     {hasSparseData ? (
                         <div className="mb-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-200">
-                            Limited disclosure coverage: showing the single available shareholder row for {symbol}.
+                            <div className="font-semibold">Limited disclosure coverage</div>
+                            <div className="mt-0.5 text-amber-100/80">
+                                Vietnam regulation only requires public disclosure for holders ≥5% of outstanding shares.
+                                Smaller institutional and retail holdings are not reported here. Showing the single
+                                available row for {symbol}.
+                            </div>
                         </div>
                     ) : null}
                     <table className="data-table w-full table-fixed text-xs">

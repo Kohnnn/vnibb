@@ -377,6 +377,32 @@ function getProviderLabel(provider: AISettings['provider']): string {
     return provider === 'openai_compatible' ? 'OpenAI-compatible' : 'OpenRouter';
 }
 
+/**
+ * Render a friendly, brand-aligned label for the active LLM model so end-users
+ * see "VNIBB Intelligence" instead of the raw provider slug like
+ * `openrouter/free` or `nvidia/nemotron-3-super-128b-a12b`. Power users still
+ * see the raw slug in the badge tooltip (`title=`) for debugging.
+ *
+ * U5 from the QA evaluation report.
+ */
+function getFriendlyModelLabel(rawModel: string | null | undefined): string {
+    if (!rawModel) return 'VNIBB Intelligence';
+    const slug = rawModel.toLowerCase();
+    if (slug.includes('browser model not set')) return 'Local model not set';
+    if (slug.startsWith('openrouter/') || slug.includes('/free') || slug.includes(':free')) {
+        return 'VNIBB Intelligence';
+    }
+    if (slug.includes('nvidia') && slug.includes('nemotron')) return 'VNIBB Intelligence Pro';
+    if (slug.includes('claude')) return 'VNIBB Intelligence (Claude)';
+    if (slug.includes('gpt-4') || slug.includes('gpt4')) return 'VNIBB Intelligence (GPT-4)';
+    if (slug.includes('gpt-3') || slug.includes('gpt3')) return 'VNIBB Intelligence (GPT-3.5)';
+    if (slug.includes('gemini')) return 'VNIBB Intelligence (Gemini)';
+    if (slug.includes('mistral') || slug.includes('mixtral')) return 'VNIBB Intelligence (Mistral)';
+    if (slug.includes('llama')) return 'VNIBB Intelligence (Llama)';
+    if (slug === 'global model') return 'VNIBB Intelligence';
+    return 'VNIBB Intelligence';
+}
+
 function getWidgetAwareIntro(widgetContext?: string, activeTabName?: string, symbol?: string): string {
     const widgetKey = normalizeWidgetKey(widgetContext);
     const tabLabel = activeTabName || 'current workspace';
@@ -642,6 +668,30 @@ export function AICopilot({
             timestamp: new Date(),
         }]);
 
+        // B2 — kill the silent 8s gap. Set an immediate "Thinking…" status
+        // so the in-bubble typing dots have an explanatory caption while we
+        // wait for the first SSE chunk. The status gets replaced with real
+        // reasoning once `onReasoning` events start firing.
+        setCurrentStatus('Thinking…');
+
+        // 30-second SSE inactivity timer. If no chunk arrives in that
+        // window, abort the read so the UI doesn't hang on a stalled
+        // connection. Each chunk reset extends the deadline.
+        let sseInactivityTimer: number | null = null;
+        const SSE_INACTIVITY_MS = 30_000;
+        const armSseInactivityTimer = (onTimeout: () => void) => {
+            if (typeof window === 'undefined') return;
+            if (sseInactivityTimer !== null) window.clearTimeout(sseInactivityTimer);
+            sseInactivityTimer = window.setTimeout(onTimeout, SSE_INACTIVITY_MS);
+        };
+        const clearSseInactivityTimer = () => {
+            if (typeof window === 'undefined') return;
+            if (sseInactivityTimer !== null) {
+                window.clearTimeout(sseInactivityTimer);
+                sseInactivityTimer = null;
+            }
+        };
+
         try {
             // Construct context for widget
             const requestContext = {
@@ -672,9 +722,28 @@ export function AICopilot({
             });
 
             let fullContent = '';
+            let timedOut = false;
+
+            armSseInactivityTimer(() => {
+                timedOut = true;
+                setCurrentStatus(null);
+                setMessages((prev) => prev.map((msg) =>
+                    msg.id === assistantMsgId
+                        ? {
+                            ...msg,
+                            content: 'VniAgent did not respond within 30 seconds. The model may be cold-starting or the network is slow. Tap **Retry** to try again.',
+                        }
+                        : msg
+                ));
+            });
 
             await consumeCopilotStream(response, {
                 onChunk: (chunk) => {
+                    if (timedOut) return;
+                    armSseInactivityTimer(() => {
+                        timedOut = true;
+                        setCurrentStatus(null);
+                    });
                     fullContent += chunk;
                     const cleanContent = sanitizeCopilotContent(fullContent);
                     setMessages((prev) => prev.map((msg) =>
@@ -684,6 +753,11 @@ export function AICopilot({
                     ));
                 },
                 onReasoning: (reasoning) => {
+                    if (timedOut) return;
+                    armSseInactivityTimer(() => {
+                        timedOut = true;
+                        setCurrentStatus(null);
+                    });
                     setCurrentStatus(reasoning.message);
                     setMessages((prev) => prev.map((msg) =>
                         msg.id === assistantMsgId
@@ -738,6 +812,7 @@ export function AICopilot({
                     : msg
             ));
         } finally {
+            clearSseInactivityTimer();
             setIsLoading(false);
         }
     };
@@ -901,8 +976,11 @@ export function AICopilot({
                         <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em]">
                             {aiSettings.mode === 'browser_key' ? 'Browser Key' : 'App Default'}
                         </span>
-                        <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-cyan-200">
-                            {activeModelLabel}
+                        <span
+                            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-cyan-200"
+                            title={`Active model: ${activeModelLabel}`}
+                        >
+                            {getFriendlyModelLabel(activeModelLabel)}
                         </span>
                         {aiSettings.webSearch ? (
                             <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-blue-200">
@@ -1071,7 +1149,12 @@ export function AICopilot({
                         </div>
                     </div>
                 ) : (
-                    messages.map((message) => (
+                    messages.map((message) => {
+                        const isAssistantPending =
+                            message.role === 'assistant' &&
+                            isLoading &&
+                            !message.content.trim();
+                        return (
                         <div key={message.id} className="space-y-2">
                             <div
                                 className={`rounded-lg p-3 ${message.role === 'user'
@@ -1080,9 +1163,22 @@ export function AICopilot({
                                     }`}
                             >
                                 <div className="text-sm text-[var(--text-primary)] prose prose-sm max-w-none">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                        {sanitizeCopilotContent(message.content)}
-                                    </ReactMarkdown>
+                                    {isAssistantPending ? (
+                                        <div className="flex items-center gap-2 py-1">
+                                            <span className="flex gap-1" aria-label="VniAgent is thinking">
+                                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" style={{ animationDelay: '0ms' }} />
+                                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" style={{ animationDelay: '180ms' }} />
+                                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" style={{ animationDelay: '360ms' }} />
+                                            </span>
+                                            <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                                                {currentStatus || 'Thinking…'}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                            {sanitizeCopilotContent(message.content)}
+                                        </ReactMarkdown>
+                                    )}
                                 </div>
                             </div>
 
@@ -1143,9 +1239,14 @@ export function AICopilot({
                                 </div>
                             )}
                         </div>
-                    ))
+                        );
+                    })
                 )}
 
+                {/* Phase 4 — the in-bubble typing dots replace the standalone
+                    "VniAgent is reasoning..." line that previously sat below
+                    the user message. We keep this fallback only when the
+                    placeholder bubble somehow hasn't been mounted yet. */}
                 {isLoading && messages[messages.length - 1]?.role === 'user' && (
                     <div className="bg-[var(--bg-secondary)] rounded-lg p-3 mr-4 border border-[var(--border-color)]">
                         <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">

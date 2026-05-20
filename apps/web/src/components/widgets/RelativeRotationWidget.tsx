@@ -58,6 +58,66 @@ function RotationDot(props: {
   )
 }
 
+/**
+ * Coverage-gap empty state for the Relative Rotation widget.
+ *
+ * B5 from the QA evaluation report: when the requested symbol does not
+ * have enough overlapping daily history with VNINDEX over the lookback
+ * window, the widget previously rendered a hard "INSUFFICIENT OVERLAP"
+ * message with no recovery path. We now surface alternative tickers from
+ * the universe coverage payload so the user can switch to a comparable
+ * symbol with sufficient history instead of being blocked.
+ */
+function RotationCoverageEmpty({
+  symbol,
+  coverageDetail,
+  alternatives,
+  onRefresh,
+}: {
+  symbol: string
+  coverageDetail: string
+  alternatives: string[]
+  onRefresh: () => void
+}) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 px-4 py-6 text-center">
+      <Orbit size={20} className="text-cyan-400/70" />
+      <div>
+        <div className="text-sm font-semibold text-[var(--text-primary)]">
+          {`No relative-rotation data available for ${symbol}.`}
+        </div>
+        <div className="mt-1 text-[11px] leading-5 text-[var(--text-secondary)]">
+          {coverageDetail}
+        </div>
+      </div>
+      {alternatives.length > 0 ? (
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">
+            Try a peer with sufficient history
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-1.5">
+            {alternatives.map((alt) => (
+              <code
+                key={alt}
+                className="rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-primary)]"
+              >
+                {alt}
+              </code>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        onClick={onRefresh}
+        className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-[11px] font-semibold text-cyan-200 transition-colors hover:bg-cyan-500/20"
+      >
+        Refresh
+      </button>
+    </div>
+  )
+}
+
 export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
 
@@ -157,12 +217,14 @@ export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) 
       ) : error && !hasData ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
-        <WidgetEmpty
-          message={`No relative-rotation data available for ${upperSymbol}.`}
-          detail={coverageDetail}
-          health={{ status: 'coverage_gap', label: 'Insufficient overlap', detail: coverageDetail }}
-          icon={<Orbit size={18} />}
-          action={{ label: 'Refresh', onClick: () => refetch() }}
+        <RotationCoverageEmpty
+          symbol={upperSymbol}
+          coverageDetail={coverageDetail}
+          alternatives={(payload?.universe ?? [])
+            .map((point) => point.symbol)
+            .filter((s): s is string => !!s && s !== upperSymbol)
+            .slice(0, 6)}
+          onRefresh={() => refetch()}
         />
       ) : (
         <>

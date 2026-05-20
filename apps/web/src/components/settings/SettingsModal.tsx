@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw, Shield, Sparkles } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { AICopilotTelemetryReview } from '@/components/admin/AICopilotTelemetryReview';
+import { DataSourcesHealthPanel } from '@/components/settings/DataSourcesHealthPanel';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
@@ -1130,6 +1131,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                   <p className="text-[10px] text-[var(--text-muted)] mt-2">KBS is the recommended default for vnstock 3.5.0+</p>
                 </div>
+
+                {/* Phase 2 of the QA evaluation remediation plan: per-source
+                    freshness lets users see when each backend table last
+                    synced and when the next refresh is scheduled. */}
+                <DataSourcesHealthPanel />
 
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                   <div className="text-sm font-bold text-[var(--text-primary)]">Display Units, FX overrides, and decimal precision moved</div>

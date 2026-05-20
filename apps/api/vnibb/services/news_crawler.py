@@ -4,16 +4,20 @@ News Crawler Service using vnstock_news
 Aggregates news from multiple Vietnamese news sources.
 Sources: CafeF, VnExpress, VietStock, Tuoi Tre, VnEconomy, etc.
 
-Uses vnstock_news premium package when available.
+Uses vnstock_news premium package when available; falls back to a free
+RSS crawler when the premium package is missing so the news bucket
+never sits stale just because the premium auto-bootstrap failed.
 Enhanced with AI sentiment analysis.
 """
 
 import asyncio
 import importlib
 import logging
+import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from sqlalchemy import and_, desc, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +27,30 @@ from vnibb.models.market_news import MarketNews
 from vnibb.services.sentiment_analyzer import sentiment_analyzer
 
 logger = logging.getLogger(__name__)
+
+
+# Free-tier RSS feed map. Used when `vnstock_news` (premium) is unavailable
+# so the news pipeline keeps producing fresh rows. Each entry is
+# `(source_label, feed_url)`. Keep these to highly stable, well-maintained
+# Vietnamese financial RSS endpoints.
+FREE_RSS_FEEDS: dict[str, list[str]] = {
+    "cafef.vn": [
+        "https://cafef.vn/thi-truong-chung-khoan.rss",
+        "https://cafef.vn/doanh-nghiep.rss",
+        "https://cafef.vn/tai-chinh-ngan-hang.rss",
+    ],
+    "vietstock.vn": [
+        "https://vietstock.vn/830/chung-khoan/co-phieu.rss",
+        "https://vietstock.vn/733/kinh-te/vi-mo-dau-tu.rss",
+    ],
+    "vneconomy.vn": [
+        "https://vneconomy.vn/chung-khoan.rss",
+        "https://vneconomy.vn/tai-chinh.rss",
+    ],
+    "baodautu.vn": [
+        "https://baodautu.vn/rss/chung-khoan.rss",
+    ],
+}
 
 
 def _coerce_published_date(value: Any) -> datetime | None:
@@ -148,8 +176,117 @@ class NewsCrawlerService:
 
             return count
         else:
-            logger.info("News crawler disabled - vnstock_news not configured")
-            return 0
+            # Free-tier RSS fallback. We don't want stale news just
+            # because the premium package didn't auto-install. The free
+            # path covers cafef.vn, vietstock.vn, vneconomy.vn, and
+            # baodautu.vn — enough to keep the freshness banner green.
+            logger.info("News crawler: vnstock_news unavailable, falling back to RSS")
+            count = await self._crawl_with_rss(sources, limit)
+            if analyze_sentiment and count > 0:
+                await self.analyze_unprocessed_articles(batch_size=20)
+            return count
+
+    async def _crawl_with_rss(
+        self,
+        sources: list[str] | None,
+        limit: int,
+    ) -> int:
+        """Free-tier RSS fallback when vnstock_news is unavailable.
+
+        Walks the curated FREE_RSS_FEEDS map, fetches each feed with a
+        short timeout, parses ``item`` elements (RSS 2.0) into article
+        dicts, and dispatches to ``_store_article`` so the upsert path
+        is identical to the premium flow.
+        """
+        per_source_limit = max(1, limit // max(len(FREE_RSS_FEEDS), 1))
+        target_sources = sources or list(FREE_RSS_FEEDS.keys())
+
+        total = 0
+        async with async_session_maker() as session:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0),
+                headers={"User-Agent": "Mozilla/5.0 VNIBB/1.0 (RSS aggregator)"},
+                follow_redirects=True,
+            ) as client:
+                for source in target_sources:
+                    feeds = FREE_RSS_FEEDS.get(source) or []
+                    if not feeds:
+                        continue
+                    for feed_url in feeds:
+                        articles = await self._fetch_rss_feed(client, source, feed_url, per_source_limit)
+                        for article in articles:
+                            try:
+                                await self._store_article(session, article)
+                                total += 1
+                            except Exception as exc:  # noqa: BLE001
+                                logger.debug(f"RSS store failed: {exc}")
+
+            await session.commit()
+
+        logger.info(f"RSS fallback crawled {total} articles across {len(target_sources)} sources")
+        return total
+
+    async def _fetch_rss_feed(
+        self,
+        client: httpx.AsyncClient,
+        source: str,
+        feed_url: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        try:
+            response = await client.get(feed_url)
+            response.raise_for_status()
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            logger.debug(f"RSS fetch failed for {feed_url}: {exc}")
+            return []
+
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError as exc:
+            logger.debug(f"RSS parse failed for {feed_url}: {exc}")
+            return []
+
+        # RSS 2.0: items live under ``channel/item``; Atom uses ``entry``.
+        # We accept both.
+        items = root.findall(".//item") or root.findall(
+            ".//{http://www.w3.org/2005/Atom}entry"
+        )
+        articles: list[dict[str, Any]] = []
+        for item in items[:limit]:
+            article = self._parse_rss_item(item, source)
+            if article is not None:
+                articles.append(article)
+        return articles
+
+    @staticmethod
+    def _parse_rss_item(item: ET.Element, source: str) -> dict[str, Any] | None:
+        def _text(tag: str) -> str | None:
+            child = item.find(tag) or item.find(
+                f"{{http://www.w3.org/2005/Atom}}{tag}"
+            )
+            if child is not None and child.text:
+                return child.text.strip()
+            return None
+
+        title = _text("title")
+        if not title:
+            return None
+        link = _text("link")
+        if not link:
+            atom_link = item.find("{http://www.w3.org/2005/Atom}link")
+            if atom_link is not None:
+                link = atom_link.attrib.get("href")
+        if not link:
+            return None
+        return {
+            "title": title,
+            "summary": _text("description") or _text("summary"),
+            "content": _text("content:encoded") or _text("content"),
+            "source": source,
+            "url": link,
+            "category": _text("category"),
+            "pub_date": _text("pubDate") or _text("published") or _text("updated"),
+        }
 
     async def _crawl_with_vnstock_news(
         self,

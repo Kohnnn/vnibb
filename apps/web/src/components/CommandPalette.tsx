@@ -574,7 +574,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             <ShortcutPill label="Enter" hint="Select" />
             <ShortcutPill label="Esc" hint="Close" />
           </div>
-          <span className="font-mono">VNIBB Discover</span>
+          <span
+            className="font-mono opacity-70"
+            title="Type to search across symbols, widgets, workspaces, and templates."
+          >
+            VNIBB Discover
+          </span>
         </div>
       </div>
     </div>

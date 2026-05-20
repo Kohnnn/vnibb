@@ -6,6 +6,7 @@ export type WidgetHealthStatus =
   | 'limited'
   | 'coverage_gap'
   | 'awaiting_update'
+  | 'live'
 
 export interface WidgetHealthState {
   status: WidgetHealthStatus

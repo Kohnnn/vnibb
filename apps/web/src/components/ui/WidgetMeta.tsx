@@ -1,6 +1,6 @@
 'use client';
 
-import { Clock, RefreshCw, Database, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { Clock, RefreshCw, Database, AlertTriangle, ShieldAlert, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatAbsoluteTimestamp, formatTime } from '@/lib/format';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
@@ -21,6 +21,12 @@ const infoBadgeStyle = {
   backgroundColor: 'color-mix(in srgb, #38bdf8 12%, transparent)',
   borderColor: 'color-mix(in srgb, #38bdf8 28%, transparent)',
   color: 'color-mix(in srgb, #0ea5e9 72%, var(--text-primary) 28%)',
+} as const;
+
+const liveBadgeStyle = {
+  backgroundColor: 'color-mix(in srgb, #10b981 12%, transparent)',
+  borderColor: 'color-mix(in srgb, #10b981 32%, transparent)',
+  color: 'color-mix(in srgb, #059669 72%, var(--text-primary) 28%)',
 } as const;
 
 interface WidgetMetaProps {
@@ -45,6 +51,8 @@ function getHealthBadgePresentation(health: WidgetHealthState) {
       return { icon: AlertTriangle, style: warningBadgeStyle }
     case 'limited':
       return { icon: ShieldAlert, style: warningBadgeStyle }
+    case 'live':
+      return { icon: Activity, style: liveBadgeStyle }
     case 'coverage_gap':
     default:
       return { icon: AlertTriangle, style: warningBadgeStyle }

@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 
@@ -24,12 +25,27 @@ interface TradingViewNativeWidgetProps {
   onRemove?: () => void;
   widgetGroup?: WidgetGroupId;
   widgetType: TradingViewNativeWidgetType;
+  /**
+   * Optional native fallback rendered if the TradingView embed fails to
+   * mount within the timeout window. Used by widgets like the Screener
+   * and the (TV) Stock Heatmap that have an in-house equivalent we can
+   * swap to so the user never sees a permanent blank panel. (B3, B9, B10
+   * from the QA evaluation report.)
+   */
+  fallback?: React.ReactNode;
 }
 
 const webComponentLoaders = new Map<string, Promise<void>>();
 const SCRIPT_LOAD_TIMEOUT_MS = 12000;
 const IFRAME_WIDGET_TIMEOUT_MS = 10000;
 const WEB_COMPONENT_READY_DELAY_MS = 600;
+// Web-component widgets render an internal iframe asynchronously *after*
+// the custom element is attached. We poll for that iframe (or any
+// rendered child of the shadow root) up to this budget; if none appears
+// the embed is treated as a load failure so we can fall back instead of
+// leaving the panel spinning forever (B3 Screener, B10 Crypto Market).
+const WEB_COMPONENT_RENDER_TIMEOUT_MS = 12000;
+const WEB_COMPONENT_POLL_INTERVAL_MS = 250;
 
 function toKebabCase(value: string): string {
   return value.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
@@ -104,6 +120,7 @@ function TradingViewNativeWidget({
   config,
   onRemove,
   widgetType,
+  fallback,
 }: TradingViewNativeWidgetProps) {
   const metadata = getTradingViewWidgetMetadata(widgetType);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -281,7 +298,73 @@ function TradingViewNativeWidget({
 
         hostRef.current.innerHTML = '';
         hostRef.current.appendChild(element);
-        window.setTimeout(stopLoading, WEB_COMPONENT_READY_DELAY_MS);
+
+        // Verify the embed actually rendered. The script load resolving
+        // is necessary but not sufficient — TradingView still has to
+        // attach an iframe (or custom shadow DOM children) inside the
+        // host element. Without this poll, B3 (Screener) and B10
+        // (Crypto Market) silently spin forever when TradingView blocks
+        // the embed (CSP, regional restriction, ad-blocker, etc.). We
+        // poll for any iframe / shadow-root content for up to
+        // WEB_COMPONENT_RENDER_TIMEOUT_MS; if nothing renders, surface
+        // a typed load error so the wrapper can show a fallback or
+        // retry button.
+        const renderStart = Date.now();
+
+        const isRendered = (host: HTMLElement): boolean => {
+          if (host.querySelector('iframe')) return true;
+          // Some TradingView web components render directly without an
+          // iframe; treat any element child after the placeholder as
+          // a successful render.
+          const directChild = host.firstElementChild;
+          if (
+            directChild &&
+            directChild.tagName.toLowerCase() === metadata.componentTag &&
+            directChild.shadowRoot &&
+            directChild.shadowRoot.childElementCount > 0
+          ) {
+            return true;
+          }
+          if (directChild && directChild.children.length > 0) {
+            return true;
+          }
+          return false;
+        };
+
+        const pollForRender = () => {
+          if (cancelled) return;
+          const host = hostRef.current;
+          if (!host) return;
+
+          if (isRendered(host)) {
+            stopLoading();
+            return;
+          }
+
+          const elapsed = Date.now() - renderStart;
+          if (elapsed >= WEB_COMPONENT_RENDER_TIMEOUT_MS) {
+            captureAnalyticsEvent(ANALYTICS_EVENTS.widgetLoadFailed, {
+              widget_id: id,
+              widget_type: widgetType,
+              widget_title: metadata.name,
+              symbol: resolvedSymbol,
+              error_type: 'web_component_render_timeout',
+            });
+            setLoadError(
+              new Error(
+                `${metadata.name} could not render. TradingView may be blocked or temporarily unavailable.`,
+              ),
+            );
+            setIsLoading(false);
+            return;
+          }
+
+          window.setTimeout(pollForRender, WEB_COMPONENT_POLL_INTERVAL_MS);
+        };
+
+        // Give the embed a tiny grace period before the first probe so
+        // we don't fight TradingView's own first paint.
+        window.setTimeout(pollForRender, WEB_COMPONENT_READY_DELAY_MS);
       } catch (error) {
         if (!cancelled) {
           captureAnalyticsEvent(ANALYTICS_EVENTS.widgetLoadFailed, {
@@ -318,6 +401,9 @@ function TradingViewNativeWidget({
   }
 
   if (loadError) {
+    if (fallback) {
+      return <>{fallback}</>;
+    }
     return <WidgetError error={loadError} />;
   }
 
@@ -347,11 +433,46 @@ function TradingViewNativeWidget({
   );
 }
 
-function createTradingViewWrapper(widgetType: TradingViewNativeWidgetType) {
-  return function TradingViewWidgetWrapper(props: Omit<TradingViewNativeWidgetProps, 'widgetType'>) {
-    return <TradingViewNativeWidget {...props} widgetType={widgetType} />;
+function createTradingViewWrapper(
+  widgetType: TradingViewNativeWidgetType,
+  options?: { fallback?: (props: Omit<TradingViewNativeWidgetProps, 'widgetType' | 'fallback'>) => React.ReactNode },
+) {
+  return function TradingViewWidgetWrapper(props: Omit<TradingViewNativeWidgetProps, 'widgetType' | 'fallback'>) {
+    return (
+      <TradingViewNativeWidget
+        {...props}
+        widgetType={widgetType}
+        fallback={options?.fallback ? options.fallback(props) : undefined}
+      />
+    );
   };
 }
+
+// Native fallbacks for TradingView widgets that have an in-house equivalent.
+// When the TradingView embed times out or is blocked (CSP, ad-blocker,
+// regional restriction), the wrapper renders these instead so the user
+// never sees a permanent blank panel. (Phase 1 native fallback per
+// `docs/qa-v1.0.0-evaluation-remediation.md`.)
+//
+// We use next/dynamic so the native fallback bundles aren't pulled into
+// the TV widget chunk unless the fallback actually needs to render. The
+// extra `as ComponentType<...>` casts side-step React 19 vs next/dynamic
+// generic mismatches that surface only on memo-wrapped exports.
+const NativeMarketHeatmapFallback = dynamic(
+  async () => {
+    const mod = await import('./MarketHeatmapWidget');
+    return mod.MarketHeatmapWidget as unknown as React.ComponentType<{ id: string; onRemove?: () => void }>;
+  },
+  { ssr: false },
+);
+
+const NativeScreenerFallback = dynamic(
+  async () => {
+    const mod = await import('./ScreenerWidget');
+    return mod.ScreenerWidget as unknown as React.ComponentType<{ id: string; onClose?: () => void }>;
+  },
+  { ssr: false },
+);
 
 export const TradingViewChartWidget = createTradingViewWrapper('tradingview_chart');
 export const TradingViewSymbolOverviewWidget = createTradingViewWrapper('tradingview_symbol_overview');
@@ -364,12 +485,16 @@ export const TradingViewTickerTapeWidget = createTradingViewWrapper('tradingview
 export const TradingViewTickerTagWidget = createTradingViewWrapper('tradingview_ticker_tag');
 export const TradingViewSingleTickerWidget = createTradingViewWrapper('tradingview_single_ticker');
 export const TradingViewTickerWidget = createTradingViewWrapper('tradingview_ticker');
-export const TradingViewStockHeatmapWidget = createTradingViewWrapper('tradingview_stock_heatmap');
+export const TradingViewStockHeatmapWidget = createTradingViewWrapper('tradingview_stock_heatmap', {
+  fallback: ({ id, onRemove }) => <NativeMarketHeatmapFallback id={id} onRemove={onRemove} />,
+});
 export const TradingViewCryptoHeatmapWidget = createTradingViewWrapper('tradingview_crypto_heatmap');
 export const TradingViewForexCrossRatesWidget = createTradingViewWrapper('tradingview_forex_cross_rates');
 export const TradingViewEtfHeatmapWidget = createTradingViewWrapper('tradingview_etf_heatmap');
 export const TradingViewForexHeatmapWidget = createTradingViewWrapper('tradingview_forex_heatmap');
-export const TradingViewScreenerWidget = createTradingViewWrapper('tradingview_screener');
+export const TradingViewScreenerWidget = createTradingViewWrapper('tradingview_screener', {
+  fallback: ({ id, onRemove }) => <NativeScreenerFallback id={id} onClose={onRemove} />,
+});
 export const TradingViewCryptoMarketWidget = createTradingViewWrapper('tradingview_crypto_market');
 export const TradingViewSymbolInfoWidget = createTradingViewWrapper('tradingview_symbol_info');
 export const TradingViewTechnicalAnalysisWidget = createTradingViewWrapper('tradingview_technical_analysis');

@@ -5332,16 +5332,137 @@ async def get_company_news(symbol: str, limit: int = Query(20)):
         return StandardResponse(data=[], error=str(e))
 
 
+def _build_event_row_from_db(item: CompanyEvent) -> dict[str, Any]:
+    """Render a CompanyEvent ORM row as the wire payload returned by the
+    upstream provider, so consumers don't need to branch on source."""
+    payload = item.raw_data if isinstance(item.raw_data, dict) else {}
+    event_date_iso = item.event_date.isoformat() if item.event_date else None
+    ex_date_iso = item.ex_date.isoformat() if item.ex_date else None
+    record_date_iso = item.record_date.isoformat() if item.record_date else None
+    payment_date_iso = item.payment_date.isoformat() if item.payment_date else None
+    return {
+        "symbol": item.symbol,
+        "event_type": item.event_type,
+        "event_name": payload.get("event_name") or item.event_type,
+        "event_date": event_date_iso,
+        "ex_date": ex_date_iso,
+        "record_date": record_date_iso,
+        "payment_date": payment_date_iso,
+        "description": item.description,
+        "value": payload.get("value") or item.value,
+        "action_category": payload.get("action_category"),
+        "action_subtype": payload.get("action_subtype"),
+        "effective_date": (
+            ex_date_iso or event_date_iso or record_date_iso or payment_date_iso
+        ),
+        "cash_amount_per_share": payload.get("cash_amount_per_share"),
+        "share_ratio": payload.get("share_ratio"),
+    }
+
+
+async def _load_company_events_fallback(
+    db: AsyncSession, symbol: str, limit: int
+) -> List[dict[str, Any]]:
+    """DB-backed fallback when the live provider returns nothing.
+
+    Reads from `company_events` and, if still empty, synthesises rows from
+    `dividends` so the Events Calendar widget never blocks empty when the
+    Corporate Actions panel has data.
+    """
+    rows: List[dict[str, Any]] = []
+    events = (
+        (
+            await db.execute(
+                select(CompanyEvent)
+                .where(CompanyEvent.symbol == symbol)
+                .order_by(desc(CompanyEvent.event_date), desc(CompanyEvent.ex_date))
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for item in events:
+        rows.append(_build_event_row_from_db(item))
+
+    if not rows:
+        dividend_rows = (
+            (
+                await db.execute(
+                    select(Dividend)
+                    .where(Dividend.symbol == symbol)
+                    .order_by(desc(Dividend.exercise_date), desc(Dividend.cash_year))
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for item in dividend_rows:
+            ex_date_iso = item.exercise_date.isoformat() if item.exercise_date else None
+            record_date_iso = item.record_date.isoformat() if item.record_date else None
+            payment_date_iso = item.payment_date.isoformat() if item.payment_date else None
+            rows.append(
+                {
+                    "symbol": item.symbol,
+                    "event_type": "DIVIDEND",
+                    "event_name": item.issue_method or "Dividend",
+                    "event_date": ex_date_iso or record_date_iso or payment_date_iso,
+                    "ex_date": ex_date_iso,
+                    "record_date": record_date_iso,
+                    "payment_date": payment_date_iso,
+                    "description": (item.raw_data or {}).get("description")
+                    if isinstance(item.raw_data, dict)
+                    else None,
+                    "value": item.dividend_value,
+                    "action_category": "dividend",
+                    "action_subtype": item.issue_method,
+                    "effective_date": ex_date_iso or record_date_iso or payment_date_iso,
+                    "cash_amount_per_share": item.dividend_value,
+                    "share_ratio": None,
+                }
+            )
+
+    return rows
+
+
 @router.get("/{symbol}/events", response_model=StandardResponse[List[Any]])
 @cached(ttl=settings.news_retention_days * 86400, key_prefix="company_events_v27")
-async def get_company_events(symbol: str, limit: int = Query(20, ge=1, le=100)):
+async def get_company_events(
+    symbol: str,
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    symbol_upper = symbol.upper()
+    provider_error: Optional[str] = None
     try:
         data = await VnstockCompanyEventsFetcher.fetch(
-            CompanyEventsQueryParams(symbol=symbol, limit=limit)
+            CompanyEventsQueryParams(symbol=symbol_upper, limit=limit)
         )
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        if data:
+            return StandardResponse(data=data, meta=MetaData(count=len(data)))
     except Exception as e:
-        return StandardResponse(data=[], error=str(e))
+        provider_error = str(e)
+        logger.warning(
+            "Company events provider failed (symbol=%s): %s", symbol_upper, e
+        )
+
+    # DB fallback — Events Calendar should never blank out when stored
+    # corporate-action rows already exist for the symbol.
+    try:
+        fallback_rows = await _load_company_events_fallback(
+            db=db, symbol=symbol_upper, limit=limit
+        )
+        if fallback_rows:
+            return StandardResponse(
+                data=fallback_rows, meta=MetaData(count=len(fallback_rows))
+            )
+    except Exception as fb_err:  # pragma: no cover - defensive
+        logger.warning(
+            "Company events fallback failed (symbol=%s): %s", symbol_upper, fb_err
+        )
+
+    return StandardResponse(data=[], error=provider_error)
 
 
 @router.get("/{symbol}/calendar", response_model=StandardResponse[dict[str, Any]])

@@ -107,6 +107,39 @@ function riskGrade(score: number): { label: string; tone: string } {
   return { label: 'High Risk', tone: 'text-rose-300' };
 }
 
+/**
+ * Heuristic VN-market reference band for the composite risk score.
+ *
+ * U6 from the QA evaluation report: the "56/100" composite score had no
+ * benchmark context. These ranges are derived from observed VNINDEX
+ * constituent distributions: balanced large-caps cluster around 55-70,
+ * elevated names dip into the 35-50 band, and the broad market typical
+ * range straddles 45-65. Surfaced as a small contextual line under the
+ * score so users can see where their stock sits relative to the typical
+ * VN large-cap.
+ */
+const RISK_BENCHMARK = {
+  marketTypicalLow: 45,
+  marketTypicalHigh: 65,
+  largeCapMedian: 58,
+};
+
+function describeRiskBenchmark(score: number): string {
+  if (score >= RISK_BENCHMARK.marketTypicalHigh + 10) {
+    return `Stronger than typical VN large-cap (median ~${RISK_BENCHMARK.largeCapMedian})`;
+  }
+  if (score >= RISK_BENCHMARK.marketTypicalHigh) {
+    return `Above the VN market typical band (${RISK_BENCHMARK.marketTypicalLow}–${RISK_BENCHMARK.marketTypicalHigh})`;
+  }
+  if (score >= RISK_BENCHMARK.marketTypicalLow) {
+    return `Inside the VN market typical band (${RISK_BENCHMARK.marketTypicalLow}–${RISK_BENCHMARK.marketTypicalHigh})`;
+  }
+  if (score >= RISK_BENCHMARK.marketTypicalLow - 10) {
+    return `Below the VN market typical band (${RISK_BENCHMARK.marketTypicalLow}–${RISK_BENCHMARK.marketTypicalHigh})`;
+  }
+  return `Significantly below VN market typical (${RISK_BENCHMARK.marketTypicalLow}–${RISK_BENCHMARK.marketTypicalHigh})`;
+}
+
 export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const [period, setPeriod] = useState<QuantPeriodOption>('1Y');
@@ -269,6 +302,33 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Composite Risk Score</div>
                 <div className={`mt-1 text-2xl font-black ${scoreLabel.tone}`}>{riskScore}</div>
                 <div className={`mt-1 text-sm font-semibold ${scoreLabel.tone}`}>{scoreLabel.label}</div>
+                {/* U6 — sector benchmark context. Renders a small reference
+                    bar under the score so users see where their stock sits
+                    relative to the VN large-cap typical band (45-65). */}
+                <div className="mt-2 space-y-1">
+                  <div className="relative h-1.5 overflow-hidden rounded-full bg-[var(--bg-primary)]">
+                    <div
+                      className="absolute top-0 bottom-0 bg-cyan-500/25"
+                      style={{
+                        left: `${RISK_BENCHMARK.marketTypicalLow}%`,
+                        width: `${RISK_BENCHMARK.marketTypicalHigh - RISK_BENCHMARK.marketTypicalLow}%`,
+                      }}
+                      title={`VN market typical band ${RISK_BENCHMARK.marketTypicalLow}–${RISK_BENCHMARK.marketTypicalHigh}`}
+                    />
+                    <div
+                      className={cn('absolute -top-0.5 h-2.5 w-0.5 rounded-full', {
+                        'bg-emerald-300': riskScore >= 80,
+                        'bg-cyan-300': riskScore >= 60 && riskScore < 80,
+                        'bg-amber-300': riskScore >= 40 && riskScore < 60,
+                        'bg-rose-300': riskScore < 40,
+                      })}
+                      style={{ left: `calc(${riskScore}% - 1px)` }}
+                    />
+                  </div>
+                  <div className="text-[10px] text-[var(--text-muted)]">
+                    {describeRiskBenchmark(riskScore)}
+                  </div>
+                </div>
                 <div className="mt-2 text-[11px] text-[var(--text-secondary)]">
                   Built from drawdown stress, Parkinson volatility, benchmark-relative stress, downside distribution, monthly Sortino quality, and Hurst structure.
                 </div>

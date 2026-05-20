@@ -1105,6 +1105,48 @@ class ComparisonService:
 
             formatted_peers = [to_peer(stock) for stock in unique_ranked[:limit]]
 
+            # F2 fix: peer P/E nulls. Some securities/financial sector tickers
+            # (HCM, FTS, BSI, DSE, CTS, AGR, etc.) have null `pe` in their
+            # latest ScreenerSnapshot row but a valid value in `financial_ratios`.
+            # When the snapshot column is missing we fall back to the most
+            # recent FinancialRatio.pe_ratio per peer so the comparison grid
+            # never shows "P/E: –" across the board.
+            missing_pe_symbols = [
+                peer.symbol for peer in formatted_peers if peer.pe_ratio is None and peer.symbol
+            ]
+            if missing_pe_symbols:
+                from vnibb.models.trading import FinancialRatio
+
+                async with async_session_maker() as session:
+                    fallback_pe_rows = (
+                        await session.execute(
+                            select(
+                                FinancialRatio.symbol,
+                                FinancialRatio.pe_ratio,
+                                FinancialRatio.period,
+                            )
+                            .where(FinancialRatio.symbol.in_(missing_pe_symbols))
+                            .where(FinancialRatio.pe_ratio.is_not(None))
+                            .order_by(FinancialRatio.symbol, desc(FinancialRatio.period))
+                        )
+                    ).all()
+
+                pe_by_symbol: dict[str, float] = {}
+                for sym, pe_val, _period in fallback_pe_rows:
+                    if not sym or sym in pe_by_symbol:
+                        continue
+                    pe_float = _positive_float(pe_val)
+                    if pe_float is not None:
+                        pe_by_symbol[str(sym).upper()] = pe_float
+
+                if pe_by_symbol:
+                    formatted_peers = [
+                        peer.copy(update={"pe_ratio": pe_by_symbol.get(peer.symbol)})
+                        if peer.pe_ratio is None and peer.symbol in pe_by_symbol
+                        else peer
+                        for peer in formatted_peers
+                    ]
+
             return PeersResponse(
                 symbol=symbol,
                 industry=target_industry,

@@ -5,33 +5,56 @@
  *
  * Renders a thin colored strip just below the header when at least one of
  * the tracked buckets (prices / foreign trading / news) is stale or
- * critically stale. Dismissible per-session via localStorage. Polls every
+ * critically stale. Dismissible per-session via sessionStorage. Polls every
  * 10 min so the banner clears automatically once the operator runs the
  * recovery sync.
+ *
+ * Dismissal is keyed to a status hash (overall + bucket statuses) so the
+ * banner re-appears when the situation gets worse — e.g. user dismisses a
+ * "stale" warning, then a fourth bucket flips to "critical": the banner
+ * comes back. This avoids the U2 complaint that dismissal was permanent
+ * even when conditions changed.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronRight, X } from 'lucide-react';
 
 import { useMarketFreshness } from '@/lib/queries';
 import { cn } from '@/lib/utils';
 
-const SESSION_KEY = 'vnibb-freshness-banner-dismissed';
+const SESSION_KEY = 'vnibb-freshness-banner-dismissed-hash';
 
 function isCriticalLike(status: string): boolean {
   return status === 'critical' || status === 'stale';
 }
 
+interface FreshnessBucketLike {
+  label: string;
+  status: string;
+}
+
+function buildStatusHash(
+  overall: string | undefined,
+  buckets: ReadonlyArray<FreshnessBucketLike>,
+): string {
+  const parts = [overall ?? 'unknown'];
+  for (const bucket of [...buckets].sort((a, b) => a.label.localeCompare(b.label))) {
+    parts.push(`${bucket.label}:${bucket.status}`);
+  }
+  return parts.join('|');
+}
+
 export function FreshnessBanner() {
   const { data, isLoading } = useMarketFreshness();
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissedHash, setDismissedHash] = useState<string | null>(null);
 
-  // Hydrate dismissal flag from sessionStorage so the banner stays hidden
-  // for the rest of the tab's life once the user closes it.
+  // Hydrate dismissal hash from sessionStorage so the banner stays hidden
+  // for the same status pattern within this tab. A *different* hash (i.e.
+  // status worsened) makes the banner re-render.
   useEffect(() => {
     try {
       const stored = sessionStorage.getItem(SESSION_KEY);
-      if (stored === '1') setDismissed(true);
+      if (stored) setDismissedHash(stored);
     } catch {
       // sessionStorage may be unavailable (private mode); silently fall back.
     }
@@ -43,21 +66,32 @@ export function FreshnessBanner() {
     return data.buckets.filter((bucket) => isCriticalLike(bucket.status));
   }, [data]);
 
-  if (isLoading || dismissed || !stale || stale.length === 0) {
+  const currentHash = useMemo(
+    () => (data ? buildStatusHash(data.overall, data.buckets) : null),
+    [data],
+  );
+
+  const handleDismiss = useCallback(() => {
+    if (!currentHash) return;
+    setDismissedHash(currentHash);
+    try {
+      sessionStorage.setItem(SESSION_KEY, currentHash);
+    } catch {
+      // ignore
+    }
+  }, [currentHash]);
+
+  if (
+    isLoading ||
+    !stale ||
+    stale.length === 0 ||
+    (currentHash !== null && currentHash === dismissedHash)
+  ) {
     return null;
   }
 
   const overall = data?.overall ?? 'stale';
   const isCritical = overall === 'critical';
-
-  const handleDismiss = () => {
-    setDismissed(true);
-    try {
-      sessionStorage.setItem(SESSION_KEY, '1');
-    } catch {
-      // ignore
-    }
-  };
 
   return (
     <div

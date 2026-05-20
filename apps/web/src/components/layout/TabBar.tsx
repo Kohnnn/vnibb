@@ -55,6 +55,8 @@ export function TabBar(_props: TabBarProps) {
         updateTab,
         deleteTab,
         reorderTabs,
+        restoreLastClosedTab,
+        recentlyClosedTabs,
     } = useDashboard();
     const shortcutModifier = getShortcutModifierLabel();
 
@@ -111,11 +113,31 @@ export function TabBar(_props: TabBarProps) {
                     handleDeleteTab(activeTab.id);
                 }
             }
+
+            // Ctrl/Cmd+Shift+T: Reopen the most recently closed tab. Mirrors
+            // the browser's tab-restore shortcut (U4 from the QA evaluation
+            // report). The buffer is transient — survives until reload, not
+            // beyond — which matches user expectation for "undo close".
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                e.shiftKey &&
+                (e.key === 'T' || e.key === 't')
+            ) {
+                if (recentlyClosedTabs.length > 0) {
+                    e.preventDefault();
+                    const restored = restoreLastClosedTab();
+                    if (restored) {
+                        captureAnalyticsEvent(ANALYTICS_EVENTS.tabRestored, {
+                            tab_id: restored,
+                        });
+                    }
+                }
+            }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [activeDashboard, activeTab]);
+    }, [activeDashboard, activeTab, recentlyClosedTabs.length, restoreLastClosedTab]);
 
     if (!activeDashboard) {
         return (
