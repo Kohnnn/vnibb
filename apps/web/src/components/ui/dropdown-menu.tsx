@@ -48,10 +48,17 @@ export const DropdownMenuContent = ({ children, className = '', align = 'center'
         };
 
         if (context?.isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
+            // Listen on `click` (not `mousedown`) so the same gesture that
+            // opens the trigger doesn't synchronously close the dropdown via
+            // the document handler. The earlier mousedown wiring was the
+            // root cause of the QA "Display Settings does nothing on click"
+            // observation: the trigger's mousedown opened the menu, then
+            // the document mousedown handler immediately closed it again
+            // before paint.
+            document.addEventListener('click', handleClickOutside);
         }
         return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('click', handleClickOutside);
         };
     }, [context]);
 

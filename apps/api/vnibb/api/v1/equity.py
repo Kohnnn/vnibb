@@ -4033,6 +4033,37 @@ async def _enrich_missing_ratio_metrics(
         ):
             item.debt_assets = total_liabilities / total_assets
         if (
+            item.debt_equity is None
+            and total_equity not in (None, 0)
+        ):
+            # Prefer interest-bearing debt (short_term + long_term) when both
+            # are reported. Fall back to total_liabilities so the metric is
+            # always populated when equity is known. Banks/securities firms
+            # have separate Debt/Equity caveats so skip them.
+            short_term_debt_value = (
+                None if balance is None else _coerce_optional_float(balance.get("short_term_debt"))
+            )
+            long_term_debt_value = (
+                None if balance is None else _coerce_optional_float(balance.get("long_term_debt"))
+            )
+            interest_bearing_debt: float | None = None
+            if short_term_debt_value is not None and long_term_debt_value is not None:
+                interest_bearing_debt = short_term_debt_value + long_term_debt_value
+            elif long_term_debt_value is not None:
+                interest_bearing_debt = long_term_debt_value
+            elif short_term_debt_value is not None:
+                interest_bearing_debt = short_term_debt_value
+            debt_basis = (
+                interest_bearing_debt
+                if interest_bearing_debt is not None and interest_bearing_debt > 0
+                else (total_liabilities if total_liabilities is not None else None)
+            )
+            if debt_basis is not None and not is_bank_like:
+                derived_de = debt_basis / total_equity
+                # Guard absurd values from corrupt rows.
+                if -50.0 <= derived_de <= 50.0:
+                    item.debt_equity = derived_de
+        if (
             item.equity_multiplier is None
             and total_assets not in (None, 0)
             and total_equity not in (None, 0)

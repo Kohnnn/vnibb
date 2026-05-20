@@ -618,12 +618,18 @@ export function Sidebar({
                         <>
                             <span className="flex-1 truncate">{folder.name}</span>
                             {lockedFolder && (
-                                <span className="inline-flex items-center rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300">
+                                <span
+                                    className="inline-flex items-center rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300"
+                                    title="System-managed workspaces (Fundamental, Technical, Quant, Global Markets) — not editable or deletable."
+                                >
                                     <Lock size={9} className="mr-1" />
                                     System
                                 </span>
                             )}
-                            <span className="text-[10px] text-[var(--text-muted)]">{folderDashboards.length}</span>
+                            <span
+                                className="text-[10px] text-[var(--text-muted)]"
+                                title={`${folderDashboards.length} workspace${folderDashboards.length === 1 ? '' : 's'}`}
+                            >{folderDashboards.length}</span>
                             {folder.isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                         </>
                     )}
@@ -778,6 +784,28 @@ export function Sidebar({
 
                                 {customFolders.map(renderFolderItem)}
                                 {rootDashboards.map(d => renderDashboardItem(d))}
+                                {customFolders.length === 0 && rootDashboards.length === 0 ? (
+                                    <div className="mt-2 rounded-lg border border-dashed border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 px-3 py-3 text-[11px] leading-5 text-[var(--text-muted)]">
+                                        <div className="font-semibold text-[var(--text-secondary)]">No custom workspaces yet</div>
+                                        <p className="mt-1">Build your own layout by starting from a template, adding individual widgets, or creating a blank dashboard.</p>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={onOpenTemplateSelector}
+                                                className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-blue-300 hover:bg-blue-500/20"
+                                            >
+                                                Browse templates
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleCreateDashboard()}
+                                                className="rounded border border-[var(--border-default)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-accent)]"
+                                            >
+                                                Blank workspace
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : null}
                             </div>
                         </>
                     )}

@@ -1,6 +1,6 @@
 'use client';
 
-import { Globe, TrendingUp, TrendingDown } from 'lucide-react';
+import { Globe, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react';
 import { useForeignTrading } from '@/lib/queries';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/VirtualizedTable';
@@ -171,7 +171,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             exportFilename={`foreign_${symbol}`}
         >
             <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
-                <div className="px-3 py-2 border-b border-[var(--border-color)]/70">
+                <div className="px-3 py-2 border-b border-[var(--border-color)]/70 flex items-center justify-between gap-2">
                     <WidgetMeta
                         updatedAt={data?.meta?.last_data_date || dataUpdatedAt}
                         isFetching={isFetching && hasData}
@@ -179,6 +179,17 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                         note="Net position"
                         align="right"
                     />
+                    {/* Co-located refresh button: makes the cached-snapshot recovery affordance discoverable next to the badge instead of relying on the toolbar icon. */}
+                    <button
+                        type="button"
+                        onClick={() => refetch()}
+                        disabled={isFetching}
+                        className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--border-default)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-accent)] disabled:cursor-not-allowed disabled:opacity-60"
+                        title="Refresh foreign trading snapshot"
+                    >
+                        <RefreshCw size={10} className={cn(isFetching ? 'animate-spin' : '')} />
+                        Refresh
+                    </button>
                 </div>
 
                 <div className="px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/50 flex items-center justify-between">

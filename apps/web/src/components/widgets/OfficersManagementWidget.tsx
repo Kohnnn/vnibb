@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { formatVietnameseTitle, translateVietnameseTitle } from '@/lib/vietnameseTitles';
 
 interface OfficersManagementWidgetProps {
     id?: string;
@@ -97,8 +98,11 @@ export function OfficersManagementWidget({ symbol, onDataChange }: OfficersManag
                                 <p className="break-words whitespace-normal text-sm font-medium text-[var(--text-primary)]">
                                     {officer.name || 'Unknown'}
                                 </p>
-                                <p className="break-words whitespace-normal text-xs text-[var(--text-muted)]">
-                                    {officer.position || 'Executive'}
+                                <p
+                                    className="break-words whitespace-normal text-xs text-[var(--text-muted)]"
+                                    title={translateVietnameseTitle(officer.position) || officer.position || 'Executive'}
+                                >
+                                    {officer.position ? formatVietnameseTitle(officer.position) : 'Executive'}
                                 </p>
                                 {officer.shares_owned && (
                                     <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">

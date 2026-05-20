@@ -317,7 +317,17 @@ export function Header({
   }, [])
 
   return (
-    <header className="relative z-30 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85">
+    <header className="relative z-30 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 isolate-auto">
+      {/* The blurred background lives in a sibling absolutely-positioned layer
+          so the header element itself does NOT establish a stacking context.
+          Putting `backdrop-filter` on the header trapped any z-50 dropdown
+          (Display Settings, AlertNotificationPanel) inside the header's
+          paint order, leaving the panels invisible behind sticky elements
+          even when their state was correctly open. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85"
+      />
       <div className="px-4 py-2">
         <div data-tour="header-bar" className="flex min-h-[2.75rem] flex-wrap items-center gap-2">
           <div className="hidden min-w-0 shrink-0 items-center gap-2 xl:flex">
