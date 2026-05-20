@@ -171,6 +171,32 @@ def configure_scheduler():
     logger.info("Scheduled: daily_data_quality_check at 9:40 UTC (4:40 PM VNT)")
 
     # =========================================================================
+    # Nightly Price Backfill - 5:00 PM VNT (10:00 AM UTC)
+    # Curated active-symbol list to keep the dashboard hot when the upstream
+    # daily price stage degrades. Cheap (~5 day window) so safe to run daily.
+    # =========================================================================
+    async def guarded_nightly_price_backfill():
+        from vnibb.services.nightly_price_backfill import run_nightly_price_backfill
+
+        await _run_guarded_job(
+            "nightly_price_backfill",
+            run_nightly_price_backfill,
+            45 * 60,
+        )
+
+    scheduler.add_job(
+        guarded_nightly_price_backfill,
+        trigger=CronTrigger(hour=10, minute=0, timezone="UTC"),
+        id="nightly_price_backfill",
+        name="Nightly Price Backfill",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Scheduled: nightly_price_backfill at 10:00 UTC (5:00 PM VNT)")
+
+    # =========================================================================
     # RS Rating Calculation - 4:10 PM VNT (9:10 AM UTC)
     # Runs after daily sync completes
     # =========================================================================

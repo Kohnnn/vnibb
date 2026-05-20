@@ -2007,6 +2007,20 @@ class DataPipeline:
                     if progress is not None and symbol_synced > 0:
                         progress["success_count"] = progress.get("success_count", 0) + 1
                         progress["stage_stats"]["prices"]["success"] += 1
+                    if symbol_synced > 0:
+                        # Reset the empty-sync counter on a successful fetch
+                        # so a transient outage doesn't accumulate towards
+                        # auto-deactivation.
+                        try:
+                            async with async_session_maker() as reset_session:
+                                await reset_session.execute(
+                                    update(Stock)
+                                    .where(Stock.symbol == symbol)
+                                    .values(empty_sync_count=0)
+                                )
+                                await reset_session.commit()
+                        except Exception:  # noqa: BLE001
+                            pass
                 elif progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["prices"]["errors"] += 1
@@ -2029,6 +2043,53 @@ class DataPipeline:
                 else:
                     logger.error("Failed to sync prices for %s: %s", symbol, error_details)
                 logger.debug("Price sync traceback for %s", symbol, exc_info=True)
+                # Auto-deactivate symbols whose provider repeatedly returns
+                # "empty data" or "no data found". The daily_trading sync
+                # had been generating 700+ errors per day for delisted /
+                # warrant tickers; counting consecutive empty-data failures
+                # in the Stock model lets us drop them from the universe
+                # automatically.
+                error_text = (str(e) or "").lower()
+                empty_signals = (
+                    "dữ liệu trống",
+                    "du lieu trong",
+                    "no data",
+                    "empty data",
+                    "no records",
+                )
+                is_empty_signal = any(signal in error_text for signal in empty_signals)
+                if is_empty_signal:
+                    try:
+                        async with async_session_maker() as deactivation_session:
+                            await deactivation_session.execute(
+                                update(Stock)
+                                .where(Stock.symbol == symbol)
+                                .values(empty_sync_count=Stock.empty_sync_count + 1)
+                            )
+                            current = (
+                                await deactivation_session.execute(
+                                    select(Stock.empty_sync_count).where(Stock.symbol == symbol)
+                                )
+                            ).scalar_one_or_none()
+                            if current is not None and current >= 5:
+                                await deactivation_session.execute(
+                                    update(Stock)
+                                    .where(Stock.symbol == symbol)
+                                    .values(is_active=0)
+                                )
+                                logger.warning(
+                                    "Auto-deactivated %s after %d consecutive empty-data sync failures",
+                                    symbol,
+                                    current,
+                                )
+                            await deactivation_session.commit()
+                    except Exception as deactivation_err:  # noqa: BLE001
+                        # Column may not exist on older deployments; ignore.
+                        logger.debug(
+                            "Skipping auto-deactivation for %s: %s",
+                            symbol,
+                            deactivation_err,
+                        )
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["prices"]["errors"] += 1
@@ -4949,15 +5010,19 @@ class DataPipeline:
                     )
 
                 raw_rows = await _fetch_intraday()
-                if not raw_rows:
-                    continue
 
+                # Always seed defaults from foreign_lookup so OrderFlowDaily
+                # rows have a usable signal even when intraday returns empty.
+                # Previously the entire body was gated by `if not raw_rows`,
+                # which left every column NULL for symbols where the
+                # foreign_trading stage had populated ForeignTrading correctly.
                 rows: List[Dict[str, Any]] = [] if store_intraday else []
                 buy_volume = 0
                 sell_volume = 0
                 buy_value = 0.0
                 sell_value = 0.0
                 big_order_count = 0
+                has_intraday_data = bool(raw_rows)
 
                 for raw in raw_rows:
                     if not isinstance(raw, dict):
@@ -5030,28 +5095,39 @@ class DataPipeline:
                     cache_payload = [row for row in rows[-100:]]
                     await self._cache_set_json(cache_key, cache_payload, CACHE_TTL_INTRADAY)
 
+                # Build OrderFlowDaily values. We keep zeros (instead of NULL)
+                # when intraday data was present but the calculated bucket was
+                # zero, because zero is a real signal. NULL is only used when
+                # intraday data was absent entirely. Foreign-side volumes
+                # always come from `foreign_lookup` so even all-empty intraday
+                # days still record useful flow signals when ForeignTrading
+                # has populated values for the same (symbol, trade_date).
+                foreign_record = foreign_lookup.get(symbol, {})
                 order_flow_values = {
                     "symbol": symbol,
                     "trade_date": trade_date,
-                    "buy_volume": buy_volume or None,
-                    "sell_volume": sell_volume or None,
-                    "buy_value": buy_value or None,
-                    "sell_value": sell_value or None,
-                    "net_volume": (buy_volume - sell_volume) if buy_volume or sell_volume else None,
-                    "net_value": (buy_value - sell_value) if buy_value or sell_value else None,
-                    "big_order_count": big_order_count or None,
+                    "buy_volume": buy_volume if has_intraday_data else None,
+                    "sell_volume": sell_volume if has_intraday_data else None,
+                    "buy_value": buy_value if has_intraday_data else None,
+                    "sell_value": sell_value if has_intraday_data else None,
+                    "net_volume": (buy_volume - sell_volume) if has_intraday_data else None,
+                    "net_value": (buy_value - sell_value) if has_intraday_data else None,
+                    "big_order_count": big_order_count if has_intraday_data else None,
                     "block_trade_count": None,
-                    "foreign_buy_volume": foreign_lookup.get(symbol, {}).get("foreign_buy_volume"),
-                    "foreign_sell_volume": foreign_lookup.get(symbol, {}).get(
-                        "foreign_sell_volume"
-                    ),
-                    "foreign_net_volume": foreign_lookup.get(symbol, {}).get("foreign_net_volume"),
+                    "foreign_buy_volume": foreign_record.get("foreign_buy_volume"),
+                    "foreign_sell_volume": foreign_record.get("foreign_sell_volume"),
+                    "foreign_net_volume": foreign_record.get("foreign_net_volume"),
                     "proprietary_buy_volume": None,
                     "proprietary_sell_volume": None,
                     "proprietary_net_volume": None,
                     "created_at": datetime.utcnow(),
                     "updated_at": datetime.utcnow(),
                 }
+                # Skip the upsert if we have nothing to record at all (no
+                # intraday + no foreign signal). This keeps the table free
+                # of pure-NULL ghost rows.
+                if not has_intraday_data and not foreign_record:
+                    continue
                 async with async_session_maker() as session:
                     stmt = get_upsert_stmt(
                         OrderFlowDaily, ["symbol", "trade_date"], order_flow_values
