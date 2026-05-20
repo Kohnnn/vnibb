@@ -11,10 +11,10 @@ Enhanced with AI sentiment analysis.
 import asyncio
 import importlib
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, desc, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,67 @@ from vnibb.models.market_news import MarketNews
 from vnibb.services.sentiment_analyzer import sentiment_analyzer
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_published_date(value: Any) -> datetime | None:
+    """Best-effort parse a publication timestamp.
+
+    Accepts datetime, ISO 8601 strings (with or without timezone), epoch
+    seconds/milliseconds, RFC 822 strings (RSS pubDate), and a few common
+    Vietnamese date layouts. Returns ``None`` only if the value is empty or
+    cannot be parsed at all so the caller can record the row without a
+    timestamp rather than silently dropping the article.
+    """
+
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            # Heuristic: > 10^12 is milliseconds, otherwise seconds.
+            seconds = float(value)
+            if seconds > 1_000_000_000_000:
+                seconds = seconds / 1000.0
+            return datetime.fromtimestamp(seconds, tz=UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    # Try ISO 8601 first (handles "Z" suffix and offsets).
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+
+    # RFC 822 (e.g. "Wed, 19 May 2026 03:14:00 +0000") commonly emitted by RSS.
+    from email.utils import parsedate_to_datetime
+
+    try:
+        return parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        pass
+
+    # Common Vietnamese / numeric layouts.
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y",
+    ):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+
+    return None
 
 
 class NewsCrawlerService:
@@ -142,6 +203,18 @@ class NewsCrawlerService:
                         logger.debug(f"No articles found for {source}")
                         continue
 
+                    # Log column layout once per crawl so future provider
+                    # schema drift (date field renamed) is visible without a
+                    # silent regression of "Unknown time" everywhere again.
+                    try:
+                        logger.debug(
+                            "vnstock_news columns for %s: %s",
+                            source,
+                            list(df.columns),
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+
                     articles = df.to_dict("records")
                     for article in articles:
                         article["source"] = source
@@ -182,13 +255,26 @@ class NewsCrawlerService:
         article: dict[str, Any],
     ):
         """Store a single news article."""
-        # Parse published date
-        pub_date = article.get("pub_date") or article.get("published_date")
-        if isinstance(pub_date, str):
-            try:
-                pub_date = datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
-            except ValueError:
-                pub_date = None
+        # Parse published date. The upstream `vnstock_news` provider emits the
+        # publication timestamp under different keys depending on the source
+        # (RSS, sitemap, scraper). Fall back across the full known set so we
+        # never silently write `published_date=NULL` (root cause for the
+        # "Unknown time" bug — every Market News article showed it because
+        # only `pub_date` and `published_date` were tried previously).
+        pub_date_raw = (
+            article.get("pub_date")
+            or article.get("published_date")
+            or article.get("published_at")
+            or article.get("publishedAt")
+            or article.get("publishDate")
+            or article.get("publishedDate")
+            or article.get("pubDate")
+            or article.get("publish_time")
+            or article.get("time_published")
+            or article.get("time")
+            or article.get("date")
+        )
+        pub_date = _coerce_published_date(pub_date_raw)
 
         # Extract related symbols if mentioned
         related_symbols = article.get("symbols", [])

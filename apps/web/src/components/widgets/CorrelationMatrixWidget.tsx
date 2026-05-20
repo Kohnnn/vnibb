@@ -94,6 +94,19 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
   // bouncing the user to the empty state. Statistical caveat is surfaced
   // explicitly so the user knows variance is wider than usual.
   const isPartialCoverage = hasData && returnsCount > 0 && returnsCount < minOverlapDays
+  // Surface a stale-data badge when the latest aligned return row is older
+  // than 7 calendar days. Backend backfills daily so anything older points
+  // at an upstream sync gap (operator should run /api/v1/data/sync/prices).
+  const lastDataDateStr = data?.meta?.last_data_date as string | undefined
+  const staleAgeDays = (() => {
+    if (!lastDataDateStr) return null
+    const parsed = new Date(lastDataDateStr)
+    if (Number.isNaN(parsed.getTime())) return null
+    const diffMs = Date.now() - parsed.getTime()
+    if (diffMs < 0) return null
+    return diffMs / (1000 * 60 * 60 * 24)
+  })()
+  const isStaleData = staleAgeDays !== null && staleAgeDays >= 7
   const coverageDetail = payload?.returns_count
     ? `Only ${payload.returns_count} aligned return rows passed validation. Need at least ${minOverlapDays} overlapping daily returns for ${upperSymbol} and peers. Try a longer window or expand the peer set; daily price history may be incomplete.`
     : `No overlapping daily price history found for ${upperSymbol} and its peer universe. Try another symbol or wait for the next EOD sync.`
@@ -173,6 +186,11 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove }: CorrelationM
             />
           ) : (
             <div className="space-y-3">
+              {isStaleData ? (
+                <div className="rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] leading-5 text-rose-200">
+                  Stale data: latest aligned return row is {Math.floor(staleAgeDays!)} days old. Operator should trigger a price-sync backfill.
+                </div>
+              ) : null}
               {isPartialCoverage ? (
                 <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
                   Partial window: {returnsCount} aligned return rows (need {minOverlapDays} for the strict threshold). Correlations below are still computed but expect wider variance. Switch to a longer window or expand the peer set for full coverage.

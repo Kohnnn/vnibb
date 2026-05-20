@@ -26,6 +26,7 @@ import {
 import { useDashboard } from '@/contexts/DashboardContext';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
+import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import {
   findMatchingWidgetTarget,
   focusDashboardWidget,
@@ -104,7 +105,8 @@ function renderTableArtifact(artifact: CopilotTableArtifact) {
 function renderChartArtifact(artifact: CopilotChartArtifact) {
   return (
     <div className="mt-3 h-[220px] min-h-[220px] w-full overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)]/60 p-2">
-      <ResponsiveContainer width="100%" height="100%">
+      <ChartMountGuard className="h-full" minHeight={180} minWidth={180}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={180} minHeight={180}>
         {artifact.chartType === 'bar' ? (
           <BarChart data={artifact.rows} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" />
@@ -162,6 +164,7 @@ function renderChartArtifact(artifact: CopilotChartArtifact) {
           </LineChart>
         )}
       </ResponsiveContainer>
+      </ChartMountGuard>
     </div>
   );
 }

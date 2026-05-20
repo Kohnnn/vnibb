@@ -26,19 +26,43 @@ export function ChartMountGuard({
 }: ChartMountGuardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isReady, setIsReady] = useState(false);
+  // Two-way unmount: if the container shrinks below the threshold (e.g. tab
+  // switched display:none, sidebar collapse animation) we re-mount Recharts
+  // afresh on the next valid size. The earlier one-way version still let
+  // Recharts emit width(-1) warnings during resize because the chart kept
+  // trying to render at zero size. Debounced through a short timeout to
+  // avoid flicker on transient transitions.
 
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
 
+    let stableTimer: number | null = null;
+    let unmountTimer: number | null = null;
+
     const updateReady = () => {
       const rect = element.getBoundingClientRect();
-      // Require a stable, positive size that exceeds both thresholds. We do
-      // NOT shrink-back to false once mounted: Recharts handles its own
-      // resize via ResizeObserver, and re-mounting on every brief 0-width
-      // transition would cause flicker.
-      if (rect.width >= minWidth && rect.height >= Math.min(minHeight, 16)) {
-        setIsReady(true);
+      const wide = rect.width >= minWidth;
+      const tall = rect.height >= Math.min(minHeight, 16);
+
+      if (wide && tall) {
+        if (unmountTimer !== null) {
+          window.clearTimeout(unmountTimer);
+          unmountTimer = null;
+        }
+        if (!isReady) {
+          if (stableTimer !== null) window.clearTimeout(stableTimer);
+          stableTimer = window.setTimeout(() => setIsReady(true), 50);
+        }
+      } else {
+        if (stableTimer !== null) {
+          window.clearTimeout(stableTimer);
+          stableTimer = null;
+        }
+        if (isReady) {
+          if (unmountTimer !== null) window.clearTimeout(unmountTimer);
+          unmountTimer = window.setTimeout(() => setIsReady(false), 250);
+        }
       }
     };
 
@@ -46,8 +70,12 @@ export function ChartMountGuard({
     const observer = new ResizeObserver(updateReady);
     observer.observe(element);
 
-    return () => observer.disconnect();
-  }, [minWidth, minHeight]);
+    return () => {
+      observer.disconnect();
+      if (stableTimer !== null) window.clearTimeout(stableTimer);
+      if (unmountTimer !== null) window.clearTimeout(unmountTimer);
+    };
+  }, [minWidth, minHeight, isReady]);
 
   return (
     <div

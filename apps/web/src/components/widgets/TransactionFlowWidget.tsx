@@ -20,7 +20,7 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { useTransactionFlow } from '@/lib/queries';
+import { useTransactionFlow, useFlowCoverage } from '@/lib/queries';
 import { formatNumber, formatPriceValueForUnit, formatCompactValueForUnit, type UnitConfig } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 import { cn } from '@/lib/utils';
@@ -91,6 +91,12 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
     days: 30,
     enabled: Boolean(upperSymbol),
   });
+
+  // Pulled once per session and shared across widget instances. Used to render
+  // a dynamic "supported tickers" hint instead of the previously hard-coded
+  // list which contradicted itself when the active symbol *was* in the list
+  // but its own buckets were sparse.
+  const { data: flowCoverage } = useFlowCoverage({ days: 30 });
 
   const rows = data?.data?.data || [];
   const hasData = rows.length > 0;
@@ -260,17 +266,31 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
               size="compact"
             />
           ) : !hasRenderableFlowData ? (
-            <WidgetEmpty
-              icon={<Activity size={18} />}
-              message={`Investor bucket flow is not available for ${upperSymbol} yet.`}
-              detail="Investor bucket flow is reliably available for broker tickers (SSI, VND, HCM, VCI, MBS, SHS, BSI) and a handful of high-liquidity blue chips. Other symbols may show sparse buckets even when end-of-day data is fresh."
-              health={{
-                status: 'coverage_gap',
-                label: 'Sparse coverage',
-                detail: 'Resumes automatically once the provider publishes domestic/foreign/proprietary buckets for this ticker.',
-              }}
-              size="compact"
-            />
+            (() => {
+              const supportedSymbols = (flowCoverage?.data || [])
+                .filter((entry) => entry.days_with_buckets >= 5)
+                .slice(0, 8)
+                .map((entry) => entry.symbol);
+              const symbolIsListed = supportedSymbols.includes(upperSymbol);
+              const supportedListLabel =
+                supportedSymbols.length > 0 ? supportedSymbols.join(', ') : 'a small set of broker tickers';
+              const detail = symbolIsListed
+                ? `${upperSymbol} usually ships investor bucket flow but the requested 30-day window is sparse. Try a longer window or wait for the next end-of-session update.`
+                : `Investor bucket flow is reliably available for ${supportedListLabel} and a handful of high-liquidity blue chips. Other symbols may show sparse buckets even when end-of-day data is fresh.`;
+              return (
+                <WidgetEmpty
+                  icon={<Activity size={18} />}
+                  message={`Investor bucket flow is not available for ${upperSymbol} yet.`}
+                  detail={detail}
+                  health={{
+                    status: 'coverage_gap',
+                    label: 'Sparse coverage',
+                    detail: 'Resumes automatically once the provider publishes domestic/foreign/proprietary buckets for this ticker.',
+                  }}
+                  size="compact"
+                />
+              );
+            })()
           ) : (
             <div className="space-y-3">
               {isStale ? (

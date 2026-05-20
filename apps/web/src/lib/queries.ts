@@ -327,6 +327,18 @@ export function useTransactionFlow(
     });
 }
 
+export function useFlowCoverage(options?: { days?: number; enabled?: boolean }) {
+    const days = options?.days || 30;
+    return useQuery({
+        queryKey: ['flowCoverage', days],
+        queryFn: () => api.getFlowCoverage({ days }),
+        enabled: options?.enabled !== false,
+        // Backend caches at 1h; FE re-uses for 30 min so refetches inside the
+        // dashboard share the cached payload across widget instances.
+        staleTime: 30 * 60 * 1000,
+    });
+}
+
 export function useCorrelationMatrix(
     symbol: string,
     options?: { days?: number; topN?: number; enabled?: boolean }

@@ -834,6 +834,22 @@ const MAIN_TECHNICAL_TEMPLATE: TemplateWidget[] = [
         syncGroupId: 1,
         config: {},
         layout: { x: 16, y: 24, w: 8, h: 12, minW: 6, minH: 9 }
+    },
+    {
+        // Intraday VWAP bands; surfaced empty-state messaging when market is
+        // closed or no trade ticks (PR-3 polish). Was missing from this
+        // template entirely so the FE polish never had a cell to render in.
+        type: 'vwap_bands',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 0, y: 36, w: 12, h: 11, minW: 8, minH: 8 }
+    },
+    {
+        // Footprint proxy bars derived from trade-tick match types.
+        type: 'footprint_proxy',
+        syncGroupId: 1,
+        config: {},
+        layout: { x: 12, y: 36, w: 12, h: 11, minW: 8, minH: 8 }
     }
 ];
 

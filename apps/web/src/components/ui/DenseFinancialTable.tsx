@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
 import { Sparkline } from '@/components/ui/Sparkline'
+import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { calculatePercentChange, EMPTY_VALUE } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
@@ -449,7 +450,8 @@ export function DenseFinancialTable({
                         <div className="text-[11px] text-[var(--text-muted)]">Need at least two reported periods to draw a trend.</div>
                       ) : (
                         <div className="h-[120px] w-full">
-                          <ResponsiveContainer width="100%" height="100%">
+                          <ChartMountGuard className="h-full" minHeight={100} minWidth={120}>
+                            <ResponsiveContainer width="100%" height="100%" minWidth={120} minHeight={80}>
                             <AreaChart data={inlineChartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                               <XAxis
                                 dataKey="period"
@@ -472,6 +474,7 @@ export function DenseFinancialTable({
                               <Area type="monotone" dataKey="value" stroke="#38bdf8" strokeWidth={2} fill="rgba(56,189,248,0.18)" />
                             </AreaChart>
                           </ResponsiveContainer>
+                          </ChartMountGuard>
                         </div>
                       )}
                     </td>

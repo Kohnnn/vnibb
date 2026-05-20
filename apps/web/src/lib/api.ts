@@ -772,6 +772,26 @@ export async function getTransactionFlow(
     });
 }
 
+export interface FlowCoverageEntry {
+    symbol: string;
+    days_with_buckets: number;
+}
+
+export interface FlowCoverageResponse {
+    window_days: number;
+    last_data_date: string | null;
+    count: number;
+    data: FlowCoverageEntry[];
+}
+
+export async function getFlowCoverage(
+    options?: { days?: number }
+): Promise<FlowCoverageResponse> {
+    return fetchAPI<FlowCoverageResponse>(`/market/flow-coverage`, {
+        params: { days: options?.days },
+    });
+}
+
 export async function getCorrelationMatrix(
     symbol: string,
     options?: { days?: number; top_n?: number }

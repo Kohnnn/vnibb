@@ -214,6 +214,34 @@ export function WidgetWrapper({
             return;
         }
 
+        // Lazy-mount via IntersectionObserver. The earlier 6 second fallback
+        // was too long: many widgets sit inside transform-clipped grid cells
+        // where IntersectionObserver never resolves at all (zero-size during
+        // breakpoint transitions, sub-pixel rounding inside react-grid-
+        // layout). Result was a "blank widget" that silently waited 6
+        // seconds before showing anything. We now:
+        //
+        //   1. Force-mount immediately if the cell is already on-screen via
+        //      a synchronous getBoundingClientRect() check.
+        //   2. Drop the IO fallback to 1.5s so worst-case the user sees the
+        //      skeleton briefly rather than a blank cell.
+        //   3. Also drop the IntersectionObserver entirely once the host has
+        //      a measured width >= 32 px (the chart-mount-guard threshold)
+        //      because such a cell is "ready" even if the observer hasn't
+        //      fired yet.
+        try {
+            const rect = node.getBoundingClientRect();
+            const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+            const inViewport = rect.bottom > -300 && rect.top < viewportH + 300;
+            const hasSize = rect.width >= 32 && rect.height >= 16;
+            if (inViewport && hasSize) {
+                setIsContentVisible(true);
+                return;
+            }
+        } catch {
+            // ignore; fall through to observer.
+        }
+
         const observer = new IntersectionObserver(
             (entries) => {
                 const entry = entries[0];
@@ -222,13 +250,13 @@ export function WidgetWrapper({
                     observer.disconnect();
                 }
             },
-            { rootMargin: '280px 0px' }
+            { rootMargin: '320px 0px' }
         );
 
         const fallbackTimer = window.setTimeout(() => {
             setIsContentVisible(true);
             observer.disconnect();
-        }, 6000);
+        }, 1500);
 
         observer.observe(node);
         return () => {

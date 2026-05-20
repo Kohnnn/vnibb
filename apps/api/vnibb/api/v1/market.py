@@ -3727,3 +3727,72 @@ async def get_research_rss_feed(
             fetched_at=fetched_at,
             error=str(e),
         )
+
+
+# ---------------------------------------------------------------------------
+# Transaction-flow coverage
+# ---------------------------------------------------------------------------
+#
+# QA report: the Transaction Flow widget shows "Sparse Coverage" copy that
+# hard-codes a small list of broker tickers (SSI/VND/HCM/VCI/MBS/SHS/BSI),
+# which is contradictory because VCI is in that list but its own buckets are
+# sparse. This endpoint returns the actual list of tickers that have
+# non-empty domestic / foreign / proprietary buckets in the last N days, so
+# the widget can render dynamic copy.
+#
+# Cached server-side for 1h to keep the query cheap; the underlying data
+# only updates once per session anyway.
+
+class FlowCoverageEntry(BaseModel):
+    symbol: str
+    days_with_buckets: int
+
+
+class FlowCoverageResponse(BaseModel):
+    window_days: int
+    last_data_date: Optional[date] = None
+    count: int
+    data: List[FlowCoverageEntry]
+
+
+@router.get("/flow-coverage", response_model=FlowCoverageResponse)
+@cached(ttl=3600, key_prefix="flow_coverage")
+async def get_flow_coverage(
+    days: int = Query(30, ge=7, le=120),
+    db: AsyncSession = Depends(get_db),
+) -> FlowCoverageResponse:
+    from vnibb.models.trading import OrderFlowDaily
+
+    cutoff = date.today() - timedelta(days=days)
+    stmt = (
+        select(
+            OrderFlowDaily.symbol,
+            func.count(OrderFlowDaily.id).label("rows"),
+        )
+        .where(
+            OrderFlowDaily.trade_date >= cutoff,
+            OrderFlowDaily.foreign_net_volume.is_not(None),
+            OrderFlowDaily.proprietary_net_volume.is_not(None),
+        )
+        .group_by(OrderFlowDaily.symbol)
+        .order_by(func.count(OrderFlowDaily.id).desc())
+    )
+
+    rows = (await db.execute(stmt)).all()
+    last_dt = (
+        await db.execute(
+            select(func.max(OrderFlowDaily.trade_date)).where(
+                OrderFlowDaily.foreign_net_volume.is_not(None)
+            )
+        )
+    ).scalar_one_or_none()
+
+    entries = [FlowCoverageEntry(symbol=row[0], days_with_buckets=int(row[1])) for row in rows]
+    return FlowCoverageResponse(
+        window_days=days,
+        last_data_date=last_dt,
+        count=len(entries),
+        data=entries,
+    )
+
+
