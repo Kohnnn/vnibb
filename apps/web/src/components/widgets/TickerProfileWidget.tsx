@@ -70,6 +70,7 @@ function firstPositiveInteger(...values: unknown[]): number | null {
     }
     return null
 }
+<<<<<<< Updated upstream
 
 function formatMarketCapCompact(value: number | null | undefined): string {
     if (value === null || value === undefined || !Number.isFinite(value)) return 'Not disclosed'
@@ -154,6 +155,92 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     const shortName = cleanText(profileData.short_name)
     const industry = cleanText(profileData.industry)
     const exchange = cleanText(profileData.exchange)
+=======
+
+function formatMarketCapCompact(value: number | null | undefined): string {
+    if (value === null || value === undefined || !Number.isFinite(value)) return 'Not disclosed'
+    return `VND ${formatLargeNumber(value, { decimals: 2 })}`
+}
+
+export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
+    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useProfile(symbol);
+    const {
+        data: dividendsData,
+        isLoading: dividendsLoading,
+        error: dividendsError,
+        isFetching: dividendsFetching,
+        dataUpdatedAt: dividendsUpdatedAt,
+    } = useDividends(symbol, Boolean(symbol));
+    const {
+        data: insiderDealsData,
+        isLoading: insiderLoading,
+        error: insiderError,
+        isFetching: insiderFetching,
+        dataUpdatedAt: insiderUpdatedAt,
+    } = useInsiderDeals(symbol, { limit: 3, enabled: Boolean(symbol) });
+    const { data: screenerData } = useScreenerData({
+        symbol,
+        limit: 1,
+        enabled: Boolean(symbol),
+    });
+
+    const profile = data?.data;
+    const screenerRow = screenerData?.data?.[0];
+    const dividends = dividendsData?.data ?? [];
+    const insiderDeals = insiderDealsData ?? [];
+    const hasData = Boolean(profile);
+    const isFallback = Boolean(error && hasData);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
+    const updatedAt = [dataUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
+        .filter(Boolean)
+        .sort((a, b) => Number(b) - Number(a))[0];
+
+    if (timedOut && isLoading && !hasData) {
+        return (
+            <WidgetError
+                title="Loading timed out"
+                error={new Error('Request timed out after 15 seconds.')}
+                onRetry={() => {
+                    resetTimeout();
+                    refetch();
+                }}
+            />
+        );
+    }
+
+    if (isLoading && !hasData) {
+        return <WidgetSkeleton lines={4} />;
+    }
+
+    if (error && !hasData) {
+        return <WidgetError error={error as Error} onRetry={() => refetch()} />;
+    }
+
+    if (!hasData) {
+        return <WidgetEmpty message={`No profile data for ${symbol}`} />;
+    }
+
+    const profileData = profile;
+    if (!profileData) {
+        return <WidgetEmpty message={`No profile data for ${symbol}`} />;
+    }
+    const marketCapValue =
+        (typeof screenerRow?.market_cap === 'number' && Number.isFinite(screenerRow.market_cap)
+            ? screenerRow.market_cap
+            : null) ??
+        (typeof profileData.market_cap === 'number' && Number.isFinite(profileData.market_cap)
+            ? profileData.market_cap
+            : null);
+    const showDividendsSection = dividendsLoading || Boolean(dividendsError) || dividends.length > 0;
+    const showInsiderDealsSection = insiderLoading || Boolean(insiderError) || insiderDeals.length > 0;
+    // TODO V200+: wire in CAFEF/vietstock dividend scraper.
+    const showCorporateActions = showDividendsSection || showInsiderDealsSection;
+
+    const companyName = cleanText(profileData.company_name) || symbol
+    const shortName = cleanText(profileData.short_name)
+    const industry = cleanText(profileData.industry)
+    const exchange = cleanText(profileData.exchange)
+>>>>>>> Stashed changes
     const website = cleanText(profileData.website)
     const companyType = cleanText(profileData.company_type) || cleanText(profileData.sector) || 'Company information'
     const listedDate = cleanText(profileData.listing_date) || cleanText(profileData.listed_date)

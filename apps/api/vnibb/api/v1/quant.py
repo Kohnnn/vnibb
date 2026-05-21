@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 """Quant analytics API endpoints."""
 
 from __future__ import annotations
@@ -34,6 +35,44 @@ from vnibb.providers.vnstock.equity_historical import (
     EquityHistoricalQueryParams,
     VnstockEquityHistoricalFetcher,
 )
+=======
+"""Quant analytics API endpoints."""
+
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime, timedelta
+from typing import Any, Callable, Dict, List
+
+import numpy as np
+import pandas as pd
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from vnibb.api.v1.equity import (
+    _apply_corporate_action_adjustments,
+    _load_corporate_actions_for_adjustment,
+    _load_historical_from_appwrite,
+    _load_historical_from_db,
+    _load_historical_from_recent_cache,
+)
+from vnibb.api.v1.schemas import MetaData, StandardResponse
+from vnibb.core.cache import cached
+from vnibb.core.config import settings
+from vnibb.core.database import get_db
+from vnibb.core.vn_sectors import VN_SECTORS
+from vnibb.models.alerts import BlockTrade
+from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.trading import ForeignTrading
+from vnibb.providers.vnstock.equity_historical import (
+    EquityHistoricalData,
+    EquityHistoricalQueryParams,
+    VnstockEquityHistoricalFetcher,
+)
+>>>>>>> Stashed changes
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
@@ -2923,8 +2962,13 @@ async def get_gap_analysis_metric(
     )
 
 
+<<<<<<< Updated upstream
 @router.get("/{symbol}", response_model=StandardResponse[QuantResponseData])
 @cached(ttl=900, key_prefix="quant_metrics_v3")
+=======
+@router.get("/{symbol}", response_model=StandardResponse[QuantResponseData])
+@cached(ttl=900, key_prefix="quant_metrics_v3")
+>>>>>>> Stashed changes
 async def get_quant_metrics(
     symbol: str,
     metrics: str = Query(

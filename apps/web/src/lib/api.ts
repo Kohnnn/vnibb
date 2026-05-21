@@ -1432,6 +1432,7 @@ export async function getMicrostructureAnalysis(
 export async function getPriceDepth(symbol: string): Promise<PriceDepthResponse> {
     return fetchAPI<PriceDepthResponse>(`/equity/${symbol}/orderbook`);
 }
+<<<<<<< Updated upstream
 
 export async function getInsiderDeals(
     symbol: string,
@@ -2026,6 +2027,602 @@ export async function getPeerCompanies(symbol: string, limit = 5): Promise<Peers
 
 // ============ Quant API ============
 
+=======
+
+export async function getInsiderDeals(
+    symbol: string,
+    options?: { limit?: number }
+): Promise<InsiderTrade[]> {
+    return fetchAPI<InsiderTrade[]>(`/insider/${symbol}/deals`, {
+        params: { limit: options?.limit },
+    });
+}
+
+export async function getRecentInsiderDeals(
+    options?: { limit?: number }
+): Promise<InsiderTrade[]> {
+    return fetchAPI<InsiderTrade[]>('/insider/recent', {
+        params: { limit: options?.limit },
+    });
+}
+
+export async function getInsiderSentiment(
+    symbol: string,
+    days = 90
+): Promise<InsiderSentiment> {
+    return fetchAPI<InsiderSentiment>(`/insider/${symbol}/sentiment`, {
+        params: { days },
+    });
+}
+
+export async function getBlockTrades(
+    options?: { symbol?: string; limit?: number }
+): Promise<BlockTrade[]> {
+    return fetchAPI<BlockTrade[]>('/insider/block-trades', {
+        params: {
+            symbol: options?.symbol,
+            limit: options?.limit
+        },
+    });
+}
+
+export async function getInsiderAlerts(
+    options?: { userId?: number; unreadOnly?: boolean; limit?: number }
+): Promise<InsiderAlert[]> {
+    return fetchAPI<InsiderAlert[]>('/alerts/insider', {
+        params: {
+            user_id: options?.userId,
+            unread_only: options?.unreadOnly,
+            limit: options?.limit,
+        },
+    });
+}
+
+export async function markAlertRead(alertId: number): Promise<InsiderAlert> {
+    return fetchAPI<InsiderAlert>(`/alerts/${alertId}/read`, {
+        method: 'PUT',
+    });
+}
+
+export async function getAlertSettings(userId: number): Promise<AlertSettings> {
+    return fetchAPI<AlertSettings>('/alerts/settings', {
+        params: { user_id: userId },
+    });
+}
+
+export async function updateAlertSettings(
+    userId: number,
+    settings: Partial<AlertSettings>
+): Promise<AlertSettings> {
+    return fetchAPI<AlertSettings>('/alerts/settings', {
+        method: 'PUT',
+        params: { user_id: userId },
+        body: JSON.stringify(settings),
+    });
+}
+
+export async function getDividends(symbol: string): Promise<DividendsResponse> {
+    return fetchAPI<DividendsResponse>(`/equity/${symbol}/dividends`);
+}
+
+export async function getTradingStats(symbol: string): Promise<TradingStatsResponse> {
+    return fetchAPI<TradingStatsResponse>(`/equity/${symbol}/trading-stats`);
+}
+
+// ============ Top Movers API ============
+
+export interface TopMoverData {
+    symbol: string;
+    index: string;
+    last_price?: number;
+    price_change?: number;
+    price_change_pct?: number;
+    volume?: number;
+    value?: number;
+    avg_volume_20d?: number;
+    volume_spike_pct?: number;
+    updated_at?: string | null;
+    is_last_session?: boolean;
+    session_label?: string | null;
+}
+
+export interface TopMoversResponse {
+    type: string;
+    index: string;
+    count: number;
+    data: TopMoverData[];
+    updated_at?: string | null;
+    is_last_session?: boolean;
+    session_label?: string | null;
+}
+
+export async function getTopGainers(options?: {
+    index?: 'VNINDEX' | 'HNX' | 'VN30';
+    limit?: number;
+}): Promise<TopMoversResponse> {
+    return fetchAPI<TopMoversResponse>('/trading/top-gainers', {
+        params: { index: options?.index, limit: options?.limit },
+    });
+}
+
+export async function getTopLosers(options?: {
+    index?: 'VNINDEX' | 'HNX' | 'VN30';
+    limit?: number;
+}): Promise<TopMoversResponse> {
+    return fetchAPI<TopMoversResponse>('/trading/top-losers', {
+        params: { index: options?.index, limit: options?.limit },
+    });
+}
+
+export async function getTopVolume(options?: {
+    index?: 'VNINDEX' | 'HNX' | 'VN30';
+    limit?: number;
+}): Promise<TopMoversResponse> {
+    return fetchAPI<TopMoversResponse>('/trading/top-volume', {
+        params: { index: options?.index, limit: options?.limit },
+    });
+}
+
+export async function getTopValue(options?: {
+    index?: 'VNINDEX' | 'HNX' | 'VN30';
+    limit?: number;
+}): Promise<TopMoversResponse> {
+    return fetchAPI<TopMoversResponse>('/trading/top-value', {
+        params: { index: options?.index, limit: options?.limit },
+    });
+}
+
+export async function getTopMovers(options?: {
+    type?: 'gainer' | 'loser' | 'volume' | 'value';
+    index?: 'VNINDEX' | 'HNX' | 'VN30';
+    limit?: number;
+}): Promise<TopMoversResponse> {
+    return fetchAPI<TopMoversResponse>('/market/top-movers', {
+        params: {
+            type: options?.type,
+            index: options?.index,
+            limit: options?.limit
+        },
+    });
+}
+
+// Sector Top Movers
+export interface SectorStockData {
+    symbol: string;
+    price?: number;
+    change?: number;
+    change_pct?: number;
+    volume?: number;
+}
+
+export interface SectorTopMoversData {
+    sector: string;
+    sector_vi?: string;
+    stocks: SectorStockData[];
+}
+
+export interface SectorTopMoversResponse {
+    count: number;
+    type: string;
+    sectors?: SectorTopMoversData[];
+    data?: SectorTopMoversData[];
+    updated_at?: string;
+}
+
+export interface SectorCatalogEntry {
+    name: string;
+    name_en: string;
+    symbols: string[];
+    keywords?: string[];
+    icb_codes?: string[];
+}
+
+export type SectorCatalogResponse = Record<string, SectorCatalogEntry>;
+
+export async function getSectorsCatalog(options?: {
+    symbolLimit?: number;
+}): Promise<SectorCatalogResponse> {
+    return fetchAPI<SectorCatalogResponse>('/sectors', {
+        params: {
+            symbol_limit: options?.symbolLimit,
+        },
+    });
+}
+
+export async function getSectorTopMovers(options?: {
+    type?: 'gainers' | 'losers';
+    limit?: number;
+    source?: 'KBS' | 'VCI' | 'DNSE';
+
+}): Promise<SectorTopMoversResponse> {
+    const params = {
+        type: options?.type,
+        limit: options?.limit,
+        source: options?.source,
+    };
+
+    try {
+        return await fetchAPI<SectorTopMoversResponse>('/sectors/top-movers', { params });
+    } catch {
+        return fetchAPI<SectorTopMoversResponse>('/trading/sector-top-movers', { params });
+    }
+}
+
+// ============ Sector Performance API ============
+
+export interface StockBrief {
+    symbol: string;
+    price?: number | null;
+    changePct?: number | null;
+}
+
+export interface SectorPerformanceData {
+    sectorId: string;
+    sectorName: string;
+    sectorNameEn: string;
+    changePct?: number | null;
+    topGainer?: StockBrief | null;
+    topLoser?: StockBrief | null;
+    totalStocks: number;
+    stocks: StockBrief[];
+}
+
+export interface SectorPerformanceResponse {
+    count: number;
+    data: SectorPerformanceData[];
+}
+
+export async function getSectorPerformance(_options?: {
+    source?: 'KBS' | 'VCI' | 'DNSE';
+
+}): Promise<SectorPerformanceResponse> {
+    return fetchAPI<SectorPerformanceResponse>('/market/sector-performance');
+}
+
+export interface SectorBoardStock {
+    symbol: string;
+    price?: number | null;
+    change_pct?: number | null;
+    volume?: number | null;
+    market_cap?: number | null;
+    color: string;
+}
+
+export interface SectorBoardSector {
+    name: string;
+    change_pct: number;
+    stocks: SectorBoardStock[];
+}
+
+export interface SectorBoardResponse {
+    market_summary: Record<string, { value?: number | null; change_pct?: number | null; time?: string | null }>;
+    sectors: SectorBoardSector[];
+    sort_by: string;
+    limit_per_sector: number;
+    updated_at?: string | null;
+}
+
+export async function getSectorBoard(options?: {
+    limit_per_sector?: number;
+    sectors?: string;
+    sort_by?: 'volume' | 'market_cap' | 'change_pct';
+}): Promise<SectorBoardResponse> {
+    return fetchAPI<SectorBoardResponse>('/market/sector-board', { params: options });
+}
+
+export interface MoneyFlowTrailPoint {
+    date: string;
+    s_trend?: number | null;
+    s_strength?: number | null;
+}
+
+export interface MoneyFlowTrendStock {
+    symbol: string;
+    name?: string | null;
+    sector?: string | null;
+    price?: number | null;
+    change_pct?: number | null;
+    s_trend?: number | null;
+    s_strength?: number | null;
+    quadrant: string;
+    color: string;
+    trail: MoneyFlowTrailPoint[];
+}
+
+export interface MoneyFlowTrendResponse {
+    timeframe: 'short' | 'medium' | 'long';
+    benchmark: string;
+    center: [number, number];
+    reference_symbol?: string | null;
+    sector?: string | null;
+    stocks: MoneyFlowTrendStock[];
+    updated_at?: string | null;
+}
+
+export async function getMoneyFlowTrend(options?: {
+    symbol?: string;
+    symbols?: string;
+    sector?: string;
+    timeframe?: 'short' | 'medium' | 'long';
+    trail_length?: number;
+}): Promise<MoneyFlowTrendResponse> {
+    return fetchAPI<MoneyFlowTrendResponse>('/market/money-flow-trend', { params: options });
+}
+
+export type ResearchRssSource = 'cafef' | 'vietstock' | 'vnexpress'
+
+export interface ResearchRssItem {
+    title: string
+    url: string
+    published_at?: string | null
+    description?: string | null
+}
+
+export interface ResearchRssFeedResponse {
+    source: ResearchRssSource
+    count: number
+    data: ResearchRssItem[]
+    fetched_at: string
+    error?: string | null
+}
+
+export async function getResearchRssFeed(
+    source: ResearchRssSource,
+    limit = 10
+): Promise<ResearchRssFeedResponse> {
+    return fetchAPI<ResearchRssFeedResponse>('/market/research/rss-feed', {
+        params: {
+            source,
+            limit,
+        },
+        timeout: 15000,
+    })
+}
+
+// ============ Ownership & Rating API ============
+
+export interface OwnershipData {
+    symbol: string;
+    owner_name?: string;
+    owner_type?: string;
+    shares?: number;
+    ownership_pct?: number;
+    change_shares?: number;
+    change_pct?: number;
+    report_date?: string;
+}
+
+export interface OwnershipResponse {
+    symbol: string;
+    count: number;
+    data: OwnershipData[];
+}
+
+export interface GeneralRatingData {
+    symbol: string;
+    valuation_score?: number;
+    financial_health_score?: number;
+    business_model_score?: number;
+    business_operation_score?: number;
+    overall_score?: number;
+    industry_rank?: number;
+    industry_total?: number;
+    recommendation?: string;
+    target_price?: number;
+    upside_pct?: number;
+}
+
+export interface GeneralRatingResponse {
+    symbol: string;
+    data: GeneralRatingData;
+}
+
+export async function getOwnership(symbol: string): Promise<OwnershipResponse> {
+    return fetchAPI<OwnershipResponse>(`/equity/${symbol}/ownership`);
+}
+
+export async function getRating(symbol: string): Promise<GeneralRatingResponse> {
+    return fetchAPI<GeneralRatingResponse>(`/equity/${symbol}/rating`);
+}
+
+// ============ Financials API ============
+
+export interface FinancialStatementData {
+    symbol: string;
+    period: string;
+    statement_type: string;
+    revenue?: number;
+    gross_profit?: number;
+    operating_income?: number;
+    net_income?: number;
+    ebitda?: number;
+    eps?: number;
+    eps_diluted?: number;
+    cost_of_revenue?: number;
+    pre_tax_profit?: number;
+    profit_before_tax?: number;
+    tax_expense?: number;
+    interest_expense?: number;
+    depreciation?: number;
+    selling_general_admin?: number;
+    research_development?: number;
+    other_income?: number;
+    total_assets?: number;
+    current_assets?: number;
+    fixed_assets?: number;
+    total_liabilities?: number;
+    current_liabilities?: number;
+    long_term_liabilities?: number;
+    short_term_debt?: number;
+    long_term_debt?: number;
+    total_equity?: number;
+    retained_earnings?: number;
+    cash_and_equivalents?: number;
+    cash?: number;
+    inventory?: number;
+    accounts_receivable?: number;
+    accounts_payable?: number;
+    customer_deposits?: number;
+    goodwill?: number;
+    intangible_assets?: number;
+    operating_cash_flow?: number;
+    investing_cash_flow?: number;
+    financing_cash_flow?: number;
+    free_cash_flow?: number;
+    net_change_in_cash?: number;
+    net_cash_flow?: number;
+    capex?: number;
+    capital_expenditure?: number;
+    dividends_paid?: number;
+    stock_repurchased?: number;
+    debt_repayment?: number;
+    raw_data?: Record<string, unknown>;
+}
+
+export interface FinancialsResponse {
+    symbol: string;
+    statement_type: string;
+    period: string;
+    count: number;
+    data: FinancialStatementData[];
+}
+
+export async function getFinancials(
+    symbol: string,
+    options?: {
+        type?: 'income' | 'balance' | 'cashflow';
+        period?: 'year' | 'quarter' | 'FY' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'TTM';
+        limit?: number;
+    }
+): Promise<FinancialsResponse> {
+    return fetchAPI<FinancialsResponse>(`/equity/${symbol}/financials`, {
+        params: {
+            statement_type: options?.type,
+            period: options?.period,
+            limit: options?.limit,
+        },
+    });
+}
+
+// ============ Comparison Analysis API ============
+
+export interface MetricDefinition {
+    id?: string;
+    key?: string;
+    name?: string;
+    label?: string;
+    format?: string;
+}
+
+export interface StockMetrics {
+    symbol: string;
+    name?: string | null;
+    price?: number | null;
+    changePct?: number | null;
+    marketCap?: number | null;
+    peRatio?: number | null;
+    pbRatio?: number | null;
+    roe?: number | null;
+    roa?: number | null;
+    eps?: number | null;
+    dividendYield?: number | null;
+    volume?: number | null;
+    high52w?: number | null;
+    low52w?: number | null;
+    beta?: number | null;
+    debtEquity?: number | null;
+    revenueGrowth?: number | null;
+}
+
+export interface StockComparison {
+    symbol: string;
+    company_name: string;
+    metrics: Record<string, number | null>;
+}
+
+export interface ComparisonResponse {
+    metrics: MetricDefinition[];
+    stocks: StockComparison[];
+    period: string;
+    generated_at?: string;
+}
+
+export type ComparisonPerformancePeriod = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'YTD' | 'ALL'
+
+export interface ComparisonPerformancePoint {
+    date: string
+    [symbol: string]: string | number
+}
+
+export async function getComparisonPerformance(
+    symbols: string[],
+    period: ComparisonPerformancePeriod = '1M'
+): Promise<ComparisonPerformancePoint[]> {
+    return fetchAPI<ComparisonPerformancePoint[]>('/comparison/performance', {
+        params: {
+            symbols: symbols.join(','),
+            period,
+        },
+    })
+}
+
+
+export async function compareStocks(symbols: string[], period: string = "FY"): Promise<ComparisonResponse> {
+    return fetchAPI<ComparisonResponse>('/comparison', {
+        params: {
+            symbols: symbols.join(','),
+            period
+        },
+    });
+}
+
+
+// Peer Companies API
+export interface PeerCompany {
+    symbol: string;
+    name?: string | null;
+    market_cap?: number | null;
+    pe_ratio?: number | null;
+    sector?: string | null;
+    industry?: string | null;
+}
+
+export interface PeersResponse {
+    symbol: string;
+    sector?: string | null;
+    industry?: string | null;
+    count: number;
+    peers: PeerCompany[];
+}
+
+export interface SearchTickerResult {
+    symbol: string;
+    name: string;
+    type: 'vn_stock' | 'crypto' | 'index' | 'us_stock';
+    exchange?: string | null;
+    tv_symbol?: string | null;
+}
+
+export interface SearchTickersResponse {
+    count: number;
+    results: SearchTickerResult[];
+}
+
+export async function searchTickers(query: string, options?: { limit?: number }): Promise<SearchTickersResponse> {
+    return fetchAPI<SearchTickersResponse>('/search/tickers', {
+        params: { q: query, limit: options?.limit },
+    });
+}
+
+export async function getPeerCompanies(symbol: string, limit = 5): Promise<PeersResponse> {
+    return fetchAPI<PeersResponse>(`/equity/${symbol}/peers`, {
+        params: { limit },
+    });
+}
+
+// ============ Quant API ============
+
+>>>>>>> Stashed changes
 export type QuantPeriod = '1M' | '6M' | '1Y' | '3Y' | '5Y' | 'ALL'
 export type SeasonalityGranularity = 'monthly' | 'weekly' | 'daily' | 'hourly'
 
