@@ -1,10 +1,19 @@
 'use client';
 
 import { memo, useEffect, useMemo, useState } from 'react';
-import { X, Activity, BarChart3, Layout, TrendingUp, Search, ChevronRight, Globe2, Sigma, Newspaper } from 'lucide-react';
+import { X, Activity, BarChart3, Layout, TrendingUp, Search, ChevronRight, Globe2, Sigma, Newspaper, Save, Trash2, Download, Upload, Star } from 'lucide-react';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { DASHBOARD_TEMPLATES, DASHBOARD_TEMPLATE_CATEGORIES, type DashboardTemplate, type DashboardTemplateCategory } from '@/types/dashboard-templates';
+import {
+  loadCustomTemplates,
+  saveCustomTemplate,
+  deleteCustomTemplate,
+  downloadCustomTemplate,
+  importCustomTemplateFromJson,
+  type CustomDashboardTemplate,
+} from '@/lib/customTemplates';
+import type { Dashboard } from '@/types/dashboard';
 import { cn } from '@/lib/utils';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -13,6 +22,8 @@ interface TemplateSelectorProps {
   open: boolean;
   onClose: () => void;
   onSelectTemplate: (template: DashboardTemplate) => void;
+  /** When provided, the modal shows a "Save current dashboard as template" CTA. */
+  currentDashboard?: Dashboard | null;
 }
 
 const CATEGORY_ICONS: Record<DashboardTemplateCategory, any> = {
@@ -102,17 +113,72 @@ function TemplateLayoutPreview({ template }: { template: DashboardTemplate }) {
   );
 }
 
-function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: TemplateSelectorProps) {
+function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDashboard }: TemplateSelectorProps) {
   const [selectedCategory, setSelectedCategory] = useState<DashboardTemplateCategory | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [customTemplates, setCustomTemplates] = useState<CustomDashboardTemplate[]>([]);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [saveCategory, setSaveCategory] = useState<DashboardTemplateCategory>('market');
+  const [saveError, setSaveError] = useState<string | null>(null);
   const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open, onClose });
 
   useEffect(() => {
-    if (!open) return
+    if (!open) return;
     captureAnalyticsEvent(ANALYTICS_EVENTS.templateSelectorOpened, {
       source: 'template_selector',
-    })
-  }, [open])
+    });
+    setCustomTemplates(loadCustomTemplates());
+  }, [open]);
+
+  const handleSaveCurrent = () => {
+    if (!currentDashboard) return;
+    if (!saveName.trim()) {
+      setSaveError('Please enter a name.');
+      return;
+    }
+    try {
+      const tpl = saveCustomTemplate({
+        name: saveName.trim(),
+        category: saveCategory,
+        dashboard: currentDashboard,
+      });
+      setCustomTemplates(loadCustomTemplates());
+      setShowSaveDialog(false);
+      setSaveName('');
+      setSaveError(null);
+      captureAnalyticsEvent(ANALYTICS_EVENTS.templateSelectorOpened, {
+        source: 'custom_template_saved',
+        template_id: tpl.id,
+      });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not save template.');
+    }
+  };
+
+  const handleDeleteCustom = (id: string) => {
+    if (!window.confirm('Delete this saved layout?')) return;
+    deleteCustomTemplate(id);
+    setCustomTemplates(loadCustomTemplates());
+  };
+
+  const handleImportClick = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        importCustomTemplateFromJson(text);
+        setCustomTemplates(loadCustomTemplates());
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : 'Import failed.');
+      }
+    };
+    input.click();
+  };
 
   const categoryCounts = useMemo(() => {
     return Object.fromEntries(
@@ -135,6 +201,17 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
       return matchesCategory && matchesSearch;
     });
   }, [searchQuery, selectedCategory]);
+
+  const filteredCustomTemplates = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    return customTemplates.filter((template) => {
+      const matchesCategory = !selectedCategory || template.category === selectedCategory;
+      const matchesSearch = !normalizedQuery
+        || template.name.toLowerCase().includes(normalizedQuery)
+        || (template.description || '').toLowerCase().includes(normalizedQuery);
+      return matchesCategory && matchesSearch;
+    });
+  }, [searchQuery, selectedCategory, customTemplates]);
 
   if (!open) return null;
 
@@ -226,6 +303,121 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate }: Template
 
         {/* Templates Grid */}
         <div className="flex-1 p-6 overflow-y-auto scrollbar-hide bg-[var(--bg-primary)]">
+          {/* Save / Import row + Custom Templates section */}
+          {currentDashboard ? (
+            <div className="mb-5 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Star className="text-blue-400" size={18} />
+                  <div>
+                    <h3 className="text-sm font-black text-[var(--text-primary)] uppercase tracking-tight">Your saved layouts</h3>
+                    <p className="text-[11px] text-[var(--text-muted)]">Save the current dashboard as a reusable template, or import a JSON layout from a colleague.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleImportClick}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                  >
+                    <Upload size={12} />
+                    Import
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowSaveDialog((v) => !v)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-blue-500"
+                  >
+                    <Save size={12} />
+                    Save current
+                  </button>
+                </div>
+              </div>
+              {showSaveDialog ? (
+                <div className="mt-4 grid gap-2 rounded-xl border border-blue-500/20 bg-[var(--bg-primary)] p-3 md:grid-cols-[minmax(0,1fr)_140px_auto]">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={saveName}
+                    onChange={(event) => setSaveName(event.target.value)}
+                    placeholder="Template name"
+                    className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-blue-400/50"
+                  />
+                  <select
+                    value={saveCategory}
+                    onChange={(event) => setSaveCategory(event.target.value as DashboardTemplateCategory)}
+                    className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-blue-400/50"
+                  >
+                    {DASHBOARD_TEMPLATE_CATEGORIES.map((category) => (
+                      <option key={category.id} value={category.id}>{category.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleSaveCurrent}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white hover:bg-blue-500"
+                  >
+                    Save layout
+                  </button>
+                  {saveError ? (
+                    <div className="md:col-span-3 text-[11px] text-rose-300">{saveError}</div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {filteredCustomTemplates.length > 0 ? (
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {filteredCustomTemplates.map((template) => (
+                    <article
+                      key={template.id}
+                      className="group flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)]/55 p-3 text-left transition-all hover:border-blue-500/30"
+                    >
+                      <TemplateLayoutPreview template={template} />
+                      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-amber-200">
+                          Custom
+                        </span>
+                        <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                          {template.widgets.length} widgets
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-black text-[var(--text-primary)] group-hover:text-blue-400">
+                        {template.name}
+                      </h3>
+                      <p className="mt-1 line-clamp-2 text-[11px] text-[var(--text-muted)]">{template.description}</p>
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => downloadCustomTemplate(template)}
+                          className="inline-flex items-center gap-1 rounded border border-[var(--border-default)] px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)] hover:border-[var(--border-color)] hover:text-[var(--text-primary)]"
+                        >
+                          <Download size={10} /> Export
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCustom(template.id)}
+                          className="inline-flex items-center gap-1 rounded border border-rose-500/30 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-rose-300 hover:bg-rose-500/10"
+                        >
+                          <Trash2 size={10} /> Delete
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectTemplate(template);
+                            onClose();
+                          }}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-white hover:bg-blue-500"
+                        >
+                          Use Layout <ChevronRight size={12} />
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {filteredTemplates.map(template => {
               const categoryLabel = DASHBOARD_TEMPLATE_CATEGORIES.find((category) => category.id === template.category)?.label || template.category;

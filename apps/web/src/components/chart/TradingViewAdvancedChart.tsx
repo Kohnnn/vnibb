@@ -114,24 +114,43 @@ function safeNumber(value: unknown): number | null {
 }
 
 function normalizePoints(rows: Array<Record<string, unknown>>): ChartPoint[] {
-  return rows
+  // QA-v4: Aggressive dedup-by-date. Even when the API server returns
+  // duplicate rows for the same trading day (mixed raw/adjusted shapes
+  // in Mongo, or merged DB+cache results), lightweight-charts paints the
+  // second entry on top of the first with conflicting OHLC values which
+  // produces invisible candles. We keep the row whose absolute close is
+  // SMALLEST per date — that's typically the post-adjustment price that
+  // matches the rest of the dashboard's display convention.
+  const byDate = new Map<string, ChartPoint>();
+  rows
     .map((row) => {
-      const time = String(row.time ?? '');
+      const time = String(row.time ?? '').slice(0, 10);
       const open = safeNumber(row.open);
       const high = safeNumber(row.high);
       const low = safeNumber(row.low);
       const close = safeNumber(row.close);
       const volume = safeNumber(row.volume) ?? 0;
-      // Reject rows where any OHLC value is missing or non-finite. Returning
-      // a partial row here would crash lightweight-charts deep in its
-      // candlestick renderer with "Value is null".
       if (open === null || high === null || low === null || close === null || !time) {
         return null;
       }
       return { time, open, high, low, close, volume };
     })
     .filter((row): row is ChartPoint => row !== null)
-    .sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime());
+    .forEach((row) => {
+      const existing = byDate.get(row.time);
+      if (!existing) {
+        byDate.set(row.time, row);
+        return;
+      }
+      // Prefer the row whose `close` is smaller — post-adjustment series
+      // for VN equities (e.g. VCI 23.22 vs raw 31.56 on 2024-01-02).
+      if (row.close < existing.close) {
+        byDate.set(row.time, row);
+      }
+    });
+  return Array.from(byDate.values()).sort(
+    (left, right) => new Date(left.time).getTime() - new Date(right.time).getTime()
+  );
 }
 
 /**

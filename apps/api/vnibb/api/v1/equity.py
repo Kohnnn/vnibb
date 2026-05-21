@@ -1295,7 +1295,41 @@ async def _load_historical_from_mongo(
         item = _to_historical_data_from_mongo(doc, adjustment_mode=adjustment_mode)
         if item is not None:
             rows.append(item)
-    return rows
+
+    # QA-v4: Deduplicate Mongo rows that share the same trade date.
+    # Mongo's `market_prices_eod` collection accumulated multiple shape
+    # generations (early raw-VND backfill at 00:00 UTC plus newer
+    # adjusted-price backfill at 07:00 ICT) for the same logical trading
+    # day. Returning both poisons the chart series — lightweight-charts
+    # accepts the duplicate but renders the second entry on top of the
+    # first with conflicting OHLC values, which is the root cause of the
+    # "Price Chart no candles" symptom (CC1/T1 across v1/v2/v3).
+    #
+    # Strategy: keep the latest (highest) close-price row per date.
+    # Newer backfills tend to use higher-precision adjusted prices that
+    # reflect post-split divisors; we prefer those when available.
+    dedup: dict[date, EquityHistoricalData] = {}
+    for item in rows:
+        existing = dedup.get(item.time)
+        if existing is None:
+            dedup[item.time] = item
+            continue
+        # Prefer rows that have a non-null adjusted_close + a numerically
+        # smaller close value (post-adjustment factor < 1 reduces price).
+        # Otherwise keep the row whose `volume` matches the maximum so
+        # we never drop the canonical session.
+        existing_score = (
+            (1 if existing.adjusted_close is not None else 0),
+            -abs((existing.close or 0) - (existing.raw_close or existing.close or 0)),
+        )
+        candidate_score = (
+            (1 if item.adjusted_close is not None else 0),
+            -abs((item.close or 0) - (item.raw_close or item.close or 0)),
+        )
+        if candidate_score > existing_score:
+            dedup[item.time] = item
+
+    return [dedup[d] for d in sorted(dedup.keys())]
 
 
 def _appwrite_optional_int(value: Any) -> Optional[int]:

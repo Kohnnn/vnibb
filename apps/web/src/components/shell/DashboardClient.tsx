@@ -1296,6 +1296,7 @@ function DashboardContent() {
                 open={isTemplateSelectorOpen}
                 onClose={() => setIsTemplateSelectorOpen(false)}
                 onSelectTemplate={handleApplyTemplate}
+                currentDashboard={activeDashboard ?? null}
             />
 
             {templateApplyStatus && activeTab?.widgets.length ? (
