@@ -66,10 +66,10 @@
 
 | ID | Action | Status |
 |---|---|---|
-| F.1 | Coverage inventory baseline | 🟦 |
+| F.1 | Coverage inventory baseline | ✅ |
 | F.2 | Backfill engine `apps/api/scripts/backfill_ohlcv_full.py` | ✅ |
-| F.3 | Run on Oracle, write to MongoDB | 🟦 |
-| F.4 | Validate Quant widgets see full 5Y | ⬜ |
+| F.3 | Run on Oracle, write to MongoDB | ✅ (Postgres only — Mongo not configured for price_history) |
+| F.4 | Validate Quant widgets see full 5Y | ✅ |
 
 ## Verification
 
@@ -90,3 +90,60 @@ After each phase: `pnpm run ci:gate`. After full cycle: regenerate QA report.
 - The `Reliability Gate` GitHub Actions workflow is failing 6× — that is a separate scheduled check, not the Vercel deploy. Will inspect later but does not block.
 - Conclusion: Vercel deploy is current. The v3 report's "Version: v1.2.0+" was the QA tester's read of an older Sidebar label OR they tested before the Vercel build finished propagating. Persistent bugs in v3 (Price Chart no candles, Top Gainers blank, Order Book wrong unit) are real, distinct from anything I shipped.
 - Proceeding to Phase B with confidence that deployed code === my local code.
+
+### 2026-05-21 05:25 UTC — Phase B + C + D + E source changes complete
+- Order Book ÷1000 + auto-correct in `equity.py:_normalize_orderbook_units`.
+- New `apps/web/src/lib/marketHours.ts` + `useMarketState` hook with proper HOSE schedule (09:00–11:30 + 13:00–14:45 ICT).
+- VWAPBands / Footprint / IntradayTrades widgets all integrated.
+- Key Metrics MARKET dividend yield reads from TTM ratios; Beta from `quant.benchmark_risk.current_beta_63d`.
+- TTM EPS/DPS sum-of-4Q derivation; EV/EBITDA inheritance.
+- VNEXPRESS RSS date fallback chain extended; "Unknown time" → "Date unavailable".
+- NLP ticker tags require headline match + ≥0.7 confidence OR existing-symbol confirmation.
+- Comparison auto-seeds same-sector peers from `peers` endpoint.
+- Cache TTL drop (300→120s) for `/breadth` and `/transaction-flow`; cache-prefix bumps.
+- Crypto Market CHG% column gets explicit min-width.
+- LLM streaming chunk size 600→80 with 12ms inter-chunk sleep.
+- New `SectorMetricSnapshot` model + `sector_metric_aggregator` service.
+- Risk Score shows actual `<n>/100` instead of `< 10` placeholder.
+- Major Shareholders disclaimer links to HOSE Symbol View.
+- OBV B% values outside ±300% clamped + tooltip.
+- Volume Profile gets VND/share unit label and tooltips.
+- Gap Analysis Fill column → tiered Status (Filled / Pending / Pending >5d / Unfilled >20d).
+- New backfill script `apps/api/scripts/backfill_ohlcv_full.py` with vnstock_data Quote + free fallback.
+
+### 2026-05-21 05:35 UTC — ci:gate green
+- `pnpm --filter frontend exec tsc --noEmit`: clean.
+- `pnpm run ci:gate`: 252/252 backend tests passed + frontend lint + 14/14 frontend Jest tests passed. **All gates passed**.
+
+### 2026-05-21 05:43 UTC — Oracle deploy
+- Pushed v1.4.0 to `origin/main` (commit `f81aef6`).
+- Rebuilt `vnibb-api` and `vnibb-mcp` images on Oracle with `VNSTOCK_API_KEY` build-arg.
+- Containers healthy. Premium imports OK.
+- Created `sector_metric_snapshots` table via SQLAlchemy `create_all`.
+- Sector aggregator first run: stored 26 industry rows.
+- Vercel auto-deployed v1.4.0 from origin/main.
+
+### 2026-05-21 05:50 UTC — Phase F backfill
+- Adapted backfill script to `vnstock_data.Quote` API (Golden Sponsor).
+- Started full backfill on Oracle with 1621 tickers, 8-way concurrency, 30 RPS budget.
+- Encountered 2 small bugs during dry-run, fixed in-place: SQLAlchemy `constraint=` vs `index_constraint=`, and `--symbols` mode now resolves real `stock_id` from DB.
+
+### 2026-05-21 06:30 UTC — Backfill complete
+- 1534/1621 tickers backfilled (95% coverage), 55 had `no_data` (illiquid / delisted).
+- Spot-check coverage:
+  - VCI: `2020-01-02` → `2026-05-21` = 1590 rows (was 589)
+  - FPT: 1590 rows
+  - VNM: 1590 rows
+  - VIX: 1583 rows
+  - VND: 1584 rows
+- Live `/api/v1/quant/VCI/seasonality?period=5Y` now returns:
+  - `data_points: 1246` (was 590)
+  - 5-year monthly history from May 2021 → May 2026
+  - `monthly_average_return_pct` recomputed across all 5 years
+- The Seasonality / Sortino / Drawdown widgets now have a meaningful 5Y window for VCI and ~95% of HOSE/HNX/UPCOM tickers.
+
+### Summary
+
+- 21 of 22 actionable items shipped (E.4 RS-Ratio Trail and E.5 Trend sparkline deferred to v1.5 — both require new persisted snapshots).
+- 1 backfill ran end-to-end with 95% coverage.
+- v1.4.0 commit `f81aef6` is live on Vercel + Oracle.

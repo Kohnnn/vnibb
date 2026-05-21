@@ -132,18 +132,17 @@ def _fetch_premium(symbol: str, start_date: date, end_date: date) -> list[dict[s
     """
 
     try:
-        from vnstock_data.api.history import History  # type: ignore
+        from vnstock_data import Quote  # type: ignore
 
-        history = History(symbol=symbol)
-        df = history.daily(
+        quote = Quote(symbol=symbol)
+        df = quote.history(
             start=start_date.isoformat(),
             end=end_date.isoformat(),
+            interval="1D",
         )
         if df is None or len(df) == 0:
             return []
-        # Normalize column names regardless of provider casing.
         df = df.rename(columns={c: c.lower() for c in df.columns})
-        # Provider may name the date column 'time', 'date', or use a DatetimeIndex.
         if "time" not in df.columns:
             if "date" in df.columns:
                 df = df.rename(columns={"date": "time"})
@@ -240,7 +239,7 @@ async def _persist_postgres(stock_id: int, symbol: str, records: list[dict[str, 
                 pg_insert(StockPrice)
                 .values(**row)
                 .on_conflict_do_update(
-                    index_constraint="uq_stock_price_symbol_time_interval",
+                    constraint="uq_stock_price_symbol_time_interval",
                     set_={
                         "open": row["open"],
                         "high": row["high"],
@@ -372,10 +371,13 @@ async def main(argv: Iterable[str] | None = None) -> int:
     end_date = datetime.strptime(args.end, "%Y-%m-%d").date() if args.end else date.today()
 
     if args.symbols:
-        target = [
-            (i, s.strip().upper())
-            for i, s in enumerate(args.symbols.split(",")) if s.strip()
-        ]
+        explicit = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+        # Resolve real stock_id values from DB (FK requires it).
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(Stock.id, Stock.symbol).where(Stock.symbol.in_(explicit))
+            )
+            target = [(int(sid), sym.upper()) for sid, sym in result.all() if sym]
     else:
         target = await _list_target_symbols()
 
