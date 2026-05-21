@@ -1061,40 +1061,4 @@ body {
   border-radius: 6px;
   box-shadow: 0 0 0 2px white;
 }
-<<<<<<< Updated upstream
 
-/* QA-v2 CC3 — explicit skip-link rule applied at base CSS layer so the
-   accessibility link never flickers visible during initial paint or
-   workspace-tab transitions, before Tailwind's sr-only utility
-   resolves via hydration. */
-.skip-to-main-link {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-.skip-to-main-link:focus {
-  position: fixed;
-  width: auto;
-  height: auto;
-  padding: 0.5rem 1rem;
-  margin: 0;
-  overflow: visible;
-  clip: auto;
-  top: 1rem;
-  left: 1rem;
-  z-index: 50;
-  background: #171717;
-  color: white;
-  border-radius: 6px;
-  box-shadow: 0 0 0 2px white;
-}
-
-=======
-
->>>>>>> Stashed changes

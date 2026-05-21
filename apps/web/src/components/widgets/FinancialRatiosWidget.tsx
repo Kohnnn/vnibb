@@ -337,7 +337,6 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     }, [ratioLookup, visiblePeriods]);
 
     return (
-<<<<<<< Updated upstream
         <WidgetContainer
             title="Financial Ratios"
             symbol={symbol}
@@ -395,65 +394,6 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                         <WidgetSkeleton variant="table" lines={6} />
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
-=======
-        <WidgetContainer
-            title="Financial Ratios"
-            symbol={symbol}
-            onRefresh={() => refetch()}
-            onClose={onRemove}
-            isLoading={isLoading && !hasData}
-            headerActions={headerActions}
-            noPadding
-            widgetId={id}
-            showLinkToggle
-            exportData={ratios}
-            exportFilename={`ratios_${symbol}_${period}`}
-        >
-            <div className="h-full flex flex-col">
-                <div className="px-2 py-1.5 border-b border-[var(--border-subtle)]">
-                    <WidgetMeta
-                        updatedAt={dataUpdatedAt}
-                        isFetching={isFetching && hasData}
-                        isCached={isFallback}
-                        note={period === 'FY' ? 'Annual · newest on right' : period === 'TTM' ? 'TTM · newest on right' : 'Quarterly · newest on right'}
-                        align="right"
-                    />
-                </div>
-                {(() => {
-                    // QA-v2 F1: surface a coverage hint when the backend
-                    // tells us full ratio coverage starts after the
-                    // earliest visible period. Pre-2020 KBS rows usually
-                    // only carry valuation ratios (P/E, P/B, P/S,
-                    // EV/EBITDA); profitability/liquidity/efficiency
-                    // require raw financial statements that don't exist
-                    // for those years yet, so we tell users instead of
-                    // pretending the data is missing at random.
-                    const coverageStarts = (data?.meta as { full_ratio_coverage_starts?: string | null } | undefined)?.full_ratio_coverage_starts;
-                    if (!coverageStarts || !visiblePeriods.length) return null;
-                    const earliestVisible = visiblePeriods[0];
-                    if (!earliestVisible) return null;
-                    if (periodSortKey(earliestVisible) >= periodSortKey(coverageStarts)) return null;
-                    return (
-                        <div className="border-b border-amber-500/20 bg-amber-500/8 px-3 py-1.5 text-[10px] text-amber-100/85">
-                            Full ratio coverage starts {coverageStarts}. Earlier periods only have valuation metrics (P/E, P/B, P/S, EV/EBITDA) until raw financial statements are backfilled.
-                        </div>
-                    );
-                })()}
-                <div className="flex-1 overflow-auto px-2 pt-1 scrollbar-hide">
-                    {timedOut && isLoading && !hasData ? (
-                        <WidgetError
-                            title="Loading timed out"
-                            error={new Error('Request timed out after 15 seconds.')}
-                            onRetry={() => {
-                                resetTimeout()
-                                refetch()
-                            }}
-                        />
-                    ) : isLoading && !hasData ? (
-                        <WidgetSkeleton variant="table" lines={6} />
-                    ) : error && !hasData ? (
-                        <WidgetError error={error as Error} onRetry={() => refetch()} />
->>>>>>> Stashed changes
                     ) : !hasData ? (
                         <WidgetEmpty message={`No ratio data for ${symbol}`} icon={<BarChart3 size={18} />} />
                     ) : tableRows.length === 0 ? (

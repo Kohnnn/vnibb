@@ -112,7 +112,6 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                     </span>
                 );
             },
-<<<<<<< Updated upstream
             align: 'right',
         },
     ], []);
@@ -193,88 +192,6 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             };
         }
         return undefined;
-=======
-            align: 'right',
-        },
-    ], []);
-
-    const hasData = trades.length > 0;
-    const responseWarning = data?.error || null;
-    const isFallback = Boolean((error || responseWarning) && hasData);
-    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
-
-    // B7 — accurate freshness badge.
-    //
-    // The widget previously showed "Cached snapshot · 11h old" any time the
-    // last data row was older than 1h, which made fresh end-of-session data
-    // look broken. We split the badge into three states based on the actual
-    // age of the most recent row, regardless of whether the response is a
-    // server-side fallback:
-    //
-    //   - Fresh         (< 6h, weekday market hours): "Live · syncs every 5m"
-    //   - End-of-day    (< 26h):                       "Last sync: <date>"
-    //   - Stale         (≥ 26h):                       "Stale · last sync <date>"
-    //
-    // We retain the "cached snapshot" wording only when we genuinely served
-    // a database fallback row (provider degradation), since that's the
-    // operator-meaningful distinction.
-    const snapshotAgeHours = useMemo(() => {
-        const lastDateStr = data?.meta?.last_data_date;
-        if (!lastDateStr) return null;
-        const lastDate = new Date(lastDateStr);
-        if (Number.isNaN(lastDate.getTime())) return null;
-        const diffMs = Date.now() - lastDate.getTime();
-        if (diffMs < 0) return null;
-        return diffMs / (1000 * 60 * 60);
-    }, [data?.meta?.last_data_date]);
-
-    const formattedLastSync = useMemo(() => {
-        const lastDateStr = data?.meta?.last_data_date;
-        if (!lastDateStr) return null;
-        const d = new Date(lastDateStr);
-        if (Number.isNaN(d.getTime())) return null;
-        return d.toLocaleDateString('en-GB', {
-            day: '2-digit',
-            month: 'short',
-        });
-    }, [data?.meta?.last_data_date]);
-
-    const healthState: WidgetHealthState | undefined = (() => {
-        if (isFallback) {
-            return {
-                status: 'cached',
-                label:
-                    snapshotAgeHours !== null && snapshotAgeHours >= 1
-                        ? `Cached snapshot · ${snapshotAgeHours >= 24 ? `${Math.floor(snapshotAgeHours / 24)}d` : `${Math.floor(snapshotAgeHours)}h`} old`
-                        : 'Cached snapshot',
-                detail: responseWarning || 'Showing the last successful foreign flow snapshot while refresh is degraded.',
-            };
-        }
-        if (snapshotAgeHours === null) return undefined;
-        // Tiered freshness per QA-v2 F3: red >12h, orange >6h, otherwise live.
-        if (snapshotAgeHours >= 12) {
-            return {
-                status: 'stale',
-                label: `Stale · last sync ${formattedLastSync ?? '—'}`,
-                detail: 'Foreign trading data has not refreshed in over 12 hours. Use Refresh to retry.',
-            };
-        }
-        if (snapshotAgeHours >= 6) {
-            return {
-                status: 'cached',
-                label: `Catching up · ${Math.floor(snapshotAgeHours)}h old`,
-                detail: 'Snapshot is older than 6 hours; backend is catching up. Use Refresh to force a sync.',
-            };
-        }
-        if (snapshotAgeHours >= 2) {
-            return {
-                status: 'live',
-                label: `Last sync ${formattedLastSync ?? 'today'}`,
-                detail: 'Foreign trading reports settle T+0 from HOSE. Intraday updates run every 5 min during market hours.',
-            };
-        }
-        return undefined;
->>>>>>> Stashed changes
     })();
 
     useEffect(() => {

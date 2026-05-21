@@ -29,7 +29,6 @@ const TIMEFRAME_OPTIONS: readonly AdvancedChartTimeframe[] = [
   'MAX',
   'YTD',
 ];
-<<<<<<< Updated upstream
 
 const CHART_MODE_OPTIONS: Array<{ value: AdvancedChartMode; label: string; icon: typeof BarChart3 }> = [
   { value: 'candles', label: 'Candles', icon: BarChart3 },
@@ -84,62 +83,6 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
 
   const exchange = profileData?.data?.exchange;
   const metrics = screenerData?.data?.[0] as ScreenerData | undefined;
-=======
-
-const CHART_MODE_OPTIONS: Array<{ value: AdvancedChartMode; label: string; icon: typeof BarChart3 }> = [
-  { value: 'candles', label: 'Candles', icon: BarChart3 },
-  { value: 'line', label: 'Line', icon: ChartLine },
-  { value: 'area', label: 'Area', icon: ChartArea },
-];
-
-interface PriceChartWidgetProps {
-  id: string;
-  symbol: string;
-  timeframe?: string;
-  onRemove?: () => void;
-}
-
-interface SnapshotMetric {
-  pe: number | null;
-  pb: number | null;
-  roe: number | null;
-  dividendYield: number | null;
-}
-
-function firstFinite(...values: Array<number | null | undefined>): number | null {
-  for (const value of values) {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-  }
-  return null;
-}
-
-function normalizeChartTimeframe(value: string | undefined): AdvancedChartTimeframe {
-  return TIMEFRAME_OPTIONS.includes((value || '') as AdvancedChartTimeframe)
-    ? (value as AdvancedChartTimeframe)
-    : '1Y';
-}
-
-export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: PriceChartWidgetProps) {
-  const { data: profileData } = useProfile(symbol, !!symbol);
-  const {
-    data: screenerData,
-    isLoading: metricsLoading,
-    error: metricsError,
-    isFetching: metricsFetching,
-    dataUpdatedAt: metricsUpdatedAt,
-  } = useScreenerData({ symbol, limit: 1, enabled: Boolean(symbol) });
-  const { data: ratiosData } = useFinancialRatios(symbol, { period: 'FY', enabled: Boolean(symbol) });
-
-  const [selectedTimeframe, setSelectedTimeframe] = useState<AdvancedChartTimeframe>(
-    normalizeChartTimeframe(timeframe)
-  );
-  const [chartMode, setChartMode] = useState<AdvancedChartMode>('candles');
-
-  const exchange = profileData?.data?.exchange;
-  const metrics = screenerData?.data?.[0] as ScreenerData | undefined;
->>>>>>> Stashed changes
   const latestRatio = latestByFinancialPeriod(ratiosData?.data) as FinancialRatioData | undefined;
   const snapshotMetrics: SnapshotMetric = {
     pe: firstFinite(latestRatio?.pe, metrics?.pe),
