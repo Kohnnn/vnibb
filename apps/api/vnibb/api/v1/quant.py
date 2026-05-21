@@ -2660,10 +2660,16 @@ async def get_relative_rotation(
         if rs_ratio is None or rs_momentum is None:
             continue
 
-        trail_count = min(5, len(rs_series))
+        # QA-v3 E.4: produce a longer trail (up to 12 weekly steps,
+        # spaced 5 trading days apart) so the RRG widget shows a
+        # meaningful rotation path instead of a near-stationary cluster.
+        trail_steps = 12
+        step_distance = 5
         trail: List[Dict[str, float | None]] = []
-        for offset in range(trail_count):
-            idx = len(rs_series) - trail_count + offset
+        for step in range(trail_steps, -1, -1):
+            idx = len(rs_series) - 1 - step * step_distance
+            if idx < 30:
+                continue
             trail_ratio, trail_momentum = _compute_rrg_metrics(rs_series.iloc[: idx + 1])
             trail.append(
                 {

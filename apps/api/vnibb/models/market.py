@@ -189,3 +189,45 @@ class SectorMetricSnapshot(Base):
             f"<SectorMetricSnapshot(industry='{self.industry_name}', "
             f"date='{self.snapshot_date}', n={self.sample_size}, pe={self.avg_pe})>"
         )
+
+
+class RsSnapshot(Base):
+    """Weekly Relative Strength snapshot per (symbol, benchmark).
+
+    QA-v3 E.4: The Relative Rotation Graph (RRG) widget needs a polyline
+    trail showing the symbol's path over recent weeks. Without persisted
+    snapshots the widget could only render a single dot ("flat trail").
+    This table is written by a weekly cron job (Friday close) so the
+    widget can fetch the last 12 weeks and draw a meaningful path.
+    """
+
+    __tablename__ = "rs_snapshots"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    symbol: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    benchmark: Mapped[str] = mapped_column(String(20), default="VNINDEX", nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+
+    rs_ratio: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rs_momentum: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    quadrant: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    lookback_days: Mapped[int] = mapped_column(Integer, default=63, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "benchmark",
+            "snapshot_date",
+            name="uq_rs_snapshot_symbol_benchmark_date",
+        ),
+        Index("ix_rs_snapshot_symbol_date", "symbol", "snapshot_date"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<RsSnapshot(symbol='{self.symbol}', date='{self.snapshot_date}', "
+            f"ratio={self.rs_ratio}, momentum={self.rs_momentum})>"
+        )

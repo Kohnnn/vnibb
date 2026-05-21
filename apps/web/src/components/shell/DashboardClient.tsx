@@ -1297,6 +1297,7 @@ function DashboardContent() {
                 onClose={() => setIsTemplateSelectorOpen(false)}
                 onSelectTemplate={handleApplyTemplate}
                 currentDashboard={activeDashboard ?? null}
+                currentSymbol={stockGlobalSymbol}
             />
 
             {templateApplyStatus && activeTab?.widgets.length ? (

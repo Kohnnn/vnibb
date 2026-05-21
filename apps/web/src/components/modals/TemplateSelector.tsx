@@ -13,6 +13,7 @@ import {
   importCustomTemplateFromJson,
   type CustomDashboardTemplate,
 } from '@/lib/customTemplates';
+import { recommendTemplates, recordTemplateUse, type RecommendedTemplate } from '@/lib/templateRecommender';
 import type { Dashboard } from '@/types/dashboard';
 import { cn } from '@/lib/utils';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
@@ -24,6 +25,8 @@ interface TemplateSelectorProps {
   onSelectTemplate: (template: DashboardTemplate) => void;
   /** When provided, the modal shows a "Save current dashboard as template" CTA. */
   currentDashboard?: Dashboard | null;
+  /** Used to bias the recommender toward symbol-relevant templates. */
+  currentSymbol?: string | null;
 }
 
 const CATEGORY_ICONS: Record<DashboardTemplateCategory, any> = {
@@ -75,9 +78,27 @@ function getTemplateBadges(template: DashboardTemplate) {
   return badges.slice(0, 4);
 }
 
+function getWidgetIconClass(widgetType: string): { tone: string; label: string } {
+  // QA-v4 polish: render widget category icons + short labels in the
+  // mini-preview so users can recognize a template's contents at a
+  // glance without reading the badge list.
+  if (widgetType.startsWith('tradingview_')) return { tone: 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40', label: 'TV' };
+  if (widgetType.startsWith('world_news_')) return { tone: 'bg-amber-500/20 text-amber-200 border-amber-500/40', label: 'News' };
+  if (widgetType.includes('chart')) return { tone: 'bg-blue-500/20 text-blue-200 border-blue-500/40', label: 'Chart' };
+  if (widgetType.includes('news') || widgetType.includes('events')) return { tone: 'bg-amber-500/20 text-amber-200 border-amber-500/40', label: 'News' };
+  if (widgetType.includes('order') || widgetType.includes('intraday') || widgetType.includes('transaction')) return { tone: 'bg-cyan-500/20 text-cyan-200 border-cyan-500/40', label: 'Tape' };
+  if (widgetType.includes('financial') || widgetType.includes('income') || widgetType.includes('balance') || widgetType.includes('cash_flow') || widgetType.includes('ratio')) return { tone: 'bg-violet-500/20 text-violet-200 border-violet-500/40', label: 'FS' };
+  if (widgetType.includes('risk') || widgetType.includes('quant') || widgetType.includes('volume_profile') || widgetType.includes('drawdown') || widgetType.includes('sortino') || widgetType.includes('seasonality')) return { tone: 'bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-500/40', label: 'Quant' };
+  if (widgetType.includes('momentum') || widgetType.includes('rsi') || widgetType.includes('macd') || widgetType.includes('bollinger') || widgetType.includes('ichimoku') || widgetType.includes('fibonacci') || widgetType.includes('signal')) return { tone: 'bg-teal-500/20 text-teal-200 border-teal-500/40', label: 'TA' };
+  if (widgetType.includes('heatmap') || widgetType.includes('breadth') || widgetType.includes('sector') || widgetType.includes('movers')) return { tone: 'bg-blue-500/20 text-blue-200 border-blue-500/40', label: 'Mkt' };
+  if (widgetType.includes('peer') || widgetType.includes('comparison') || widgetType.includes('similar') || widgetType.includes('correlation')) return { tone: 'bg-pink-500/20 text-pink-200 border-pink-500/40', label: 'Peer' };
+  if (widgetType.includes('shareholder') || widgetType.includes('officer') || widgetType.includes('foreign') || widgetType.includes('insider')) return { tone: 'bg-orange-500/20 text-orange-200 border-orange-500/40', label: 'Own' };
+  return { tone: 'bg-slate-500/20 text-slate-200 border-slate-500/40', label: 'W' };
+}
+
 function TemplateLayoutPreview({ template }: { template: DashboardTemplate }) {
   const maxY = Math.max(...template.widgets.map((widget) => widget.layout.y + widget.layout.h), 1);
-  const visibleWidgets = template.widgets.slice(0, 8);
+  const visibleWidgets = template.widgets.slice(0, 12);
 
   return (
     <div className={cn(
@@ -85,38 +106,47 @@ function TemplateLayoutPreview({ template }: { template: DashboardTemplate }) {
       "bg-gradient-to-br",
       CATEGORY_PREVIEW_STYLES[template.category]
     )}>
-      <div className="absolute inset-0 p-3">
-        {visibleWidgets.map((widget, index) => (
-          <div
-            key={`${template.id}-layout-${widget.type}-${index}`}
-            className="absolute rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/85 shadow-sm"
-            style={{
-              left: `${(widget.layout.x / 24) * 100}%`,
-              top: `${(widget.layout.y / maxY) * 100}%`,
-              width: `${Math.max(8, (widget.layout.w / 24) * 100)}%`,
-              height: `${Math.max(12, (widget.layout.h / maxY) * 100)}%`,
-            }}
-          />
-        ))}
-      </div>
-      <div className="absolute bottom-3 left-3 right-3 flex flex-wrap gap-1.5">
-        {template.widgets.slice(0, 4).map((widget) => (
-          <span
-            key={`${template.id}-${widget.type}`}
-            className="rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-2 py-0.5 text-[8px] font-bold uppercase tracking-wide text-[var(--text-secondary)]"
-          >
-            {formatWidgetType(widget.type)}
-          </span>
-        ))}
+      <div className="absolute inset-0 p-2">
+        {visibleWidgets.map((widget, index) => {
+          const { tone, label } = getWidgetIconClass(widget.type);
+          const titleText = formatWidgetType(widget.type);
+          const widthPct = Math.max(8, (widget.layout.w / 24) * 100);
+          const heightPct = Math.max(12, (widget.layout.h / maxY) * 100);
+          const isCompact = widthPct < 18 || heightPct < 18;
+          return (
+            <div
+              key={`${template.id}-layout-${widget.type}-${index}`}
+              className={cn(
+                'absolute flex items-center justify-center overflow-hidden rounded-md border shadow-sm transition-transform',
+                tone
+              )}
+              style={{
+                left: `${(widget.layout.x / 24) * 100}%`,
+                top: `${(widget.layout.y / maxY) * 100}%`,
+                width: `${widthPct}%`,
+                height: `${heightPct}%`,
+              }}
+              title={titleText}
+            >
+              <span className={cn(
+                'truncate text-center font-bold uppercase tracking-tight',
+                isCompact ? 'text-[7px] px-1' : 'text-[9px] px-2'
+              )}>
+                {isCompact ? label : titleText.split(' ').slice(0, 2).join(' ')}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDashboard }: TemplateSelectorProps) {
+function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDashboard, currentSymbol }: TemplateSelectorProps) {
   const [selectedCategory, setSelectedCategory] = useState<DashboardTemplateCategory | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [customTemplates, setCustomTemplates] = useState<CustomDashboardTemplate[]>([]);
+  const [recommendations, setRecommendations] = useState<RecommendedTemplate[]>([]);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [saveCategory, setSaveCategory] = useState<DashboardTemplateCategory>('market');
@@ -129,7 +159,14 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
       source: 'template_selector',
     });
     setCustomTemplates(loadCustomTemplates());
-  }, [open]);
+    setRecommendations(recommendTemplates({ currentSymbol: currentSymbol ?? null, limit: 4 }));
+  }, [open, currentSymbol]);
+
+  const handleApplyTemplate = (template: DashboardTemplate) => {
+    recordTemplateUse(template, currentSymbol ?? null);
+    onSelectTemplate(template);
+    onClose();
+  };
 
   const handleSaveCurrent = () => {
     if (!currentDashboard) return;
@@ -402,10 +439,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            onSelectTemplate(template);
-                            onClose();
-                          }}
+                          onClick={() => handleApplyTemplate(template)}
                           className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-white hover:bg-blue-500"
                         >
                           Use Layout <ChevronRight size={12} />
@@ -415,6 +449,58 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
                   ))}
                 </div>
               ) : null}
+            </div>
+          ) : null}
+
+          {/* QA-v4: Recommended-for-you row. Surfaced above the
+              category-filtered grid when not actively searching, so
+              first-time users get a balanced mix and returning users
+              see their recent / matching workflows pinned at the top. */}
+          {recommendations.length > 0 && !searchQuery.trim() && !selectedCategory ? (
+            <div className="mb-5">
+              <div className="mb-3 flex items-center gap-2">
+                <Star className="text-amber-400" size={14} />
+                <h3 className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                  Recommended for you
+                </h3>
+                {currentSymbol ? (
+                  <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-blue-200">
+                    Context · {currentSymbol}
+                  </span>
+                ) : null}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                {recommendations.map(({ template, reason }) => {
+                  const categoryLabel = DASHBOARD_TEMPLATE_CATEGORIES.find((c) => c.id === template.category)?.label || template.category;
+                  return (
+                    <article
+                      key={`rec-${template.id}`}
+                      className="group flex flex-col rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-left transition-all hover:border-amber-400/50"
+                    >
+                      <TemplateLayoutPreview template={template} />
+                      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-amber-200">
+                          {reason}
+                        </span>
+                        <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                          {categoryLabel}
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-black text-[var(--text-primary)] group-hover:text-amber-200">
+                        {template.name}
+                      </h3>
+                      <p className="mt-1 line-clamp-2 text-[11px] text-[var(--text-muted)]">{template.description}</p>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyTemplate(template)}
+                        className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-slate-950 hover:bg-amber-400"
+                      >
+                        Use Template <ChevronRight size={12} />
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
 
@@ -462,10 +548,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
                     </span>
                     <button
                       type="button"
-                      onClick={() => {
-                        onSelectTemplate(template);
-                        onClose();
-                      }}
+                      onClick={() => handleApplyTemplate(template)}
                       className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-blue-500"
                     >
                       Use Template
