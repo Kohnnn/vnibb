@@ -37,4 +37,13 @@ Improve high-frequency research flow after the v1.4.x QA remediation cycle, then
 
 ## Deployment Log
 
-- Pending.
+- Committed as `68556e2` with message `feat(web): improve symbol discovery and quick comparison`.
+- Pushed `main` to `origin/main`.
+- OCI active host: `129.150.58.64`; old attempted host `152.69.210.235` timed out on SSH.
+- `/srv/vnibb` fast-forwarded from `d5f32f9` to `68556e2`.
+- Rebuilt and recreated OCI stack with `docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build`.
+- `vnibb-api`, `vnibb-mcp`, and `vnibb-caddy` are running; `vnibb-api` and `vnibb-mcp` are healthy.
+- Public healthcheck against `https://129.150.58.64.sslip.io` passed for `/live`, `/ready`, and `/health/`.
+- Public smoke test passed for health, API health, profile, quote, screener, microstructure, and CORS preflight from `https://vnibb.vercel.app`.
+- Runtime verify warning: deployment is configured with `DATA_BACKEND=postgres`, while the script expects `hybrid`. Appwrite remains connected, `APPWRITE_WRITE_ENABLED=false`, and anonymous dashboard writes remain enabled.
+- MCP smoke passed against `http://127.0.0.1:8001` with configured bearer token and returned 10 tools plus Appwrite connectivity.
