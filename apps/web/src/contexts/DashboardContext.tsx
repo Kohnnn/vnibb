@@ -403,13 +403,21 @@ const GLOBAL_MARKETS_CRYPTO_TEMPLATE: TemplateWidget[] = [
     {
         type: 'tradingview_ticker_tape',
         syncGroupId: 1,
-        config: { symbols: 'crypto' },
+        // Use the explicit `crypto_majors` preset rather than the legacy
+        // `'crypto'` string so the ticker tape renders BTC / ETH / SOL etc.
+        // instead of falling through to the default NASDAQ:VFS symbol on
+        // first paint. (QA-v2 G5)
+        config: { symbolsPreset: 'crypto_majors' },
         layout: { x: 0, y: 0, w: 24, h: 4, minW: 12, minH: 3 }
     },
     {
         type: 'tradingview_crypto_market',
         syncGroupId: 1,
-        config: {},
+        // Crypto market widget needs an explicit screener seed so the
+        // embed doesn't resolve to the default Vietnam-equity context.
+        // The native fallback (CryptoMarketFallback) takes over if the
+        // TradingView embed is blocked. (QA-v2 G6)
+        config: { market: 'crypto', screener_type: 'crypto_mkt' },
         layout: { x: 0, y: 4, w: 14, h: 14, minW: 8, minH: 8 }
     },
     {

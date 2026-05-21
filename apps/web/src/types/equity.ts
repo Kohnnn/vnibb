@@ -214,6 +214,13 @@ export interface FinancialRatiosResponse {
   symbol: string;
   count: number;
   data: FinancialRatioData[];
+  meta?: {
+    count?: number;
+    data_points?: number;
+    last_data_date?: string | null;
+    full_ratio_coverage_starts?: string | null;
+    [key: string]: unknown;
+  };
 }
 
 export interface RatioHistoryPoint {

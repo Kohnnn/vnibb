@@ -1526,6 +1526,8 @@ export interface TopMoverData {
     avg_volume_20d?: number;
     volume_spike_pct?: number;
     updated_at?: string | null;
+    is_last_session?: boolean;
+    session_label?: string | null;
 }
 
 export interface TopMoversResponse {
@@ -1534,6 +1536,8 @@ export interface TopMoversResponse {
     count: number;
     data: TopMoverData[];
     updated_at?: string | null;
+    is_last_session?: boolean;
+    session_label?: string | null;
 }
 
 export async function getTopGainers(options?: {

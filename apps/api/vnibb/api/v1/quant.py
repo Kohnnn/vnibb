@@ -21,6 +21,7 @@ from vnibb.api.v1.equity import (
     _load_historical_from_recent_cache,
 )
 from vnibb.api.v1.schemas import MetaData, StandardResponse
+from vnibb.core.cache import cached
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
 from vnibb.core.vn_sectors import VN_SECTORS
@@ -2923,6 +2924,7 @@ async def get_gap_analysis_metric(
 
 
 @router.get("/{symbol}", response_model=StandardResponse[QuantResponseData])
+@cached(ttl=900, key_prefix="quant_metrics_v3")
 async def get_quant_metrics(
     symbol: str,
     metrics: str = Query(

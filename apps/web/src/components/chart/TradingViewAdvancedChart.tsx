@@ -90,7 +90,14 @@ function resolveDateRange(timeframe: AdvancedChartTimeframe): { startDate: strin
       start.setDate(end.getDate() - 365 * 5);
       break;
     case 'MAX':
-      start.setFullYear(2000, 0, 1);
+      // MAX = 10 years rather than year-2000. Vietnam tickers usually have
+      // ~5–10 years of liquid daily bars; opening the range to 2000-01-01
+      // produced ~6500 bars at ~0.1 px each, which made candles invisible
+      // (QA-v2 CC1/T1). Volume histograms still rendered because they are
+      // solid blocks per pixel column. Capping at 10 years keeps every
+      // candle ≥1 px wide on a ~700 px viewport while still showing a
+      // long-cycle view.
+      start.setFullYear(end.getFullYear() - 10);
       break;
     case 'YTD':
       start.setMonth(0, 1);
@@ -367,6 +374,13 @@ export function TradingViewAdvancedChart({
             borderColor,
             timeVisible: timeframe !== '5Y',
             rightOffset: 4,
+            // Enforce a minimum bar spacing so candle bodies stay visible
+            // even when the user picks a long timeframe with thousands of
+            // bars. Without this, lightweight-charts auto-fits to a
+            // sub-pixel bar width and candles render as invisible 0-px
+            // strokes (QA-v2 CC1/T1).
+            barSpacing: 6,
+            minBarSpacing: 2,
           },
           handleScroll: { vertTouchDrag: false },
         });
@@ -392,6 +406,18 @@ export function TradingViewAdvancedChart({
             Number.isFinite(point.low) &&
             Number.isFinite(point.close)
         );
+        // Diagnostic guard. If lightweight-charts gets zero rows we
+        // render an empty axis frame which previously looked identical
+        // to the "candles invisible" bug. Surface a typed empty state
+        // instead so the user (and QA) can tell them apart.
+        if (points.length > 0 && safePoints.length === 0) {
+          removeChart(chartRef.current);
+          chartRef.current = null;
+          mainSeriesRef.current = null;
+          volumeSeriesRef.current = null;
+          setError('Chart data could not be parsed for this timeframe.');
+          return;
+        }
         if (mode === 'line') {
           series = chart.addLineSeries({
             color: '#38bdf8',
@@ -443,6 +469,9 @@ export function TradingViewAdvancedChart({
           priceFormat: { type: 'volume' },
           priceScaleId: 'volume',
         });
+        // Apply scale margins BEFORE setData so the volume histogram does
+        // not occupy the full chart height on first paint (which can
+        // visually crowd out the candles before the next render frame).
         chart.priceScale('volume').applyOptions({
           scaleMargins: { top: 0.8, bottom: 0 },
         });
@@ -455,7 +484,21 @@ export function TradingViewAdvancedChart({
         );
         volumeSeriesRef.current = volumeSeries;
 
-        chart.timeScale().fitContent();
+        // Show the most recent ~120 bars (about 6 trading months) by
+        // default. Calling fitContent() with a multi-year dataset
+        // compressed candles to sub-pixel widths and made them invisible
+        // (QA-v2 CC1/T1). setVisibleLogicalRange keeps the user's
+        // chosen timeframe queryable while ensuring candles render at a
+        // readable size.
+        const visibleBars = Math.min(safePoints.length, 180);
+        if (visibleBars > 0) {
+          chart.timeScale().setVisibleLogicalRange({
+            from: Math.max(0, safePoints.length - visibleBars),
+            to: safePoints.length - 1,
+          });
+        } else {
+          chart.timeScale().fitContent();
+        }
       } catch (chartError) {
         removeChart(chartRef.current);
         chartRef.current = null;

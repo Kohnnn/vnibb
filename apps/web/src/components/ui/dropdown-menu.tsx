@@ -47,6 +47,20 @@ export const DropdownMenuContent = ({ children, className = '', align = 'center'
             }
         };
 
+        // Close the dropdown on Escape and on browser/forward back-button
+        // events (popstate). The latter addresses QA-v2 CC2 where the
+        // Display Settings dropdown stayed open while the user navigated
+        // workspace tabs because tab navigation does not trigger a
+        // document-level click event.
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                context?.setIsOpen(false);
+            }
+        };
+        const handlePopState = () => {
+            context?.setIsOpen(false);
+        };
+
         if (context?.isOpen) {
             // Listen on `click` (not `mousedown`) so the same gesture that
             // opens the trigger doesn't synchronously close the dropdown via
@@ -56,9 +70,13 @@ export const DropdownMenuContent = ({ children, className = '', align = 'center'
             // the document mousedown handler immediately closed it again
             // before paint.
             document.addEventListener('click', handleClickOutside);
+            document.addEventListener('keydown', handleKeyDown);
+            window.addEventListener('popstate', handlePopState);
         }
         return () => {
             document.removeEventListener('click', handleClickOutside);
+            document.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('popstate', handlePopState);
         };
     }, [context]);
 

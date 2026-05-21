@@ -194,6 +194,8 @@ class MarketTopMoversResponse(BaseModel):
     data: List[dict[str, Any]]
     updated_at: Optional[str] = None
     error: Optional[str] = None
+    is_last_session: bool = False
+    session_label: Optional[str] = None
 
 
 class MarketSectorPerformanceResponse(BaseModel):
@@ -1906,6 +1908,152 @@ def _has_non_zero_top_mover_signal(payload: List[dict[str, Any]]) -> bool:
     return False
 
 
+async def _build_last_session_top_movers(
+    index: str, mover_type: str, limit: int
+) -> List[dict[str, Any]]:
+    """SQL-backed last-session top-movers fallback (QA-v2 T3).
+
+    The vnstock screener cache and the snapshot-derived path can both
+    produce empty payloads after market close (intraday-rank tables
+    roll over). We resolve this by querying the most recent session in
+    `stock_prices` that has at least 5 distinct symbols with a non-zero
+    close, then computing change% from the previous session's close
+    per symbol. Returned rows include `is_last_session=True` so the
+    UI can label the data as historical.
+    """
+
+    if mover_type not in {"gainer", "loser", "volume", "value"}:
+        return []
+
+    async with async_session_maker() as session:
+        # Find latest trade date that has meaningful coverage. We require
+        # at least 30 distinct symbols so we don't latch onto a partial
+        # half-loaded session.
+        latest_session_row = await session.execute(
+            text(
+                """
+                SELECT trade_date
+                FROM (
+                    SELECT time AS trade_date, COUNT(DISTINCT symbol) AS n
+                    FROM stock_prices
+                    WHERE interval = '1D'
+                    GROUP BY time
+                ) s
+                WHERE n >= 30
+                ORDER BY trade_date DESC
+                LIMIT 1
+                """
+            )
+        )
+        latest_date = latest_session_row.scalar()
+        if not latest_date:
+            return []
+
+        # Pull the latest two sessions for every symbol so we can
+        # compute change %.
+        rows_result = await session.execute(
+            text(
+                """
+                WITH ranked AS (
+                    SELECT
+                        symbol,
+                        time,
+                        close,
+                        volume,
+                        value,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY symbol
+                            ORDER BY time DESC
+                        ) AS rn
+                    FROM stock_prices
+                    WHERE interval = '1D'
+                      AND time <= :latest_date
+                )
+                SELECT symbol, time, close, volume, value, rn
+                FROM ranked
+                WHERE rn <= 2
+                """
+            ),
+            {"latest_date": latest_date},
+        )
+
+        per_symbol: dict[str, dict[str, Any]] = {}
+        for row in rows_result.mappings():
+            symbol = (row["symbol"] or "").upper()
+            if not symbol:
+                continue
+            entry = per_symbol.setdefault(symbol, {"latest": None, "prev": None})
+            if row["rn"] == 1:
+                entry["latest"] = row
+            elif row["rn"] == 2:
+                entry["prev"] = row
+
+        # Optional: filter by index / exchange. We resolve via the
+        # `stocks` table; if an index allow-list isn't available we let
+        # everything through.
+        exchange_allow = TOP_MOVER_INDEX_EXCHANGE.get(index)
+        symbol_to_exchange: dict[str, str] = {}
+        if exchange_allow:
+            ex_rows = await session.execute(
+                select(Stock.symbol, Stock.exchange).where(
+                    Stock.symbol.in_(list(per_symbol.keys()))
+                )
+            )
+            for sym, ex in ex_rows.all():
+                if sym:
+                    symbol_to_exchange[sym.upper()] = (ex or "").upper()
+
+        rows: List[dict[str, Any]] = []
+        for symbol, parts in per_symbol.items():
+            latest = parts.get("latest")
+            prev = parts.get("prev")
+            if not latest:
+                continue
+
+            if exchange_allow:
+                ex = symbol_to_exchange.get(symbol)
+                if ex not in exchange_allow:
+                    continue
+
+            close = _to_float(latest["close"])
+            prev_close = _to_float(prev["close"]) if prev else None
+            change_pct = None
+            price_change = None
+            if (
+                close is not None
+                and prev_close is not None
+                and prev_close not in (None, 0)
+            ):
+                price_change = close - prev_close
+                change_pct = (price_change / prev_close) * 100.0
+
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "index": index,
+                    "last_price": close,
+                    "price_change": price_change,
+                    "price_change_pct": change_pct,
+                    "volume": _to_float(latest["volume"]),
+                    "value": _to_float(latest["value"]),
+                    "avg_volume_20d": None,
+                    "volume_spike_pct": None,
+                    "updated_at": latest["time"].isoformat()
+                    if hasattr(latest["time"], "isoformat")
+                    else str(latest["time"]),
+                    "is_last_session": True,
+                    "session_label": latest_date.isoformat()
+                    if hasattr(latest_date, "isoformat")
+                    else str(latest_date),
+                }
+            )
+
+    if not rows:
+        return []
+
+    return _sort_top_movers(rows, mover_type=mover_type, limit=limit)
+
+
 async def _build_snapshot_top_movers(
     index: str, mover_type: str, limit: int
 ) -> List[dict[str, Any]]:
@@ -3344,7 +3492,18 @@ async def get_market_top_movers(
                     index=index, mover_type=mover_type, limit=limit
                 )
 
+            if not payload or not _has_non_zero_top_mover_signal(payload):
+                # SQL-backed last-completed-session fallback. Without this
+                # branch the panel returns an empty list whenever the
+                # vnstock provider, snapshot cache, AND screener cache
+                # are all empty after market close (QA-v2 T3).
+                payload = await _build_last_session_top_movers(
+                    index=index, mover_type=mover_type, limit=limit
+                )
+
             if payload:
+                is_last_session_resp = bool(payload and payload[0].get("is_last_session"))
+                session_label = payload[0].get("session_label") if payload else None
                 return MarketTopMoversResponse(
                     type=mover_type,
                     index=index,
@@ -3360,6 +3519,8 @@ async def get_market_top_movers(
                         f"Requested '{mover_type}' movers unavailable, returned snapshot-derived "
                         "fallback"
                     ),
+                    is_last_session=is_last_session_resp,
+                    session_label=session_label,
                 )
 
         return MarketTopMoversResponse(

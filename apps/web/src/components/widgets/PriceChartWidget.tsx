@@ -62,10 +62,10 @@ function firstFinite(...values: Array<number | null | undefined>): number | null
 function normalizeChartTimeframe(value: string | undefined): AdvancedChartTimeframe {
   return TIMEFRAME_OPTIONS.includes((value || '') as AdvancedChartTimeframe)
     ? (value as AdvancedChartTimeframe)
-    : 'MAX';
+    : '1Y';
 }
 
-export function PriceChartWidget({ id, symbol, timeframe = 'MAX', onRemove }: PriceChartWidgetProps) {
+export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: PriceChartWidgetProps) {
   const { data: profileData } = useProfile(symbol, !!symbol);
   const {
     data: screenerData,

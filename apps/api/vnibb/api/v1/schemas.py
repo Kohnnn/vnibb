@@ -1,10 +1,14 @@
 from typing import Any, List, Optional, TypeVar, Generic
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 T = TypeVar("T")
 
 
 class MetaData(BaseModel):
+    # Allow per-endpoint extension fields (e.g. `full_ratio_coverage_starts`,
+    # `is_last_session`, etc.) without churning the base schema.
+    model_config = ConfigDict(extra="allow")
+
     count: int
     page: Optional[int] = None
     limit: Optional[int] = None
@@ -12,6 +16,7 @@ class MetaData(BaseModel):
     symbol: Optional[str] = None
     data_points: Optional[int] = None
     last_data_date: Optional[str] = None
+    full_ratio_coverage_starts: Optional[str] = None
 
 
 class StandardResponse(BaseModel, Generic[T]):

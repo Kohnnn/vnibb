@@ -71,6 +71,15 @@ RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
     echo "WARNING: VNSTOCK_API_KEY not provided. Premium packages not installed."; \
     fi
 
+# Premium transitive dependencies. The vnstock Golden Sponsor packages
+# pull these in as runtime imports but the installer above does not
+# always install them, leaving `import vnstock_news` and
+# `import vnstock_ta` failing inside the running container even after a
+# successful premium bootstrap. We pin them explicitly so future rebuilds
+# never regress (QA-v2 oracle rebuild — discovered when re-deploying
+# v1.3.0 left market_news pipeline still producing 0 articles).
+RUN pip install --no-cache-dir html2text pta_reload tqdm
+
 
 # Copy entrypoint script and set permissions (as root)
 COPY entrypoint.sh .

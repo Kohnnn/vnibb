@@ -52,6 +52,8 @@ export function TopMoversWidget({
   const stocks = data?.data || [];
   const hasData = stocks.length > 0;
   const isFallback = Boolean(error && hasData);
+  const isLastSession = Boolean(data?.is_last_session);
+  const sessionLabel = data?.session_label;
   const sourceUpdatedAt =
     getLatestTimestampValue([
       data?.updated_at,
@@ -112,8 +114,14 @@ export function TopMoversWidget({
           <WidgetMeta
             updatedAt={sourceUpdatedAt}
             isFetching={isFetching && hasData}
-            isCached={isFallback}
-            note={mode === 'gainer' ? 'Top gainers' : 'Top losers'}
+            isCached={isFallback || isLastSession}
+            note={
+              isLastSession && sessionLabel
+                ? `Last session ${sessionLabel}`
+                : mode === 'gainer'
+                  ? 'Top gainers'
+                  : 'Top losers'
+            }
             align="right"
           />
         </div>

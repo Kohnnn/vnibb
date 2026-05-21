@@ -370,12 +370,20 @@ class NewsCrawlerService:
         if not articles:
             return 0
 
-        # Store articles
+        # Store articles. We open a SAVEPOINT per article so a single bad
+        # row (constraint violation, oversized text, encoding issue) does
+        # not poison the whole transaction. Without nested savepoints,
+        # the asyncpg driver returns
+        # "InFailedSQLTransactionError: current transaction is aborted"
+        # for every subsequent INSERT after the first failure, dropping
+        # the storage rate to 0/N (QA-v2: market_news kept showing
+        # "Crawled 62 articles · 0 stored" because of this).
         async with async_session_maker() as session:
             count = 0
             for article in articles:
                 try:
-                    await self._store_article(session, article)
+                    async with session.begin_nested():
+                        await self._store_article(session, article)
                     count += 1
                 except Exception as e:
                     logger.warning(f"Failed to store article: {e}")

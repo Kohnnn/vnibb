@@ -1111,39 +1111,77 @@ class ComparisonService:
             # When the snapshot column is missing we fall back to the most
             # recent FinancialRatio.pe_ratio per peer so the comparison grid
             # never shows "P/E: –" across the board.
+            #
+            # QA-v2 F5: also fill `roe` from the same fallback so the Similar
+            # Stocks list doesn't render "P/E: –" + "ROE: –" when the
+            # FinancialRatio table has populated rows.
             missing_pe_symbols = [
                 peer.symbol for peer in formatted_peers if peer.pe_ratio is None and peer.symbol
             ]
-            if missing_pe_symbols:
+            missing_roe_symbols = [
+                peer.symbol
+                for peer in formatted_peers
+                if getattr(peer, "roe", None) is None and peer.symbol
+            ]
+            fallback_targets = sorted(set(missing_pe_symbols) | set(missing_roe_symbols))
+            if fallback_targets:
                 from vnibb.models.trading import FinancialRatio
 
                 async with async_session_maker() as session:
-                    fallback_pe_rows = (
+                    fallback_rows = (
                         await session.execute(
                             select(
                                 FinancialRatio.symbol,
                                 FinancialRatio.pe_ratio,
-                                FinancialRatio.period,
+                                FinancialRatio.roe,
+                                FinancialRatio.fiscal_year,
                             )
-                            .where(FinancialRatio.symbol.in_(missing_pe_symbols))
-                            .where(FinancialRatio.pe_ratio.is_not(None))
-                            .order_by(FinancialRatio.symbol, desc(FinancialRatio.period))
+                            .where(FinancialRatio.symbol.in_(fallback_targets))
+                            .where(FinancialRatio.period_type == "year")
+                            .order_by(
+                                FinancialRatio.symbol,
+                                desc(FinancialRatio.fiscal_year),
+                            )
                         )
                     ).all()
 
                 pe_by_symbol: dict[str, float] = {}
-                for sym, pe_val, _period in fallback_pe_rows:
-                    if not sym or sym in pe_by_symbol:
+                roe_by_symbol: dict[str, float] = {}
+                for sym, pe_val, roe_val, _year in fallback_rows:
+                    if not sym:
                         continue
-                    pe_float = _positive_float(pe_val)
-                    if pe_float is not None:
-                        pe_by_symbol[str(sym).upper()] = pe_float
+                    key = str(sym).upper()
+                    if key not in pe_by_symbol:
+                        pe_float = _positive_float(pe_val)
+                        if pe_float is not None:
+                            pe_by_symbol[key] = pe_float
+                    if key not in roe_by_symbol:
+                        roe_float = (
+                            float(roe_val)
+                            if roe_val is not None
+                            and isinstance(roe_val, (int, float))
+                            and roe_val == roe_val
+                            else None
+                        )
+                        if roe_float is not None:
+                            roe_by_symbol[key] = roe_float
 
-                if pe_by_symbol:
+                if pe_by_symbol or roe_by_symbol:
                     formatted_peers = [
-                        peer.copy(update={"pe_ratio": pe_by_symbol.get(peer.symbol)})
-                        if peer.pe_ratio is None and peer.symbol in pe_by_symbol
-                        else peer
+                        peer.copy(
+                            update={
+                                "pe_ratio": (
+                                    pe_by_symbol.get(peer.symbol)
+                                    if peer.pe_ratio is None
+                                    else peer.pe_ratio
+                                ),
+                                "roe": (
+                                    roe_by_symbol.get(peer.symbol)
+                                    if getattr(peer, "roe", None) is None
+                                    else getattr(peer, "roe", None)
+                                ),
+                            }
+                        )
                         for peer in formatted_peers
                     ]
 

@@ -847,9 +847,15 @@ export function Sidebar({
                         )}
                     </button>
                     {!collapsed && (
-                        <div className="px-2 py-1 text-[10px] text-[var(--text-muted)]">
-                            v1.0.0
-                        </div>
+                        <a
+                            href="https://github.com/anomalyco/VNIBB/releases"
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="block px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                            title="View release notes on GitHub"
+                        >
+                            v1.3.0
+                        </a>
                     )}
                 </div>
             </aside>

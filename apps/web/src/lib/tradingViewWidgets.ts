@@ -1364,9 +1364,12 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/screeners/screener/',
     symbolMode: 'none',
     defaultConfig: {
+      // Default to US large-cap equities so the screener loads with rows
+      // on first paint instead of an empty 'forex/general' state that
+      // looked like a broken widget. (QA-v2 G3)
       defaultColumn: 'overview',
-      defaultScreen: 'general',
-      market: 'forex',
+      defaultScreen: 'most_capitalized',
+      market: 'america',
       showToolbar: true,
       isTransparent: true,
       colorTheme: 'dark',

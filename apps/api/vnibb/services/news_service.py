@@ -496,6 +496,28 @@ async def get_company_news_rows(symbol: str, limit: int = 20) -> list[dict[str, 
         reverse=True,
     )
 
+    # Drop articles older than 90 days when newer ones exist. This
+    # prevents the company-news widget from surfacing year-old archive
+    # rows alongside fresh stories purely because the older row had a
+    # higher relevance score (QA-v2 F7).
+    if merged_rows:
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+        def _published_utc(row: dict[str, Any]) -> _dt:
+            value = _parse_published_at(
+                row.get("published_date") or row.get("published_at")
+            )
+            if not isinstance(value, _dt):
+                return _dt.min.replace(tzinfo=_tz.utc)
+            if value.tzinfo is None:
+                return value.replace(tzinfo=_tz.utc)
+            return value
+
+        cutoff = _dt.now(_tz.utc) - _td(days=90)
+        any_fresh = any(_published_utc(row) >= cutoff for row in merged_rows)
+        if any_fresh:
+            merged_rows = [row for row in merged_rows if _published_utc(row) >= cutoff]
+
     return await _enrich_sentiment_rows(merged_rows[:limit])
 
 

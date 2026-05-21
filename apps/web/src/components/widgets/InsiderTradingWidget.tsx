@@ -193,13 +193,13 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           <WidgetEmpty
             message={
               filter === 'all'
-                ? 'No insider disclosures filed for this period'
-                : `No ${filter === 'buy' ? 'buy' : 'sell'} disclosures match this filter`
+                ? 'No insider disclosures in the last 90 days'
+                : `No ${filter === 'buy' ? 'buy' : 'sell'} disclosures in the last 90 days`
             }
             detail={
               filter === 'all'
-                ? 'This panel shows official insider transactions filed with HOSE/HNX. Empty state means no disclosures were filed within the lookback window — not the same as "insiders never trade".'
-                : 'Try the All filter to see all recent disclosures.'
+                ? 'This panel shows official insider transactions filed with HOSE/HNX over the last 90 days. Empty state means no disclosures were filed in that window — not the same as "insiders never trade".'
+                : 'Try the All filter to see every disclosure in the 90-day window.'
             }
             icon={<AlertCircle size={18} />}
             size="compact"

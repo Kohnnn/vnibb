@@ -28,7 +28,14 @@ export function FootprintProxyWidget({ symbol }: FootprintProxyWidgetProps) {
     enabled: Boolean(upperSymbol),
   });
   const bars = data?.data?.footprint?.bars || [];
-  const footprintSource = (data?.data?.footprint as { source?: string } | undefined)?.source;
+  const footprintBlock = data?.data?.footprint as { source?: string; quality?: string } | undefined;
+  // Backend reports availability via `quality` ('available' / 'unavailable' /
+  // 'not_requested'). Map both keys so we surface a typed empty state instead
+  // of a permanently blank panel. (QA-v2 T2)
+  const footprintStatus = footprintBlock?.quality || footprintBlock?.source;
+  const isUnavailable =
+    footprintStatus === 'unavailable' ||
+    (Array.isArray(data?.data?.unsupported_reasons) && data.data.unsupported_reasons.length > 0 && bars.length === 0);
   const hasData = bars.length > 0;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
   const recent = bars.slice(-8).reverse();
@@ -50,7 +57,6 @@ export function FootprintProxyWidget({ symbol }: FootprintProxyWidgetProps) {
   }
 
   if (!hasData) {
-    const isUnavailable = footprintSource === 'unavailable';
     return (
       <WidgetEmpty
         message={isUnavailable ? 'Footprint proxy not available' : 'No footprint proxy data yet'}

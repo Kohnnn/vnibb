@@ -470,7 +470,13 @@ WORLD_NEWS_SOURCES: tuple[WorldNewsSourceConfig, ...] = (
         language="en",
         tier=2,
         homepage_url="https://www.euronews.com/",
-        feed_urls=("https://www.euronews.com/rss?format=xml",),
+        # The native Euronews RSS feed (https://www.euronews.com/rss?format=xml)
+        # has been returning malformed XML since early 2026 (QA-v2 G7).
+        # Fall back to a Google News query targeting their domain so the
+        # tier-2 European geopolitics slot stays populated.
+        feed_urls=(
+            "https://news.google.com/rss/search?q=site:euronews.com+when:2d&hl=en-US&gl=US&ceid=US:en",
+        ),
     ),
     WorldNewsSourceConfig(
         id="dw_news",
@@ -1705,6 +1711,56 @@ def _failed_feed(
     )
 
 
+# In-memory circuit breaker for chronically broken RSS feeds (QA-v2 G7).
+# Each entry: (consecutive_failure_count, suppress_until_utc, last_reason).
+# When a feed's consecutive failures reaches the threshold, we skip the
+# fetch entirely for `_FEED_CIRCUIT_OPEN_SECONDS` rather than re-hammering
+# upstream. The breaker is intentionally process-local: the world news
+# service is queried from a single FastAPI process, and a fresh deploy
+# resets state so misconfigurations get re-tested promptly.
+_FEED_CIRCUIT_FAILURE_THRESHOLD = 3
+_FEED_CIRCUIT_OPEN_SECONDS = 30 * 60  # 30 minutes
+_feed_circuit_state: dict[str, dict[str, Any]] = {}
+
+
+def _feed_circuit_key(source_id: str, feed_url: str) -> str:
+    return f"{source_id}::{feed_url}"
+
+
+def _feed_circuit_should_skip(
+    source_id: str, feed_url: str
+) -> tuple[bool, str | None]:
+    state = _feed_circuit_state.get(_feed_circuit_key(source_id, feed_url))
+    if not state:
+        return False, None
+    suppress_until = state.get("suppress_until")
+    if not suppress_until:
+        return False, None
+    now = datetime.now(UTC)
+    if now < suppress_until:
+        remaining = int((suppress_until - now).total_seconds())
+        return True, f"Auto-disabled after repeated failures (retry in {remaining}s)"
+    # Window expired — clear so the breaker re-arms organically.
+    _feed_circuit_state.pop(_feed_circuit_key(source_id, feed_url), None)
+    return False, None
+
+
+def _feed_circuit_record_failure(source_id: str, feed_url: str, reason: str) -> None:
+    key = _feed_circuit_key(source_id, feed_url)
+    state = _feed_circuit_state.get(key) or {"failures": 0}
+    state["failures"] = int(state.get("failures") or 0) + 1
+    state["last_reason"] = reason
+    if state["failures"] >= _FEED_CIRCUIT_FAILURE_THRESHOLD:
+        state["suppress_until"] = datetime.now(UTC) + timedelta(
+            seconds=_FEED_CIRCUIT_OPEN_SECONDS
+        )
+    _feed_circuit_state[key] = state
+
+
+def _feed_circuit_record_success(source_id: str, feed_url: str) -> None:
+    _feed_circuit_state.pop(_feed_circuit_key(source_id, feed_url), None)
+
+
 async def _fetch_feed(
     client: httpx.AsyncClient,
     source: WorldNewsSourceConfig,
@@ -1717,6 +1773,16 @@ async def _fetch_feed(
     transient 5xx / 429 / network-glitch failures we see from publisher CDNs
     without inflating the worst-case per-request latency budget too much.
     """
+
+    # Circuit breaker: skip feeds that have been failing repeatedly until
+    # their suppression window expires. (QA-v2 G7)
+    skip, reason = _feed_circuit_should_skip(source.id, feed_url)
+    if skip:
+        return FeedFetchResult(
+            articles=[],
+            failed=True,
+            failed_feed=_failed_feed(source, feed_url, reason=reason or "Circuit open"),
+        )
 
     last_error: Exception | None = None
     response: httpx.Response | None = None
@@ -1766,24 +1832,24 @@ async def _fetch_feed(
                 "error": str(last_error) if last_error else "unknown",
             },
         )
+        reason = _feed_error_reason(last_error) if last_error else "Feed fetch failed"
+        _feed_circuit_record_failure(source.id, feed_url, reason)
         return FeedFetchResult(
             articles=[],
             failed=True,
-            failed_feed=_failed_feed(
-                source,
-                feed_url,
-                reason=_feed_error_reason(last_error) if last_error else "Feed fetch failed",
-            ),
+            failed_feed=_failed_feed(source, feed_url, reason=reason),
         )
 
     articles = _parse_feed(response.text, source=source, feed_url=feed_url)
     if articles is None:
+        _feed_circuit_record_failure(source.id, feed_url, "Invalid RSS/Atom XML")
         return FeedFetchResult(
             articles=[],
             failed=True,
             failed_feed=_failed_feed(source, feed_url, reason="Invalid RSS/Atom XML"),
         )
 
+    _feed_circuit_record_success(source.id, feed_url)
     return FeedFetchResult(articles=articles)
 
 

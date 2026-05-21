@@ -5323,7 +5323,7 @@ async def get_growth_rates(
 
 # Re-adding missing endpoints for completeness
 @router.get("/{symbol}/news", response_model=StandardResponse[List[Any]])
-@cached(ttl=settings.news_retention_days * 86400, key_prefix="company_news_v26")
+@cached(ttl=1800, key_prefix="company_news_v27")
 async def get_company_news(symbol: str, limit: int = Query(20)):
     try:
         data = await get_company_news_rows(symbol, limit=limit)
@@ -5427,7 +5427,7 @@ async def _load_company_events_fallback(
 
 
 @router.get("/{symbol}/events", response_model=StandardResponse[List[Any]])
-@cached(ttl=settings.news_retention_days * 86400, key_prefix="company_events_v27")
+@cached(ttl=3600, key_prefix="company_events_v28")
 async def get_company_events(
     symbol: str,
     limit: int = Query(20, ge=1, le=100),
@@ -5441,14 +5441,17 @@ async def get_company_events(
         )
         if data:
             return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        # Provider returned empty (success path) — fall through to the DB
+        # fallback so the Events Calendar widget never blanks out when
+        # stored corporate-action rows already exist for the symbol.
+        # (QA-v2 F6)
     except Exception as e:
         provider_error = str(e)
         logger.warning(
             "Company events provider failed (symbol=%s): %s", symbol_upper, e
         )
 
-    # DB fallback — Events Calendar should never blank out when stored
-    # corporate-action rows already exist for the symbol.
+    # DB fallback — runs whether the provider raised OR returned empty.
     try:
         fallback_rows = await _load_company_events_fallback(
             db=db, symbol=symbol_upper, limit=limit
@@ -6200,11 +6203,33 @@ async def get_financial_ratios(
         usable_data = [item for item in data if _ratio_has_metric_value(item)]
         payload = usable_data if usable_data else data
         if payload:
+            # Compute coverage hint: earliest period with at least one
+            # profitability/liquidity ratio populated. Pre-2020 KBS
+            # rows usually only have valuation ratios (pe/pb/ps/ev_*),
+            # so we tell the UI when "full" ratios actually start.
+            # (QA-v2 F1 — surface coverage instead of misleading nulls.)
+            full_coverage_periods: List[str] = []
+            for item in payload:
+                if (
+                    item.roe is not None
+                    or item.roa is not None
+                    or getattr(item, "current_ratio", None) is not None
+                    or getattr(item, "net_margin", None) is not None
+                ):
+                    period_str = str(item.period or "").strip()
+                    if period_str:
+                        full_coverage_periods.append(period_str)
+            coverage_starts = (
+                min(full_coverage_periods, key=_ratio_period_sort_key)
+                if full_coverage_periods
+                else None
+            )
             return StandardResponse(
                 data=payload,
                 meta=MetaData(
                     count=len(payload),
                     data_points=len(payload),
+                    full_ratio_coverage_starts=coverage_starts,
                     **meta_kwargs,
                 ),
             )

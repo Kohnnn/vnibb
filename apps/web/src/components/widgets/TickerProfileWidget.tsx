@@ -72,7 +72,7 @@ function firstPositiveInteger(...values: unknown[]): number | null {
 }
 
 function formatMarketCapCompact(value: number | null | undefined): string {
-    if (value === null || value === undefined || !Number.isFinite(value)) return 'Unavailable'
+    if (value === null || value === undefined || !Number.isFinite(value)) return 'Not disclosed'
     return `VND ${formatLargeNumber(value, { decimals: 2 })}`
 }
 

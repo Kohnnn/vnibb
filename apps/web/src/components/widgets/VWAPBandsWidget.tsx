@@ -24,7 +24,13 @@ export function VWAPBandsWidget({ symbol }: VWAPBandsWidgetProps) {
     enabled: Boolean(upperSymbol),
   });
   const points = data?.data?.vwap?.points || [];
-  const vwapSource = (data?.data?.vwap as { source?: string } | undefined)?.source;
+  const vwapBlock = data?.data?.vwap as { source?: string; quality?: string } | undefined;
+  // Backend reports availability via `quality` ('available' / 'unavailable' /
+  // 'not_requested'). The legacy `source` key is a fallback. (QA-v2 T2)
+  const vwapStatus = vwapBlock?.quality || vwapBlock?.source;
+  const isUnavailable =
+    vwapStatus === 'unavailable' ||
+    (Array.isArray(data?.data?.unsupported_reasons) && data.data.unsupported_reasons.length > 0 && points.length === 0);
   const hasData = points.length > 0;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
   const latest = points[points.length - 1];
@@ -51,7 +57,6 @@ export function VWAPBandsWidget({ symbol }: VWAPBandsWidgetProps) {
   }
 
   if (!hasData) {
-    const isUnavailable = vwapSource === 'unavailable';
     return (
       <WidgetEmpty
         message={isUnavailable ? 'Intraday VWAP not available' : 'No intraday VWAP data yet'}

@@ -312,21 +312,40 @@ function TradingViewNativeWidget({
         const renderStart = Date.now();
 
         const isRendered = (host: HTMLElement): boolean => {
-          if (host.querySelector('iframe')) return true;
-          // Some TradingView web components render directly without an
-          // iframe; treat any element child after the placeholder as
-          // a successful render.
+          // Treat the embed as rendered only when it has produced an
+          // iframe that actually has non-zero dimensions, OR when its web
+          // component has populated its shadow DOM with non-empty
+          // content. Without this stricter check the placeholder DOM
+          // children that TradingView injects (skeleton bars, loaders)
+          // pass the original "any direct child" test, which left
+          // panels like Cryptocurrency Market spinning forever
+          // (QA-v2 G6).
+          const iframe = host.querySelector('iframe');
+          if (iframe) {
+            const rect = iframe.getBoundingClientRect();
+            if (rect.height > 0 && rect.width > 0) return true;
+            return false;
+          }
+
           const directChild = host.firstElementChild;
           if (
             directChild &&
+            metadata.componentTag &&
             directChild.tagName.toLowerCase() === metadata.componentTag &&
-            directChild.shadowRoot &&
-            directChild.shadowRoot.childElementCount > 0
+            directChild.shadowRoot
           ) {
-            return true;
-          }
-          if (directChild && directChild.children.length > 0) {
-            return true;
+            const shadowChildren = directChild.shadowRoot.childElementCount;
+            if (shadowChildren === 0) return false;
+            // Look for any rendered iframe or content node inside the
+            // shadow root with a positive bounding box.
+            const shadowIframe = directChild.shadowRoot.querySelector('iframe');
+            if (shadowIframe) {
+              const rect = shadowIframe.getBoundingClientRect();
+              if (rect.height > 0 && rect.width > 0) return true;
+              return false;
+            }
+            const childRect = (directChild as HTMLElement).getBoundingClientRect();
+            return childRect.height > 32;
           }
           return false;
         };
@@ -474,6 +493,14 @@ const NativeScreenerFallback = dynamic(
   { ssr: false },
 );
 
+const NativeCryptoMarketFallback = dynamic(
+  async () => {
+    const mod = await import('./CryptoMarketFallback');
+    return mod.CryptoMarketFallback as unknown as React.ComponentType<{ id: string; onRemove?: () => void }>;
+  },
+  { ssr: false },
+);
+
 export const TradingViewChartWidget = createTradingViewWrapper('tradingview_chart');
 export const TradingViewSymbolOverviewWidget = createTradingViewWrapper('tradingview_symbol_overview');
 export const TradingViewMiniChartWidget = createTradingViewWrapper('tradingview_mini_chart');
@@ -495,7 +522,9 @@ export const TradingViewForexHeatmapWidget = createTradingViewWrapper('tradingvi
 export const TradingViewScreenerWidget = createTradingViewWrapper('tradingview_screener', {
   fallback: ({ id, onRemove }) => <NativeScreenerFallback id={id} onClose={onRemove} />,
 });
-export const TradingViewCryptoMarketWidget = createTradingViewWrapper('tradingview_crypto_market');
+export const TradingViewCryptoMarketWidget = createTradingViewWrapper('tradingview_crypto_market', {
+  fallback: ({ id, onRemove }) => <NativeCryptoMarketFallback id={id} onRemove={onRemove} />,
+});
 export const TradingViewSymbolInfoWidget = createTradingViewWrapper('tradingview_symbol_info');
 export const TradingViewTechnicalAnalysisWidget = createTradingViewWrapper('tradingview_technical_analysis');
 export const TradingViewFundamentalDataWidget = createTradingViewWrapper('tradingview_fundamental_data');

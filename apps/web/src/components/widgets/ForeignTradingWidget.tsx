@@ -169,16 +169,22 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             };
         }
         if (snapshotAgeHours === null) return undefined;
-        if (snapshotAgeHours >= 26) {
+        // Tiered freshness per QA-v2 F3: red >12h, orange >6h, otherwise live.
+        if (snapshotAgeHours >= 12) {
             return {
                 status: 'stale',
                 label: `Stale · last sync ${formattedLastSync ?? '—'}`,
-                detail: 'Foreign trading data has not refreshed in over a day. Use Refresh to retry.',
+                detail: 'Foreign trading data has not refreshed in over 12 hours. Use Refresh to retry.',
             };
         }
-        // Fresh end-of-session data: drop the misleading "cached" wording
-        // and call out the next sync window so users know where it stands.
         if (snapshotAgeHours >= 6) {
+            return {
+                status: 'cached',
+                label: `Catching up · ${Math.floor(snapshotAgeHours)}h old`,
+                detail: 'Snapshot is older than 6 hours; backend is catching up. Use Refresh to force a sync.',
+            };
+        }
+        if (snapshotAgeHours >= 2) {
             return {
                 status: 'live',
                 label: `Last sync ${formattedLastSync ?? 'today'}`,
