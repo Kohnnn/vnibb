@@ -12,6 +12,7 @@ export type AdvancedChartTimeframe = '1D' | '5D' | '1M' | '3M' | '6M' | '1Y' | '
 
 interface TradingViewAdvancedChartProps {
   symbol: string;
+  compareSymbol?: string;
   timeframe: AdvancedChartTimeframe;
   mode?: AdvancedChartMode;
   className?: string;
@@ -228,6 +229,7 @@ function mergeQuote(points: ChartPoint[], quote: Awaited<ReturnType<typeof getQu
 
 export function TradingViewAdvancedChart({
   symbol,
+  compareSymbol,
   timeframe,
   mode = 'candles',
   className,
@@ -239,12 +241,17 @@ export function TradingViewAdvancedChart({
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
   const [points, setPoints] = useState<ChartPoint[]>([]);
+  const [comparePoints, setComparePoints] = useState<ChartPoint[]>([]);
   const [eventMarkers, setEventMarkers] = useState<ChartEventMarker[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adjustmentMode, setAdjustmentMode] = useState<'raw' | 'adjusted'>('adjusted');
 
   const dateRange = useMemo(() => resolveDateRange(timeframe), [timeframe]);
+  const normalizedCompareSymbol = (compareSymbol || '').trim().toUpperCase();
+  const activeCompareSymbol = normalizedCompareSymbol && normalizedCompareSymbol !== symbol.trim().toUpperCase()
+    ? normalizedCompareSymbol
+    : '';
 
   useEffect(() => {
     if (!symbol) return;
@@ -257,7 +264,7 @@ export function TradingViewAdvancedChart({
       setError(null);
 
       try {
-        const [historyResponse, quoteResponse, eventsResponse] = await Promise.all([
+        const [historyResponse, quoteResponse, eventsResponse, compareResponse] = await Promise.all([
           getHistoricalPrices(symbol, {
             startDate: dateRange.startDate,
             endDate: dateRange.endDate,
@@ -267,11 +274,21 @@ export function TradingViewAdvancedChart({
           }),
           getQuote(symbol, controller.signal).catch(() => null),
           getCompanyEvents(symbol, { limit: 80 }).catch(() => null),
+          activeCompareSymbol
+            ? getHistoricalPrices(activeCompareSymbol, {
+                startDate: dateRange.startDate,
+                endDate: dateRange.endDate,
+                interval: '1D',
+                adjustmentMode,
+                signal: controller.signal,
+              }).catch(() => null)
+            : Promise.resolve(null),
         ]);
 
         const normalized = normalizePoints((historyResponse?.data || []) as unknown as Array<Record<string, unknown>>);
         const merged = mergeQuote(normalized, quoteResponse?.data ?? null);
         setPoints(merged);
+        setComparePoints(normalizePoints((compareResponse?.data || []) as unknown as Array<Record<string, unknown>>));
         setEventMarkers(buildChartEventMarkers(eventsResponse?.data || [], merged, timeframe === '5Y' ? 12 : 8));
       } catch (fetchError) {
         if ((fetchError as Error)?.name === 'AbortError') {
@@ -279,6 +296,7 @@ export function TradingViewAdvancedChart({
         }
         setError((fetchError as Error)?.message || 'Failed to load chart data');
         setPoints([]);
+        setComparePoints([]);
         setEventMarkers([]);
       } finally {
         window.clearTimeout(timeoutId);
@@ -292,7 +310,7 @@ export function TradingViewAdvancedChart({
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [adjustmentMode, symbol, timeframe, dateRange.startDate, dateRange.endDate]);
+  }, [activeCompareSymbol, adjustmentMode, symbol, timeframe, dateRange.startDate, dateRange.endDate]);
 
   useEffect(() => {
     if (!containerRef.current || points.length === 0) return;
@@ -425,6 +443,11 @@ export function TradingViewAdvancedChart({
             Number.isFinite(point.low) &&
             Number.isFinite(point.close)
         );
+        const safeComparePoints = comparePoints.filter(
+          (point) =>
+            !!point.time &&
+            Number.isFinite(point.close)
+        );
         // Diagnostic guard. If lightweight-charts gets zero rows we
         // render an empty axis frame which previously looked identical
         // to the "candles invisible" bug. Surface a typed empty state
@@ -482,6 +505,25 @@ export function TradingViewAdvancedChart({
             text: marker.shortLabel,
           }))
         );
+
+        if (activeCompareSymbol && safeComparePoints.length > 0) {
+          const compareSeries = chart.addLineSeries({
+            color: '#f59e0b',
+            lineWidth: 2,
+            priceScaleId: 'right',
+            crosshairMarkerVisible: true,
+            crosshairMarkerRadius: 4,
+          });
+          const firstClose = safeComparePoints[0]?.close;
+          compareSeries.setData(
+            safeComparePoints
+              .filter((point) => firstClose && firstClose > 0 && Number.isFinite(point.close))
+              .map((point) => ({
+                time: point.time,
+                value: (point.close / firstClose) * (safePoints[0]?.close || firstClose),
+              }))
+          );
+        }
 
         const volumeSeries = chart.addHistogramSeries({
           color: '#475569',
@@ -570,7 +612,7 @@ export function TradingViewAdvancedChart({
       mainSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, [eventMarkers, mode, points, timeframe]);
+  }, [activeCompareSymbol, comparePoints, eventMarkers, mode, points, timeframe]);
 
   return (
     <div className={cn('relative h-full w-full', className)} style={{ minHeight: height }}>
@@ -601,6 +643,12 @@ export function TradingViewAdvancedChart({
           <span>S split</span>
           <span>•</span>
           <span>R rights</span>
+        </div>
+      ) : null}
+
+      {activeCompareSymbol && comparePoints.length > 0 ? (
+        <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-lg border border-amber-500/25 bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200 backdrop-blur">
+          Compare {activeCompareSymbol}
         </div>
       ) : null}
 

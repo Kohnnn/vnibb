@@ -10,6 +10,7 @@ import {
   Command as CommandIcon,
   ExternalLink,
   Globe2,
+  HelpCircle,
   LayoutGrid,
   Newspaper,
   Search,
@@ -96,6 +97,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [search, setSearch] = useState('');
   const [recentSearches, setRecentSearches] = useState<RecentSearchEntry[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const shortcutModifier = getShortcutModifierLabel();
@@ -247,6 +249,90 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     });
     items.push(quantItem);
 
+    const priceChartItem: CommandPaletteActionItem = {
+      id: 'command:add-price-chart',
+      type: 'command',
+      label: 'Add Price Chart Widget',
+      description: 'Add native VNIBB charting with quick compare support',
+    };
+    actions.set(priceChartItem.id, () => {
+      if (state.activeDashboardId && state.activeTabId) {
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'price_chart',
+          tabId: state.activeTabId,
+          layout: { x: 0, y: Infinity, w: 12, h: 9 },
+        });
+      }
+      onOpenChange(false);
+    });
+    items.push(priceChartItem);
+
+    const comparisonItem: CommandPaletteActionItem = {
+      id: 'command:add-comparison-analysis',
+      type: 'command',
+      label: 'Add Comparison Analysis Widget',
+      description: 'Compare fundamentals and performance across multiple tickers',
+    };
+    actions.set(comparisonItem.id, () => {
+      if (state.activeDashboardId && state.activeTabId) {
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'comparison_analysis',
+          tabId: state.activeTabId,
+          config: { initialSymbols: [normalizedTickerSearch || 'VCI', 'SSI', 'HCM'] },
+          layout: { x: 0, y: Infinity, w: 16, h: 11 },
+        });
+      }
+      onOpenChange(false);
+    });
+    items.push(comparisonItem);
+
+    const rrgItem: CommandPaletteActionItem = {
+      id: 'command:add-relative-rotation',
+      type: 'command',
+      label: 'Add Relative Rotation Widget',
+      description: 'Track relative strength rotation with 12-week trail context',
+    };
+    actions.set(rrgItem.id, () => {
+      if (state.activeDashboardId && state.activeTabId) {
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'relative_rotation',
+          tabId: state.activeTabId,
+          layout: { x: 0, y: Infinity, w: 12, h: 10 },
+        });
+      }
+      onOpenChange(false);
+    });
+    items.push(rrgItem);
+
+    const watchlistItem: CommandPaletteActionItem = {
+      id: 'command:add-watchlist',
+      type: 'command',
+      label: 'Add Watchlist Widget',
+      description: 'Pin a local watchlist for quick monitoring',
+    };
+    actions.set(watchlistItem.id, () => {
+      if (state.activeDashboardId && state.activeTabId) {
+        addWidget(state.activeDashboardId, state.activeTabId, {
+          type: 'watchlist',
+          tabId: state.activeTabId,
+          layout: { x: 0, y: Infinity, w: 8, h: 8 },
+        });
+      }
+      onOpenChange(false);
+    });
+    items.push(watchlistItem);
+
+    const shortcutsItem: CommandPaletteActionItem = {
+      id: 'command:keyboard-shortcuts',
+      type: 'command',
+      label: 'Show Keyboard Shortcuts',
+      description: 'View workspace navigation and command palette shortcuts',
+    };
+    actions.set(shortcutsItem.id, () => {
+      setShowShortcutHelp(true);
+    });
+    items.push(shortcutsItem);
+
     const marketNewsItem: CommandPaletteActionItem = {
       id: 'command:add-market-news',
       type: 'command',
@@ -361,6 +447,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     state.dashboards,
     updateTab,
     updateWidget,
+    normalizedTickerSearch,
   ]);
 
   const sections = useMemo(
@@ -582,6 +669,43 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </span>
         </div>
       </div>
+
+      {showShortcutHelp ? (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-[rgba(2,6,23,0.64)] p-4">
+          <div className="w-full max-w-md rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-bold text-[var(--text-primary)]">
+                <HelpCircle className="h-4 w-4 text-sky-300" />
+                Keyboard Shortcuts
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowShortcutHelp(false)}
+                className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+                aria-label="Close keyboard shortcuts"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-2 text-sm">
+              {[
+                [`${shortcutModifier}+K`, 'Open command palette'],
+                [`${shortcutModifier}+T`, 'Create tab'],
+                [`${shortcutModifier}+W`, 'Close tab'],
+                [`${shortcutModifier}+1-9`, 'Switch tabs'],
+                ['Arrow Up/Down', 'Navigate command results'],
+                ['Enter', 'Select highlighted command'],
+                ['Esc', 'Close palette or dialogs'],
+              ].map(([keys, label]) => (
+                <div key={keys} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+                  <kbd className="rounded border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-xs font-semibold text-[var(--text-primary)]">{keys}</kbd>
+                  <span className="text-xs text-[var(--text-secondary)]">{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

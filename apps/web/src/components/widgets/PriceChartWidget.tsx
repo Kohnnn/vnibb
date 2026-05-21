@@ -40,6 +40,7 @@ interface PriceChartWidgetProps {
   id: string;
   symbol: string;
   timeframe?: string;
+  config?: Record<string, unknown>;
   onRemove?: () => void;
 }
 
@@ -65,7 +66,7 @@ function normalizeChartTimeframe(value: string | undefined): AdvancedChartTimefr
     : '1Y';
 }
 
-export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: PriceChartWidgetProps) {
+export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onRemove }: PriceChartWidgetProps) {
   const { data: profileData } = useProfile(symbol, !!symbol);
   const {
     data: screenerData,
@@ -77,9 +78,13 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
   const { data: ratiosData } = useFinancialRatios(symbol, { period: 'FY', enabled: Boolean(symbol) });
 
   const [selectedTimeframe, setSelectedTimeframe] = useState<AdvancedChartTimeframe>(
-    normalizeChartTimeframe(timeframe)
+    normalizeChartTimeframe(typeof config?.timeframe === 'string' ? config.timeframe : timeframe)
   );
   const [chartMode, setChartMode] = useState<AdvancedChartMode>('candles');
+  const [compareInput, setCompareInput] = useState(
+    typeof config?.compareSymbol === 'string' ? config.compareSymbol.toUpperCase() : ''
+  );
+  const compareSymbol = compareInput.trim().toUpperCase();
 
   const exchange = profileData?.data?.exchange;
   const metrics = screenerData?.data?.[0] as ScreenerData | undefined;
@@ -164,6 +169,27 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
                   </span>
                 ))}
               </div>
+
+              <label className="flex items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-semibold text-[var(--text-muted)]">
+                <span className="hidden lg:inline">Compare</span>
+                <input
+                  value={compareInput}
+                  onChange={(event) => setCompareInput(event.target.value.toUpperCase())}
+                  placeholder="Ticker"
+                  className="w-16 bg-transparent font-mono text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                  aria-label="Compare ticker"
+                />
+                {compareInput ? (
+                  <button
+                    type="button"
+                    onClick={() => setCompareInput('')}
+                    className="rounded px-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    aria-label="Clear compare ticker"
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </label>
             </div>
 
             <WidgetMeta
@@ -179,6 +205,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', onRemove }: Pri
         <div className="relative flex-1 min-h-[220px]">
           <TradingViewAdvancedChart
             symbol={symbol}
+            compareSymbol={compareSymbol}
             timeframe={selectedTimeframe}
             mode={chartMode}
             className="h-full"
