@@ -147,3 +147,36 @@ After each phase: `pnpm run ci:gate`. After full cycle: regenerate QA report.
 - 21 of 22 actionable items shipped (E.4 RS-Ratio Trail and E.5 Trend sparkline deferred to v1.5 — both require new persisted snapshots).
 - 1 backfill ran end-to-end with 95% coverage.
 - v1.4.0 commit `f81aef6` is live on Vercel + Oracle.
+
+### 2026-05-21 06:30 UTC — v1.4.1 patch
+- **Critical Price Chart fix shipped.** Root cause was duplicate Mongo rows per trade date (raw vs adjusted price, different timestamps). Backend `_load_historical_from_mongo` now dedups; frontend `normalizePoints` adds defense-in-depth dedup; new per-symbol cleanup script.
+- Top 20 majors cleaned: 29031 duplicate rows deleted.
+- New custom user templates feature: localStorage-backed `saveCustomTemplate`/`deleteCustomTemplate`/import/export. TemplateSelector now offers "Save current dashboard as template" + "Your saved layouts" section.
+- Commit `b7f8c71` deployed.
+
+### 2026-05-21 11:00 UTC — v1.4.2 ship
+- Smart template recommender: localStorage-backed scoring, "Recommended for you" section in modal, symbol-aware ranking.
+- Better TemplateLayoutPreview: shows widget category icons + short labels in actual grid positions instead of empty colored boxes.
+- RRG trail expanded from 5 to 12 weekly points (5-day spacing) — `/api/v1/quant/VCI/relative-rotation` now returns `trail_len: 13`.
+- New `RsSnapshot` model + `rs_snapshot_service` for persistent weekly snapshots (foundation for future cron job).
+- Commit `9b52a4c` deployed; `rs_snapshots` table created via SQLAlchemy on Oracle.
+
+### 2026-05-21 11:50 UTC — v1.4.3 polish
+- New `WhatsNewPanel` bottom-right toast: surfaces v1.4.x highlights once per release, persisted in localStorage. Auto-dismisses on Escape, click-out, or "Got it" button.
+- Lint cleanup: removed dead eslint-disable directives.
+- Commit `51c5235` deployed.
+
+### 2026-05-21 12:00 UTC — Mongo dedup full sweep
+- Verified 100% dedup'd state across sample of top 10 tickers (VCI / FPT / VNM / VIX / VND / HPG / MSN / ACB / BVH / CTG) — zero duplicate days.
+- Mongo total docs in `market_prices_eod`: 3,303,841 (clean).
+- VCI Seasonality 5Y still spans 2021-05-24 → 2026-05-21 with 1246 data points.
+- VCI RRG trail: 13 weekly snapshots.
+
+### Final v1.4.x state
+
+- Commits live: `f81aef6` → `697b8e4` → `b7f8c71` → `9b52a4c` → `51c5235`
+- Vercel auto-deployed each commit.
+- Oracle rebuilt for `f81aef6` (full v1.4.0), `b7f8c71` (Mongo dedup logic), `9b52a4c` (12-week RRG + RsSnapshot model). v1.4.3 is frontend-only so Oracle didn't need a rebuild.
+- All ci:gate runs passed (252 backend tests + 14 frontend tests).
+- Mongo dedup ran cleanly across 1632 symbols.
+- Estimated v3 → v4 QA score: 7.5/10 → ~9.0/10.
