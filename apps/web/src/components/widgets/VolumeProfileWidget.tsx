@@ -199,16 +199,16 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">POC</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="Point of Control · price level with the highest traded volume in the lookback window. VND/share.">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">POC <span className="ml-1 text-[8px] normal-case tracking-normal opacity-60">VND/share</span></div>
           <div className="text-cyan-300 font-mono">{pocPrice ? pocPrice.toFixed(2) : '-'}</div>
         </div>
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">VAH</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="Value Area High · upper bound of the price range that contained 70% of volume.">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">VAH <span className="ml-1 text-[8px] normal-case tracking-normal opacity-60">VND/share</span></div>
           <div className="text-emerald-300 font-mono">{vahPrice ? vahPrice.toFixed(2) : '-'}</div>
         </div>
-        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">VAL</div>
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="Value Area Low · lower bound of the price range that contained 70% of volume.">
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">VAL <span className="ml-1 text-[8px] normal-case tracking-normal opacity-60">VND/share</span></div>
           <div className="text-amber-300 font-mono">{valPrice ? valPrice.toFixed(2) : '-'}</div>
         </div>
       </div>

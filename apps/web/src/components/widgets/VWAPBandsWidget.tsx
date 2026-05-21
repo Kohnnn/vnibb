@@ -6,6 +6,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { useMarketState } from '@/hooks/useMarketState';
+import { describeIntradayUnavailable } from '@/lib/marketHours';
 
 interface VWAPBandsWidgetProps {
   symbol: string;
@@ -17,6 +19,7 @@ function formatPrice(value: number | null | undefined): string {
 
 export function VWAPBandsWidget({ symbol }: VWAPBandsWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
+  const marketState = useMarketState();
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMicrostructureAnalysis(upperSymbol, {
     features: ['vwap'],
     interval: '5m',
@@ -57,14 +60,11 @@ export function VWAPBandsWidget({ symbol }: VWAPBandsWidgetProps) {
   }
 
   if (!hasData) {
+    const unavailableCopy = describeIntradayUnavailable(marketState);
     return (
       <WidgetEmpty
-        message={isUnavailable ? 'Intraday VWAP not available' : 'No intraday VWAP data yet'}
-        detail={
-          isUnavailable
-            ? 'VWAP populates from live trade ticks. Data resumes when HOSE reopens (09:00–15:00 ICT).'
-            : 'Waiting for trade ticks. Try refresh in a few minutes.'
-        }
+        message={isUnavailable ? `Intraday VWAP not available · ${unavailableCopy.primary}` : 'No intraday VWAP data yet'}
+        detail={isUnavailable ? unavailableCopy.detail : 'Waiting for trade ticks. Try refresh in a few minutes.'}
         icon={<Activity size={18} />}
         size="compact"
         action={{ label: 'Refresh', onClick: () => refetch() }}

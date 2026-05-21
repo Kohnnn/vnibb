@@ -232,9 +232,37 @@ async def _enrich_sentiment_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
         existing_symbols = _parse_symbols(row.get("related_symbols"))
         inferred_symbols = _parse_symbols(sentiment.get("symbols"))
         if inferred_symbols:
-            row["related_symbols"] = list(dict.fromkeys([*existing_symbols, *inferred_symbols]))[
-                :10
-            ]
+            # QA-v3 F11: Filter NLP-inferred symbols against the article
+            # title only. Inference from body text generated false
+            # positives (e.g. AGR/TIN/HCM tagged on Arsenal football
+            # articles because the words appeared in unrelated context).
+            # We additionally require either a sentiment confidence
+            # >= 0.7 OR the ticker to be already in `existing_symbols`
+            # (i.e. confirmed elsewhere) before we surface it.
+            confidence = (
+                sentiment.get("confidence")
+                if isinstance(sentiment.get("confidence"), (int, float))
+                else 0.0
+            )
+            title_text = str(row.get("title") or "").upper()
+            high_confidence = float(confidence or 0.0) >= 0.7
+
+            def _accept(sym: str) -> bool:
+                if not sym:
+                    return False
+                upper = sym.upper()
+                if upper in existing_symbols:
+                    return True
+                appears_in_title = bool(
+                    re.search(rf"(?<![A-Z0-9]){re.escape(upper)}(?![A-Z0-9])", title_text)
+                )
+                return appears_in_title and high_confidence
+
+            filtered_symbols = [s for s in inferred_symbols if _accept(s)]
+            if filtered_symbols:
+                row["related_symbols"] = list(
+                    dict.fromkeys([*existing_symbols, *filtered_symbols])
+                )[:10]
 
         if sentiment.get("sectors") and not row.get("sectors"):
             row["sectors"] = sentiment.get("sectors", [])

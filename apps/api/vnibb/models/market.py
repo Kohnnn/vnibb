@@ -137,3 +137,55 @@ class Subsidiary(Base):
     
     def __repr__(self) -> str:
         return f"<Subsidiary(parent='{self.symbol}', name='{self.subsidiary_name}', ownership={self.ownership_pct})>"
+
+
+class SectorMetricSnapshot(Base):
+    """Daily aggregated valuation/profitability ratios per sector.
+
+    QA-v3 A2: VniAgent reported "the server context does not include
+    sector average P/E ratio" because the Peer Comparison widget was
+    computing sector averages client-side. This table persists those
+    averages so MCP / VniAgent context can pull them on demand.
+    """
+
+    __tablename__ = "sector_metric_snapshots"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    # Sector identification (industry name preferred since `industry`
+    # is what the screener exposes; we keep both for join flexibility).
+    sector_code: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    industry_name: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+
+    # Snapshot date (UTC business day; one row per sector per day)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+
+    # Aggregate metrics
+    sample_size: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    avg_pe: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    median_pe: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_pb: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    median_pb: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_ps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_roe: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_roa: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_net_margin: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_dividend_yield: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    avg_market_cap: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "industry_name",
+            "snapshot_date",
+            name="uq_sector_metric_snapshot_industry_date",
+        ),
+        Index("ix_sector_metric_snapshot_date", "snapshot_date"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<SectorMetricSnapshot(industry='{self.industry_name}', "
+            f"date='{self.snapshot_date}', n={self.sample_size}, pe={self.avg_pe})>"
+        )

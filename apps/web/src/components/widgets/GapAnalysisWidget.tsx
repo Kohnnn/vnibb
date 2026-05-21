@@ -146,23 +146,46 @@ export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
                   <th className="text-left py-1">Type</th>
                   <th className="text-right py-1">Gap %</th>
                   <th className="text-right py-1">Next Day</th>
-                  <th className="text-center py-1">Fill</th>
+                  <th className="text-center py-1" title="Filled = price retraced through the gap. Status considers age: ≤5 days pending, ≤20 days unfilled (pending), >20 days unfilled (confirmed unfilled).">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {topGaps.slice(0, 10).map((row) => (
-                  <tr key={`${row.date}-${row.type}-${row.gap_pct}`} className="border-b border-[var(--border-subtle)] text-[var(--text-secondary)]">
-                    <td className="py-1">{row.date}</td>
-                    <td className={`py-1 ${row.type === 'gap_up' ? 'text-emerald-300' : row.type === 'gap_down' ? 'text-red-300' : 'text-[var(--text-muted)]'}`}>
-                      {row.type}
-                    </td>
-                    <td className="py-1 text-right font-mono">{Number(row.gap_pct ?? 0).toFixed(2)}%</td>
-                    <td className={`py-1 text-right font-mono ${Number(row.next_day_return_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                      {Number(row.next_day_return_pct ?? 0).toFixed(2)}%
-                    </td>
-                    <td className={`py-1 text-center ${row.filled ? 'text-emerald-300' : 'text-[var(--text-muted)]'}`}>{row.filled ? 'Yes' : 'No'}</td>
-                  </tr>
-                ))}
+                {topGaps.slice(0, 10).map((row) => {
+                  // QA-v3 Q3: tier the Fill column so users distinguish
+                  // "still pending" from "confirmed unfilled".
+                  const ageDays = (() => {
+                    const ts = Date.parse(String(row.date || ''));
+                    if (Number.isNaN(ts)) return null;
+                    return Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+                  })();
+                  let statusLabel = 'Pending';
+                  let statusClass = 'text-amber-300';
+                  if (row.filled) {
+                    statusLabel = 'Filled';
+                    statusClass = 'text-emerald-300';
+                  } else if (ageDays !== null && ageDays > 20) {
+                    statusLabel = 'Unfilled';
+                    statusClass = 'text-red-300';
+                  } else if (ageDays !== null && ageDays > 5) {
+                    statusLabel = 'Pending (>5d)';
+                    statusClass = 'text-amber-300';
+                  }
+                  return (
+                    <tr key={`${row.date}-${row.type}-${row.gap_pct}`} className="border-b border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                      <td className="py-1">{row.date}</td>
+                      <td className={`py-1 ${row.type === 'gap_up' ? 'text-emerald-300' : row.type === 'gap_down' ? 'text-red-300' : 'text-[var(--text-muted)]'}`}>
+                        {row.type}
+                      </td>
+                      <td className="py-1 text-right font-mono">{Number(row.gap_pct ?? 0).toFixed(2)}%</td>
+                      <td className={`py-1 text-right font-mono ${Number(row.next_day_return_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                        {Number(row.next_day_return_pct ?? 0).toFixed(2)}%
+                      </td>
+                      <td className={`py-1 text-center ${statusClass}`} title={ageDays !== null ? `${ageDays}d since gap` : undefined}>
+                        {statusLabel}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   CartesianGrid,
@@ -226,6 +226,31 @@ function ComparisonAnalysisWidgetComponent({
     enabled: Boolean(symbols[0]),
     staleTime: 30 * 60 * 1000,
   })
+
+  // QA-v3 F8: When the widget first seeds peers, prefer same-sector
+  // peers from the backend `peers` endpoint over the hardcoded FPT
+  // fallback. The backend already returns peers ranked within the
+  // primary symbol's sector, so the first peer is the right default
+  // (e.g. for VCI it returns VIX/VND/HCM rather than FPT).
+  useEffect(() => {
+    const peerSymbols = (peersQuery.data?.peers || [])
+      .map((peer: any) => String(peer?.symbol || '').toUpperCase())
+      .filter(Boolean)
+    if (peerSymbols.length === 0) return
+    const primary = symbols[0]
+    if (!primary) return
+    // Only auto-seed when the user hasn't customised yet — i.e. the
+    // current `symbols` matches the initial seed of [primary, FPT] or
+    // is just the primary alone.
+    const isInitialSeed =
+      symbols.length <= 1 ||
+      (symbols.length === 2 && (symbols[1] === 'FPT' || symbols[1] === DEFAULT_TICKER))
+    if (!isInitialSeed) return
+    const next = Array.from(new Set([primary, ...peerSymbols])).slice(0, MAX_SYMBOLS)
+    if (next.length === symbols.length && next.every((s, i) => s === symbols[i])) return
+    setSymbols(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peersQuery.data?.peers, symbols.join(',')])
 
   const ratioGridQuery = useQuery({
     queryKey: ['comparison-ratio-grid', symbols.join(','), period],

@@ -132,7 +132,16 @@ export function MajorShareholdersWidget({ symbol, onDataChange }: MajorSharehold
                             <div className="mt-0.5 text-amber-100/80">
                                 Vietnam regulation only requires public disclosure for holders ≥5% of outstanding shares.
                                 Smaller institutional and retail holdings are not reported here. Showing the single
-                                available row for {symbol}.
+                                available row for {symbol}.{' '}
+                                <a
+                                    href={`https://www.hsx.vn/Modules/Listed/Web/SymbolView/${encodeURIComponent(symbol)}`}
+                                    target="_blank"
+                                    rel="noreferrer noopener"
+                                    className="underline hover:text-amber-100"
+                                >
+                                    Cross-check on HOSE
+                                </a>
+                                .
                             </div>
                         </div>
                     ) : null}

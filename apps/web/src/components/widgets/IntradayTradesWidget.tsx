@@ -37,28 +37,16 @@ function formatVolume(vol: number | null | undefined): string {
 }
 
 /**
- * Vietnam HOSE/HNX market hours: Mon–Fri, 09:00–15:00 Asia/Ho_Chi_Minh.
- * Returns true when the local clock is outside that window so we can
- * show a "market closed — last session" empty state instead of a
- * generic "no trades" message during evenings/weekends.
+ * Vietnam HOSE/HNX market hours awareness.
+ * Delegates to the shared marketHours module so widgets stay in sync
+ * about the actual HOSE schedule (09:00–11:30 + 13:00–14:45 ICT).
+ * (QA-v3 T4/T6 — IntradayTrades, VWAP, Footprint must agree on the
+ * canonical session boundaries.)
  */
+import { isMarketClosedNowVnt as _isMarketClosedNowVnt, getMarketState } from '@/lib/marketHours';
+
 function isMarketClosedNowVnt(): boolean {
-    const now = new Date();
-    const vntFmt = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'Asia/Ho_Chi_Minh',
-        weekday: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-    });
-    const parts = vntFmt.formatToParts(now);
-    const weekday = parts.find((p) => p.type === 'weekday')?.value ?? '';
-    const hour = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10);
-    const minute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
-    const isWeekday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(weekday);
-    if (!isWeekday) return true;
-    const totalMin = hour * 60 + minute;
-    return totalMin < 9 * 60 || totalMin >= 15 * 60;
+    return _isMarketClosedNowVnt();
 }
 
 function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: IntradayTradesWidgetProps) {
@@ -171,16 +159,36 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                     ) : error && !hasData ? (
                         <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
-                        <WidgetEmpty
-                            message={isMarketClosedNowVnt() ? 'Market closed' : `No trades for ${symbol}`}
-                            detail={
-                                isMarketClosedNowVnt()
-                                    ? `Vietnam HOSE/HNX trades 09:00–15:00 VNT, Mon–Fri. The last session's tape will reload when the market opens.`
-                                    : 'Intraday tape will appear here once trade prints are available.'
-                            }
-                            icon={<Activity size={18} />}
-                            size="compact"
-                        />
+                        (() => {
+                            const state = getMarketState();
+                            const closed = !state.isOpen;
+                            const phaseDescription = (() => {
+                                switch (state.phase) {
+                                    case 'pre-open':
+                                        return 'Pre-open · live tape resumes at 09:00 ICT (HOSE 09:00–11:30 + 13:00–14:45 ICT, Mon–Fri).';
+                                    case 'lunch':
+                                        return 'Lunch break (11:30–13:00 ICT) · live tape resumes at 13:00 ICT.';
+                                    case 'after-close':
+                                        return 'Session closed (14:45 ICT) · live tape resumes 09:00 ICT next trading day.';
+                                    case 'weekend':
+                                        return 'Weekend · HOSE trades Mon–Fri, 09:00–11:30 + 13:00–14:45 ICT.';
+                                    default:
+                                        return 'Intraday tape will appear here once trade prints are available.';
+                                }
+                            })();
+                            return (
+                                <WidgetEmpty
+                                    message={closed ? `Market ${state.phase === 'lunch' ? 'on lunch break' : 'closed'}` : `No trades for ${symbol}`}
+                                    detail={
+                                        closed
+                                            ? phaseDescription
+                                            : 'Intraday tape will appear here once trade prints are available.'
+                                    }
+                                    icon={<Activity size={18} />}
+                                    size="compact"
+                                />
+                            );
+                        })()
                     ) : (
                         <VirtualizedTable data={trades} columns={columns} rowHeight={30} />
                     )}

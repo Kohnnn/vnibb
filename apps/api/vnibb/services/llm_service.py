@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+import asyncio
 import uuid
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 MAX_HISTORY_MESSAGES = 12
 MAX_MESSAGE_LENGTH = 2000
 MAX_CONTEXT_CHARS = 16000
-STREAM_CHUNK_SIZE = 600
+STREAM_CHUNK_SIZE = 80
 DEFAULT_OPENROUTER_MODEL = "openrouter/free"
 SUPPORTED_LLM_PROVIDERS = {"openrouter", "openai_compatible"}
 
@@ -735,8 +736,16 @@ class LlmService:
         )
 
         body_markdown = rendered["answer_markdown"] or rendered["final_markdown"]
-        for chunk in _chunk_markdown(body_markdown):
+        # QA-v3 A1: Stream the response in small (~80 char) chunks with a
+        # tiny inter-chunk sleep so the frontend can render token-by-token
+        # animation. Without the sleep, the entire response chunked
+        # immediately and the user perceived "all at once after 8s".
+        chunks = _chunk_markdown(body_markdown)
+        chunk_delay_s = 0.012 if len(chunks) > 4 else 0
+        for chunk in chunks:
             yield {"chunk": chunk}
+            if chunk_delay_s:
+                await asyncio.sleep(chunk_delay_s)
 
         yield {
             "done": True,

@@ -285,7 +285,18 @@ class NewsCrawlerService:
             "source": source,
             "url": link,
             "category": _text("category"),
-            "pub_date": _text("pubDate") or _text("published") or _text("updated"),
+            "pub_date": (
+                _text("pubDate")
+                or _text("published")
+                or _text("updated")
+                or _text("dc:date")
+                or _text("dc:Date")
+                or _text("pubdate")
+                or _text("date")
+                or _text("lastBuildDate")
+                or _text("publishedTime")
+                or _text("publishedAt")
+            ),
         }
 
     async def _crawl_with_vnstock_news(

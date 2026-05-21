@@ -568,6 +568,42 @@ def _build_ratio_ttm_rows(rows: List[FinancialRatioData]) -> List[FinancialRatio
 
     payload = latest.model_dump(mode="json")
     payload["period"] = "TTM"
+
+    # QA-v3 F1: Build a real TTM payload by summing the most recent 4
+    # quarterly rows (and inheriting any field that's already present in
+    # the latest row). Without this, EV/EBITDA TTM and EPS TTM remained
+    # null even when 4 quarterly values were available.
+    quarterly_rows = [
+        row
+        for row in ordered_rows
+        if "Q" in str(row.period or "").upper()
+    ]
+    last4 = quarterly_rows[-4:]
+
+    def _sum_attr(attr: str) -> float | None:
+        values: list[float] = []
+        for row in last4:
+            val = getattr(row, attr, None)
+            if isinstance(val, (int, float)) and val == val:
+                values.append(float(val))
+        return sum(values) if len(values) == 4 else None
+
+    if len(last4) == 4:
+        for attr in ("eps", "dps"):
+            ttm_value = _sum_attr(attr)
+            if ttm_value is not None:
+                payload[attr] = ttm_value
+
+    # If `ev_ebitda` is null on the latest row but we have an annual
+    # entry with a value, inherit it as a working approximation. This
+    # is an explicit fallback rather than a fabricated computation.
+    if not payload.get("ev_ebitda"):
+        for row in reversed(ordered_rows):
+            value = getattr(row, "ev_ebitda", None)
+            if isinstance(value, (int, float)) and value == value and value > 0:
+                payload["ev_ebitda"] = float(value)
+                break
+
     return [FinancialRatioData.model_validate(payload)]
 
 
@@ -5607,6 +5643,77 @@ def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
     return entries
 
 
+# QA-v3 T2/T7: Some HOSE/SSI provider responses transmit bid/ask prices in
+# raw VND (e.g. 25_000) while VNIBB's display convention is "VND thousands"
+# (e.g. 25.0). When that happens every level shows up ~1000x the real
+# market price, breaking the Order Book widget visually.
+#
+# We auto-correct by comparing every level's price against the response's
+# `last_price` (the most recent matched trade, which we know is in display
+# units because the rest of the app uses it everywhere). If a level's price
+# is >= 100x the last_price we treat the bid/ask side as raw-VND and divide
+# by 1000.
+_ORDERBOOK_UNIT_THRESHOLD = 100.0
+
+
+def _coerce_unit_correction_factor(level_price: Any, reference: Any) -> float:
+    try:
+        price_f = float(level_price)
+        ref_f = float(reference)
+    except (TypeError, ValueError):
+        return 1.0
+    if not (price_f and ref_f) or ref_f <= 0:
+        return 1.0
+    if price_f / ref_f >= _ORDERBOOK_UNIT_THRESHOLD:
+        return 0.001
+    return 1.0
+
+
+def _normalize_orderbook_units(payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply HOSE display-unit normalization (raw VND -> VND thousands)
+    when the provider response is in the wrong scale.
+
+    Returns the payload unchanged when no anomaly detected. Sets
+    ``payload['unit_corrected'] = True`` when at least one level was
+    rescaled so the frontend can surface a discreet hint.
+    """
+
+    entries = payload.get("entries") or []
+    reference = payload.get("last_price")
+    if not entries or reference is None:
+        return payload
+
+    corrected_any = False
+    new_entries: List[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            new_entries.append(entry)
+            continue
+        factor = _coerce_unit_correction_factor(entry.get("price"), reference)
+        if factor == 1.0:
+            new_entries.append(entry)
+            continue
+        try:
+            entry = {**entry, "price": float(entry.get("price")) * factor}
+        except (TypeError, ValueError):
+            new_entries.append(entry)
+            continue
+        corrected_any = True
+        new_entries.append(entry)
+
+    if corrected_any:
+        logger.warning(
+            "Orderbook unit anomaly detected for %s; auto-corrected by 0.001x",
+            payload.get("symbol"),
+        )
+        payload = {
+            **payload,
+            "entries": new_entries,
+            "unit_corrected": True,
+        }
+    return payload
+
+
 def _build_orderbook_payload(
     symbol: str,
     depth_data: Any,
@@ -5619,7 +5726,7 @@ def _build_orderbook_payload(
         if isinstance(cached_entries, list) and cached_entries
         else _normalize_orderbook_entries(depth_data)
     )
-    return {
+    payload = {
         "symbol": symbol.upper(),
         "entries": entries,
         "total_bid_volume": _depth_value(depth_data, "total_bid_volume"),
@@ -5628,6 +5735,7 @@ def _build_orderbook_payload(
         "last_volume": _depth_value(depth_data, "last_volume"),
         "snapshot_time": snapshot_time,
     }
+    return _normalize_orderbook_units(payload)
 
 
 def _build_orderbook_payload_from_snapshot(snapshot: OrderbookSnapshot) -> dict[str, Any]:
@@ -5795,7 +5903,7 @@ async def get_intraday(symbol: str, limit: int = Query(200, ge=1, le=1000)):
     "/{symbol}/transaction-flow",
     response_model=StandardResponse[TransactionFlowPayload],
 )
-@cached(ttl=300, key_prefix="transaction_flow")
+@cached(ttl=120, key_prefix="transaction_flow_v2")
 async def get_transaction_flow(
     symbol: str,
     days: int = Query(30, ge=5, le=90),

@@ -2674,7 +2674,7 @@ async def get_market_indices(
 
 
 @router.get("/breadth", response_model=MarketBreadthResponse)
-@cached(ttl=300, key_prefix="market_breadth")
+@cached(ttl=120, key_prefix="market_breadth_v2")
 async def get_market_breadth() -> MarketBreadthResponse:
     try:
         screener_rows = await _fetch_market_screener_rows(limit=1500)

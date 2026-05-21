@@ -108,13 +108,17 @@ export function CryptoMarketFallback({ id, onRemove }: CryptoMarketFallbackProps
           />
         ) : (
           <div className="flex-1 overflow-auto">
-            <table className="w-full text-xs">
+            {/* QA-v3 G6: ensure CHG% column never gets clipped by setting
+                a min-width on the table and an explicit min-width on the
+                CHG% column. The previous default Tailwind layout truncated
+                the percent sign + decimal on narrow widget cells. */}
+            <table className="w-full min-w-[640px] text-xs">
               <thead className="sticky top-0 bg-[var(--bg-secondary)] text-[10px] uppercase text-[var(--text-muted)]">
                 <tr>
                   <th className="px-2 py-1.5 text-left">#</th>
                   <th className="px-2 py-1.5 text-left">Coin</th>
                   <th className="px-2 py-1.5 text-right">Price</th>
-                  <th className="px-2 py-1.5 text-right">24h %</th>
+                  <th className="px-2 py-1.5 text-right" style={{ minWidth: 88 }}>24h %</th>
                   <th className="px-2 py-1.5 text-right">Mkt Cap</th>
                   <th className="px-2 py-1.5 text-right">Volume</th>
                 </tr>
@@ -134,9 +138,10 @@ export function CryptoMarketFallback({ id, onRemove }: CryptoMarketFallbackProps
                         {formatPrice(coin.current_price)}
                       </td>
                       <td
-                        className={`px-2 py-1.5 text-right font-mono tabular-nums ${
+                        className={`whitespace-nowrap px-2 py-1.5 text-right font-mono tabular-nums ${
                           isUp ? 'text-emerald-300' : 'text-rose-300'
                         }`}
+                        style={{ minWidth: 88 }}
                       >
                         {isUp ? '+' : ''}
                         {change.toFixed(2)}%

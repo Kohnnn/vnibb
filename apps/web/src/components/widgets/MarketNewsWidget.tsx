@@ -38,7 +38,7 @@ function cleanText(value: string | null | undefined): string {
 
 function formatPublishedTime(value: string | null | undefined): string {
   const formatted = formatTimestamp(value);
-  return formatted === '-' ? 'Unknown time' : formatted;
+  return formatted === '-' ? 'Date unavailable' : formatted;
 }
 
 function renderHighlightedText(text: string, tokens: string[]) {

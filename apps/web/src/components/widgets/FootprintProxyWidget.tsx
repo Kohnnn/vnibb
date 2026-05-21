@@ -6,6 +6,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
+import { useMarketState } from '@/hooks/useMarketState';
+import { describeIntradayUnavailable } from '@/lib/marketHours';
 
 interface FootprintProxyWidgetProps {
   symbol: string;
@@ -21,6 +23,7 @@ function formatCompact(value: number): string {
 
 export function FootprintProxyWidget({ symbol }: FootprintProxyWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
+  const marketState = useMarketState();
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMicrostructureAnalysis(upperSymbol, {
     features: ['footprint'],
     interval: '5m',
@@ -57,14 +60,11 @@ export function FootprintProxyWidget({ symbol }: FootprintProxyWidgetProps) {
   }
 
   if (!hasData) {
+    const unavailableCopy = describeIntradayUnavailable(marketState);
     return (
       <WidgetEmpty
-        message={isUnavailable ? 'Footprint proxy not available' : 'No footprint proxy data yet'}
-        detail={
-          isUnavailable
-            ? 'Footprint proxy is computed from live trade ticks. Data resumes when HOSE reopens (09:00–15:00 ICT).'
-            : 'Waiting for trade ticks. Try refresh in a few minutes.'
-        }
+        message={isUnavailable ? `Footprint proxy not available · ${unavailableCopy.primary}` : 'No footprint proxy data yet'}
+        detail={isUnavailable ? unavailableCopy.detail : 'Waiting for trade ticks. Try refresh in a few minutes.'}
         icon={<Rows3 size={18} />}
         size="compact"
         action={{ label: 'Refresh', onClick: () => refetch() }}

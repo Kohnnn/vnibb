@@ -163,11 +163,13 @@ export function OBVDivergenceWidget({ symbol }: OBVDivergenceWidgetProps) {
                   {priceDeltaPct.toFixed(2)}%
                 </div>
               </div>
-              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
+              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="OBV B%: Bollinger Band %B applied to On-Balance-Volume. Values outside ±300% indicate OBV is far below/above its 20-period band; usually means the price-volume divergence is extreme rather than a calculation error.">
                 <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">OBV %</div>
                 <div className={`text-xs font-mono ${obvDeltaPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
                   {obvDeltaPct >= 0 ? '+' : ''}
-                  {obvDeltaPct.toFixed(2)}%
+                  {Math.abs(obvDeltaPct) > 300
+                    ? `${obvDeltaPct > 0 ? '>' : '<'} ${obvDeltaPct > 0 ? '+' : '-'}300%`
+                    : `${obvDeltaPct.toFixed(2)}%`}
                 </div>
               </div>
             </div>

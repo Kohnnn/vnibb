@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useScreenerData, useMetricsHistory, useFinancialRatios, useProfile, useStockQuote } from '@/lib/queries';
+import { useScreenerData, useMetricsHistory, useFinancialRatios, useProfile, useStockQuote, useQuantMetrics } from '@/lib/queries';
 import { formatDividendYield, formatRatio, formatPercent, normalizeDividendYield } from '@/lib/formatters';
 import { formatUnitValue } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
@@ -102,11 +102,34 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
 
     const { data: history, isFetching: historyFetching } = useMetricsHistory(symbol, { enabled: !!symbol });
     const { data: ratiosData } = useFinancialRatios(symbol, { period: 'FY', enabled: !!symbol });
+    // QA-v3 F5: Dividend Yield in Key Metrics MARKET tab was reading
+    // 0.00% from the screener snapshot while the Financial Ratios widget
+    // showed TTM=3.00%. Pull a TTM ratios slice so we can resolve from the
+    // same source.
+    const { data: ratiosTtmData } = useFinancialRatios(symbol, { period: 'TTM', enabled: !!symbol });
     const { data: profile } = useProfile(symbol, !!symbol);
     const { data: quote } = useStockQuote(symbol, !!symbol);
+    // QA-v3 F6: Beta 63D was already computed for the Quant tab
+    // (`/api/v1/quant/{symbol}` returns it) but Key Metrics MARKET tab
+    // showed "–". Surface it from the same source.
+    const { data: quantMetrics } = useQuantMetrics(symbol, { enabled: !!symbol });
 
     const stock = screenData?.data?.[0];
     const latestRatio = latestByFinancialPeriod(ratiosData?.data);
+    // QA-v3 F5: Prefer TTM dividend yield from the same Financial Ratios
+    // pipeline that powers the FY/Q/TTM toggle. The screener snapshot
+    // dividend_yield is a stale field that frequently reads 0.00% even
+    // when the TTM is clearly populated.
+    const ttmRatio = (ratiosTtmData?.data || []).find((row) =>
+        String((row as { period?: string }).period || '').toUpperCase() === 'TTM'
+    ) || null;
+    // QA-v3 F6: Pull Beta 63D from the same source that powers the
+    // Quant tab Risk Dashboard.
+    const quantBeta63d = (() => {
+        const benchmarkRisk = (quantMetrics as any)?.data?.metrics?.benchmark_risk;
+        const value = benchmarkRisk?.current_beta_63d;
+        return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    })();
     const derivedMarketCap =
         toNumber(profile?.data?.outstanding_shares) && toNumber(quote?.price)
             ? (toNumber(profile?.data?.outstanding_shares) || 0) * (toNumber(quote?.price) || 0)
@@ -159,10 +182,14 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
             { value: derivedMarketCap, source: 'Profile+Quote', positiveOnly: true },
         ]),
         dividendYield: resolveMetric([
+            { value: normalizeDividendYield((ttmRatio as any)?.dividend_yield), source: 'Ratios TTM' },
             { value: normalizeDividendYield(latestRatio?.dividend_yield), source: 'Ratios' },
             { value: normalizeDividendYield(stock?.dividend_yield), source: 'Screener' },
         ]),
-        beta: resolveMetric([{ value: stock?.beta, source: 'Screener' }]),
+        beta: resolveMetric([
+            { value: quantBeta63d, source: 'Quant 63D' },
+            { value: stock?.beta, source: 'Screener' },
+        ]),
     }
 
     const mergedStock: any = {

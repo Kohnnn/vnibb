@@ -300,17 +300,17 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-6">
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 xl:col-span-2">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Composite Risk Score</div>
-                {/* QA-v2 Q2 — when the composite score sits in the
-                    pathological tail (< 10) it can read like an
-                    uninitialized "0/100" gauge. Show a typed "< 10"
-                    label with a high-risk band so users see this is a
-                    real (very poor) score rather than a missing
-                    measurement. */}
+                {/* QA-v3 Q1: Show the actual computed score (e.g. "4/100")
+                    rather than a "< 10" range string that read like a
+                    formatting placeholder. We still tone the score in
+                    rose for the high-risk band so the visual hierarchy
+                    distinguishes critical readings. */}
                 <div className={`mt-1 text-2xl font-black ${riskScore < 10 ? 'text-rose-300' : scoreLabel.tone}`}>
-                  {riskScore < 10 ? '< 10' : riskScore}
+                  {riskScore}
+                  <span className="ml-0.5 text-sm font-semibold text-[var(--text-muted)]">/100</span>
                 </div>
                 <div className={`mt-1 text-sm font-semibold ${riskScore < 10 ? 'text-rose-300' : scoreLabel.tone}`}>
-                  {riskScore < 10 ? 'Very High Risk' : scoreLabel.label}
+                  {riskScore < 10 ? 'Critical Risk Zone' : scoreLabel.label}
                 </div>
                 {/* U6 — sector benchmark context. Renders a small reference
                     bar under the score so users see where their stock sits
