@@ -56,7 +56,6 @@ function persist(templates: CustomDashboardTemplate[]): void {
     // Quota exceeded or storage disabled — fail silently. The user can still
     // create / use templates within the current session via in-memory state
     // managed by the consumer.
-    // eslint-disable-next-line no-console
     console.warn('VNIBB: failed to persist custom templates', error);
   }
 }

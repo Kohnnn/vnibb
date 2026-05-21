@@ -3,7 +3,7 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Sidebar, Header, TabBar, RightSidebar, MobileNav, FreshnessBanner } from '@/components/layout';
+import { Sidebar, Header, TabBar, RightSidebar, MobileNav, FreshnessBanner, WhatsNewPanel } from '@/components/layout';
 import { OnboardingWalkthrough } from '@/components/onboarding/OnboardingWalkthrough';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
@@ -972,6 +972,8 @@ function DashboardContent() {
                 <FreshnessBanner />
 
                 <TabBar symbol={stockGlobalSymbol} />
+
+                <WhatsNewPanel />
 
                 <div className="relative flex-1 min-h-0 overflow-hidden bg-[var(--bg-primary)] p-2 sm:p-3 lg:p-4">
                     {showAdminSystemLayoutControls && activeDashboard ? (

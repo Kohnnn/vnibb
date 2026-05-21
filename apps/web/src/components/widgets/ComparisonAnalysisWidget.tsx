@@ -249,7 +249,6 @@ function ComparisonAnalysisWidgetComponent({
     const next = Array.from(new Set([primary, ...peerSymbols])).slice(0, MAX_SYMBOLS)
     if (next.length === symbols.length && next.every((s, i) => s === symbols[i])) return
     setSymbols(next)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [peersQuery.data?.peers, symbols.join(',')])
 
   const ratioGridQuery = useQuery({
