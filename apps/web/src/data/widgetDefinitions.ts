@@ -643,8 +643,8 @@ export const widgetDefinitions: WidgetDefinition[] = [
     },
     {
         type: 'seasonality_spiral_heatmap',
-        name: 'Daily Spiral Heatmap',
-        description: 'Daily return spiral heatmap for visually scanning day-by-day seasonality',
+        name: 'Spiral Heatmap',
+        description: 'Daily or weekly spiral seasonality with old in center, new on outer rings',
         category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 12, h: 13, minW: 8, minH: 10 }

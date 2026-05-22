@@ -34,6 +34,7 @@ import { useDashboard } from '@/contexts/DashboardContext';
 import { cn } from '@/lib/utils';
 import type { Dashboard, DashboardFolder } from '@/types/dashboard';
 import { SettingsModal } from '@/components/settings/SettingsModal';
+import { CURRENT_RELEASE, WHATS_NEW_REOPEN_EVENT } from '@/lib/version';
 
 const COLLAPSED_SIDEBAR_WIDTH = 56;
 
@@ -847,15 +848,18 @@ export function Sidebar({
                         )}
                     </button>
                     {!collapsed && (
-                        <a
-                            href="https://github.com/anomalyco/VNIBB/releases"
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            className="block px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                            title="View release notes on GitHub"
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (typeof window !== 'undefined') {
+                                    window.dispatchEvent(new CustomEvent(WHATS_NEW_REOPEN_EVENT));
+                                }
+                            }}
+                            className="block w-full px-2 py-1 text-left text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                            title="Show release notes"
                         >
-                            v1.3.0
-                        </a>
+                            {CURRENT_RELEASE}
+                        </button>
                     )}
                 </div>
             </aside>

@@ -127,6 +127,9 @@ function TradingViewNativeWidget({
   const hasTrackedLoadRef = useRef(false);
   const [loadError, setLoadError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Bumped on retry to force a fresh mount cycle. Retries the script
+  // load + render poll without dropping the symbol or runtime config.
+  const [mountAttempt, setMountAttempt] = useState(0);
   // Defer iframe-script injection until the host element is at least
   // partially in the viewport. TradingView's iframe widgets each fetch a
   // separate `embed-widget-*.js`, and on dashboards with many such widgets
@@ -438,7 +441,7 @@ function TradingViewNativeWidget({
       cancelled = true;
       teardown();
     };
-  }, [isInView, metadata, runtimeConfig, webComponentAttributes]);
+  }, [isInView, metadata, runtimeConfig, webComponentAttributes, mountAttempt]);
 
   if (!metadata) {
     return <WidgetError error={new Error(`Unknown TradingView widget: ${widgetType}`)} />;
@@ -456,7 +459,46 @@ function TradingViewNativeWidget({
     if (fallback) {
       return <>{fallback}</>;
     }
-    return <WidgetError error={loadError} />;
+    const externalUrl = resolvedSymbol
+      ? `https://www.tradingview.com/symbols/${encodeURIComponent(resolvedSymbol.replace(':', '-'))}/`
+      : 'https://www.tradingview.com/';
+    return (
+      <WidgetContainer
+        title={metadata.name}
+        widgetId={id}
+        onClose={onRemove}
+        noPadding
+      >
+        <div className="flex h-full min-h-[180px] flex-col items-stretch justify-center gap-3 px-4 py-4 text-[12px] text-[var(--text-secondary)]">
+          <div className="font-semibold text-[var(--text-primary)]">{metadata.name} could not load.</div>
+          <div className="text-[11px] text-[var(--text-muted)]">
+            {loadError.message || 'TradingView may be blocked, rate-limited, or temporarily unavailable.'}
+          </div>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setLoadError(null);
+                setIsLoading(true);
+                setMountAttempt((prev) => prev + 1);
+              }}
+              className="inline-flex items-center gap-1 rounded-md border border-blue-500/40 bg-blue-600/15 px-3 py-1 text-[11px] font-bold text-blue-300 hover:bg-blue-600/25"
+            >
+              <RefreshCw size={12} />
+              Retry
+            </button>
+            <a
+              href={externalUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center gap-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1 text-[11px] font-bold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            >
+              Open in TradingView
+            </a>
+          </div>
+        </div>
+      </WidgetContainer>
+    );
   }
 
   return (

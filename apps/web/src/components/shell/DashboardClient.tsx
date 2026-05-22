@@ -139,7 +139,6 @@ function DashboardContent() {
     const [adminLayoutControlsVisible, setAdminLayoutControlsVisible] = useState(false);
     const [adminLayoutStatus, setAdminLayoutStatus] = useState<string | null>(null);
     const [templateApplyStatus, setTemplateApplyStatus] = useState<TemplateApplyStatus | null>(null);
-    const [templateConfirm, setTemplateConfirm] = useState<DashboardTemplate | null>(null);
     const [isPublishingSystemLayout, setIsPublishingSystemLayout] = useState(false);
     const [draggingPane, setDraggingPane] = useState<'left' | 'right' | null>(null);
     const [widgetSettingsState, setWidgetSettingsState] = useState<{
@@ -770,13 +769,32 @@ function DashboardContent() {
 
     const handleApplyTemplate = useCallback((template: DashboardTemplate) => {
         if (!activeDashboard || !activeTab) return;
-        if (!canEditCurrentDashboard) {
-            setTemplateConfirm(template);
-            setIsTemplateSelectorOpen(false);
-            return;
-        }
         if (template.widgets.length === 0) {
             setTemplateApplyStatus({ message: 'This template has no widgets to apply.', tone: 'warning' });
+            return;
+        }
+        if (!canEditCurrentDashboard) {
+            // Locked / admin-managed system dashboards cannot be edited in
+            // place. Instead of presenting a modal that the user has to
+            // confirm, transparently spin up a fresh editable workspace
+            // seeded with the template and switch to it. This eliminates the
+            // "blacked out / nothing happens" UX without dropping the lock.
+            const dashboard = createDashboard({ name: `${template.name} Workspace` });
+            const tab = dashboard.tabs[0];
+            applyTemplateToDashboard(template, dashboard.id, tab.id);
+            setActiveDashboard(dashboard.id);
+            setActiveTab(tab.id);
+            setIsTemplateSelectorOpen(false);
+            setTemplateApplyStatus({ message: `Created '${dashboard.name}' from ${template.name}.`, tone: 'success' });
+            captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
+                source: 'locked_dashboard_auto_workspace',
+                template_id: template.id,
+                template_name: template.name,
+                template_category: template.category,
+                dashboard_id: dashboard.id,
+                tab_id: tab.id,
+                widget_count: template.widgets.length,
+            });
             return;
         }
 
@@ -794,45 +812,37 @@ function DashboardContent() {
             tab_id: tab.id,
             widget_count: template.widgets.length,
         });
-    }, [activeDashboard, activeTab, applyTemplateToDashboard, canEditCurrentDashboard, createTab, setActiveTab]);
-
-    const handleConfirmTemplateWorkspace = useCallback(() => {
-        if (!templateConfirm) return;
-        if (templateConfirm.widgets.length === 0) {
-            setTemplateApplyStatus({ message: 'This template has no widgets to apply.', tone: 'warning' });
-            setTemplateConfirm(null);
-            return;
-        }
-        const dashboard = createDashboard({ name: `${templateConfirm.name} Workspace` });
-        const tab = dashboard.tabs[0];
-        applyTemplateToDashboard(templateConfirm, dashboard.id, tab.id);
-        setActiveDashboard(dashboard.id);
-        setActiveTab(tab.id);
-        setTemplateApplyStatus({ message: `Created workspace from ${templateConfirm.name}.`, tone: 'success' });
-        captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
-            source: 'locked_dashboard_new_workspace',
-            template_id: templateConfirm.id,
-            template_name: templateConfirm.name,
-            template_category: templateConfirm.category,
-            dashboard_id: dashboard.id,
-            tab_id: tab.id,
-            widget_count: templateConfirm.widgets.length,
-        });
-        setTemplateConfirm(null);
-    }, [applyTemplateToDashboard, createDashboard, setActiveDashboard, setActiveTab, templateConfirm]);
+    }, [activeDashboard, activeTab, applyTemplateToDashboard, canEditCurrentDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab]);
 
     const handleSeedEmptyTab = useCallback((template: DashboardTemplate) => {
         if (!activeDashboard || !activeTab) return;
+        if (template.widgets.length === 0) {
+            setTemplateApplyStatus({ message: 'This template has no widgets to apply.', tone: 'warning' });
+            return;
+        }
         if (!canEditCurrentDashboard) {
-            setTemplateApplyStatus({ message: 'Unlock or create a custom workspace before applying templates.', tone: 'warning' });
+            // Empty-tab starter cards on locked dashboards now spin up a
+            // fresh workspace instead of warning the user — same UX path as
+            // the main template picker.
+            const dashboard = createDashboard({ name: `${template.name} Workspace` });
+            const tab = dashboard.tabs[0];
+            applyTemplateToDashboard(template, dashboard.id, tab.id);
+            setActiveDashboard(dashboard.id);
+            setActiveTab(tab.id);
+            setTemplateApplyStatus({ message: `Created '${dashboard.name}' from ${template.name}.`, tone: 'success' });
+            captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
+                source: 'empty_tab_seed_locked_auto_workspace',
+                template_id: template.id,
+                template_name: template.name,
+                template_category: template.category,
+                dashboard_id: dashboard.id,
+                tab_id: tab.id,
+                widget_count: template.widgets.length,
+            });
             return;
         }
         if (activeTab.widgets.length > 0) {
             setTemplateApplyStatus({ message: 'Suggested layouts can only seed an empty tab.', tone: 'warning' });
-            return;
-        }
-        if (template.widgets.length === 0) {
-            setTemplateApplyStatus({ message: 'This template has no widgets to apply.', tone: 'warning' });
             return;
         }
 
@@ -854,7 +864,7 @@ function DashboardContent() {
             tab_id: activeTab.id,
             widget_count: template.widgets.length,
         });
-    }, [activeDashboard, activeTab, addWidget, canEditCurrentDashboard]);
+    }, [activeDashboard, activeTab, addWidget, applyTemplateToDashboard, canEditCurrentDashboard, createDashboard, setActiveDashboard, setActiveTab]);
 
     const handleCreateWorkspace = useCallback(() => {
         const dashboard = createDashboard({ name: 'Workspace 1' });
@@ -873,7 +883,28 @@ function DashboardContent() {
     const handleQuickAddWidget = useCallback((type: WidgetType) => {
         if (!activeDashboard || !activeTab) return;
         if (!canEditCurrentDashboard) {
-            setTemplateApplyStatus({ message: 'Unlock or create a custom workspace before adding widgets.', tone: 'warning' });
+            // Quick-add on a locked dashboard creates a fresh workspace
+            // and adds the widget there. Mirrors the template-apply path so
+            // the user is never stuck.
+            const dashboard = createDashboard({ name: `${getWidgetDefinition(type)?.name ?? 'Workspace'} Workspace` });
+            const tab = dashboard.tabs[0];
+            const placement = findNextAvailableLayout(tab.widgets, type);
+            const defaults = getWidgetDefaultLayout(type);
+            addWidget(dashboard.id, tab.id, {
+                type,
+                tabId: tab.id,
+                layout: {
+                    x: placement.x,
+                    y: placement.y,
+                    w: defaults.w,
+                    h: defaults.h,
+                    minW: defaults.minW,
+                    minH: defaults.minH,
+                },
+            });
+            setActiveDashboard(dashboard.id);
+            setActiveTab(tab.id);
+            setTemplateApplyStatus({ message: `Created '${dashboard.name}' with ${getWidgetDefinition(type)?.name ?? type.replace(/_/g, ' ')}.`, tone: 'success' });
             return;
         }
 
@@ -893,7 +924,7 @@ function DashboardContent() {
             },
         });
         setTemplateApplyStatus({ message: `Added ${getWidgetDefinition(type)?.name ?? type.replace(/_/g, ' ')}.`, tone: 'success' });
-    }, [activeDashboard, activeTab, addWidget, canEditCurrentDashboard]);
+    }, [activeDashboard, activeTab, addWidget, canEditCurrentDashboard, createDashboard, setActiveDashboard, setActiveTab]);
 
     const memoizedLayouts = useMemo(() => {
         if (!activeTab?.widgets) return [];
@@ -1332,36 +1363,6 @@ function DashboardContent() {
                 currentDashboard={activeDashboard ?? null}
                 currentSymbol={stockGlobalSymbol}
             />
-
-            {templateConfirm ? (
-                <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/70 px-4">
-                    <div className="w-full max-w-md rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] p-5 shadow-2xl">
-                        <div className="text-sm font-semibold text-[var(--text-primary)]">Create editable workspace?</div>
-                        <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
-                            The current dashboard is locked. Create a new editable workspace from the {templateConfirm.name} template?
-                        </p>
-                        <div className="mt-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-muted)]">
-                            {templateConfirm.widgets.length} widgets will be added to a new workspace. Your current dashboard stays unchanged.
-                        </div>
-                        <div className="mt-5 flex justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setTemplateConfirm(null)}
-                                className="rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleConfirmTemplateWorkspace}
-                                className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500"
-                            >
-                                Create workspace
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            ) : null}
 
             {templateApplyStatus && activeTab?.widgets.length ? (
                 <div className={`fixed bottom-4 left-1/2 z-[120] -translate-x-1/2 rounded-xl border bg-slate-950/95 px-4 py-2 text-xs font-semibold shadow-2xl ${templateApplyStatusClass}`}>

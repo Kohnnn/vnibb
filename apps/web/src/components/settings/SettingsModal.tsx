@@ -27,6 +27,7 @@ import {
   readStoredUserPreferences,
   writeStoredUserPreferences,
 } from '@/lib/userPreferences';
+import { CURRENT_RELEASE, CURRENT_RELEASE_DATE, WHATS_NEW_REOPEN_EVENT } from '@/lib/version';
 import { formatNumber, formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
 import {
   clearAdminLayoutKey,
@@ -722,6 +723,29 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     >
                       <RotateCcw size={14} />
                       Restart Walkthrough
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h4 className="text-sm font-bold text-[var(--text-primary)]">Release Notes</h4>
+                      <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                        Currently on <span className="font-semibold text-[var(--text-secondary)]">{CURRENT_RELEASE}</span> ({CURRENT_RELEASE_DATE}). Open the inline changelog any time.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (typeof window !== 'undefined') {
+                          window.dispatchEvent(new CustomEvent(WHATS_NEW_REOPEN_EVENT));
+                        }
+                      }}
+                      className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2 text-[11px] font-bold text-blue-300 transition-colors hover:bg-blue-600/25"
+                    >
+                      <Sparkles size={14} />
+                      Show Release Notes
                     </button>
                   </div>
                 </div>

@@ -48,8 +48,19 @@ function formatColumnLabel(column: string, granularity: SeasonalityGranularity):
 
 function formatColumnTitle(column: string, granularity: SeasonalityGranularity): string {
   if (granularity !== 'weekly') return column
-  const label = formatColumnLabel(column, granularity)
-  return `Week ${label}`
+  return formatColumnLabel(column, granularity)
+}
+
+/**
+ * Strip the legacy `W` prefix from period labels coming back from the
+ * backend matrix endpoint. The backend keeps `W##` as the stable column
+ * key for cache + matrix lookups; this helper is used purely for display.
+ *
+ * Examples: "W42" -> "42", "W42 2025" -> "42 2025", "Mar" -> "Mar".
+ */
+function stripWeekPrefix(value: string | null | undefined): string {
+  if (!value) return '-'
+  return value.replace(/\bW0?(\d+)\b/g, '$1')
 }
 
 export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHeatmapWidgetProps) {
@@ -156,11 +167,11 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
       <div className="mb-2 grid grid-cols-4 gap-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Best Avg</div>
-          <div className="mt-1 text-sm font-mono font-semibold text-emerald-300">{payload?.best_period || '-'}</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-emerald-300">{stripWeekPrefix(payload?.best_period)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Worst Avg</div>
-          <div className="mt-1 text-sm font-mono font-semibold text-rose-300">{payload?.worst_period || '-'}</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-rose-300">{stripWeekPrefix(payload?.worst_period)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Hit Rate</div>
@@ -169,7 +180,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Latest</div>
           <div className="mt-1 truncate text-sm font-mono font-semibold text-[var(--text-primary)]">
-            {payload?.current_period ? `${payload.current_period.label} ${formatPct(payload.current_period.return_pct)}` : '-'}
+            {payload?.current_period ? `${stripWeekPrefix(payload.current_period.label)} ${formatPct(payload.current_period.return_pct)}` : '-'}
           </div>
         </div>
       </div>

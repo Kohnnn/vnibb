@@ -846,18 +846,35 @@ export async function getSubsidiaries(symbol: string): Promise<SubsidiariesRespo
     return fetchAPI<SubsidiariesResponse>(`/equity/${symbol}/subsidiaries`);
 }
 
-function normalizeFinancialStatementPeriod(period?: string): string | undefined {
+/**
+ * Map every UI period selection to the canonical backend value.
+ *
+ * UI surfaces send: `FY | Q | Q1 | Q2 | Q3 | Q4 | TTM`. The backend's
+ * statement endpoints (`income-statement`, `balance-sheet`, `cash-flow`)
+ * canonicalize internally on `year | quarter | ttm`, so we map up-front
+ * to keep the wire contract narrow. Per-quarter filtering is still
+ * performed client-side via `matchesFinancialQuarterSelection` in
+ * `financialPeriods.ts`, so a single `quarter` request fans out into
+ * Q1..Q4 in the table without extra HTTP round-trips.
+ */
+export function normalizeFinancialStatementPeriod(period?: string): string | undefined {
     if (!period) return undefined;
-    if (period === 'FY') return 'year';
-    if (period === 'Q') return 'Q';
-    return period;
+    const upper = period.trim().toUpperCase();
+    if (!upper) return undefined;
+    if (upper === 'FY' || upper === 'YEAR' || upper === 'ANNUAL' || upper === 'A') return 'year';
+    if (upper === 'TTM' || upper === 'TRAILING') return 'ttm';
+    if (upper === 'Q' || upper === 'QUARTER' || /^Q[1-4]$/.test(upper)) return 'quarter';
+    return upper.toLowerCase();
 }
 
 function normalizeFinancialRatioPeriod(period?: string): string | undefined {
     if (!period) return undefined;
-    if (period === 'FY') return 'FY';
-    if (period === 'Q') return 'quarter';
-    return period;
+    const upper = period.trim().toUpperCase();
+    if (!upper) return undefined;
+    if (upper === 'FY' || upper === 'YEAR' || upper === 'ANNUAL' || upper === 'A') return 'FY';
+    if (upper === 'TTM' || upper === 'TRAILING') return 'TTM';
+    if (upper === 'Q' || upper === 'QUARTER' || /^Q[1-4]$/.test(upper)) return 'quarter';
+    return upper;
 }
 
 export async function getBalanceSheet(
