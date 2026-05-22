@@ -90,6 +90,17 @@
     - `/health/` -> 200
     - `/live` -> 200
     - `/ready` -> 200
+- 2026-05-22 (follow-up cycle): templates "still stuck" + spiral heatmap looked wrong + reinforce financials.
+  - Templates: rewrote `handleApplyTemplate` to ALWAYS create a fresh editable workspace seeded with the template, regardless of the current dashboard's lock state. Removed the conditional branching, removed the leftover `createTab` import. Wrapped in try/catch + analytics so failures surface a toast instead of silently no-oping.
+  - Spiral heatmap: rewrote with a proper Archimedean spiral. Each cell is now an SVG `<path>` arc segment connecting two radii along the curve `r(theta) = a*theta`, so the result reads as a continuous "snail shell" instead of a sparse dot pattern. Adjacent cells share edges; the latest period gets a cyan dot for orientation. Daily uses 60 segments/turn, weekly uses 52 segments/turn (one full ring per ISO year).
+  - Financial Statement reinforcement:
+    - `useIncomeStatement / useBalanceSheet / useCashFlow` now request `limit=80` so the table renders the full multi-year history.
+    - Income statement metrics expanded from 5 -> 11 rows (Revenue, COGS, Gross Profit, OpEx, Operating Income, Interest, Pre-Tax, Tax, Net Income, EBITDA, EPS).
+    - Balance sheet expanded from 4 -> 14 rows (Cash, ST Investments, Receivables, Inventory, Current Assets, LT Investments, Fixed Assets, Total Assets, ST Debt, Current Liab, LT Debt, Total Liab, Retained Earnings, Total Equity).
+    - Cash flow expanded from 4 -> 9 rows (Operating CF, CapEx, Investing CF, Debt Issued, Debt Repaid, Dividends Paid, Financing CF, Net Change, FCF).
+    - Ratios expanded from 8 -> 16 metrics (added EPS, BVPS, Operating Margin, Quick Ratio, Asset Turnover, Inventory Turnover, Dividend Yield, Payout Ratio).
+    - Aliases extended end-to-end so each metric reads from camelCase, snake_case, and Vietnamese-diacritic variants of provider payloads.
+    - Existing `initialScrollPosition="end"` keeps the freshest period in view on mount.
 
 ## How to run the parity scripts
 

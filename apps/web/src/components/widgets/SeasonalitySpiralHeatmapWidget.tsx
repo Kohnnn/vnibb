@@ -22,58 +22,108 @@ const SPIRAL_GRANULARITY_OPTIONS: Array<{
   centerLabel: string
   note: string
 }> = [
-  { value: 'daily', label: 'Daily', centerLabel: 'Daily', note: 'each cell = one trading day' },
-  { value: 'weekly', label: 'Weekly', centerLabel: 'Weekly', note: 'each cell = one ISO week' },
+  { value: 'daily', label: 'Daily', centerLabel: 'Daily', note: 'each segment = one trading day' },
+  { value: 'weekly', label: 'Weekly', centerLabel: 'Weekly', note: 'each segment = one ISO week' },
 ]
-
-interface SpiralGeometryConfig {
-  startRadius: number
-  step: number
-  angleStep: number
-  cellSize: number
-  cellRadius: number
-}
-
-const SPIRAL_GEOMETRY: Record<SpiralGranularity, SpiralGeometryConfig> = {
-  daily: {
-    startRadius: 26,
-    step: 0.44,
-    angleStep: 0.39,
-    cellSize: 5.6,
-    cellRadius: 1.6,
-  },
-  weekly: {
-    startRadius: 30,
-    step: 1.6,
-    angleStep: 0.62,
-    cellSize: 9.5,
-    cellRadius: 2.4,
-  },
-}
 
 function formatPct(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '-'
   return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
 }
 
+/**
+ * Map a return percentage to a fill color. Uses a divergent red/green
+ * scale with five buckets per side so neighbouring segments visually
+ * differ.
+ */
 function getFill(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return 'rgba(71,85,105,0.45)'
-  if (value >= 8) return 'rgba(16,185,129,0.86)'
-  if (value >= 4) return 'rgba(16,185,129,0.62)'
-  if (value > 0) return 'rgba(16,185,129,0.34)'
-  if (value <= -8) return 'rgba(244,63,94,0.86)'
-  if (value <= -4) return 'rgba(244,63,94,0.62)'
-  return 'rgba(244,63,94,0.34)'
+  if (value >= 8) return 'rgba(16,185,129,0.92)'
+  if (value >= 4) return 'rgba(16,185,129,0.72)'
+  if (value >= 1) return 'rgba(16,185,129,0.46)'
+  if (value > 0) return 'rgba(16,185,129,0.28)'
+  if (value <= -8) return 'rgba(244,63,94,0.92)'
+  if (value <= -4) return 'rgba(244,63,94,0.72)'
+  if (value <= -1) return 'rgba(244,63,94,0.46)'
+  return 'rgba(244,63,94,0.28)'
 }
 
-/**
- * Strip the legacy `W` prefix used by the backend matrix as a stable
- * cache key. Spiral cells should display the bare number when the user
- * is in weekly mode.
- */
 function stripWeekPrefix(value: string | null | undefined): string {
   if (!value) return ''
   return value.replace(/\bW0?(\d+)\b/g, '$1')
+}
+
+interface SpiralSegment {
+  id: string
+  label: string
+  value: number | null
+  pathD: string
+  cx: number
+  cy: number
+}
+
+/**
+ * Generate an Archimedean spiral path for one cell. The spiral is built
+ * by sweeping a small theta range and emitting two arcs (inner + outer)
+ * connected by radial caps. The spiral parameter `a` controls the gap
+ * between successive turns.
+ *
+ *   r(theta) = a * theta
+ *
+ * This produces the recognizable "snail shell" pattern with a continuous
+ * inward-to-outward flow that makes time the natural spatial axis.
+ */
+function buildSpiralSegments(
+  cells: Array<{ id: string; label: string; value: number | null }>,
+  options: { center: number; turnSpacing: number; segmentsPerTurn: number; thickness: number; minRadius: number },
+): SpiralSegment[] {
+  const { center, turnSpacing, segmentsPerTurn, thickness, minRadius } = options
+  const a = turnSpacing / (2 * Math.PI)
+  const dTheta = (2 * Math.PI) / segmentsPerTurn
+  const half = thickness / 2
+
+  return cells.map((cell, index) => {
+    const theta0 = index * dTheta
+    const theta1 = (index + 1) * dTheta
+    const rMid0 = Math.max(minRadius, a * theta0)
+    const rMid1 = Math.max(minRadius, a * theta1)
+
+    const rOuter0 = rMid0 + half
+    const rOuter1 = rMid1 + half
+    const rInner0 = Math.max(2, rMid0 - half)
+    const rInner1 = Math.max(2, rMid1 - half)
+
+    const cos0 = Math.cos(theta0)
+    const sin0 = Math.sin(theta0)
+    const cos1 = Math.cos(theta1)
+    const sin1 = Math.sin(theta1)
+
+    const p1 = { x: center + rOuter0 * cos0, y: center + rOuter0 * sin0 }
+    const p2 = { x: center + rOuter1 * cos1, y: center + rOuter1 * sin1 }
+    const p3 = { x: center + rInner1 * cos1, y: center + rInner1 * sin1 }
+    const p4 = { x: center + rInner0 * cos0, y: center + rInner0 * sin0 }
+
+    // Outer arc sweep is small (less than a full turn), so large-arc-flag
+    // is 0; inner arc reverses direction so sweep-flag flips.
+    const pathD = [
+      `M ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}`,
+      `A ${rOuter0.toFixed(2)} ${rOuter0.toFixed(2)} 0 0 1 ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`,
+      `L ${p3.x.toFixed(2)} ${p3.y.toFixed(2)}`,
+      `A ${rInner0.toFixed(2)} ${rInner0.toFixed(2)} 0 0 0 ${p4.x.toFixed(2)} ${p4.y.toFixed(2)}`,
+      'Z',
+    ].join(' ')
+
+    const thetaMid = (theta0 + theta1) / 2
+    const rMidAvg = (rMid0 + rMid1) / 2
+    return {
+      id: cell.id,
+      label: cell.label,
+      value: cell.value,
+      pathD,
+      cx: center + rMidAvg * Math.cos(thetaMid),
+      cy: center + rMidAvg * Math.sin(thetaMid),
+    }
+  })
 }
 
 export function SeasonalitySpiralHeatmapWidget({ symbol }: SeasonalitySpiralHeatmapWidgetProps) {
@@ -113,20 +163,21 @@ export function SeasonalitySpiralHeatmapWidget({ symbol }: SeasonalitySpiralHeat
       .sort((a, b) => a.time - b.time)
   }, [granularity, rows])
 
-  const geometry = useMemo(() => {
-    const center = 170
-    const config = SPIRAL_GEOMETRY[granularity]
-    return cells.map((cell, index) => {
-      const angle = index * config.angleStep - Math.PI / 2
-      const radius = config.startRadius + index * config.step
-      return {
-        ...cell,
-        x: center + Math.cos(angle) * radius,
-        y: center + Math.sin(angle) * radius,
-        rotate: (angle * 180) / Math.PI,
-        size: config.cellSize,
-        radius: config.cellRadius,
-      }
+  const segments = useMemo<SpiralSegment[]>(() => {
+    if (cells.length === 0) return []
+    // Tune density: weekly fits ~52/year on a single ring, so we want
+    // wider segments and tighter turns. Daily packs ~252/year so we
+    // shrink segment width and increase turn spacing.
+    const isWeekly = granularity === 'weekly'
+    const segmentsPerTurn = isWeekly ? 52 : 60
+    const turnSpacing = isWeekly ? 22 : 14
+    const thickness = isWeekly ? 18 : 11
+    return buildSpiralSegments(cells, {
+      center: 200,
+      turnSpacing,
+      segmentsPerTurn,
+      thickness,
+      minRadius: 18,
     })
   }, [cells, granularity])
 
@@ -205,34 +256,64 @@ export function SeasonalitySpiralHeatmapWidget({ symbol }: SeasonalitySpiralHeat
         ) : (
           <div className="flex h-full flex-col">
             <div className="flex-1 overflow-auto">
-              <svg viewBox="0 0 340 340" className="mx-auto h-full min-h-[300px] max-h-[640px] w-full max-w-[720px]">
-                <circle cx="170" cy="170" r="24" fill="rgba(15,23,42,0.72)" stroke="rgba(148,163,184,0.25)" />
-                <text x="170" y="166" textAnchor="middle" className="fill-slate-200 text-[10px] font-bold">
+              <svg viewBox="0 0 400 400" className="mx-auto h-full min-h-[320px] max-h-[680px] w-full max-w-[720px]">
+                {/* Center disc with granularity label */}
+                <circle
+                  cx="200"
+                  cy="200"
+                  r="16"
+                  fill="rgba(15,23,42,0.78)"
+                  stroke="rgba(148,163,184,0.35)"
+                  strokeWidth="0.6"
+                />
+                <text
+                  x="200"
+                  y="198"
+                  textAnchor="middle"
+                  className="fill-slate-200 text-[8px] font-bold uppercase tracking-[0.18em]"
+                >
                   {granularityConfig.centerLabel}
                 </text>
-                <text x="170" y="180" textAnchor="middle" className="fill-slate-400 text-[8px]">old to new</text>
-                {geometry.map((cell) => (
-                  <rect
-                    key={cell.id}
-                    x={cell.x - cell.size / 2}
-                    y={cell.y - cell.size / 2}
-                    width={cell.size}
-                    height={cell.size}
-                    rx={cell.radius}
-                    fill={getFill(cell.value)}
-                    stroke="rgba(15,23,42,0.55)"
-                    strokeWidth="0.35"
-                    transform={`rotate(${cell.rotate} ${cell.x} ${cell.y})`}
+                <text
+                  x="200"
+                  y="208"
+                  textAnchor="middle"
+                  className="fill-slate-400 text-[6px]"
+                >
+                  oldest
+                </text>
+
+                {segments.map((segment) => (
+                  <path
+                    key={segment.id}
+                    d={segment.pathD}
+                    fill={getFill(segment.value)}
+                    stroke="rgba(15,23,42,0.45)"
+                    strokeWidth="0.4"
                   >
-                    <title>{`${cell.label}: ${formatPct(cell.value)}`}</title>
-                  </rect>
+                    <title>{`${segment.label}: ${formatPct(segment.value)}`}</title>
+                  </path>
                 ))}
+
+                {/* "newest" arrow on the outermost segment */}
+                {segments.length > 0 && (
+                  <g>
+                    <circle
+                      cx={segments[segments.length - 1].cx}
+                      cy={segments[segments.length - 1].cy}
+                      r="2.5"
+                      fill="rgba(56,189,248,0.95)"
+                      stroke="rgba(15,23,42,0.85)"
+                      strokeWidth="0.6"
+                    />
+                  </g>
+                )}
               </svg>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-3 py-2 text-[10px] text-[var(--text-muted)]">
               <span>
-                Spiral denotes each {granularity === 'weekly' ? 'ISO week' : 'trading day'} from oldest center-adjacent
-                cells to newest outer cells.
+                Each ring is one full {granularity === 'weekly' ? 'year of ISO weeks' : 'cycle of ~60 trading days'}; outer rings are newer.
+                Cyan dot marks the latest period.
               </span>
               <div className="flex items-center gap-2">
                 <span className="h-2.5 w-5 rounded bg-rose-500/70" /> negative

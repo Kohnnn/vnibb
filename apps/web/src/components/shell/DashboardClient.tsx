@@ -104,7 +104,6 @@ function DashboardContent() {
         activeTab,
         setActiveTab,
         createDashboard,
-        createTab,
         setActiveDashboard,
         updateSyncGroupSymbol,
         deleteWidget,
@@ -768,26 +767,30 @@ function DashboardContent() {
     }, [addWidget]);
 
     const handleApplyTemplate = useCallback((template: DashboardTemplate) => {
-        if (!activeDashboard || !activeTab) return;
         if (template.widgets.length === 0) {
             setTemplateApplyStatus({ message: 'This template has no widgets to apply.', tone: 'warning' });
             return;
         }
-        if (!canEditCurrentDashboard) {
-            // Locked / admin-managed system dashboards cannot be edited in
-            // place. Instead of presenting a modal that the user has to
-            // confirm, transparently spin up a fresh editable workspace
-            // seeded with the template and switch to it. This eliminates the
-            // "blacked out / nothing happens" UX without dropping the lock.
+
+        // Always create a fresh editable workspace seeded with the template
+        // and switch to it. This is intentionally unconditional so templates
+        // never appear stuck or "blacked out" regardless of whether the
+        // currently active dashboard is locked, missing, or read-only.
+        try {
             const dashboard = createDashboard({ name: `${template.name} Workspace` });
             const tab = dashboard.tabs[0];
+            if (!tab) {
+                setTemplateApplyStatus({ message: 'Could not create workspace for template.', tone: 'warning' });
+                return;
+            }
             applyTemplateToDashboard(template, dashboard.id, tab.id);
             setActiveDashboard(dashboard.id);
             setActiveTab(tab.id);
             setIsTemplateSelectorOpen(false);
+            setIsAppsLibraryOpen(false);
             setTemplateApplyStatus({ message: `Created '${dashboard.name}' from ${template.name}.`, tone: 'success' });
             captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
-                source: 'locked_dashboard_auto_workspace',
+                source: 'template_selector_auto_workspace',
                 template_id: template.id,
                 template_name: template.name,
                 template_category: template.category,
@@ -795,24 +798,14 @@ function DashboardContent() {
                 tab_id: tab.id,
                 widget_count: template.widgets.length,
             });
-            return;
+        } catch (err) {
+            console.error('[handleApplyTemplate] failed', err);
+            setTemplateApplyStatus({
+                message: `Could not apply template: ${err instanceof Error ? err.message : 'unknown error'}`,
+                tone: 'warning',
+            });
         }
-
-        const tab = createTab(activeDashboard.id, template.name);
-        applyTemplateToDashboard(template, activeDashboard.id, tab.id);
-        setActiveTab(tab.id);
-        setIsTemplateSelectorOpen(false);
-        setTemplateApplyStatus({ message: `Applied ${template.name} template.`, tone: 'success' });
-        captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
-            source: 'template_selector',
-            template_id: template.id,
-            template_name: template.name,
-            template_category: template.category,
-            dashboard_id: activeDashboard.id,
-            tab_id: tab.id,
-            widget_count: template.widgets.length,
-        });
-    }, [activeDashboard, activeTab, applyTemplateToDashboard, canEditCurrentDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab]);
+    }, [applyTemplateToDashboard, createDashboard, setActiveDashboard, setActiveTab]);
 
     const handleSeedEmptyTab = useCallback((template: DashboardTemplate) => {
         if (!activeDashboard || !activeTab) return;

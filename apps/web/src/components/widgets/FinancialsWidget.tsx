@@ -39,24 +39,84 @@ interface FinancialsWidgetProps {
 }
 
 const STATEMENT_METRIC_KEYS: Record<'income_statement' | 'balance_sheet' | 'cash_flow', string[]> = {
-    income_statement: ['revenue', 'gross_profit', 'operating_income', 'net_income', 'ebitda'],
-    balance_sheet: ['total_assets', 'total_liabilities', 'total_equity', 'cash_and_equivalents'],
-    cash_flow: ['operating_cash_flow', 'investing_cash_flow', 'financing_cash_flow', 'free_cash_flow'],
+    income_statement: [
+        'revenue',
+        'cost_of_revenue',
+        'gross_profit',
+        'operating_expenses',
+        'operating_income',
+        'interest_expense',
+        'pre_tax_income',
+        'income_tax',
+        'net_income',
+        'ebitda',
+        'eps',
+    ],
+    balance_sheet: [
+        'cash_and_equivalents',
+        'short_term_investments',
+        'receivables',
+        'inventory',
+        'current_assets',
+        'long_term_investments',
+        'fixed_assets',
+        'total_assets',
+        'short_term_debt',
+        'current_liabilities',
+        'long_term_debt',
+        'total_liabilities',
+        'retained_earnings',
+        'total_equity',
+    ],
+    cash_flow: [
+        'operating_cash_flow',
+        'capital_expenditures',
+        'investing_cash_flow',
+        'debt_issued',
+        'debt_repaid',
+        'dividends_paid',
+        'financing_cash_flow',
+        'net_change_in_cash',
+        'free_cash_flow',
+    ],
 };
 
 const STATEMENT_METRIC_ALIASES: Record<string, string[]> = {
     revenue: ['revenue', 'net_revenue', 'sales_revenue', 'total_revenue', 'doanh_thu_thuan', 'doanh_thu'],
+    cost_of_revenue: ['cost_of_revenue', 'costOfRevenue', 'cogs', 'cost_of_goods_sold', 'gia_von_hang_ban'],
     gross_profit: ['gross_profit', 'grossProfit', 'loi_nhuan_gop'],
+    operating_expenses: ['operating_expenses', 'operatingExpenses', 'opex', 'sga', 'selling_general_admin', 'chi_phi_quan_ly_doanh_nghiep', 'chi_phi_ban_hang'],
     operating_income: ['operating_income', 'operatingIncome', 'operating_profit', 'loi_nhuan_thuan_tu_hoat_dong_kinh_doanh'],
+    interest_expense: ['interest_expense', 'interestExpense', 'chi_phi_lai_vay'],
+    pre_tax_income: ['pre_tax_income', 'preTaxIncome', 'income_before_tax', 'profit_before_tax', 'tong_loi_nhuan_truoc_thue'],
+    income_tax: ['income_tax', 'incomeTax', 'tax_expense', 'thue_tncn', 'chi_phi_thue_thu_nhap_doanh_nghiep'],
     net_income: ['net_income', 'netIncome', 'post_tax_profit', 'profit_after_tax', 'loi_nhuan_sau_thue'],
     ebitda: ['ebitda', 'EBITDA'],
-    total_assets: ['total_assets', 'totalAssets', 'asset', 'assets', 'tong_tai_san'],
-    total_liabilities: ['total_liabilities', 'totalLiabilities', 'liabilities', 'debt', 'tong_no_phai_tra'],
-    total_equity: ['total_equity', 'totalEquity', 'equity', 'owner_equity', 'owners_equity', 'von_chu_so_huu'],
+    eps: ['eps', 'earnings_per_share', 'basic_eps', 'lai_co_ban_tren_co_phieu'],
+
     cash_and_equivalents: ['cash_and_equivalents', 'cashAndCashEquivalents', 'cash', 'cash_equivalents', 'tien_va_tuong_duong_tien'],
+    short_term_investments: ['short_term_investments', 'shortTermInvestments', 'dau_tu_tai_chinh_ngan_han'],
+    receivables: ['receivables', 'accounts_receivable', 'cac_khoan_phai_thu_ngan_han'],
+    inventory: ['inventory', 'inventories', 'hang_ton_kho'],
+    current_assets: ['current_assets', 'currentAssets', 'tai_san_ngan_han'],
+    long_term_investments: ['long_term_investments', 'longTermInvestments', 'dau_tu_tai_chinh_dai_han'],
+    fixed_assets: ['fixed_assets', 'fixedAssets', 'tai_san_co_dinh'],
+    total_assets: ['total_assets', 'totalAssets', 'asset', 'assets', 'tong_tai_san'],
+    short_term_debt: ['short_term_debt', 'shortTermDebt', 'vay_va_no_ngan_han'],
+    current_liabilities: ['current_liabilities', 'currentLiabilities', 'no_ngan_han'],
+    long_term_debt: ['long_term_debt', 'longTermDebt', 'vay_va_no_dai_han'],
+    total_liabilities: ['total_liabilities', 'totalLiabilities', 'liabilities', 'debt', 'tong_no_phai_tra'],
+    retained_earnings: ['retained_earnings', 'retainedEarnings', 'loi_nhuan_chua_phan_phoi', 'loi_nhuan_sau_thue_chua_phan_phoi'],
+    total_equity: ['total_equity', 'totalEquity', 'equity', 'owner_equity', 'owners_equity', 'von_chu_so_huu'],
+
     operating_cash_flow: ['operating_cash_flow', 'operatingCashFlow', 'fromOperating', 'cash_from_operations', 'luu_chuyen_tien_thuan_tu_hoat_dong_kinh_doanh'],
+    capital_expenditures: ['capital_expenditures', 'capitalExpenditures', 'capex', 'mua_sam_tai_san_co_dinh'],
     investing_cash_flow: ['investing_cash_flow', 'investingCashFlow', 'fromInvesting', 'cash_from_investments', 'luu_chuyen_tien_thuan_tu_hoat_dong_dau_tu'],
+    debt_issued: ['debt_issued', 'debtIssued', 'proceeds_from_borrowings', 'tien_vay_ngan_han_dai_han_nhan_duoc'],
+    debt_repaid: ['debt_repaid', 'debtRepaid', 'repayment_of_borrowings', 'tien_chi_tra_no_goc_vay'],
+    dividends_paid: ['dividends_paid', 'dividendsPaid', 'co_tuc_loi_nhuan_da_tra_cho_chu_so_huu'],
     financing_cash_flow: ['financing_cash_flow', 'financingCashFlow', 'fromFinancing', 'cash_from_financing', 'luu_chuyen_tien_thuan_tu_hoat_dong_tai_chinh'],
+    net_change_in_cash: ['net_change_in_cash', 'netChangeInCash', 'luu_chuyen_tien_thuan_trong_ky'],
     free_cash_flow: ['free_cash_flow', 'freeCashFlow', 'fcf', 'dong_tien_tu_do'],
 };
 
@@ -101,12 +161,66 @@ function readMetricValue(row: Record<string, any>, key: string): any {
 }
 
 const STATEMENT_LABELS: Record<'income_statement' | 'balance_sheet' | 'cash_flow', string[]> = {
-    income_statement: ['Revenue', 'Gross Profit', 'Operating Inc.', 'Net Income', 'EBITDA'],
-    balance_sheet: ['Total Assets', 'Total Liab.', 'Total Equity', 'Cash & Eq.'],
-    cash_flow: ['Operating CF', 'Investing CF', 'Financing CF', 'Free CF'],
+    income_statement: [
+        'Revenue',
+        'Cost of Revenue',
+        'Gross Profit',
+        'Operating Expenses',
+        'Operating Income',
+        'Interest Expense',
+        'Pre-Tax Income',
+        'Income Tax',
+        'Net Income',
+        'EBITDA',
+        'EPS',
+    ],
+    balance_sheet: [
+        'Cash & Eq.',
+        'ST Investments',
+        'Receivables',
+        'Inventory',
+        'Current Assets',
+        'LT Investments',
+        'Fixed Assets',
+        'Total Assets',
+        'ST Debt',
+        'Current Liab.',
+        'LT Debt',
+        'Total Liab.',
+        'Retained Earnings',
+        'Total Equity',
+    ],
+    cash_flow: [
+        'Operating CF',
+        'CapEx',
+        'Investing CF',
+        'Debt Issued',
+        'Debt Repaid',
+        'Dividends Paid',
+        'Financing CF',
+        'Net Change in Cash',
+        'Free CF',
+    ],
 };
 
-const RATIO_METRIC_KEYS = ['pe', 'pb', 'roe', 'roa', 'eps', 'debt_equity', 'gross_margin', 'net_margin'];
+const RATIO_METRIC_KEYS = [
+    'pe',
+    'pb',
+    'roe',
+    'roa',
+    'eps',
+    'bvps',
+    'debt_equity',
+    'current_ratio',
+    'quick_ratio',
+    'gross_margin',
+    'operating_margin',
+    'net_margin',
+    'asset_turnover',
+    'inventory_turnover',
+    'dividend_yield',
+    'payout_ratio',
+];
 
 function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: FinancialsWidgetProps) {
     const [activeTab, setActiveTab] = useState<FinancialTab>('income_statement');
@@ -130,9 +244,14 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                 : 'quarter';
     const periodLabel = period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : `${period} Quarterly`;
 
-    const incomeQuery = useIncomeStatement(symbol, { period: requestPeriod, enabled: activeTab === 'income_statement' });
-    const balanceQuery = useBalanceSheet(symbol, { period: requestPeriod, enabled: activeTab === 'balance_sheet' });
-    const cashFlowQuery = useCashFlow(symbol, { period: requestPeriod, enabled: activeTab === 'cash_flow' });
+    // Backend `limit` caps at 80. We always request the maximum so the
+    // table can render the full multi-year history that the user
+    // expects to see when they scroll. Per-quarter selectors filter
+    // client-side so the same payload covers Q1..Q4/TTM views.
+    const requestLimit = 80;
+    const incomeQuery = useIncomeStatement(symbol, { period: requestPeriod, limit: requestLimit, enabled: activeTab === 'income_statement' });
+    const balanceQuery = useBalanceSheet(symbol, { period: requestPeriod, limit: requestLimit, enabled: activeTab === 'balance_sheet' });
+    const cashFlowQuery = useCashFlow(symbol, { period: requestPeriod, limit: requestLimit, enabled: activeTab === 'cash_flow' });
     const ratiosQuery = useFinancialRatios(symbol, { period: requestPeriod, enabled: activeTab === 'ratios' });
 
     const activeQuery = useMemo(() => {
@@ -215,12 +334,20 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
             metrics = [
                 { key: 'pe', label: 'P/E' },
                 { key: 'pb', label: 'P/B' },
+                { key: 'eps', label: 'EPS' },
+                { key: 'bvps', label: 'BVPS' },
                 { key: 'roe', label: 'ROE', isPct: true },
                 { key: 'roa', label: 'ROA', isPct: true },
                 { key: 'gross_margin', label: 'Gross Margin', isPct: true },
+                { key: 'operating_margin', label: 'Operating Margin', isPct: true },
                 { key: 'net_margin', label: 'Net Margin', isPct: true },
                 { key: 'debt_equity', label: 'D/E' },
                 { key: 'current_ratio', label: 'Current Ratio' },
+                { key: 'quick_ratio', label: 'Quick Ratio' },
+                { key: 'asset_turnover', label: 'Asset Turnover' },
+                { key: 'inventory_turnover', label: 'Inventory Turnover' },
+                { key: 'dividend_yield', label: 'Dividend Yield', isPct: true },
+                { key: 'payout_ratio', label: 'Payout Ratio', isPct: true },
             ];
         } else {
             const keys = STATEMENT_METRIC_KEYS[activeTab as 'income_statement' | 'balance_sheet' | 'cash_flow'];
