@@ -51,7 +51,13 @@
 - Full all-symbol/all-period check attempted `41,808` checks with concurrency `16`; result was polluted by public API `429 Too Many Requests` responses.
 - FY-only all-symbol baseline attempted `6,968` checks with concurrency `4`; result was still rate-limited by public API `429 Too Many Requests` responses.
 - Current parity blocker is API rate limiting during bulk validation, not the probe's ability to enumerate all stocks.
+- Deployed commit `8a255c3` to OCI and reran FY-only parity inside the `vnibb-api` container against `http://127.0.0.1:8000`.
+- In-container FY-only run still hit FastAPI `429 Too Many Requests`, proving rate limiting applies to localhost/container traffic too.
+- In-container run details: `1,742` symbols, `6,968` FY checks, concurrency `2`, `6,849` failures polluted by `429`.
+- Next parity step should be a server-side validation job that calls service/database functions directly instead of HTTP endpoints, or a temporary admin-only bypass for local parity runs.
 
 ## Deployment Log
 
-- Pending.
+- Committed and pushed as `8a255c3` with message `fix(dashboard): improve templates financials and seasonality`.
+- OCI `/srv/vnibb` fast-forwarded and rebuilt with `docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build`.
+- `vnibb-api` reported healthy after rebuild.
