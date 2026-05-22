@@ -91,14 +91,7 @@ function resolveDateRange(timeframe: AdvancedChartTimeframe): { startDate: strin
       start.setDate(end.getDate() - 365 * 5);
       break;
     case 'MAX':
-      // MAX = 10 years rather than year-2000. Vietnam tickers usually have
-      // ~5–10 years of liquid daily bars; opening the range to 2000-01-01
-      // produced ~6500 bars at ~0.1 px each, which made candles invisible
-      // (QA-v2 CC1/T1). Volume histograms still rendered because they are
-      // solid blocks per pixel column. Capping at 10 years keeps every
-      // candle ≥1 px wide on a ~700 px viewport while still showing a
-      // long-cycle view.
-      start.setFullYear(end.getFullYear() - 10);
+      start.setFullYear(2000, 0, 1);
       break;
     case 'YTD':
       start.setMonth(0, 1);
@@ -460,7 +453,8 @@ export function TradingViewAdvancedChart({
           setError('Chart data could not be parsed for this timeframe.');
           return;
         }
-        if (mode === 'line') {
+        const effectiveMode = timeframe === 'MAX' && safePoints.length > 900 && mode === 'candles' ? 'line' : mode;
+        if (effectiveMode === 'line') {
           series = chart.addLineSeries({
             color: '#38bdf8',
             lineWidth: 2,
@@ -468,7 +462,7 @@ export function TradingViewAdvancedChart({
             crosshairMarkerRadius: 4,
           });
           series.setData(safePoints.map((point) => ({ time: point.time, value: point.close })));
-        } else if (mode === 'area') {
+        } else if (effectiveMode === 'area') {
           series = chart.addAreaSeries({
             topColor: 'rgba(56, 189, 248, 0.35)',
             bottomColor: 'rgba(56, 189, 248, 0.04)',

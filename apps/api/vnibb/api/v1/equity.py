@@ -2807,6 +2807,29 @@ async def _get_latest_financial_row(
     return result.scalar_one_or_none()
 
 
+async def _get_latest_statement_period_key(
+    db: AsyncSession,
+    symbol: str,
+    period: str,
+) -> int:
+    latest_key = 0
+    for model in (IncomeStatement, BalanceSheet, CashFlow):
+        row = await _get_latest_financial_row(db, symbol, model, period)
+        if not row:
+            continue
+        year = int(getattr(row, "fiscal_year", 0) or 0)
+        quarter = int(getattr(row, "fiscal_quarter", 0) or 0)
+        latest_key = max(latest_key, year * 10 + quarter)
+    return latest_key
+
+
+def _latest_ratio_period_key(rows: list[FinancialRatioData]) -> int:
+    latest_key = 0
+    for row in rows:
+        latest_key = max(latest_key, _ratio_period_sort_key(str(row.period or "")))
+    return latest_key
+
+
 def _to_ratio_data(row: FinancialRatio) -> FinancialRatioData:
     period_value = (
         _normalize_ratio_period(
@@ -6295,10 +6318,27 @@ async def get_financial_ratios(
         limit=80,
     )
 
+    latest_statement_period_key = await _get_latest_statement_period_key(
+        db,
+        symbol_upper,
+        normalized_period,
+    )
+    latest_ratio_period_key = _latest_ratio_period_key(db_ratio_rows + mongo_ratio_rows)
+    statements_are_newer = latest_statement_period_key > latest_ratio_period_key
+
+    if statements_are_newer and normalized_period == "year":
+        support_rows = await _load_ratio_statement_support(
+            db=db,
+            symbol=symbol_upper,
+            period=normalized_period,
+            limit=20,
+        )
+
     should_fetch_provider = (
         not db_ratio_rows
         or normalized_period == "quarter"
         or str(period or "").strip().upper() == "TTM"
+        or statements_are_newer
     )
     if should_fetch_provider:
         try:

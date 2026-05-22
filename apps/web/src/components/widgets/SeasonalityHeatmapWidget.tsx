@@ -19,7 +19,6 @@ const GRANULARITY_OPTIONS: Array<{ value: SeasonalityGranularity; label: string;
   { value: 'monthly', label: 'Month', note: 'monthly returns' },
   { value: 'weekly', label: 'Week', note: 'weekly returns' },
   { value: 'daily', label: 'Day', note: 'weekday returns' },
-  { value: 'hourly', label: 'Hour', note: 'intraday Mongo trades' },
 ]
 
 function formatPct(value: number | null | undefined): string {
@@ -38,8 +37,8 @@ function getCellClass(value: number | null): string {
 }
 
 function getRowLimit(granularity: SeasonalityGranularity): number {
-  if (granularity === 'daily') return 18
-  if (granularity === 'hourly') return 20
+  if (granularity === 'daily') return 260
+  if (granularity === 'weekly') return 120
   return 60
 }
 
@@ -77,6 +76,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
   }, [rows, visibleRows])
 
   const note = GRANULARITY_OPTIONS.find((option) => option.value === granularity)?.note || 'seasonality'
+  const compactCells = granularity === 'daily' || granularity === 'weekly'
 
   useEffect(() => {
     onDataChange?.({
@@ -183,7 +183,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
         ) : !hasData ? (
           <WidgetEmpty message="Insufficient data for the selected seasonality mode" icon={<CalendarDays size={18} />} />
         ) : (
-          <div className={granularity === 'weekly' ? 'min-w-[980px] space-y-2' : 'min-w-[560px] space-y-2'}>
+          <div className={compactCells ? 'min-w-[980px] space-y-1' : 'min-w-[560px] space-y-2'}>
             {payload?.warning ? (
               <div className="rounded-md border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-[10px] text-blue-200">
                 {payload.warning}
@@ -191,7 +191,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
             ) : null}
             <div
               className="grid gap-1 text-[10px] text-[var(--text-muted)]"
-              style={{ gridTemplateColumns: `64px repeat(${columns.length}, minmax(0, 1fr))` }}
+              style={{ gridTemplateColumns: `${compactCells ? '72px' : '64px'} repeat(${columns.length}, minmax(0, 1fr))` }}
             >
               <div />
               {columns.map((column) => (
@@ -205,7 +205,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
               <div
                 key={rowKey}
                 className="grid gap-1 text-[10px]"
-                style={{ gridTemplateColumns: `64px repeat(${columns.length}, minmax(0, 1fr))` }}
+                style={{ gridTemplateColumns: `${compactCells ? '72px' : '64px'} repeat(${columns.length}, minmax(0, 1fr))` }}
               >
                 <div className="flex items-center truncate font-medium text-[var(--text-secondary)]" title={rowKey}>
                   {rowKey}
@@ -215,10 +215,10 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
                   return (
                     <div
                       key={`${rowKey}-${column}`}
-                      className={`flex h-7 items-center justify-center rounded border border-[var(--border-subtle)] font-mono ${getCellClass(value)}`}
+                      className={`flex ${compactCells ? 'h-4 min-w-4' : 'h-7'} items-center justify-center rounded border border-[var(--border-subtle)] font-mono ${getCellClass(value)}`}
                       title={`${rowKey} ${column}: ${formatPct(value)}`}
                     >
-                      {value === null ? '-' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}
+                      {compactCells ? '' : value === null ? '-' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}
                     </div>
                   )
                 })}
@@ -227,7 +227,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
 
             <div
               className="grid gap-1 text-[10px]"
-              style={{ gridTemplateColumns: `64px repeat(${columns.length}, minmax(0, 1fr))` }}
+              style={{ gridTemplateColumns: `${compactCells ? '72px' : '64px'} repeat(${columns.length}, minmax(0, 1fr))` }}
             >
               <div className="flex items-center font-semibold text-cyan-300">Avg</div>
               {columns.map((column) => {
@@ -235,10 +235,10 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
                 return (
                   <div
                     key={`avg-${column}`}
-                    className={`flex h-7 items-center justify-center rounded border border-cyan-500/20 font-mono ${getCellClass(value)}`}
+                    className={`flex ${compactCells ? 'h-4 min-w-4' : 'h-7'} items-center justify-center rounded border border-cyan-500/20 font-mono ${getCellClass(value)}`}
                     title={`Average ${column}: ${formatPct(value)}`}
                   >
-                    {value === null ? '-' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}
+                    {compactCells ? '' : value === null ? '-' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}
                   </div>
                 )
               })}

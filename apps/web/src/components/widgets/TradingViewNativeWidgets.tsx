@@ -137,6 +137,39 @@ function TradingViewNativeWidget({
   const [isInView, setIsInView] = useState(false);
   const allowsOverflow = widgetType === 'tradingview_ticker_tag';
 
+  useEffect(() => {
+    if (widgetType !== 'tradingview_ticker_tape') return;
+
+    const isTradingViewChunkError = (value: unknown) => {
+      const message = value instanceof Error ? value.message : String(value || '');
+      return (
+        message.includes('ChunkLoadError') ||
+        message.includes('tradingview-widget.com') ||
+        message.includes('snowplow-embed-widget-tracker')
+      );
+    };
+
+    const handleError = (event: ErrorEvent) => {
+      if (!isTradingViewChunkError(event.error || event.message || event.filename)) return;
+      setLoadError(new Error('TradingView ticker tape failed to load a required chunk.'));
+      setIsLoading(false);
+    };
+
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      if (!isTradingViewChunkError(event.reason)) return;
+      event.preventDefault();
+      setLoadError(new Error('TradingView ticker tape failed to load a required chunk.'));
+      setIsLoading(false);
+    };
+
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleRejection);
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
+  }, [widgetType]);
+
   const resolvedSymbol = useMemo(() => {
     if (!symbol) return '';
     return toTradingViewSymbol(symbol);
@@ -501,6 +534,49 @@ const NativeCryptoMarketFallback = dynamic(
   { ssr: false },
 );
 
+function NativeTickerTapeFallback({ config }: { config?: WidgetConfig }) {
+  const symbols = useMemo(() => {
+    const configured = Array.isArray(config?.symbols) ? config.symbols : [];
+    const raw = configured.length > 0
+      ? configured
+      : ['AMEX:SPY', 'NASDAQ:QQQ', 'TVC:DXY', 'BINANCE:BTCUSDT', 'TVC:GOLD', 'TVC:USOIL'];
+    return raw
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object') {
+          const record = item as Record<string, unknown>;
+          return String(record.proName || record.s || record.name || '').trim();
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .slice(0, 12);
+  }, [config]);
+
+  return (
+    <WidgetContainer title="Ticker Tape" noPadding>
+      <div className="flex h-full min-h-[96px] items-center overflow-hidden bg-[var(--bg-primary)] px-3">
+        <div className="flex min-w-max animate-[marquee_28s_linear_infinite] items-center gap-3">
+          {[...symbols, ...symbols].map((symbol, index) => (
+            <div
+              key={`${symbol}-${index}`}
+              className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] shadow-sm"
+            >
+              {symbol}
+            </div>
+          ))}
+        </div>
+      </div>
+      <style>{`
+        @keyframes marquee {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+      `}</style>
+    </WidgetContainer>
+  );
+}
+
 export const TradingViewChartWidget = createTradingViewWrapper('tradingview_chart');
 export const TradingViewSymbolOverviewWidget = createTradingViewWrapper('tradingview_symbol_overview');
 export const TradingViewMiniChartWidget = createTradingViewWrapper('tradingview_mini_chart');
@@ -508,7 +584,9 @@ export const TradingViewMarketSummaryWidget = createTradingViewWrapper('tradingv
 export const TradingViewMarketOverviewWidget = createTradingViewWrapper('tradingview_market_overview');
 export const TradingViewStockMarketWidget = createTradingViewWrapper('tradingview_stock_market');
 export const TradingViewMarketDataWidget = createTradingViewWrapper('tradingview_market_data');
-export const TradingViewTickerTapeWidget = createTradingViewWrapper('tradingview_ticker_tape');
+export const TradingViewTickerTapeWidget = createTradingViewWrapper('tradingview_ticker_tape', {
+  fallback: ({ config }) => <NativeTickerTapeFallback config={config} />,
+});
 export const TradingViewTickerTagWidget = createTradingViewWrapper('tradingview_ticker_tag');
 export const TradingViewSingleTickerWidget = createTradingViewWrapper('tradingview_single_ticker');
 export const TradingViewTickerWidget = createTradingViewWrapper('tradingview_ticker');

@@ -1,7 +1,7 @@
 import { DEFAULT_TICKER, normalizeTickerSymbol, writeStoredTicker } from '@/lib/defaultTicker'
 
 export const USER_PREFERENCES_STORAGE_KEY = 'vnibb-user-preferences'
-export const DASHBOARD_WALKTHROUGH_VERSION = 1
+export const DASHBOARD_WALKTHROUGH_VERSION = 2
 export const DASHBOARD_WALKTHROUGH_RESTART_EVENT = 'vnibb:restart-dashboard-walkthrough'
 
 export type DefaultTabPreference =
