@@ -80,7 +80,16 @@
 ## Deployment Log
 
 - 2026-05-22 (previous cycle): commit `8a255c3 fix(dashboard): improve templates financials and seasonality` deployed to OCI; doc update committed as `bbd4c6e docs: record dashboard parity deployment`.
-- 2026-05-23 build cycle: changes staged locally, all local gates green. Deployment pending user confirmation.
+- 2026-05-22 (this cycle):
+  - Committed as `470ce4e feat(dashboard): templates auto-create workspace, spiral heatmap granularity, whats-new revamp, parity probes` and pushed to `origin/main`.
+  - OCI `/srv/vnibb` fast-forwarded `bbd4c6e` -> `470ce4e`.
+  - Rebuilt `vnibb-api` and `vnibb-mcp` with `docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build api mcp`.
+  - Both containers report `Up (healthy)` after restart.
+  - Public healthcheck `https://129.150.58.64.sslip.io`:
+    - `/api/v1/health` -> 200
+    - `/health/` -> 200
+    - `/live` -> 200
+    - `/ready` -> 200
 
 ## How to run the parity scripts
 
