@@ -40,4 +40,10 @@ Fix dashboard issues reported from `https://vnibb-web.vercel.app/dashboard`, the
 
 ## Deployment Log
 
-- Pending.
+- Committed and pushed as `45d873f` with message `fix(web+api): remediate dashboard data UX issues`.
+- OCI `/srv/vnibb` fast-forwarded and rebuilt with `docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build`.
+- `vnibb-api` and `vnibb-mcp` recreated; `vnibb-api` reported healthy after startup.
+- Public healthcheck against `https://129.150.58.64.sslip.io` passed for `/live`, `/ready`, and `/health/`.
+- Public smoke test passed for API health, profile, quote, screener, microstructure, and CORS preflight from `https://vnibb.vercel.app`.
+- WebSocket probe skipped because the remote shell Python environment lacks the `websockets` package.
+- MCP smoke passed against `http://127.0.0.1:8001` with configured bearer token; returned 10 tools and Appwrite connectivity.
