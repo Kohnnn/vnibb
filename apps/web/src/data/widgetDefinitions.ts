@@ -636,10 +636,18 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'seasonality_heatmap',
         name: 'Seasonality Heatmap',
-        description: 'Month, week, weekday, and intraday-hour return matrix for recurring seasonal patterns',
+        description: 'Month and week return matrix for recurring seasonal patterns',
         category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 8, h: 7, minW: 6, minH: 5 }
+    },
+    {
+        type: 'seasonality_spiral_heatmap',
+        name: 'Daily Spiral Heatmap',
+        description: 'Daily return spiral heatmap for visually scanning day-by-day seasonality',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 12, h: 13, minW: 8, minH: 10 }
     },
     {
         type: 'volume_flow',

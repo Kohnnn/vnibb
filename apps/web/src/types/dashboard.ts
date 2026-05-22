@@ -115,6 +115,7 @@ export type WidgetType =
     | 'drawdown_deep_dive'
     | 'hurst_market_structure'
     | 'seasonality_heatmap'
+    | 'seasonality_spiral_heatmap'
     | 'technical_summary'
     | 'technical_snapshot'
     | 'signal_summary'

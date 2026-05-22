@@ -117,6 +117,7 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   money_flow_trend: { preferredW: 14, preferredH: 12, minW: 10, minH: 9, orientation: 'horizontal', expandPriority: 3 },
   industry_bubble: { preferredW: 10, preferredH: 12, minW: 8, minH: 9, orientation: 'balanced', expandPriority: 2 },
   seasonality_heatmap: { preferredW: 14, preferredH: 13, minW: 10, minH: 10, orientation: 'horizontal', expandPriority: 5 },
+  seasonality_spiral_heatmap: { preferredW: 12, preferredH: 13, minW: 8, minH: 10, orientation: 'balanced', expandPriority: 5 },
   sortino_monthly: { preferredW: 10, preferredH: 13, minW: 8, minH: 10, orientation: 'vertical', expandPriority: 2 },
   volume_profile: { preferredW: 12, preferredH: 11, minW: 8, minH: 8, orientation: 'vertical', expandPriority: 2 },
   volume_flow: { preferredW: 8, preferredH: 10, minW: 6, minH: 8, orientation: 'balanced', expandPriority: 2 },

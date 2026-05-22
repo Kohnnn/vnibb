@@ -102,6 +102,7 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
     const neutralCount = signals?.neutral_count || 0;
     const sellCount = signals?.sell_count || 0;
     const totalSignals = Math.max(signals?.total_indicators || 0, buyCount + neutralCount + sellCount, 1);
+    const dataQualityIssues = ta?.data_quality?.issues || [];
     const gaugeBackground = useMemo(
         () => buildSignalGaugeBackground(buyCount, neutralCount, sellCount),
         [buyCount, neutralCount, sellCount]
@@ -172,9 +173,16 @@ export function TechnicalSummaryWidget({ symbol, isEditing, onRemove }: Technica
                         updatedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={timeframeLabel}
+                        note={ta?.data_quality?.bars ? `${timeframeLabel} · ${ta.data_quality.bars} bars` : timeframeLabel}
                         align="right"
                     />
+
+                    {dataQualityIssues.length ? (
+                        <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-4 text-amber-100">
+                            <div className="font-bold uppercase tracking-[0.14em]">Data quality</div>
+                            <div className="mt-1">{dataQualityIssues.slice(0, 2).join(' ')}</div>
+                        </div>
+                    ) : null}
 
                     {/* Signal Indicator */}
                     <Card className="bg-[var(--bg-secondary)] border-[var(--border-color)] p-2.5 flex flex-col items-center justify-center relative overflow-hidden">

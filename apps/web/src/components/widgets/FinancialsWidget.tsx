@@ -45,31 +45,55 @@ const STATEMENT_METRIC_KEYS: Record<'income_statement' | 'balance_sheet' | 'cash
 };
 
 const STATEMENT_METRIC_ALIASES: Record<string, string[]> = {
-    revenue: ['revenue', 'net_revenue', 'sales_revenue', 'total_revenue'],
-    gross_profit: ['gross_profit', 'grossProfit'],
-    operating_income: ['operating_income', 'operatingIncome', 'operating_profit'],
-    net_income: ['net_income', 'netIncome', 'post_tax_profit'],
+    revenue: ['revenue', 'net_revenue', 'sales_revenue', 'total_revenue', 'doanh_thu_thuan', 'doanh_thu'],
+    gross_profit: ['gross_profit', 'grossProfit', 'loi_nhuan_gop'],
+    operating_income: ['operating_income', 'operatingIncome', 'operating_profit', 'loi_nhuan_thuan_tu_hoat_dong_kinh_doanh'],
+    net_income: ['net_income', 'netIncome', 'post_tax_profit', 'profit_after_tax', 'loi_nhuan_sau_thue'],
     ebitda: ['ebitda', 'EBITDA'],
-    total_assets: ['total_assets', 'totalAssets', 'asset', 'assets'],
-    total_liabilities: ['total_liabilities', 'totalLiabilities', 'liabilities', 'debt'],
-    total_equity: ['total_equity', 'totalEquity', 'equity', 'owner_equity', 'owners_equity'],
-    cash_and_equivalents: ['cash_and_equivalents', 'cashAndCashEquivalents', 'cash', 'cash_equivalents'],
-    operating_cash_flow: ['operating_cash_flow', 'operatingCashFlow', 'fromOperating', 'cash_from_operations'],
-    investing_cash_flow: ['investing_cash_flow', 'investingCashFlow', 'fromInvesting', 'cash_from_investments'],
-    financing_cash_flow: ['financing_cash_flow', 'financingCashFlow', 'fromFinancing', 'cash_from_financing'],
-    free_cash_flow: ['free_cash_flow', 'freeCashFlow', 'fcf'],
+    total_assets: ['total_assets', 'totalAssets', 'asset', 'assets', 'tong_tai_san'],
+    total_liabilities: ['total_liabilities', 'totalLiabilities', 'liabilities', 'debt', 'tong_no_phai_tra'],
+    total_equity: ['total_equity', 'totalEquity', 'equity', 'owner_equity', 'owners_equity', 'von_chu_so_huu'],
+    cash_and_equivalents: ['cash_and_equivalents', 'cashAndCashEquivalents', 'cash', 'cash_equivalents', 'tien_va_tuong_duong_tien'],
+    operating_cash_flow: ['operating_cash_flow', 'operatingCashFlow', 'fromOperating', 'cash_from_operations', 'luu_chuyen_tien_thuan_tu_hoat_dong_kinh_doanh'],
+    investing_cash_flow: ['investing_cash_flow', 'investingCashFlow', 'fromInvesting', 'cash_from_investments', 'luu_chuyen_tien_thuan_tu_hoat_dong_dau_tu'],
+    financing_cash_flow: ['financing_cash_flow', 'financingCashFlow', 'fromFinancing', 'cash_from_financing', 'luu_chuyen_tien_thuan_tu_hoat_dong_tai_chinh'],
+    free_cash_flow: ['free_cash_flow', 'freeCashFlow', 'fcf', 'dong_tien_tu_do'],
 };
+
+function normalizeMetricKey(value: string): string {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+}
+
+function buildMetricLookup(source: unknown): Map<string, unknown> {
+    const lookup = new Map<string, unknown>();
+    if (!source || typeof source !== 'object') return lookup;
+    Object.entries(source as Record<string, unknown>).forEach(([key, value]) => {
+        lookup.set(key, value);
+        lookup.set(normalizeMetricKey(key), value);
+    });
+    return lookup;
+}
 
 function readMetricValue(row: Record<string, any>, key: string): any {
     const aliases = STATEMENT_METRIC_ALIASES[key] || [key];
+    const rowLookup = buildMetricLookup(row);
     for (const alias of aliases) {
-        const value = row[alias];
+        const value = rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias));
         if (value !== null && value !== undefined && value !== '') return value;
     }
     const rawData = row.raw_data || row.rawData || row.raw;
-    if (rawData && typeof rawData === 'object') {
+    const rawLookup = buildMetricLookup(rawData);
+    if (rawLookup.size > 0) {
         for (const alias of aliases) {
-            const value = rawData[alias];
+            const value = rawLookup.get(alias) ?? rawLookup.get(normalizeMetricKey(alias));
             if (value !== null && value !== undefined && value !== '') return value;
         }
     }

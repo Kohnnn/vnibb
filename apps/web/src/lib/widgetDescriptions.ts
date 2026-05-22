@@ -115,20 +115,28 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     interpretation: 'Concentrated ownership can support strong trends but can also reduce float and increase gap risk if sentiment changes.',
   },
   seasonality_heatmap: {
-    purpose: 'Shows recurring return patterns across month, week, weekday, and intraday-hour views in one heatmap.',
-    calculation: 'Groups adjusted daily price history into monthly, weekly, or weekday return buckets; hourly mode uses Mongo intraday trades.',
+    purpose: 'Shows recurring return patterns across month and week views in one heatmap.',
+    calculation: 'Groups adjusted daily price history into monthly or weekly return buckets.',
     interpretation: 'Greener cells have historically been stronger. Redder cells have historically been weaker. Toggle modes to see whether a pattern persists across time scales.',
     advanced_insights: [
       'In Vietnam, some stronger seasonal windows can cluster around AGM season, dividend announcements, and post-Tet liquidity normalization.',
-      'Monthly patterns are the most stable. Weekly, weekday, and hourly views are better for timing context and should be treated as lower-confidence pattern evidence.',
+      'Monthly patterns are the most stable. Weekly views are better for timing context and should be treated as lower-confidence pattern evidence.',
     ],
     limitations: [
       'Seasonality is descriptive, not predictive. One regime change can overwhelm a long-run monthly average.',
-      'Hourly mode depends on available Mongo intraday trade coverage and is not a true order-book seasonality model.',
       'Small-cap names with short histories can show noisy month effects that do not persist.',
     ],
     pro_tips: [
       'Use seasonality as a context layer with support/resistance and signal confirmation, not as a standalone timing rule.',
+    ],
+  },
+  seasonality_spiral_heatmap: {
+    purpose: 'Shows daily return seasonality as a spiral so clusters and regime shifts are easier to scan than in a very wide table.',
+    calculation: 'Uses adjusted daily price history and plots each trading day from older center-adjacent cells to newer outer cells.',
+    interpretation: 'Green cells are positive daily returns and red cells are negative daily returns. Hover a cell to see the exact date and return.',
+    limitations: [
+      'Daily seasonality is noisy and should be used as a visual context layer, not a signal by itself.',
+      'Missing trading days appear as gaps because weekends and holidays are not synthetic-filled.',
     ],
   },
   sortino_monthly: {

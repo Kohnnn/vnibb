@@ -18,7 +18,6 @@ interface SeasonalityHeatmapWidgetProps {
 const GRANULARITY_OPTIONS: Array<{ value: SeasonalityGranularity; label: string; note: string }> = [
   { value: 'monthly', label: 'Month', note: 'monthly returns' },
   { value: 'weekly', label: 'Week', note: 'weekly returns' },
-  { value: 'daily', label: 'Day', note: 'weekday returns' },
 ]
 
 function formatPct(value: number | null | undefined): string {
@@ -37,9 +36,20 @@ function getCellClass(value: number | null): string {
 }
 
 function getRowLimit(granularity: SeasonalityGranularity): number {
-  if (granularity === 'daily') return 260
   if (granularity === 'weekly') return 120
   return 60
+}
+
+function formatColumnLabel(column: string, granularity: SeasonalityGranularity): string {
+  if (granularity !== 'weekly') return column
+  const match = column.match(/^W0?(\d+)$/i)
+  return match ? match[1] : column
+}
+
+function formatColumnTitle(column: string, granularity: SeasonalityGranularity): string {
+  if (granularity !== 'weekly') return column
+  const label = formatColumnLabel(column, granularity)
+  return `Week ${label}`
 }
 
 export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHeatmapWidgetProps) {
@@ -76,7 +86,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
   }, [rows, visibleRows])
 
   const note = GRANULARITY_OPTIONS.find((option) => option.value === granularity)?.note || 'seasonality'
-  const compactCells = granularity === 'daily' || granularity === 'weekly'
+  const compactCells = granularity === 'weekly'
 
   useEffect(() => {
     onDataChange?.({
@@ -196,7 +206,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
               <div />
               {columns.map((column) => (
                 <div key={column} className="text-center uppercase tracking-widest">
-                  {column}
+                  <span title={formatColumnTitle(column, granularity)}>{formatColumnLabel(column, granularity)}</span>
                 </div>
               ))}
             </div>
@@ -216,7 +226,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
                     <div
                       key={`${rowKey}-${column}`}
                       className={`flex ${compactCells ? 'h-4 min-w-4' : 'h-7'} items-center justify-center rounded border border-[var(--border-subtle)] font-mono ${getCellClass(value)}`}
-                      title={`${rowKey} ${column}: ${formatPct(value)}`}
+                      title={`${rowKey} ${formatColumnTitle(column, granularity)}: ${formatPct(value)}`}
                     >
                       {compactCells ? '' : value === null ? '-' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}
                     </div>
@@ -236,7 +246,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
                   <div
                     key={`avg-${column}`}
                     className={`flex ${compactCells ? 'h-4 min-w-4' : 'h-7'} items-center justify-center rounded border border-cyan-500/20 font-mono ${getCellClass(value)}`}
-                    title={`Average ${column}: ${formatPct(value)}`}
+                    title={`Average ${formatColumnTitle(column, granularity)}: ${formatPct(value)}`}
                   >
                     {compactCells ? '' : value === null ? '-' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}
                   </div>

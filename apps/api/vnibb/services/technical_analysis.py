@@ -344,6 +344,8 @@ class TechnicalAnalysisService:
         if frame is None or frame.empty:
             return frame
 
+        frame = self._clean_ohlcv_frame(frame)
+
         try:
             quote, _ = await VnstockStockQuoteFetcher.fetch(
                 symbol=symbol, source=settings.vnstock_source
@@ -400,6 +402,54 @@ class TechnicalAnalysisService:
             merged = pd.concat([merged, pd.DataFrame([appended_row])], ignore_index=True)
 
         return merged
+
+    @staticmethod
+    def _clean_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        cleaned = frame.copy()
+        if "time" in cleaned.columns:
+            cleaned["time"] = pd.to_datetime(cleaned["time"], errors="coerce")
+        elif "date" in cleaned.columns:
+            cleaned["time"] = pd.to_datetime(cleaned["date"], errors="coerce")
+        for column in ["open", "high", "low", "close", "volume"]:
+            if column in cleaned.columns:
+                cleaned[column] = pd.to_numeric(cleaned[column], errors="coerce")
+        cleaned = cleaned.dropna(subset=["time", "high", "low", "close"])
+        cleaned = cleaned[(cleaned["high"] >= cleaned["low"]) & (cleaned["close"] > 0)]
+        cleaned = cleaned.drop_duplicates(subset=["time"], keep="last")
+        return cleaned.sort_values("time").reset_index(drop=True)
+
+    async def get_data_quality_summary(
+        self,
+        symbol: str,
+        lookback_days: int = 260,
+    ) -> Dict[str, Any]:
+        end_date = date.today()
+        start_date = end_date - timedelta(days=lookback_days)
+        raw = await self.get_ohlcv_data(symbol, start_date, end_date)
+        if raw is None or raw.empty:
+            return {
+                "status": "no_data",
+                "bars": 0,
+                "issues": [f"No OHLCV rows returned for {symbol.upper()}"],
+            }
+        frame = self._clean_ohlcv_frame(raw)
+        issues: List[str] = []
+        if len(frame) < 60:
+            issues.append(f"Only {len(frame)} clean bars available; most indicators need at least 60.")
+        if len(frame) < 220:
+            issues.append(f"SMA200 and long lookback indicators may be incomplete with {len(frame)} clean bars.")
+        latest = pd.to_datetime(frame.iloc[-1]["time"], errors="coerce")
+        latest_date = latest.date().isoformat() if not pd.isna(latest) else None
+        if latest_date:
+            age_days = (date.today() - latest.date()).days
+            if age_days > 10:
+                issues.append(f"Latest clean bar is {age_days} days old ({latest_date}).")
+        return {
+            "status": "ok" if not issues else "degraded",
+            "bars": int(len(frame)),
+            "latest_date": latest_date,
+            "issues": issues,
+        }
 
     async def get_moving_averages(
         self,
@@ -1210,6 +1260,7 @@ class TechnicalAnalysisService:
         elif timeframe == "M":
             lookback_days = lookback_days * 20  # ~16 years of monthly data
 
+        quality_task = self.get_data_quality_summary(symbol, lookback_days)
         # Fetch all data in parallel
         ma_task = self.get_moving_averages(symbol, [10, 20, 50, 200], lookback_days)
         rsi_task = self.get_rsi(symbol, 14, lookback_days)
@@ -1223,7 +1274,8 @@ class TechnicalAnalysisService:
         signal_task = self.get_signal_summary(symbol, lookback_days)
         volume_full_task = self.get_volume_analysis(symbol, 20, lookback_days)
 
-        ma, rsi, macd, bb, stoch, adx, sr, fib, ichimoku, signals, vol = await asyncio.gather(
+        quality, ma, rsi, macd, bb, stoch, adx, sr, fib, ichimoku, signals, vol = await asyncio.gather(
+            quality_task,
             ma_task,
             rsi_task,
             macd_task,
@@ -1257,6 +1309,7 @@ class TechnicalAnalysisService:
                 "fibonacci": fib,
             },
             "signals": signals,
+            "data_quality": quality,
             "generated_at": datetime.now().isoformat(),
         }
 

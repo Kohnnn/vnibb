@@ -258,6 +258,7 @@ class FullTechnicalAnalysis(BaseModel):
     volatility: VolatilityResponse
     levels: LevelsResponse
     signals: SignalSummary
+    data_quality: Optional[Dict[str, Any]] = None
     generated_at: str
 
 

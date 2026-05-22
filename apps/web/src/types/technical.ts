@@ -181,5 +181,11 @@ export interface FullTechnicalAnalysis {
     volatility: VolatilityResponse;
     levels: LevelsResponse;
     signals: SignalSummary;
+    data_quality?: {
+        status?: 'ok' | 'degraded' | 'no_data' | string;
+        bars?: number;
+        latest_date?: string | null;
+        issues?: string[];
+    };
     generated_at: string;
 }

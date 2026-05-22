@@ -55,6 +55,7 @@ import { AmihudIlliquidityWidget } from './AmihudIlliquidityWidget';
 import { DrawdownDeepDiveWidget } from './DrawdownDeepDiveWidget';
 import { HurstMarketStructureWidget } from './HurstMarketStructureWidget';
 import { SeasonalityHeatmapWidget } from './SeasonalityHeatmapWidget';
+import { SeasonalitySpiralHeatmapWidget } from './SeasonalitySpiralHeatmapWidget';
 import { TechnicalSummaryWidget } from './TechnicalSummaryWidget';
 import { ForexRatesWidget } from './ForexRatesWidget';
 import { CommoditiesWidget } from './CommoditiesWidget';
@@ -398,6 +399,7 @@ export const widgetRegistry: Record<string, ComponentType<WidgetProps>> = {
     drawdown_deep_dive: DrawdownDeepDiveWidget as ComponentType<WidgetProps>,
     hurst_market_structure: HurstMarketStructureWidget as ComponentType<WidgetProps>,
     seasonality_heatmap: SeasonalityHeatmapWidget as ComponentType<WidgetProps>,
+    seasonality_spiral_heatmap: SeasonalitySpiralHeatmapWidget as ComponentType<WidgetProps>,
     technical_summary: TechnicalSummaryWidget as ComponentType<WidgetProps>,
     technical_snapshot: TechnicalSnapshotWidget as ComponentType<WidgetProps>,
     signal_summary: SignalSummaryWidget as ComponentType<WidgetProps>,
@@ -513,6 +515,7 @@ export const defaultWidgetLayouts: Record<WidgetType, { w: number; h: number; mi
     drawdown_deep_dive: { w: 8, h: 7, minW: 6, minH: 5 },
     hurst_market_structure: { w: 6, h: 7, minW: 4, minH: 5 },
     seasonality_heatmap: { w: 14, h: 13, minW: 10, minH: 10 },
+    seasonality_spiral_heatmap: { w: 12, h: 13, minW: 8, minH: 10 },
     technical_summary: { w: 5, h: 7, minW: 4, minH: 5 },
     technical_snapshot: { w: 5, h: 6, minW: 4, minH: 5 },
     signal_summary: { w: 24, h: 8, minW: 12, minH: 6 },
@@ -676,6 +679,7 @@ export const widgetNames: Record<WidgetType, string> = {
     drawdown_deep_dive: 'Drawdown Deep Dive',
     hurst_market_structure: 'Hurst Market Structure',
     seasonality_heatmap: 'Seasonality Heatmap',
+    seasonality_spiral_heatmap: 'Daily Spiral Heatmap',
     technical_summary: 'Technical Summary',
     technical_snapshot: 'Technical Snapshot',
     signal_summary: 'Signal Summary',
@@ -798,7 +802,8 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     amihud_illiquidity: 'Price impact per traded value with rolling liquidity trend',
     drawdown_deep_dive: 'Underwater drawdown curve with depth and recovery statistics',
     hurst_market_structure: 'Hurst exponent with persistence and mean-reversion structure clues',
-    seasonality_heatmap: 'Year by month return heatmap for seasonal structure',
+    seasonality_heatmap: 'Year by month/week return heatmap for seasonal structure',
+    seasonality_spiral_heatmap: 'Daily return spiral from oldest center-adjacent cells to newest outer cells',
     technical_summary: 'Indicator-based signals',
     technical_snapshot: 'Daily technical indicator snapshot',
     signal_summary: 'Unified buy, sell, and hold summary distilled from technical indicators',
