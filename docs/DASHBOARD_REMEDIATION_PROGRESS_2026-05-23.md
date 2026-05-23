@@ -113,6 +113,36 @@
     - Aliases extended end-to-end so each metric reads from camelCase, snake_case, and Vietnamese-diacritic variants of provider payloads.
     - Existing `initialScrollPosition="end"` keeps the freshest period in view on mount.
 
+## Cycle 4 - 2026-05-23 (incremental ship)
+
+Tracking 5 issues:
+- Spiral "no pattern, no green daily"
+- Templates "still stuck even on custom workspace"
+- Financials "VCI ratios stuck at 2021, sync latest year across tabs"
+- Weekly seasonality tooltip needs date range
+- Eval report quick wins + deep bugs (`docs/evaluationreprot.md`)
+
+### Track A - Spiral heatmap calendar-aligned per year (SHIPPED)
+
+Files: `apps/web/src/components/widgets/SeasonalitySpiralHeatmapWidget.tsx`.
+
+Root cause of "no pattern": cells were placed sequentially along an Archimedean curve so the same calendar week across different years landed at different angles. Users could not visually scan for "every July is green".
+
+Root cause of "no green daily": color thresholds were 1/4/8 percent. Daily returns are typically <= 2%, so almost every cell fell into the lightest opacity bucket which reads as grey on a dark background.
+
+Fixes:
+- Angle is now driven by calendar position. Daily: `(dayOfYear / yearLength) * 2pi`. Weekly: `(isoWeek / 52) * 2pi`. Same calendar slot lines up at the same angle across years.
+- Radius is driven by year. Oldest year is the inner ring; newest year is the outermost ring per the user's preference.
+- Color buckets recalibrated: daily bands at 0.2/0.5/1.0/2.0%, weekly bands at 0.5/1.5/3.0/6.0%. A 5-step scale per direction so adjacent days look different.
+- Compass: 12 month initials (J F M A M J J A S O N D) painted around the outer ring at the angle of each month's first day.
+- Year tags painted on each ring at Jan 1 (12 o'clock) with a stroke outline so they remain readable over data cells.
+- Tooltip continues to use `<dd/mm or week-range> <year>: <return>`; this lays the groundwork for Track D where the seasonality table widget gets the same treatment.
+- Latest cell still gets a cyan dot.
+
+Verification:
+- `pnpm --filter frontend lint` PASS
+- `pnpm --filter frontend exec tsc --noEmit` PASS
+
 ## How to run the parity scripts
 
 ```pwsh

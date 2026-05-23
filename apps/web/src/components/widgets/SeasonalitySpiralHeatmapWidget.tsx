@@ -22,9 +22,11 @@ const SPIRAL_GRANULARITY_OPTIONS: Array<{
   centerLabel: string
   note: string
 }> = [
-  { value: 'daily', label: 'Daily', centerLabel: 'Daily', note: 'each segment = one trading day' },
-  { value: 'weekly', label: 'Weekly', centerLabel: 'Weekly', note: 'each segment = one ISO week' },
+  { value: 'daily', label: 'Daily', centerLabel: 'Daily', note: 'each cell = one trading day' },
+  { value: 'weekly', label: 'Weekly', centerLabel: 'Weekly', note: 'each cell = one ISO week' },
 ]
+
+const MONTH_INITIALS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D']
 
 function formatPct(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '-'
@@ -32,79 +34,118 @@ function formatPct(value: number | null | undefined): string {
 }
 
 /**
- * Divergent red/green color scale with five buckets per side so adjacent
- * cells visually differ. Missing values use a neutral slate.
+ * Recalibrated divergent red/green color scale. Daily returns are
+ * typically <= 2% so the previous 1/4/8 thresholds left almost every
+ * daily cell in the lightest opacity bucket and reading nearly grey.
+ * The new bucketing emphasizes <= 2% changes which is where the
+ * day-to-day signal lives.
  */
-function getFill(value: number | null | undefined): string {
+function getFill(value: number | null | undefined, granularity: SpiralGranularity): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return 'rgba(71,85,105,0.42)'
-  if (value >= 8) return 'rgba(16,185,129,0.95)'
-  if (value >= 4) return 'rgba(16,185,129,0.78)'
-  if (value >= 1) return 'rgba(16,185,129,0.52)'
-  if (value > 0) return 'rgba(16,185,129,0.32)'
-  if (value <= -8) return 'rgba(244,63,94,0.95)'
-  if (value <= -4) return 'rgba(244,63,94,0.78)'
-  if (value <= -1) return 'rgba(244,63,94,0.52)'
-  return 'rgba(244,63,94,0.32)'
+
+  // Daily uses tighter bands; weekly uses wider bands matching typical
+  // weekly return distributions (-6% to +6%).
+  const bands = granularity === 'daily'
+    ? [0.2, 0.5, 1.0, 2.0]
+    : [0.5, 1.5, 3.0, 6.0]
+
+  if (value >= bands[3]) return 'rgba(16,185,129,0.95)'
+  if (value >= bands[2]) return 'rgba(16,185,129,0.78)'
+  if (value >= bands[1]) return 'rgba(16,185,129,0.56)'
+  if (value >= bands[0]) return 'rgba(16,185,129,0.36)'
+  if (value > 0) return 'rgba(16,185,129,0.22)'
+  if (value <= -bands[3]) return 'rgba(244,63,94,0.95)'
+  if (value <= -bands[2]) return 'rgba(244,63,94,0.78)'
+  if (value <= -bands[1]) return 'rgba(244,63,94,0.56)'
+  if (value <= -bands[0]) return 'rgba(244,63,94,0.36)'
+  return 'rgba(244,63,94,0.22)'
 }
 
-function stripWeekPrefix(value: string | null | undefined): string {
-  if (!value) return ''
-  return value.replace(/\bW0?(\d+)\b/g, '$1')
+function dayOfYear(date: Date): number {
+  const start = Date.UTC(date.getUTCFullYear(), 0, 0)
+  const diff = date.getTime() - start
+  return Math.floor(diff / (1000 * 60 * 60 * 24))
 }
 
-interface SpiralSegment {
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+}
+
+interface SpiralCell {
   id: string
   label: string
   value: number | null
+  year: number
+  date: Date
+}
+
+interface SpiralSegment extends SpiralCell {
   pathD: string
   cx: number
   cy: number
 }
 
 /**
- * Build segments along an Archimedean spiral
+ * Build polygon segments for each cell so cells with the same calendar
+ * position across years align at the same angle but different rings.
  *
- *   r(theta) = r0 + (turnSpacing / 2*pi) * theta
+ *   angle  = (dayOfYear / 365 or isoWeek / 53) * 2*pi
+ *   radius = r0 + yearIndex * turnSpacing
  *
- * Each segment is a quadrilateral spanning [theta_i, theta_{i+1}] and
- * [r_i - thickness/2, r_i + thickness/2]. Drawn as polygon (M..L..Z)
- * because at small dTheta the curvature is invisible while polygons
- * avoid the SVG arc-rendering quirks that mismatched start/end radii
- * trigger.
+ * yearIndex is 0 for the oldest year (closest to the center) so the
+ * newest year forms the outermost ring.
  */
-function buildSpiralSegments(
-  cells: Array<{ id: string; label: string; value: number | null }>,
-  options: { center: number; turnSpacing: number; segmentsPerTurn: number; thickness: number; r0: number },
+function buildCalendarSegments(
+  cells: SpiralCell[],
+  options: {
+    center: number
+    r0: number
+    turnSpacing: number
+    thickness: number
+    granularity: SpiralGranularity
+    yearOrder: number[]
+  },
 ): SpiralSegment[] {
-  const { center, turnSpacing, segmentsPerTurn, thickness, r0 } = options
-  const a = turnSpacing / (2 * Math.PI)
-  const dTheta = (2 * Math.PI) / segmentsPerTurn
+  const { center, r0, turnSpacing, thickness, granularity, yearOrder } = options
+  const yearIndex = new Map(yearOrder.map((year, index) => [year, index]))
   const half = thickness / 2
 
-  return cells.map((cell, index) => {
-    const theta0 = index * dTheta
-    const theta1 = theta0 + dTheta
-    const rMid0 = r0 + a * theta0
-    const rMid1 = r0 + a * theta1
+  // Slice width in radians. Daily uses 1/365 of a turn; weekly uses 1/52.
+  return cells.map((cell) => {
+    let theta0 = 0
+    let theta1 = 0
+    if (granularity === 'weekly') {
+      const isoWeek = getIsoWeek(cell.date)
+      const weekFraction = (isoWeek - 1) / 52
+      const dTheta = (2 * Math.PI) / 52
+      theta0 = weekFraction * 2 * Math.PI - Math.PI / 2
+      theta1 = theta0 + dTheta
+    } else {
+      const doy = dayOfYear(cell.date)
+      const yearLen = isLeapYear(cell.date.getUTCFullYear()) ? 366 : 365
+      const dTheta = (2 * Math.PI) / yearLen
+      theta0 = ((doy - 1) / yearLen) * 2 * Math.PI - Math.PI / 2
+      theta1 = theta0 + dTheta
+    }
 
-    const rOuter0 = rMid0 + half
-    const rOuter1 = rMid1 + half
-    const rInner0 = rMid0 - half
-    const rInner1 = rMid1 - half
+    const idx = yearIndex.get(cell.year) ?? 0
+    const rMid = r0 + idx * turnSpacing
+    const rOuter = rMid + half
+    const rInner = Math.max(2, rMid - half)
 
     const cos0 = Math.cos(theta0)
     const sin0 = Math.sin(theta0)
     const cos1 = Math.cos(theta1)
     const sin1 = Math.sin(theta1)
 
-    const x1 = center + rOuter0 * cos0
-    const y1 = center + rOuter0 * sin0
-    const x2 = center + rOuter1 * cos1
-    const y2 = center + rOuter1 * sin1
-    const x3 = center + rInner1 * cos1
-    const y3 = center + rInner1 * sin1
-    const x4 = center + rInner0 * cos0
-    const y4 = center + rInner0 * sin0
+    const x1 = center + rOuter * cos0
+    const y1 = center + rOuter * sin0
+    const x2 = center + rOuter * cos1
+    const y2 = center + rOuter * sin1
+    const x3 = center + rInner * cos1
+    const y3 = center + rInner * sin1
+    const x4 = center + rInner * cos0
+    const y4 = center + rInner * sin0
 
     const pathD = [
       `M ${x1.toFixed(2)} ${y1.toFixed(2)}`,
@@ -115,16 +156,39 @@ function buildSpiralSegments(
     ].join(' ')
 
     const thetaMid = (theta0 + theta1) / 2
-    const rMidAvg = (rMid0 + rMid1) / 2
     return {
-      id: cell.id,
-      label: cell.label,
-      value: cell.value,
+      ...cell,
       pathD,
-      cx: center + rMidAvg * Math.cos(thetaMid),
-      cy: center + rMidAvg * Math.sin(thetaMid),
+      cx: center + rMid * Math.cos(thetaMid),
+      cy: center + rMid * Math.sin(thetaMid),
     }
   })
+}
+
+function getIsoWeek(date: Date): number {
+  // Standard ISO 8601 week-of-year. Algorithm copied from MDN reference.
+  const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+  const dayNr = (target.getUTCDay() + 6) % 7
+  target.setUTCDate(target.getUTCDate() - dayNr + 3)
+  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4))
+  const diff = target.getTime() - firstThursday.getTime()
+  return 1 + Math.round(diff / (7 * 24 * 60 * 60 * 1000))
+}
+
+function formatDDMM(date: Date): string {
+  const dd = String(date.getUTCDate()).padStart(2, '0')
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}`
+}
+
+function formatTooltip(cell: SpiralCell, granularity: SpiralGranularity): string {
+  const value = formatPct(cell.value)
+  if (granularity === 'weekly') {
+    const start = cell.date
+    const end = new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000)
+    return `${formatDDMM(start)} - ${formatDDMM(end)} ${cell.year}: ${value}`
+  }
+  return `${formatDDMM(cell.date)}/${cell.year}: ${value}`
 }
 
 export function SeasonalitySpiralHeatmapWidget({ symbol }: SeasonalitySpiralHeatmapWidgetProps) {
@@ -148,62 +212,94 @@ export function SeasonalitySpiralHeatmapWidget({ symbol }: SeasonalitySpiralHeat
     [granularity],
   )
 
-  const cells = useMemo(() => {
-    return [...rows]
+  const cells = useMemo<SpiralCell[]>(() => {
+    return rows
       .map((row) => {
         const date = new Date(row.start_date || row.label || '')
-        const rawLabel = row.label || `${row.row_key} ${row.column}`
+        if (Number.isNaN(date.getTime())) return null
         return {
-          id: row.start_date || `${row.row_key}-${row.column}-${row.label}`,
-          label: granularity === 'weekly' ? stripWeekPrefix(rawLabel) : rawLabel,
+          id: row.start_date || `${row.row_key}-${row.column}`,
+          label: row.label || `${row.row_key} ${row.column}`,
           value: row.return_pct ?? null,
-          time: Number.isNaN(date.getTime()) ? 0 : date.getTime(),
+          year: date.getUTCFullYear(),
+          date,
         }
       })
-      .filter((row) => row.time > 0)
-      .sort((a, b) => a.time - b.time)
-  }, [granularity, rows])
+      .filter((c): c is SpiralCell => c !== null)
+      .sort((a, b) => a.date.getTime() - b.date.getTime())
+  }, [rows])
+
+  // Year order: oldest -> newest. Closest-to-center index = 0 for oldest;
+  // outermost ring is the newest year, matching "history grows outward".
+  const yearOrder = useMemo(() => {
+    const years = Array.from(new Set(cells.map((c) => c.year))).sort((a, b) => a - b)
+    return years
+  }, [cells])
 
   const geometry = useMemo(() => {
     if (cells.length === 0) {
-      return { segments: [] as SpiralSegment[], outerRadius: 18 }
+      return { segments: [] as SpiralSegment[], outerRadius: 24, r0: 30, turnSpacing: 24 }
     }
 
-    // Pick segmentsPerTurn so a "natural cycle" wraps once per ring.
-    // Weekly: 52 weeks per ISO year. Daily: ~252 trading days per year,
-    // but that produces too-tight rings; cap at 60/turn so each ring is
-    // a comfortable two-month bucket and the spiral stays legible.
     const isWeekly = granularity === 'weekly'
-    const segmentsPerTurn = isWeekly ? 52 : 60
-    // Thickness = how thick each ring is, turnSpacing = distance between
-    // ring centers. We need turnSpacing > thickness for visible gaps; a
-    // 1.4x ratio reads cleanly.
-    const thickness = isWeekly ? 12 : 8
-    const turnSpacing = thickness * 1.4
-    const r0 = 26
+    const r0 = 36
+    // Per-ring thickness; ring spacing must exceed thickness so years
+    // don't visually merge.
+    const thickness = isWeekly ? 16 : 12
+    const turnSpacing = thickness * 1.25
 
-    const center = 200
-    const segments = buildSpiralSegments(cells, {
+    const center = 220
+    const segments = buildCalendarSegments(cells, {
       center,
-      turnSpacing,
-      segmentsPerTurn,
-      thickness,
       r0,
+      turnSpacing,
+      thickness,
+      granularity,
+      yearOrder,
     })
 
-    const a = turnSpacing / (2 * Math.PI)
-    const lastTheta = cells.length * ((2 * Math.PI) / segmentsPerTurn)
-    const outerRadius = r0 + a * lastTheta + thickness / 2
+    const outerRadius = r0 + (yearOrder.length - 1) * turnSpacing + thickness / 2
 
-    return { segments, outerRadius }
-  }, [cells, granularity])
+    return { segments, outerRadius, r0, turnSpacing }
+  }, [cells, granularity, yearOrder])
 
-  // Pad SVG viewBox to fit the outermost ring plus a small margin.
+  // SVG sizing: scales with outer radius so the full figure fits.
   const viewBoxSize = useMemo(() => {
-    const center = 200
-    const desired = Math.max(360, (geometry.outerRadius + 12) * 2)
-    return { side: desired, center: desired / 2 }
+    const padding = 28
+    const side = Math.max(380, (geometry.outerRadius + padding) * 2)
+    return { side, center: side / 2 }
   }, [geometry.outerRadius])
+
+  const monthMarkers = useMemo(() => {
+    if (geometry.segments.length === 0) return []
+    const monthAngles = MONTH_INITIALS.map((label, monthIndex) => {
+      // Angle to the START of each month, normalized as a fraction of the year.
+      const startDay = monthFirstDayOfYear(monthIndex)
+      const fraction = startDay / 365
+      const angle = fraction * 2 * Math.PI - Math.PI / 2
+      const labelRadius = geometry.outerRadius + 12
+      return {
+        label,
+        x: viewBoxSize.center + labelRadius * Math.cos(angle),
+        y: viewBoxSize.center + labelRadius * Math.sin(angle),
+      }
+    })
+    return monthAngles
+  }, [geometry.outerRadius, geometry.segments.length, viewBoxSize.center])
+
+  const yearMarkers = useMemo(() => {
+    if (yearOrder.length === 0) return []
+    return yearOrder.map((year, index) => {
+      const r = geometry.r0 + index * geometry.turnSpacing
+      // Place at Jan 1 angle (top of the spiral, 12 o'clock).
+      const angle = -Math.PI / 2
+      return {
+        year,
+        x: viewBoxSize.center + r * Math.cos(angle),
+        y: viewBoxSize.center + r * Math.sin(angle) - geometry.turnSpacing / 2 + 4,
+      }
+    })
+  }, [geometry.r0, geometry.turnSpacing, viewBoxSize.center, yearOrder])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view spiral seasonality" icon={<CalendarDays size={18} />} />
@@ -282,61 +378,93 @@ export function SeasonalitySpiralHeatmapWidget({ symbol }: SeasonalitySpiralHeat
             <div className="flex-1 overflow-auto">
               <svg
                 viewBox={`0 0 ${viewBoxSize.side} ${viewBoxSize.side}`}
-                className="mx-auto h-full min-h-[320px] max-h-[680px] w-full max-w-[720px]"
+                className="mx-auto h-full min-h-[340px] max-h-[720px] w-full max-w-[760px]"
               >
-                <g transform={`translate(${viewBoxSize.center - 200} ${viewBoxSize.center - 200})`}>
-                  {/* Center disc */}
-                  <circle
-                    cx="200"
-                    cy="200"
-                    r="20"
-                    fill="rgba(15,23,42,0.78)"
-                    stroke="rgba(148,163,184,0.35)"
-                    strokeWidth="0.6"
-                  />
+                {/* Center disc with granularity label */}
+                <circle
+                  cx={viewBoxSize.center}
+                  cy={viewBoxSize.center}
+                  r="22"
+                  fill="rgba(15,23,42,0.78)"
+                  stroke="rgba(148,163,184,0.35)"
+                  strokeWidth="0.6"
+                />
+                <text
+                  x={viewBoxSize.center}
+                  y={viewBoxSize.center - 1}
+                  textAnchor="middle"
+                  className="fill-slate-200 text-[8px] font-bold uppercase tracking-[0.18em]"
+                >
+                  {granularityConfig.centerLabel}
+                </text>
+                <text
+                  x={viewBoxSize.center}
+                  y={viewBoxSize.center + 9}
+                  textAnchor="middle"
+                  className="fill-slate-400 text-[6px]"
+                >
+                  by year
+                </text>
+
+                {/* Month compass markers around the outer ring */}
+                {monthMarkers.map((marker, idx) => (
                   <text
-                    x="200"
-                    y="198"
+                    key={`month-${idx}`}
+                    x={marker.x}
+                    y={marker.y}
                     textAnchor="middle"
-                    className="fill-slate-200 text-[8px] font-bold uppercase tracking-[0.18em]"
+                    dominantBaseline="middle"
+                    className="fill-slate-400 text-[7px] font-semibold"
                   >
-                    {granularityConfig.centerLabel}
+                    {marker.label}
                   </text>
-                  <text x="200" y="208" textAnchor="middle" className="fill-slate-400 text-[6px]">
-                    oldest
-                  </text>
+                ))}
 
-                  {geometry.segments.map((segment) => (
-                    <path
-                      key={segment.id}
-                      d={segment.pathD}
-                      fill={getFill(segment.value)}
-                      stroke="rgba(15,23,42,0.45)"
-                      strokeWidth="0.35"
+                {/* Cells */}
+                {geometry.segments.map((segment) => (
+                  <path
+                    key={segment.id}
+                    d={segment.pathD}
+                    fill={getFill(segment.value, granularity)}
+                    stroke="rgba(15,23,42,0.4)"
+                    strokeWidth="0.3"
+                  >
+                    <title>{formatTooltip(segment, granularity)}</title>
+                  </path>
+                ))}
+
+                {/* Year tags placed at Jan 1 angle on each ring */}
+                {yearMarkers.map((marker) => (
+                  <g key={`year-${marker.year}`}>
+                    <text
+                      x={marker.x}
+                      y={marker.y}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      className="fill-slate-300 text-[7px] font-bold"
+                      style={{ paintOrder: 'stroke', stroke: 'rgba(15,23,42,0.85)', strokeWidth: 2 }}
                     >
-                      <title>{`${segment.label}: ${formatPct(segment.value)}`}</title>
-                    </path>
-                  ))}
+                      {marker.year}
+                    </text>
+                  </g>
+                ))}
 
-                  {/* Marker on the outermost (newest) cell so users can */}
-                  {/* find "today" at a glance. */}
-                  {geometry.segments.length > 0 && (
-                    <circle
-                      cx={geometry.segments[geometry.segments.length - 1].cx}
-                      cy={geometry.segments[geometry.segments.length - 1].cy}
-                      r="3"
-                      fill="rgba(56,189,248,1)"
-                      stroke="rgba(15,23,42,0.85)"
-                      strokeWidth="0.7"
-                    />
-                  )}
-                </g>
+                {/* Marker on the most recent cell */}
+                {geometry.segments.length > 0 && (
+                  <circle
+                    cx={geometry.segments[geometry.segments.length - 1].cx}
+                    cy={geometry.segments[geometry.segments.length - 1].cy}
+                    r="3"
+                    fill="rgba(56,189,248,1)"
+                    stroke="rgba(15,23,42,0.85)"
+                    strokeWidth="0.7"
+                  />
+                )}
               </svg>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-3 py-2 text-[10px] text-[var(--text-muted)]">
               <span>
-                Each ring covers {granularity === 'weekly' ? 'one ISO year (52 weeks)' : '~60 trading days'}; outer rings
-                are newer. Cyan dot marks the latest period.
+                Same calendar position across years aligns on the same angle. Outer rings are newer years; inner ring is the oldest. Cyan dot marks the latest period.
               </span>
               <div className="flex items-center gap-2">
                 <span className="h-2.5 w-5 rounded bg-rose-500/70" /> negative
@@ -349,6 +477,12 @@ export function SeasonalitySpiralHeatmapWidget({ symbol }: SeasonalitySpiralHeat
       </div>
     </div>
   )
+}
+
+function monthFirstDayOfYear(monthIndex: number): number {
+  // 0-indexed month -> day-of-year for the 1st (non-leap reference).
+  const offsets = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335]
+  return offsets[monthIndex] ?? 1
 }
 
 export default SeasonalitySpiralHeatmapWidget
