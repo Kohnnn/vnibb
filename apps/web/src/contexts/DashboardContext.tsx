@@ -11,6 +11,7 @@ import {
     useState,
     type ReactNode,
 } from 'react';
+import { flushSync } from 'react-dom';
 import type {
     Dashboard,
     DashboardFolder,
@@ -3110,7 +3111,15 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     // ========================================================================
 
     const setActiveDashboard = useCallback((id: string) => {
-        dispatch({ type: 'SET_ACTIVE_DASHBOARD', payload: id });
+        // flushSync forces the SET_ACTIVE_DASHBOARD reducer (which also
+        // realigns activeTabId) to commit before the next render so any
+        // immediately-following render sees the correct active dashboard
+        // and tab. Without this, callers that synchronously create a
+        // dashboard and then call setActiveDashboard would still see the
+        // previous tab id in state, leaving the grid blank.
+        flushSync(() => {
+            dispatch({ type: 'SET_ACTIVE_DASHBOARD', payload: id });
+        });
         const dashboard = state.dashboards.find((d) => d.id === id);
         if (dashboard) {
             captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceSwitched, {

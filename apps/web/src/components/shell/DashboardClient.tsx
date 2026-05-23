@@ -42,6 +42,7 @@ import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
 import { autoFitGridItems, findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { CURRENT_RELEASE } from '@/lib/version';
 import { analyzeDashboardTab } from '@/lib/dashboardIntelligence';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
@@ -180,6 +181,13 @@ function DashboardContent() {
     useEffect(() => {
         setMounted(true);
         updateViewport();
+
+        // One-shot boot log so we can ask "open devtools and tell me what
+        // version you see" when users report stale-bundle issues.
+        if (typeof window !== 'undefined' && !(window as { __VNIBB_BOOTED__?: boolean }).__VNIBB_BOOTED__) {
+            (window as { __VNIBB_BOOTED__?: boolean }).__VNIBB_BOOTED__ = true;
+            console.info(`[VNIBB ${CURRENT_RELEASE}] dashboard booted at ${new Date().toISOString()}`);
+        }
 
         if (typeof window !== 'undefined') {
             const storedLeftWidth = Number(window.localStorage.getItem(LEFT_SIDEBAR_STORAGE_KEY));
@@ -1347,6 +1355,7 @@ function DashboardContent() {
             <AppsLibrary
                 isOpen={isAppsLibraryOpen}
                 onClose={() => setIsAppsLibraryOpen(false)}
+                onSelectTemplate={handleApplyTemplate}
             />
 
             <TemplateSelector

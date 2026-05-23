@@ -143,6 +143,29 @@ Verification:
 - `pnpm --filter frontend lint` PASS
 - `pnpm --filter frontend exec tsc --noEmit` PASS
 
+### Track B - Templates "still stuck" defensive rewrite + unify (SHIPPED)
+
+Files:
+- `apps/web/src/contexts/DashboardContext.tsx`
+- `apps/web/src/components/modals/AppsLibrary.tsx`
+- `apps/web/src/components/shell/DashboardClient.tsx`
+
+Three things converged to make this still feel "stuck" in cycle 3:
+
+1. The `setActiveDashboard` callback dispatched `SET_ACTIVE_DASHBOARD` then read `state.dashboards.find(...)` from a stale closure. The reducer fix from cycle 3 took care of `activeTabId`, but if any consumer re-rendered between the dispatch and the SET_ACTIVE_TAB second dispatch, the grid could still mount with no active tab for one frame.
+2. `AppsLibrary` had its own private `handleApplyTemplate` that called `createDashboard` + `addWidget` + `setActiveDashboard` directly without the auto-workspace path that `DashboardClient.handleApplyTemplate` uses. So clicking a template through Apps Library bypassed every cycle-3 fix.
+3. No way to verify a user is on the latest bundle when they report "stuck" - had to guess at cache freshness.
+
+Fixes:
+- `setActiveDashboard` now wraps the `SET_ACTIVE_DASHBOARD` dispatch in `flushSync` so the reducer commit (including activeTabId realignment) lands before the next render.
+- `AppsLibrary` no longer calls `useDashboard` or carries its own apply logic. It takes a new `onSelectTemplate` prop and forwards the chosen template to whatever the parent wired in. `DashboardClient` passes its own `handleApplyTemplate` which is the same auto-workspace path that `TemplateSelector` already uses.
+- Added a one-shot boot console log: `[VNIBB v1.4.0] dashboard booted at <ISO time>`. Future "templates stuck" reports can be triaged in seconds by asking the user to open devtools and read out the version line.
+
+Verification:
+- `pnpm --filter frontend lint` PASS
+- `pnpm --filter frontend exec tsc --noEmit` PASS
+- `pnpm --filter frontend test -- --runInBand` PASS (7 suites, 19 tests)
+
 ## How to run the parity scripts
 
 ```pwsh

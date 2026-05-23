@@ -13,9 +13,7 @@ import {
     X,
 } from 'lucide-react';
 
-import { useDashboard } from '@/contexts/DashboardContext';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
-import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import {
@@ -28,6 +26,14 @@ import {
 interface AppsLibraryProps {
     isOpen: boolean;
     onClose: () => void;
+    /**
+     * Called with the user's chosen template. The handler is supplied by
+     * `DashboardClient` so all template-apply paths share the same
+     * "always create a fresh editable workspace" logic - this fixes the
+     * persistent "templates blank/stuck" UX where the modal had its own
+     * private addWidget loop that didn't realign the active tab.
+     */
+    onSelectTemplate: (template: DashboardTemplate) => void;
 }
 
 const CATEGORY_ICONS: Record<DashboardTemplateCategory, typeof Activity> = {
@@ -52,10 +58,9 @@ function getTemplateWidgetLabel(type: string): string {
     return getWidgetDefinition(type)?.name || type.replace(/_/g, ' ');
 }
 
-export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
+export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryProps) {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<DashboardTemplateCategory | 'all'>('all');
-    const { createDashboard, addWidget, setActiveDashboard } = useDashboard();
 
     const filteredTemplates = useMemo(() => {
         const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -88,32 +93,14 @@ export function AppsLibrary({ isOpen, onClose }: AppsLibraryProps) {
     if (!isOpen) return null;
 
     const handleApplyTemplate = (template: DashboardTemplate) => {
-        const dashboard = createDashboard({
-            name: template.name,
-            folderId: template.category === 'global' ? 'folder-initial' : undefined,
-        });
-
-        const tabId = dashboard.tabs[0]?.id;
-        if (tabId) {
-            template.widgets.forEach((widget) => {
-                addWidget(dashboard.id, tabId, {
-                    type: widget.type,
-                    tabId,
-                    config: widget.config || {},
-                    layout: widget.layout || getWidgetDefaultLayout(widget.type),
-                });
-            });
-        }
-
-        setActiveDashboard(dashboard.id);
         captureAnalyticsEvent(ANALYTICS_EVENTS.workspaceTemplateApplied, {
             source: 'apps_library',
             template_id: template.id,
             template_name: template.name,
             template_category: template.category,
-            dashboard_id: dashboard.id,
             widget_count: template.widgets.length,
         });
+        onSelectTemplate(template);
         onClose();
     };
 
