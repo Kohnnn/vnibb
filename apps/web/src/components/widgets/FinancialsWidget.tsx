@@ -544,6 +544,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                 </div>
                             )}
                             <DenseFinancialTable
+                                key={`financials:${symbol}:${activeTab}:${period}:${denseColumns.length}`}
                                 columns={denseColumns}
                                 rows={denseRows}
                                 maxYears={denseColumns.length || 1}

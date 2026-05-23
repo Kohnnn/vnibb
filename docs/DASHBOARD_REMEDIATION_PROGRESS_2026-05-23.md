@@ -166,6 +166,23 @@ Verification:
 - `pnpm --filter frontend exec tsc --noEmit` PASS
 - `pnpm --filter frontend test -- --runInBand` PASS (7 suites, 19 tests)
 
+### Track C - Financials scroll-to-latest reinforcement (SHIPPED)
+
+Files:
+- `apps/web/src/components/ui/DenseFinancialTable.tsx`
+- `apps/web/src/components/widgets/FinancialsWidget.tsx`
+
+Root cause of "VCI ratios stuck at 2021": probed live OCI API for VCI - ratios actually go through 2025 with full coverage and statements through 2025 too. The data was being rendered correctly but the table wasn't scrolling all the way to the rightmost column on tab/period switch, so the user saw 2021 as the visible right edge.
+
+Fixes:
+- Three-stage scroll-to-end retry: `requestAnimationFrame` (next paint), 100ms timeout (after column widths settle), 400ms timeout (after lazy chunks finish). Catches every layout pass that can finish after mount.
+- Added a `ResizeObserver` on the scroll container so the table re-snaps to the latest period whenever the container resizes (e.g. when the right sidebar opens/closes).
+- `DenseFinancialTable` instance now keyed on `${symbol}:${activeTab}:${period}:${denseColumns.length}` so React remounts the table - and re-runs the scroll-to-end effect from scratch - whenever the user switches sub-tabs or period selectors. This was the missing piece for "VCI ratios stuck at 2021": the table was being kept mounted across the FY/Q/TTM toggles, so the scroll effect dep on `visibleColumns` reference equality skipped the re-run.
+
+Verification:
+- `pnpm --filter frontend lint` PASS
+- `pnpm --filter frontend exec tsc --noEmit` PASS
+
 ## How to run the parity scripts
 
 ```pwsh

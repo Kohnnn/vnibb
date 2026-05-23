@@ -172,19 +172,35 @@ export function DenseFinancialTable({
     const scrollElement = scrollRef.current
     if (!scrollElement) return
 
-    // Use a small delay so the table can finish laying out before we
-    // measure scrollWidth. Otherwise on first paint the scroll target
-    // is sometimes still 0 because columns haven't widened yet.
-    const frame = window.requestAnimationFrame(() => {
-      scrollElement.scrollLeft = scrollElement.scrollWidth - scrollElement.clientWidth
-    })
-    const fallbackTimer = window.setTimeout(() => {
-      scrollElement.scrollLeft = scrollElement.scrollWidth - scrollElement.clientWidth
-    }, 80)
+    const scrollToEnd = () => {
+      const target = scrollElement.scrollWidth - scrollElement.clientWidth
+      if (target > 0 && scrollElement.scrollLeft !== target) {
+        scrollElement.scrollLeft = target
+      }
+    }
+
+    // Three-stage retry covers the layout passes that can finish after
+    // mount: rAF (next paint), short timer (after column widths settle),
+    // long timer (after virtualization / lazy chunks finish). Plus a
+    // ResizeObserver so the table re-snaps to the latest period if its
+    // container resizes - common when the right sidebar opens/closes.
+    const frame = window.requestAnimationFrame(scrollToEnd)
+    const shortTimer = window.setTimeout(scrollToEnd, 100)
+    const longTimer = window.setTimeout(scrollToEnd, 400)
+
+    let observer: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        scrollToEnd()
+      })
+      observer.observe(scrollElement)
+    }
 
     return () => {
       window.cancelAnimationFrame(frame)
-      window.clearTimeout(fallbackTimer)
+      window.clearTimeout(shortTimer)
+      window.clearTimeout(longTimer)
+      if (observer) observer.disconnect()
     }
   }, [initialScrollPosition, storageKey, visibleColumns, rows.length])
 
