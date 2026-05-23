@@ -41,6 +41,33 @@ function getEntryPrice(entry: DepthEntry): number | null {
   );
 }
 
+/**
+ * HOSE/HNX/UPCOM order book payloads sometimes arrive in raw VND units
+ * (e.g. `25,000` for a stock priced at 25.0 VND/share thousands) and
+ * sometimes already pre-scaled to thousand-VND units. The chart and the
+ * comparison code throughout the dashboard expect "thousand VND" units
+ * (matching the convention used in the price ticker, market overview,
+ * etc). When a price is more than 5x the lastPrice anchor we treat it
+ * as an unscaled raw value and divide by 1000 to align the display.
+ *
+ * This addresses QA-v3 T2/T7 where ask prices showed 58,000-311,900 for
+ * a stock trading at ~25 VND.
+ */
+function normalizeOrderbookPrice(price: number | null, lastPriceAnchor: number | null): number | null {
+  if (price === null || !Number.isFinite(price)) return price;
+  if (lastPriceAnchor === null || !Number.isFinite(lastPriceAnchor) || lastPriceAnchor <= 0) {
+    // Without an anchor we still apply the heuristic for absurdly large
+    // values typical of unscaled HOSE feeds (>= 5,000 effectively means
+    // raw VND for any HOSE-listed stock priced in thousand-VND units).
+    if (Math.abs(price) >= 5000) return price / 1000;
+    return price;
+  }
+  if (Math.abs(price) > lastPriceAnchor * 5) {
+    return price / 1000;
+  }
+  return price;
+}
+
 function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataChange }: OrderbookWidgetProps) {
   const {
     data: orderbook,
@@ -65,8 +92,12 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
   }, [entries]);
 
   const normalizedEntries = useMemo(
-    () => entries.map((entry) => ({ ...entry, price: getEntryPrice(entry) })),
-    [entries]
+    () => entries.map((entry) => {
+      const rawPrice = getEntryPrice(entry);
+      const anchor = Number.isFinite(lastPrice) ? lastPrice : null;
+      return { ...entry, price: normalizeOrderbookPrice(rawPrice, anchor) };
+    }),
+    [entries, lastPrice]
   );
 
   const depthSeries = useMemo(() => {

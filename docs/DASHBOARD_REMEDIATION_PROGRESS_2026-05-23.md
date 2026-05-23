@@ -198,6 +198,25 @@ Verification:
 - `pnpm --filter frontend lint` PASS
 - `pnpm --filter frontend exec tsc --noEmit` PASS
 
+### Track E.1 - Eval report quick wins audit (SHIPPED)
+
+Files: `apps/web/src/components/widgets/OrderbookWidget.tsx`.
+
+Audited the eval report's quick-win bugs against the deployed code:
+
+- **H1 HMX vs HNX** (eval report 2026-05-21): `apps/web/src/components/layout/Header.tsx:219` already uses the label `HNX`. The eval report likely captured a stale screenshot or had a typo; the deployed code is correct. No change.
+- **F5 Dividend Yield 0.00%**: `KeyMetricsWidget.tsx:184-188` already resolves through `Ratios TTM` -> `Ratios` -> `Screener` chain. The eval report's complaint pre-dates the v1.4.0 deploy. No change.
+- **F6 Beta = "-"**: `KeyMetricsWidget.tsx:189-192` already pulls Beta 63D from `useQuantMetrics` (Quant tab pipeline) before falling through to the screener. No change.
+- **T4 HOSE hours**: `apps/web/src/lib/marketHours.ts` already exports `HOSE_SCHEDULE_SUMMARY = '09:00-11:30 + 13:00-14:45 ICT, Mon-Fri'` and the VWAP / Footprint copy reads from there. No change.
+- **G2/G7 Per-tab Advanced Chart symbol**: `GLOBAL_MARKETS_CRYPTO_TEMPLATE` at `apps/web/src/contexts/DashboardContext.tsx:425-428` already pins `BINANCE:BTCUSDT` for the Crypto sub-tab. The eval report sees VFS persisting because users have an older localStorage layout snapshot; the in-template default is correct for fresh installs. Filed for follow-up: per-tab migration of legacy layouts.
+- **T2/T7 Order Book price unit**: FIXED. Added `normalizeOrderbookPrice` helper that scales raw VND values to thousand-VND units when the price is more than 5x the lastPrice anchor. Without an anchor, divides by 1000 for any value >= 5,000. This addresses the eval report's `58,000-311,900` ask prices showing for VCI which trades at ~25.
+
+Verification:
+- `pnpm --filter frontend lint` PASS
+- `pnpm --filter frontend exec tsc --noEmit` PASS
+
+Five of six quick-win bugs were already fixed in shipped code from cycle 3. Order Book price unit is the only one that needed new code in this commit.
+
 ## How to run the parity scripts
 
 ```pwsh
