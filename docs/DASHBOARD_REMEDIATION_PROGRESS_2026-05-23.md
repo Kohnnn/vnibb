@@ -90,7 +90,18 @@
     - `/health/` -> 200
     - `/live` -> 200
     - `/ready` -> 200
-- 2026-05-22 (follow-up cycle): templates "still stuck" + spiral heatmap looked wrong + reinforce financials.
+- 2026-05-23 (cycle 3): user reported templates "still stuck", spiral "wtf is this", and asked to reinforce financial statements + ratios.
+  - Templates root cause found: `setActiveDashboard` in `DashboardContext` only updated `activeDashboardId`, never `activeTabId`. After creating a new dashboard from a template the previous tab id stayed in state, no tab matched the new dashboard, and the grid rendered with `activeTab` resolving to null. Fix: extended the `SET_ACTIVE_DASHBOARD` reducer to validate the tab id against the new dashboard and fall back to `tabs[0].id` when the previous tab is gone.
+  - Spiral rebuilt for legibility:
+    - Removed early radius clamping that was collapsing the inner ~50 cells onto the same circle.
+    - Switched cell rendering from rotated `<rect>` to polygon `<path>` quads spanning [theta_i, theta_{i+1}] x [r-half, r+half], giving sharp seams that read as a continuous spiral.
+    - Tightened thickness vs turn spacing to a 1:1.4 ratio so each ring is visually distinct without gaps swallowing data.
+    - Default granularity flipped to weekly (52 segments/turn = one ring per ISO year) for the most readable layout out of the box.
+    - SVG viewBox now scales with the outer radius so the full spiral fits regardless of how many cells the period contains.
+  - Financial Statement reinforcement:
+    - Aliases extended for the actual provider keys returned by the live OCI API (probed VNM): `pre_tax_profit`, `tax_expense`, `selling_general_admin`, `short_term_receivables`, `long_term_liabilities`, `proceeds_from_borrowings`, `repayment_of_borrowings`.
+    - `DenseFinancialTable` scroll-to-end effect now also depends on `rows.length` and adds an 80ms fallback timer so the latest period is in view even when columns finish laying out a few frames after mount.
+    - Note: live OCI provider currently returns 6 fiscal years of statement data (2020-2025) and 14 years of ratios (2012-2025). Frontend can render every period the backend ships; the provider history cap is upstream.
   - Templates: rewrote `handleApplyTemplate` to ALWAYS create a fresh editable workspace seeded with the template, regardless of the current dashboard's lock state. Removed the conditional branching, removed the leftover `createTab` import. Wrapped in try/catch + analytics so failures surface a toast instead of silently no-oping.
   - Spiral heatmap: rewrote with a proper Archimedean spiral. Each cell is now an SVG `<path>` arc segment connecting two radii along the curve `r(theta) = a*theta`, so the result reads as a continuous "snail shell" instead of a sparse dot pattern. Adjacent cells share edges; the latest period gets a cyan dot for orientation. Daily uses 60 segments/turn, weekly uses 52 segments/turn (one full ring per ISO year).
   - Financial Statement reinforcement:

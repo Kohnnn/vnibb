@@ -2227,8 +2227,27 @@ function dashboardReducer(state: DashboardState, action: DashboardAction): Dashb
             };
         }
 
-        case 'SET_ACTIVE_DASHBOARD':
-            return { ...state, activeDashboardId: action.payload };
+        case 'SET_ACTIVE_DASHBOARD': {
+            // Switching dashboards must also realign `activeTabId` to a tab
+            // that actually exists on the new dashboard. Without this the
+            // grid renders the new dashboard but `activeTab` resolves to
+            // null (the previous dashboard's tab id no longer matches),
+            // which is what users perceive as "templates do nothing /
+            // stuck".
+            const targetDashboard = state.dashboards.find((d) => d.id === action.payload);
+            if (!targetDashboard) {
+                return { ...state, activeDashboardId: action.payload };
+            }
+            const stillValid = targetDashboard.tabs.some((tab) => tab.id === state.activeTabId);
+            const nextActiveTabId = stillValid
+                ? state.activeTabId
+                : targetDashboard.tabs[0]?.id ?? null;
+            return {
+                ...state,
+                activeDashboardId: action.payload,
+                activeTabId: nextActiveTabId,
+            };
+        }
 
         case 'SET_ACTIVE_TAB':
             return { ...state, activeTabId: action.payload };

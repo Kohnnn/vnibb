@@ -172,12 +172,21 @@ export function DenseFinancialTable({
     const scrollElement = scrollRef.current
     if (!scrollElement) return
 
+    // Use a small delay so the table can finish laying out before we
+    // measure scrollWidth. Otherwise on first paint the scroll target
+    // is sometimes still 0 because columns haven't widened yet.
     const frame = window.requestAnimationFrame(() => {
       scrollElement.scrollLeft = scrollElement.scrollWidth - scrollElement.clientWidth
     })
+    const fallbackTimer = window.setTimeout(() => {
+      scrollElement.scrollLeft = scrollElement.scrollWidth - scrollElement.clientWidth
+    }, 80)
 
-    return () => window.cancelAnimationFrame(frame)
-  }, [initialScrollPosition, storageKey, visibleColumns])
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(fallbackTimer)
+    }
+  }, [initialScrollPosition, storageKey, visibleColumns, rows.length])
 
   const displayedRows = useMemo(() => {
     if (!hasGroups) {
