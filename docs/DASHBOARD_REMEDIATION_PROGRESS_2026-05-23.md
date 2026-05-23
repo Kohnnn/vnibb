@@ -217,6 +217,24 @@ Verification:
 
 Five of six quick-win bugs were already fixed in shipped code from cycle 3. Order Book price unit is the only one that needed new code in this commit.
 
+### Track E.2 - Price Chart blank diagnostics (SHIPPED)
+
+Files: `apps/web/src/components/chart/TradingViewAdvancedChart.tsx`.
+
+The eval report v3 documents that the price chart has been blank across all three QA versions: scales render, event annotations render, but candles/lines never appear. Probed live OCI API for VCI historical prices - the response is well-formed (`time: '2025-04-01'` strings, finite OHLCV values). The TradingViewAdvancedChart code is heavily defended: dedup-by-date, finite-value filter, dimension retries, and a `setVisibleLogicalRange` guard.
+
+Two changes to surface and self-heal the remaining failure modes:
+
+1. Wrapped `series.setData(...)` calls (line, area, candlestick) in a try/catch that logs `[VNIBB PriceChart] series.setData failed for symbol VCI mode candles sample point ... error ...` to the console. Future "candles invisible" reports can now be triaged by reading devtools instead of guessing.
+2. Wrapped `chart.timeScale().setVisibleLogicalRange(...)` in a try/catch that falls back to `fitContent()` if the visible-range API rejects the range. This handles the edge case where the chart is mid-resize when the visible range is being set.
+
+The remaining root-cause hypothesis from the eval report (lightweight-charts time format) does not apply: the API already emits `YYYY-MM-DD` strings and the dedup logic preserves that exact format. If candles still don't render after the next deploy, the new console errors will show exactly which point or call is rejected.
+
+Verification:
+- `pnpm --filter frontend lint` PASS
+- `pnpm --filter frontend exec tsc --noEmit` PASS
+- `pnpm --filter frontend build` PASS
+
 ## How to run the parity scripts
 
 ```pwsh

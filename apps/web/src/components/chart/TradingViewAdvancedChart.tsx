@@ -454,40 +454,59 @@ export function TradingViewAdvancedChart({
           return;
         }
         const effectiveMode = timeframe === 'MAX' && safePoints.length > 900 && mode === 'candles' ? 'line' : mode;
-        if (effectiveMode === 'line') {
-          series = chart.addLineSeries({
-            color: '#38bdf8',
-            lineWidth: 2,
-            crosshairMarkerVisible: true,
-            crosshairMarkerRadius: 4,
-          });
-          series.setData(safePoints.map((point) => ({ time: point.time, value: point.close })));
-        } else if (effectiveMode === 'area') {
-          series = chart.addAreaSeries({
-            topColor: 'rgba(56, 189, 248, 0.35)',
-            bottomColor: 'rgba(56, 189, 248, 0.04)',
-            lineColor: '#38bdf8',
-            lineWidth: 2,
-          });
-          series.setData(safePoints.map((point) => ({ time: point.time, value: point.close })));
-        } else {
-          series = chart.addCandlestickSeries({
-            upColor: '#22c55e',
-            downColor: '#ef4444',
-            borderUpColor: '#22c55e',
-            borderDownColor: '#ef4444',
-            wickUpColor: '#22c55e',
-            wickDownColor: '#ef4444',
-          });
-          series.setData(
-            safePoints.map((point) => ({
-              time: point.time,
-              open: point.open,
-              high: point.high,
-              low: point.low,
-              close: point.close,
-            }))
+        try {
+          if (effectiveMode === 'line') {
+            series = chart.addLineSeries({
+              color: '#38bdf8',
+              lineWidth: 2,
+              crosshairMarkerVisible: true,
+              crosshairMarkerRadius: 4,
+            });
+            series.setData(safePoints.map((point) => ({ time: point.time, value: point.close })));
+          } else if (effectiveMode === 'area') {
+            series = chart.addAreaSeries({
+              topColor: 'rgba(56, 189, 248, 0.35)',
+              bottomColor: 'rgba(56, 189, 248, 0.04)',
+              lineColor: '#38bdf8',
+              lineWidth: 2,
+            });
+            series.setData(safePoints.map((point) => ({ time: point.time, value: point.close })));
+          } else {
+            series = chart.addCandlestickSeries({
+              upColor: '#22c55e',
+              downColor: '#ef4444',
+              borderUpColor: '#22c55e',
+              borderDownColor: '#ef4444',
+              wickUpColor: '#22c55e',
+              wickDownColor: '#ef4444',
+            });
+            series.setData(
+              safePoints.map((point) => ({
+                time: point.time,
+                open: point.open,
+                high: point.high,
+                low: point.low,
+                close: point.close,
+              }))
+            );
+          }
+        } catch (setDataError) {
+          // QA-v3 F4/T1: lightweight-charts silently rejects malformed
+          // series data and the chart frame keeps rendering scales but
+          // not candles. Surfacing the error explicitly turns the
+          // long-standing "price chart blank" mystery into something we
+          // can grep for in user devtools.
+          console.error(
+            '[VNIBB PriceChart] series.setData failed for symbol',
+            symbol,
+            'mode',
+            effectiveMode,
+            'sample point',
+            safePoints[0],
+            'error',
+            setDataError,
           );
+          throw setDataError;
         }
         mainSeriesRef.current = series;
         series.setMarkers(
@@ -547,10 +566,18 @@ export function TradingViewAdvancedChart({
         // readable size.
         const visibleBars = Math.min(safePoints.length, 180);
         if (visibleBars > 0) {
-          chart.timeScale().setVisibleLogicalRange({
-            from: Math.max(0, safePoints.length - visibleBars),
-            to: safePoints.length - 1,
-          });
+          try {
+            chart.timeScale().setVisibleLogicalRange({
+              from: Math.max(0, safePoints.length - visibleBars),
+              to: safePoints.length - 1,
+            });
+          } catch (rangeError) {
+            // QA-v3 F4/T1: if setVisibleLogicalRange rejects the range
+            // (can happen when the chart is mid-resize), fall back to
+            // fitContent which always works once data is present.
+            console.warn('[VNIBB PriceChart] setVisibleLogicalRange failed, falling back to fitContent', rangeError);
+            chart.timeScale().fitContent();
+          }
         } else {
           chart.timeScale().fitContent();
         }
