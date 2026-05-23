@@ -183,6 +183,21 @@ Verification:
 - `pnpm --filter frontend lint` PASS
 - `pnpm --filter frontend exec tsc --noEmit` PASS
 
+### Track D - Weekly seasonality tooltip with date range (SHIPPED)
+
+Files: `apps/web/src/components/widgets/SeasonalityHeatmapWidget.tsx`.
+
+The weekly heatmap previously showed `Week 20 2024: +1.4%` in tooltips, leaving users to mentally translate the ISO week number into a calendar range. Now the tooltip computes the Monday -> Sunday range from the backend `start_date` field and shows it directly: `Week 20 2024 (12/05 - 18/05): +1.4%`.
+
+Implementation:
+- Added a `startDateMap` keyed `${row_key}|${column}` so any cell can look up its Monday date in O(1).
+- New `buildCellTooltip` helper returns the date-range form for weekly granularity and falls back to the original `<rowKey> <column>: <return>` form for monthly. Daily and hourly modes (when present) inherit the simple form.
+- End-of-week computed as `start_date + 6 * 86_400_000` ms which lands on Sunday in UTC.
+
+Verification:
+- `pnpm --filter frontend lint` PASS
+- `pnpm --filter frontend exec tsc --noEmit` PASS
+
 ## How to run the parity scripts
 
 ```pwsh

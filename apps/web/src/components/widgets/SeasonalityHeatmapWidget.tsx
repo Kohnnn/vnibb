@@ -63,6 +63,37 @@ function stripWeekPrefix(value: string | null | undefined): string {
   return value.replace(/\bW0?(\d+)\b/g, '$1')
 }
 
+function formatDDMM(date: Date): string {
+  const dd = String(date.getUTCDate()).padStart(2, '0')
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}`
+}
+
+/**
+ * Build a tooltip describing a single cell. For weekly granularity the
+ * tooltip shows the full Monday->Sunday date range so users no longer
+ * have to mentally translate "W20 2024" into "12/05 - 18/05".
+ */
+function buildCellTooltip(
+  rowKey: string,
+  column: string,
+  granularity: SeasonalityGranularity,
+  startDateMap: Map<string, Date>,
+  value: number | null,
+): string {
+  const pct = formatPct(value)
+  if (granularity === 'weekly') {
+    const key = `${rowKey}|${column}`
+    const startDate = startDateMap.get(key)
+    if (startDate && !Number.isNaN(startDate.getTime())) {
+      const endDate = new Date(startDate.getTime() + 6 * 24 * 60 * 60 * 1000)
+      return `Week ${formatColumnLabel(column, granularity)} ${rowKey} (${formatDDMM(startDate)} - ${formatDDMM(endDate)}): ${pct}`
+    }
+    return `Week ${formatColumnLabel(column, granularity)} ${rowKey}: ${pct}`
+  }
+  return `${rowKey} ${formatColumnTitle(column, granularity)}: ${pct}`
+}
+
 export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHeatmapWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
@@ -95,6 +126,20 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
     })
     return next
   }, [rows, visibleRows])
+
+  // Lookup map of `${row_key}|${column}` -> Date built from backend
+  // start_date so weekly tooltips can show the actual Monday -> Sunday
+  // calendar range for the cell rather than just "W20 2024".
+  const startDateMap = useMemo(() => {
+    const map = new Map<string, Date>()
+    rows.forEach((row) => {
+      if (!row.start_date) return
+      const date = new Date(row.start_date)
+      if (Number.isNaN(date.getTime())) return
+      map.set(`${row.row_key}|${row.column}`, date)
+    })
+    return map
+  }, [rows])
 
   const note = GRANULARITY_OPTIONS.find((option) => option.value === granularity)?.note || 'seasonality'
   const compactCells = granularity === 'weekly'
@@ -237,7 +282,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
                     <div
                       key={`${rowKey}-${column}`}
                       className={`flex ${compactCells ? 'h-4 min-w-4' : 'h-7'} items-center justify-center rounded border border-[var(--border-subtle)] font-mono ${getCellClass(value)}`}
-                      title={`${rowKey} ${formatColumnTitle(column, granularity)}: ${formatPct(value)}`}
+                      title={buildCellTooltip(rowKey, column, granularity, startDateMap, value)}
                     >
                       {compactCells ? '' : value === null ? '-' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}
                     </div>
