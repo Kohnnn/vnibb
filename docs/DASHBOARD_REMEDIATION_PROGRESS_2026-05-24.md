@@ -181,3 +181,14 @@ C.3 (`19e5203`):
 - GM-2 Technical Analysis sync: `allow_symbol_change: false` on TV chart (shipped in C.1) closes the loop by forcing symbol changes through VNIBB selectors. A deeper fix using TradingView Widget API postMessage was scoped out as low ROI.
 - F10 Insider Deals data filling — the writer is wired (D.4); first batch of new rows will land after the next `sync_insider_deals` scheduler run.
 
+## Cycle 5 Continuation — Deferred items shipped
+
+After the initial cycle, the user asked to ship the deferred items. The following commits address them:
+
+### F5 + GM-2 — Live MktCap recompute + cross-widget TV symbol propagation
+
+- `apps/api/vnibb/services/comparison_service.py:25` — Added `StockPrice` import.
+- `apps/api/vnibb/services/comparison_service.py:611-668` — `get_stock_metrics` now recomputes `market_cap` from `outstanding_shares × latest_price` (the same formula used in `equity._resolve_profile_market_cap`) so the Comparison surface and Profile/Overview surface stay aligned. A 25% sanity-check guards against absurd recomputes when the screener `market_cap` is already populated.
+- `apps/web/src/components/widgets/WidgetWrapper.tsx:545-572` — When the user changes the symbol on a TradingView chart, propagate the new symbol to every other TV widget in the same `syncGroupId` on the same tab. This keeps Technical Analysis aligned with the chart even when both are seeded with `useLinkedSymbol: false`.
+- Verification: `pnpm run ci:gate` green (frontend lint + build + 19 jest tests, backend `py_compile` + 252 pytest, all 4 comparison-service tests pass).
+

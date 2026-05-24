@@ -22,7 +22,7 @@ from vnibb.core.database import async_session_maker
 from vnibb.core.vn_sectors import VN_SECTORS
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.stock import Stock
+from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.trading import FinancialRatio
 from vnibb.services.cache_manager import CacheManager
 
@@ -608,6 +608,54 @@ class ComparisonService:
                 for key, value in ratio_fallbacks.items():
                     if metrics_dict.get(key) is None and value is not None:
                         metrics_dict[key] = value
+
+            # QA-v4 F5: Recompute market_cap from outstanding_shares × the
+            # freshest StockPrice.close so the Comparison surface and the
+            # Profile/Overview surface (which already uses
+            # _resolve_profile_market_cap) stay aligned. The cached
+            # ScreenerSnapshot.market_cap that initially seeds metrics_dict
+            # lags the live quote by hours/days, producing the
+            # 28.23B vs 28.28B discrepancy noted in the QA report.
+            if stock_row is not None:
+                try:
+                    shares_value = _to_float(
+                        getattr(stock_row, "outstanding_shares", None)
+                        or getattr(stock_row, "listed_shares", None)
+                    )
+                    latest_price_row = (
+                        await session.execute(
+                            select(StockPrice.close)
+                            .where(
+                                StockPrice.symbol == symbol,
+                                StockPrice.interval == "1D",
+                            )
+                            .order_by(desc(StockPrice.time))
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    latest_price = _to_float(latest_price_row)
+                    if shares_value and shares_value > 0 and latest_price and latest_price > 0:
+                        # Vietnamese price feeds carry close in thousand-VND
+                        # units; multiplier matches the heuristic used in
+                        # equity._resolve_profile_market_cap.
+                        multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
+                        recomputed_market_cap = shares_value * multiplier * latest_price
+                        # Only override when the recompute lands within
+                        # 25% of the snapshot value (sanity-check).
+                        existing_market_cap = _to_float(metrics_dict.get("market_cap"))
+                        if (
+                            existing_market_cap is None
+                            or existing_market_cap <= 0
+                            or abs(recomputed_market_cap - existing_market_cap) / max(
+                                existing_market_cap, 1.0
+                            )
+                            <= 0.25
+                        ):
+                            metrics_dict["market_cap"] = recomputed_market_cap
+                except Exception as exc:
+                    logger.debug(
+                        "Live market_cap recompute skipped for %s: %s", symbol, exc
+                    )
 
             normalized_metrics: Dict[str, float] = {}
             for key, value in metrics_dict.items():

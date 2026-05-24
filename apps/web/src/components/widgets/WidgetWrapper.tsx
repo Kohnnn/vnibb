@@ -536,6 +536,30 @@ export function WidgetWrapper({
                     },
                 });
 
+                // QA-v4 GM-2: When the user changes the symbol on a
+                // TradingView chart, propagate the new symbol to every
+                // other TV widget in the same syncGroup on the same tab
+                // (e.g. Technical Analysis). This keeps the TA panel
+                // aligned with the chart even when both are seeded with
+                // useLinkedSymbol:false (which prevents the global
+                // VN-ticker channel from clobbering the TV symbol).
+                if (currentTab && currentWidget.syncGroupId !== undefined) {
+                    for (const peer of currentTab.widgets) {
+                        if (peer.id === id) continue;
+                        if (peer.syncGroupId !== currentWidget.syncGroupId) continue;
+                        if (typeof peer.type !== 'string' || !peer.type.startsWith('tradingview_')) continue;
+                        const peerHasOwnSymbol =
+                            peer.config && typeof (peer.config as { symbol?: unknown }).symbol === 'string';
+                        if (!peerHasOwnSymbol) continue;
+                        updateWidget(dashboardId, tabId, peer.id, {
+                            config: {
+                                ...peer.config,
+                                symbol: newSymbol,
+                            },
+                        });
+                    }
+                }
+
                 setGlobalMarketsSymbol(newSymbol);
                 return;
             }
