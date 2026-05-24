@@ -389,9 +389,18 @@ function DashboardContent() {
         };
     }, [activeDashboard, activeTab, effectiveLeftSidebarWidth, mounted, openWalkthrough]);
 
-    const applySelectedSymbol = useCallback((rawSymbol: string) => {
+    const applySelectedSymbol = useCallback((rawSymbol: string, options?: { domain?: 'vn' | 'tv' }) => {
         const normalizedSymbol = rawSymbol.trim().toUpperCase();
         if (!normalizedSymbol) return;
+
+        // Track C: VN tickers and TradingView symbols live in two separate
+        // channels. A bare VN ticker like 'MBB' must never overwrite the
+        // TradingView default (e.g. 'AMEX:SPY') because the public TV embed
+        // cannot resolve `HOSE:MBB` and surfaces a blocking modal.
+        // Heuristic: TradingView symbols always include a colon
+        // (EXCHANGE:SYMBOL); VN tickers never do.
+        const inferredDomain: 'vn' | 'tv' = normalizedSymbol.includes(':') ? 'tv' : 'vn';
+        const domain = options?.domain || inferredDomain;
 
         if (normalizedSymbol !== stockGlobalSymbol) {
             captureAnalyticsEvent(ANALYTICS_EVENTS.symbolChanged, {
@@ -399,11 +408,20 @@ function DashboardContent() {
                 to_symbol: normalizedSymbol,
                 dashboard_id: activeDashboard?.id,
                 tab_id: activeTab?.id,
+                domain,
             });
         }
 
-        setStockGlobalSymbol(normalizedSymbol);
-        setContextGlobalSymbol(normalizedSymbol);
+        if (domain === 'vn') {
+            setStockGlobalSymbol(normalizedSymbol);
+            setContextGlobalSymbol(normalizedSymbol);
+            if (activeDashboard) {
+                updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
+            }
+            return;
+        }
+
+        // domain === 'tv'
         setGlobalMarketsSymbol(normalizedSymbol);
         if (activeDashboard) {
             updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
