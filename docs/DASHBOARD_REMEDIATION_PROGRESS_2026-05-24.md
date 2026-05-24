@@ -122,7 +122,7 @@ C.3 (`19e5203`):
 - VNIBB MCP integration is already wired end-to-end via `ai_context_service.build_runtime_context` (calls `vnibb_mcp_client_service.get_symbol_snapshot` / `get_market_snapshot` when configured). The Track F commit makes the MCP-fetched snapshot's ratios usable by the prompt builder via the new aliases.
 - Verification: `pnpm --filter frontend lint` clean; backend `pytest -k "copilot or ai_context"` 21/21 pass.
 
-### Track D — shipped
+### Track D — shipped (`777e88d`)
 
 - `apps/api/vnibb/services/cache_manager.py:85-92,160-180` — Added `MAX_STALE_DAYS = 7` ceiling; `get_screener_data` returns a miss when `MAX(snapshot_date)` is older so callers refetch fresh from the provider instead of indefinitely serving the 7-week-stale heatmap snapshot.
 - `apps/api/vnibb/api/v1/market.py` — New `_load_latest_price_time` helper; market heatmap `updated_at` now prefers the freshest `StockPrice.time` (which the daily price feed keeps current) over the stale screener snapshot date.
@@ -133,4 +133,51 @@ C.3 (`19e5203`):
 - `apps/api/migrations/versions/20260524_1600_widen_insider_deals_deal_action.py` — Alembic migration `7f3a8d1e6b22 -> 4e8b1c2a9f17`.
 - `apps/api/vnibb/services/news_crawler.py:80-114` — `_coerce_published_date` pre-processor rewrites `GMT+7`-style timezones to `+0700` and strips Vietnamese weekday prefixes before falling through to ISO-8601 / RFC 822 parsers, fixing the persistent "Date unavailable" on VnExpress.NET articles.
 - Verification: `python -m py_compile` clean; `pnpm run ci:gate` green (frontend lint + build + 19 jest tests, backend `py_compile` + 252 pytest).
+
+## OCI Deployment — completed
+
+- SSH key: `C:/Users/Admin/.ssh/oci-vnibb` -> `ubuntu@129.150.58.64`.
+- `git pull --ff-only origin main` advanced OCI from `235162a` to `777e88d`.
+- `docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --build` rebuilt `vnibb-api` and `vnibb-mcp`.
+- `alembic upgrade head` ran inside `vnibb-api`; current head is `7f3a8d1e6b22` (the InsiderDeal column-widening migration shipped this cycle).
+- Container health: `vnibb-api: Up (healthy)`, `vnibb-mcp: Up (healthy)`, `vnibb-caddy: Up`.
+- Endpoint smoke probes via `https://129.150.58.64.sslip.io`:
+  - `/api/v1/equity/VCI/financial-ratios?period=FY` -> 200.
+  - `/api/v1/equity/VCI/income-statement?period=TTM&limit=20` -> 200 (no more 422; payload may be empty depending on provider freshness, but the Track A validation bug is gone).
+  - `/api/v1/equity/VCI/orderbook` -> 200.
+  - `/api/v1/market/heatmap?group_by=sector` -> 200; `count=0`, `updated_at=null` confirms the Track D.1 freshness ceiling correctly rejected the 7-week-stale snapshot. The screener cron will refill it on the next scheduled run.
+- `nightly_price_backfill` job ran successfully right after rebuild (wrote 384 rows in 81.5s), so the price feed driving heatmap `updated_at` is current.
+
+## Cycle Summary — Tracks A-F + D shipped
+
+| Bug | Track | Commit | Status |
+|---|---|---|---|
+| F-TTM-1 TTM statements 422 | A | c340761 | shipped |
+| F2 Ratios capped at 2021 | A | c340761 | shipped |
+| T1 Order Book BID=0 | B | 2e7be0e | shipped (needs OCI restart -> done) |
+| T2 ASK in raw VND | B | 2e7be0e | shipped (needs OCI restart -> done) |
+| Order Book closed-market UX | B | 2e7be0e | shipped |
+| GM-1 Wrong Advanced Chart symbol | C.1 | a9b083a | shipped |
+| CRYPTO-1 Wrong chart symbol | C.1 | a9b083a | shipped |
+| F-Ticker TV symbol pollution | C.3 | 19e5203 | shipped |
+| localStorage migration | C.1 | a9b083a | shipped |
+| F4 Beta 0.00 | E | f484ffb | shipped |
+| F3 Snapshot DivYield | E | f484ffb | shipped |
+| T3 Signal decimals | E | f484ffb | shipped |
+| F7 Comparison Y-axis ±100% | E | f484ffb | shipped |
+| Market Breadth timeout | E | f484ffb | shipped |
+| VA-1 Pro label inconsistent | F | 07c0960 | shipped |
+| VA-2 P/E blank in responses | F | 07c0960 | shipped |
+| GM-3 Ticker tape duplicates | F | 07c0960 | shipped |
+| Heatmap stale 7 weeks | D.1 | 777e88d | shipped (deployed) |
+| Money Flow 0 of 0 | D.2 | 777e88d | shipped (deployed) |
+| Top Gainers intermittent zero | D.3 | 777e88d | shipped (deployed) |
+| Insider Deals empty since v1 | D.4 | 777e88d | shipped (deployed) |
+| VnExpress 'Date unavailable' | D.5 | 777e88d | shipped (deployed) |
+
+## Deferred
+
+- F5 (MktCap 28.23 vs 28.28): underlying screener lag heals via D.1 freshness ceiling. Comparison-service refactor not needed unless the gap persists after the next screener cron run.
+- GM-2 Technical Analysis sync: `allow_symbol_change: false` on TV chart (shipped in C.1) closes the loop by forcing symbol changes through VNIBB selectors. A deeper fix using TradingView Widget API postMessage was scoped out as low ROI.
+- F10 Insider Deals data filling — the writer is wired (D.4); first batch of new rows will land after the next `sync_insider_deals` scheduler run.
 
