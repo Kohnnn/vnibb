@@ -6561,7 +6561,9 @@ async def get_metrics_history(
 @cached(ttl=86400, key_prefix="income_statement_v3")
 async def get_income_statement(
     symbol: str,
-    period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
+    period: Literal[
+        "year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM", "ttm"
+    ] = Query("year"),
     limit: int = Query(20, ge=1, le=80),
     db: AsyncSession = Depends(get_db),
 ):
@@ -6644,7 +6646,9 @@ async def get_income_statement(
 @cached(ttl=86400, key_prefix="balance_sheet_v3")
 async def get_balance_sheet(
     symbol: str,
-    period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
+    period: Literal[
+        "year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM", "ttm"
+    ] = Query("year"),
     limit: int = Query(20, ge=1, le=80),
     db: AsyncSession = Depends(get_db),
 ):
@@ -6698,7 +6702,9 @@ async def get_balance_sheet(
 @cached(ttl=86400, key_prefix="cash_flow_v3")
 async def get_cash_flow(
     symbol: str,
-    period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = Query("year"),
+    period: Literal[
+        "year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM", "ttm"
+    ] = Query("year"),
     limit: int = Query(20, ge=1, le=80),
     db: AsyncSession = Depends(get_db),
 ):

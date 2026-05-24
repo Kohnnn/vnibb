@@ -862,7 +862,9 @@ export function normalizeFinancialStatementPeriod(period?: string): string | und
     const upper = period.trim().toUpperCase();
     if (!upper) return undefined;
     if (upper === 'FY' || upper === 'YEAR' || upper === 'ANNUAL' || upper === 'A') return 'year';
-    if (upper === 'TTM' || upper === 'TRAILING') return 'ttm';
+    // Use uppercase 'TTM' to match the backend Literal[...] (case-sensitive in pydantic).
+    // Mirrors `normalizeFinancialRatioPeriod` so both routes share a single canonical wire token.
+    if (upper === 'TTM' || upper === 'TRAILING') return 'TTM';
     if (upper === 'Q' || upper === 'QUARTER' || /^Q[1-4]$/.test(upper)) return 'quarter';
     return upper.toLowerCase();
 }

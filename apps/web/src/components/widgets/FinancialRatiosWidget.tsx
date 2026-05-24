@@ -417,6 +417,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                                 rows={tableRows}
                                 sortable
                                 showTrend={false}
+                                maxYears={tableColumns.length || 1}
                                 initialScrollPosition="end"
                                 storageKey={`ratios:${id}:${symbol}:${period}`}
                                 footerNote={`Note: Ratio history by ${period}. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}

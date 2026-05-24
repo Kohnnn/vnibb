@@ -18,10 +18,10 @@ describe('normalizeFinancialStatementPeriod', () => {
     expect(normalizeFinancialStatementPeriod('quarter')).toBe('quarter');
   });
 
-  it('maps trailing twelve-month selectors to ttm', () => {
-    expect(normalizeFinancialStatementPeriod('TTM')).toBe('ttm');
-    expect(normalizeFinancialStatementPeriod('ttm')).toBe('ttm');
-    expect(normalizeFinancialStatementPeriod('Trailing')).toBe('ttm');
+  it('maps trailing twelve-month selectors to TTM (uppercase to match backend Literal)', () => {
+    expect(normalizeFinancialStatementPeriod('TTM')).toBe('TTM');
+    expect(normalizeFinancialStatementPeriod('ttm')).toBe('TTM');
+    expect(normalizeFinancialStatementPeriod('Trailing')).toBe('TTM');
   });
 
   it('returns undefined for empty input', () => {
