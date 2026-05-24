@@ -112,7 +112,13 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
     // QA-v3 F6: Beta 63D was already computed for the Quant tab
     // (`/api/v1/quant/{symbol}` returns it) but Key Metrics MARKET tab
     // showed "–". Surface it from the same source.
-    const { data: quantMetrics } = useQuantMetrics(symbol, { enabled: !!symbol });
+    // QA-v4 F4: Explicitly request the `benchmark_risk` metric so the
+    // backend includes `current_beta_63d` in the response (defaults to
+    // `volume_delta` only and would never expose beta).
+    const { data: quantMetrics } = useQuantMetrics(symbol, {
+        enabled: !!symbol,
+        metrics: ['benchmark_risk'],
+    });
 
     const stock = screenData?.data?.[0];
     const latestRatio = latestByFinancialPeriod(ratiosData?.data);
@@ -188,7 +194,12 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         ]),
         beta: resolveMetric([
             { value: quantBeta63d, source: 'Quant 63D' },
-            { value: stock?.beta, source: 'Screener' },
+            // QA-v4 F4: A literal beta=0 in the screener row means "no value
+            // computed yet" rather than a real beta of zero (which would
+            // imply zero correlation to market - extremely rare). Treat 0
+            // as missing so it doesn't mask a legitimate Quant 63D fetch
+            // that might land later.
+            { value: stock?.beta, source: 'Screener', positiveOnly: true },
         ]),
     }
 

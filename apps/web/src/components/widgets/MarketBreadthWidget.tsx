@@ -29,7 +29,11 @@ export function MarketBreadthWidget({ id, onRemove }: MarketBreadthWidgetProps) 
   const isFetching = breadthQuery.isFetching;
   const error = breadthQuery.error;
   const updatedAt = breadthQuery.data?.updated_at || breadthQuery.dataUpdatedAt;
-  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+  // QA-v4 Market Breadth: 8s budget was too aggressive for cold cache and
+  // caused intermittent "Loading timed out" even when the request was
+  // mid-flight. Raise to 15s and gate timedOut on `!isFetching` so an
+  // active retry doesn't trip the timeout error.
+  const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 15_000 });
   const healthState: WidgetHealthState | undefined = error && hasData
     ? {
         status: 'cached',
@@ -62,7 +66,7 @@ export function MarketBreadthWidget({ id, onRemove }: MarketBreadthWidgetProps) 
         </div>
 
         <div className="flex-1 overflow-auto p-3">
-          {timedOut && isLoading && !hasData ? (
+          {timedOut && isLoading && !isFetching && !hasData ? (
             <WidgetError
               title="Loading timed out"
               error={new Error('Market breadth data took too long to load.')}

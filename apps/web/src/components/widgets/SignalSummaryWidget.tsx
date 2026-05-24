@@ -187,7 +187,16 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
                 <div key={indicator.name} className="grid grid-cols-[minmax(0,1fr)_90px] items-center gap-2 text-xs">
                   <div className="min-w-0">
                     <div className="break-words whitespace-normal font-medium text-[var(--text-primary)]">{indicator.name}</div>
-                    <div className="break-words whitespace-normal text-[10px] text-[var(--text-muted)]">{String(indicator.value ?? 'No value')}</div>
+                    <div className="break-words whitespace-normal text-[10px] text-[var(--text-muted)]">{(() => {
+                      // QA-v4 T3: Indicator values are floats with full IEEE-754
+                      // precision (e.g. 25.895722016483697). Format to 2 d.p. for
+                      // readability, falling back to String() for non-numerics.
+                      const v = indicator.value;
+                      if (typeof v === 'number' && Number.isFinite(v)) return v.toFixed(2);
+                      const n = Number(v);
+                      if (Number.isFinite(n) && v !== null && v !== undefined && String(v).trim() !== '') return n.toFixed(2);
+                      return String(v ?? 'No value');
+                    })()}</div>
                   </div>
                   <div className={`justify-self-end rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${signalTone(indicator.signal)}`}>
                     {indicator.signal.replace(/_/g, ' ')}

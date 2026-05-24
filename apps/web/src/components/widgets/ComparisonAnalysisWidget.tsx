@@ -533,6 +533,16 @@ function ComparisonAnalysisWidgetComponent({
                     tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                     axisLine={false}
                     tickLine={false}
+                    // QA-v4 F7: For short timeframes (1M) actual swings are
+                    // often <5% but Recharts' auto-domain occasionally locks
+                    // to [0, 100] when one ticker has a sentinel-like value,
+                    // producing a useless ±100% scale. Pin the domain to a
+                    // ±5% baseline floor (95-105) and grow only when data
+                    // genuinely exceeds that range.
+                    domain={[
+                      (dataMin: number) => Math.min(95, Math.floor(Number(dataMin) || 100)),
+                      (dataMax: number) => Math.max(105, Math.ceil(Number(dataMax) || 100)),
+                    ]}
                     tickFormatter={(value) => `${(Number(value) - 100).toFixed(0)}%`}
                   />
                   <Tooltip

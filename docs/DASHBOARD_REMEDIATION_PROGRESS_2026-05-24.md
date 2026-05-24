@@ -88,3 +88,18 @@ Goal: Heal stale screener-dependent widgets, restore Insider Deals, fix VnExpres
 - `apps/web/src/components/widgets/OrderbookWidget.tsx` — frontend price normalization heuristic removed (backend is canonical). New `toFiniteOrderPrice` treats 0 as null. Stale/closed annotation rendered in `WidgetMeta` note.
 - Verification: `pnpm --filter frontend lint` clean; `tsc --noEmit` clean; `pytest -k "orderbook or order_book or depth"` 2/2 pass; backend `py_compile` clean. Ruff baseline unchanged at 198 (pre-existing) after Optional->`X | None` cleanup on the new field.
 
+### Track C — shipped (in two commits)
+
+C.1 + C.2 (`a9b083a`):
+
+- `apps/web/src/contexts/DashboardContext.tsx:298-313` — Global Markets `tradingview_chart` and `tradingview_technical_analysis` now seed `AMEX:SPY` with `useLinkedSymbol: false` and `allow_symbol_change: false`.
+- `apps/web/src/contexts/DashboardContext.tsx:425-433` — Crypto chart now seeds `BINANCE:BTCUSDT` with `useLinkedSymbol: false` and `allow_symbol_change: false`.
+- `apps/web/src/contexts/DashboardContext.tsx:478-491` — Global Markets Overview chart and TA mirror the same per-tab default.
+- `apps/web/src/lib/globalMarketsSymbol.ts` — `DEFAULT_GLOBAL_MARKETS_SYMBOL` is `'AMEX:SPY'`. `normalizeGlobalMarketsSymbol` now requires the strict `EXCHANGE:SYMBOL` shape; `readStoredGlobalMarketsSymbol` auto-resets the localStorage value when a non-conforming token (e.g. bare `'MBB'`) is found, addressing already-polluted clients.
+- `apps/web/src/lib/tradingViewWidgets.ts:621` — `tradingview_chart` `defaultConfig.symbol` bumped to `'AMEX:SPY'` so widgets created outside templates also start on a public-embed-valid TV symbol.
+
+C.3 (`19e5203`):
+
+- `apps/web/src/components/shell/DashboardClient.tsx:392-428` — `applySelectedSymbol` accepts `{ domain: 'vn' | 'tv' }` and infers it from the symbol shape (`:` => `tv`). VN domain writes only `setStockGlobalSymbol` + `setContextGlobalSymbol` + sync group; TV domain writes only `setGlobalMarketsSymbol` + sync group. Neither writes into the other channel.
+- Verification: `pnpm --filter frontend lint` clean; `tsc --noEmit` clean.
+
