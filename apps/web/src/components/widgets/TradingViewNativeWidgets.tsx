@@ -598,10 +598,26 @@ function NativeTickerTapeFallback({ config }: { config?: WidgetConfig }) {
   return (
     <WidgetContainer title="Ticker Tape" noPadding>
       <div className="flex h-full min-h-[96px] items-center overflow-hidden bg-[var(--bg-primary)] px-3">
+        {/*
+          QA-v4 GM-3: The marquee must render the symbol list twice for a
+          seamless infinite scroll (the track translates -50%, so the
+          second copy seamlessly becomes the first). The second copy is
+          marked aria-hidden so screen readers and automated scrapers
+          don't surface it as a "duplicate symbol".
+        */}
         <div className="flex min-w-max animate-[marquee_28s_linear_infinite] items-center gap-3">
-          {[...symbols, ...symbols].map((symbol, index) => (
+          {symbols.map((symbol) => (
             <div
-              key={`${symbol}-${index}`}
+              key={`tape-primary-${symbol}`}
+              className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] shadow-sm"
+            >
+              {symbol}
+            </div>
+          ))}
+          {symbols.map((symbol) => (
+            <div
+              key={`tape-marquee-${symbol}`}
+              aria-hidden="true"
               className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] shadow-sm"
             >
               {symbol}

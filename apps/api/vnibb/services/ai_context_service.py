@@ -166,6 +166,24 @@ def _pick_fields(data: dict[str, Any] | None, fields: Sequence[str]) -> dict[str
     return subset or None
 
 
+def _augment_ratio_aliases(ratios: dict[str, Any] | None) -> dict[str, Any] | None:
+    """QA-v4 VA-2: Emit both `pe_ratio` and `pe` (and pb/ps) so the
+    copilot prompt builder hits on either short-form or canonical key.
+    """
+    if not ratios:
+        return ratios
+    pe = ratios.get("pe_ratio")
+    pb = ratios.get("pb_ratio")
+    ps = ratios.get("ps_ratio")
+    if pe is not None and "pe" not in ratios:
+        ratios["pe"] = pe
+    if pb is not None and "pb" not in ratios:
+        ratios["pb"] = pb
+    if ps is not None and "ps" not in ratios:
+        ratios["ps"] = ps
+    return ratios
+
+
 def _build_price_context(price_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     normalized_rows = []
     for row in price_rows:
@@ -865,7 +883,7 @@ class AIContextService:
                 ),
             ),
             "price_context": _build_price_context(price_rows),
-            "ratios": _pick_fields(
+            "ratios": _augment_ratio_aliases(_pick_fields(
                 ratio_doc,
                 (
                     "period",
@@ -887,7 +905,7 @@ class AIContextService:
                     "eps",
                     "bvps",
                 ),
-            ),
+            )),
             "income_statement": _pick_fields(
                 income_doc,
                 (
@@ -1312,8 +1330,14 @@ class AIContextService:
                 "period_type": getattr(ratio_row, "period_type", None),
                 "fiscal_year": getattr(ratio_row, "fiscal_year", None),
                 "fiscal_quarter": getattr(ratio_row, "fiscal_quarter", None),
+                # QA-v4 VA-2: emit both canonical and short-form keys so
+                # downstream consumers (copilot prompt builder) hit on
+                # either `pe` or `pe_ratio` without falling back to None.
+                "pe": getattr(ratio_row, "pe_ratio", None),
                 "pe_ratio": getattr(ratio_row, "pe_ratio", None),
+                "pb": getattr(ratio_row, "pb_ratio", None),
                 "pb_ratio": getattr(ratio_row, "pb_ratio", None),
+                "ps": getattr(ratio_row, "ps_ratio", None),
                 "ps_ratio": getattr(ratio_row, "ps_ratio", None),
                 "roe": getattr(ratio_row, "roe", None),
                 "roa": getattr(ratio_row, "roa", None),

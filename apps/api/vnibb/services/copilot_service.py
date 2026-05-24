@@ -88,6 +88,29 @@ PROMPT_TEMPLATES = {
 }
 
 
+def _fmt_metric(value: Any, suffix: str = "") -> str:
+    """QA-v4 VA-2: Defensive formatter for metric values injected into AI prompts.
+
+    When an upstream payload omits a field, plain f-string interpolation
+    produces the literal token `None`, which downstream LLMs will either
+    echo or strip — leaving a blank like "PE ratio is " in the response.
+    This helper renders missing values as the explicit token `unknown`
+    so the system-prompt guard can rephrase to "data unavailable", and
+    formats numeric values to two decimal places for readability.
+    """
+    if value is None:
+        return "unknown"
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned or cleaned.lower() in {"none", "null", "n/a", "na"}:
+            return "unknown"
+        return f"{cleaned}{suffix}"
+    try:
+        return f"{float(value):.2f}{suffix}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
 class CopilotService:
     """
     AI Copilot for natural language stock queries.
@@ -128,7 +151,7 @@ class CopilotService:
             quote_price = quote.get("price") or quote.get("data", {}).get("price")
             quote_change = quote.get("changePct") or quote.get("data", {}).get("changePct")
             if quote_price is not None:
-                context_msg += f"Latest quote: price={quote_price}, changePct={quote_change}.\n"
+                context_msg += f"Latest quote: price={_fmt_metric(quote_price)}, changePct={_fmt_metric(quote_change, '%')}.\n"
 
             profile_name = profile.get("company_name") or profile.get("data", {}).get(
                 "company_name"
@@ -140,25 +163,46 @@ class CopilotService:
             ratio_data = ratios.get("data") if isinstance(ratios, dict) else None
             if isinstance(ratio_data, list) and ratio_data:
                 latest_ratio = ratio_data[0]
+                # QA-v4 VA-2: copilot was emitting raw `None` into the
+                # prompt for missing metrics, which the model would either
+                # echo verbatim or strip leaving the value blank in
+                # responses. Use a defensive formatter and accept both
+                # `pe` and `pe_ratio` (the canonical key from
+                # ai_context_service).
                 context_msg += (
                     "Latest ratios: "
-                    f"PE={latest_ratio.get('pe')}, PB={latest_ratio.get('pb')}, "
-                    f"ROE={latest_ratio.get('roe')}, ROA={latest_ratio.get('roa')}.\n"
+                    f"PE={_fmt_metric(latest_ratio.get('pe') or latest_ratio.get('pe_ratio'))}, "
+                    f"PB={_fmt_metric(latest_ratio.get('pb') or latest_ratio.get('pb_ratio'))}, "
+                    f"ROE={_fmt_metric(latest_ratio.get('roe'), '%')}, "
+                    f"ROA={_fmt_metric(latest_ratio.get('roa'), '%')}.\n"
                 )
 
         if widget_type == "Key Metrics":
             metrics = context.get("metrics", {})
             if metrics:
-                context_msg += f"Current metrics for {symbol}: PE={metrics.get('pe', 'N/A')}, PB={metrics.get('pb', 'N/A')}, ROE={metrics.get('roe', 'N/A')}%.\n"
+                context_msg += (
+                    f"Current metrics for {symbol}: "
+                    f"PE={_fmt_metric(metrics.get('pe') or metrics.get('pe_ratio'))}, "
+                    f"PB={_fmt_metric(metrics.get('pb') or metrics.get('pb_ratio'))}, "
+                    f"ROE={_fmt_metric(metrics.get('roe'), '%')}.\n"
+                )
 
         elif widget_type == "Price Chart":
-            price = context.get("price", "N/A")
-            change = context.get("changePct", "0")
-            context_msg += f"Latest price: {price} ({change}%).\n"
+            price = context.get("price")
+            change = context.get("changePct")
+            context_msg += f"Latest price: {_fmt_metric(price)} ({_fmt_metric(change, '%')}).\n"
 
         if widget_payload:
             payload_keys = ", ".join(list(widget_payload.keys())[:8])
             context_msg += f"Widget payload keys available: {payload_keys}.\n"
+
+        # QA-v4 VA-2: Tell the model how to handle missing metrics so it
+        # surfaces "data unavailable" instead of leaving a blank.
+        context_msg += (
+            "If a metric value is reported as 'unknown' above, say "
+            "'data unavailable' rather than emitting a blank or the literal "
+            "word 'None'.\n"
+        )
 
         return context_msg
 

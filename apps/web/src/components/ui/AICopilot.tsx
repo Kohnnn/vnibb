@@ -383,23 +383,15 @@ function getProviderLabel(provider: AISettings['provider']): string {
  * `openrouter/free` or `nvidia/nemotron-3-super-128b-a12b`. Power users still
  * see the raw slug in the badge tooltip (`title=`) for debugging.
  *
- * U5 from the QA evaluation report.
+ * QA-v4 VA-1: Collapse all branches to a single label so the badge does not
+ * inconsistently flip between "VNIBB Intelligence" and "VNIBB Intelligence
+ * Pro" depending on which upstream model resolved a particular response.
+ * The raw slug is still surfaced in the tooltip for debugging.
  */
 function getFriendlyModelLabel(rawModel: string | null | undefined): string {
     if (!rawModel) return 'VNIBB Intelligence';
     const slug = rawModel.toLowerCase();
     if (slug.includes('browser model not set')) return 'Local model not set';
-    if (slug.startsWith('openrouter/') || slug.includes('/free') || slug.includes(':free')) {
-        return 'VNIBB Intelligence';
-    }
-    if (slug.includes('nvidia') && slug.includes('nemotron')) return 'VNIBB Intelligence Pro';
-    if (slug.includes('claude')) return 'VNIBB Intelligence (Claude)';
-    if (slug.includes('gpt-4') || slug.includes('gpt4')) return 'VNIBB Intelligence (GPT-4)';
-    if (slug.includes('gpt-3') || slug.includes('gpt3')) return 'VNIBB Intelligence (GPT-3.5)';
-    if (slug.includes('gemini')) return 'VNIBB Intelligence (Gemini)';
-    if (slug.includes('mistral') || slug.includes('mixtral')) return 'VNIBB Intelligence (Mistral)';
-    if (slug.includes('llama')) return 'VNIBB Intelligence (Llama)';
-    if (slug === 'global model') return 'VNIBB Intelligence';
     return 'VNIBB Intelligence';
 }
 

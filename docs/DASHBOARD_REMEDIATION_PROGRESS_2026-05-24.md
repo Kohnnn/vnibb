@@ -103,3 +103,13 @@ C.3 (`19e5203`):
 - `apps/web/src/components/shell/DashboardClient.tsx:392-428` — `applySelectedSymbol` accepts `{ domain: 'vn' | 'tv' }` and infers it from the symbol shape (`:` => `tv`). VN domain writes only `setStockGlobalSymbol` + `setContextGlobalSymbol` + sync group; TV domain writes only `setGlobalMarketsSymbol` + sync group. Neither writes into the other channel.
 - Verification: `pnpm --filter frontend lint` clean; `tsc --noEmit` clean.
 
+### Track E — shipped (`f484ffb`)
+
+- `apps/web/src/components/widgets/KeyMetricsWidget.tsx:115-119,195-202` — `useQuantMetrics` now passes `metrics: ['benchmark_risk']` so the backend includes `current_beta_63d`. Beta resolver treats screener `beta=0` as missing.
+- `apps/web/src/components/widgets/PriceChartWidget.tsx:80-114` — Snapshot Dividend Yield prefers TTM ratios (matching Key Metrics MARKET), then FY, then screener.
+- `apps/web/src/components/widgets/SignalSummaryWidget.tsx:185-198` — Indicator breakdown formats numeric values via `toFixed(2)` instead of full IEEE-754 strings.
+- `apps/web/src/components/widgets/ComparisonAnalysisWidget.tsx:532-545` — Y-axis pins baseline floor to ±5% (95-105), grows only when data exceeds. Resolves the ±100% scale on 1M views.
+- `apps/web/src/components/widgets/MarketBreadthWidget.tsx:25-38,65` — Timeout raised from 8s to 15s; `timedOut` gated on `!isFetching` so retries no longer trip the error state.
+- F5 (MktCap unify) deferred to Track D where the screener freshness fix in D.1 heals the underlying snapshot lag without a risky comparison-service refactor.
+- Verification: `pnpm --filter frontend lint` clean; `tsc --noEmit` clean.
+
