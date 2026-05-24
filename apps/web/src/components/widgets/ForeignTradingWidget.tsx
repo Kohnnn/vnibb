@@ -10,6 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { cn } from '@/lib/utils';
 import { formatShortDate } from '@/lib/format';
+import { getMarketState } from '@/lib/marketHours';
 import { memo, useEffect, useMemo } from 'react';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
@@ -158,6 +159,20 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     }, [data?.meta?.last_data_date]);
 
     const healthState: WidgetHealthState | undefined = (() => {
+        // QA-v4 Note F6 / T-2: When the user opens the dashboard on a weekend
+        // (or outside market hours), the freshest available row is by
+        // definition the last trading day's close. The previous "Cached
+        // snapshot · 3d old" copy made this look like a defect when in
+        // fact it's the canonical, intended state. Surface a clearer
+        // weekend label and skip the "stale" red badge.
+        const marketState = getMarketState();
+        if (marketState.phase === 'weekend' && snapshotAgeHours !== null && snapshotAgeHours <= 96) {
+            return {
+                status: 'live',
+                label: `Last trading day · ${formattedLastSync ?? '—'}`,
+                detail: 'Foreign trading reports settle T+0 from HOSE. Showing the most recent trading day; live updates resume Monday at 09:00 ICT.',
+            };
+        }
         if (isFallback) {
             return {
                 status: 'cached',

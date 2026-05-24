@@ -199,3 +199,9 @@ After the initial cycle, the user asked to ship the deferred items. The followin
 - Probed live API: `GET /api/v1/insider/recent?limit=10` returns real rows (TSD entries from 2025-02 visible), proving the read path is functional end-to-end.
 - VCI specifically has no insider deals in the upstream KBS/VCI feed at this moment (that's an upstream-data state, not a code bug). New rows for any VN listing will land automatically on the next scheduler cycle.
 
+### T-2 / F6 / M-1 — Weekend-aware freshness labels
+
+- `apps/web/src/components/widgets/ForeignTradingWidget.tsx` — Added `getMarketState()` import. When the user opens the dashboard on a weekend and the snapshot is ≤ 96h old, render a softer `Last trading day · DD MMM` label (status `live`) instead of the alarming `Cached snapshot · 3d old`. Stops the QA report's recurring false-positive without affecting genuine staleness detection on weekdays.
+- `apps/web/src/components/widgets/MarketOverviewWidget.tsx` — Added `getMarketState()` import. When the data is ≤ 96h old and we're currently in `weekend` / `pre-open` / `after-close`, append ` · last close` to the source label so the meta line correctly distinguishes "post-session snapshot" from "pipeline lag".
+- Verification: `pnpm --filter frontend lint` clean; `tsc --noEmit` clean.
+

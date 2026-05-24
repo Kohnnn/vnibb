@@ -7,6 +7,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
+import { getMarketState } from '@/lib/marketHours';
 
 interface MarketOverviewWidgetProps {
   isEditing?: boolean;
@@ -42,7 +43,24 @@ export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
   const isFallback = Boolean(error && hasData);
   const sourceUpdatedAt =
     getLatestTimestampValue([data?.updated_at, ...indices.map((item) => item.time)]) ?? dataUpdatedAt;
-  const sourceLabel = data?.source?.includes('yahoo_finance') ? 'Yahoo fast path' : 'Indices snapshot';
+  // QA-v4 M-1: When the data was published 2 days ago and we are
+  // currently on a weekend (or pre-open before any trading session),
+  // the staleness is canonical, not a defect. Use a softer label so
+  // users don't think the indices are broken.
+  const marketState = getMarketState();
+  const sourceLabel = (() => {
+    const baseLabel = data?.source?.includes('yahoo_finance') ? 'Yahoo fast path' : 'Indices snapshot';
+    if (!sourceUpdatedAt) return baseLabel;
+    const ageMs = Date.now() - new Date(sourceUpdatedAt).getTime();
+    const ageHours = ageMs / (1000 * 60 * 60);
+    if (
+      (marketState.phase === 'weekend' || marketState.phase === 'pre-open' || marketState.phase === 'after-close')
+      && ageHours <= 96
+    ) {
+      return `${baseLabel} · last close`;
+    }
+    return baseLabel;
+  })();
 
   return (
     <WidgetContainer
