@@ -618,7 +618,7 @@ const TRADINGVIEW_WIDGETS: readonly TradingViewNativeWidgetMetadata[] = [
     docsUrl: 'https://www.tradingview.com/widget-docs/widgets/charts/advanced-chart/',
     symbolMode: 'widget',
     defaultConfig: {
-      symbol: 'NASDAQ:VFS',
+      symbol: 'AMEX:SPY',
       useLinkedSymbol: true,
       autosize: true,
       interval: 'D',

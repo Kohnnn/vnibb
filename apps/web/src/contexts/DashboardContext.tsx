@@ -297,13 +297,18 @@ const GLOBAL_MARKETS_TEMPLATE: TemplateWidget[] = [
     {
         type: 'tradingview_chart',
         syncGroupId: 1,
-        config: { symbol: 'NASDAQ:VFS' },
+        // Track C: per-tab default with useLinkedSymbol:false so the chart
+        // honours its template seed instead of being overwritten by the
+        // global VN ticker channel. allow_symbol_change:false hides the
+        // in-iframe symbol search so VNIBB selectors are the only mutator
+        // and Technical Analysis stays in sync.
+        config: { symbol: 'AMEX:SPY', useLinkedSymbol: false, allow_symbol_change: false },
         layout: { x: 0, y: 4, w: 14, h: 10, minW: 10, minH: 8 }
     },
     {
         type: 'tradingview_technical_analysis',
         syncGroupId: 1,
-        config: { symbol: 'NASDAQ:VFS' },
+        config: { symbol: 'AMEX:SPY', useLinkedSymbol: false },
         layout: { x: 14, y: 4, w: 10, h: 10, minW: 8, minH: 8 }
     },
     {
@@ -424,7 +429,10 @@ const GLOBAL_MARKETS_CRYPTO_TEMPLATE: TemplateWidget[] = [
     {
         type: 'tradingview_chart',
         syncGroupId: 1,
-        config: { symbol: 'BINANCE:BTCUSDT' },
+        // Track C: opt out of linked-symbol channel so the Crypto chart
+        // stays on BTCUSDT instead of receiving a leaked VN ticker (e.g.
+        // HOSE:MBB) which the public TradingView embed cannot resolve.
+        config: { symbol: 'BINANCE:BTCUSDT', useLinkedSymbol: false, allow_symbol_change: false },
         layout: { x: 14, y: 4, w: 10, h: 14, minW: 8, minH: 8 }
     },
     {
@@ -472,13 +480,13 @@ const GLOBAL_MARKETS_OVERVIEW_TEMPLATE: TemplateWidget[] = [
     {
         type: 'tradingview_chart',
         syncGroupId: 1,
-        config: { symbol: 'NASDAQ:VFS' },
+        config: { symbol: 'AMEX:SPY', useLinkedSymbol: false, allow_symbol_change: false },
         layout: { x: 0, y: 4, w: 14, h: 10, minW: 10, minH: 8 }
     },
     {
         type: 'tradingview_technical_analysis',
         syncGroupId: 1,
-        config: { symbol: 'NASDAQ:VFS' },
+        config: { symbol: 'AMEX:SPY', useLinkedSymbol: false },
         layout: { x: 14, y: 4, w: 10, h: 10, minW: 8, minH: 8 }
     },
     {
