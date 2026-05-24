@@ -205,3 +205,10 @@ After the initial cycle, the user asked to ship the deferred items. The followin
 - `apps/web/src/components/widgets/MarketOverviewWidget.tsx` — Added `getMarketState()` import. When the data is ≤ 96h old and we're currently in `weekend` / `pre-open` / `after-close`, append ` · last close` to the source label so the meta line correctly distinguishes "post-session snapshot" from "pipeline lag".
 - Verification: `pnpm --filter frontend lint` clean; `tsc --noEmit` clean.
 
+### Transaction Flow — last-non-null bucket fallback
+
+- `apps/web/src/components/widgets/TransactionFlowWidget.tsx:141-167` — `summaryCards` now walks back through the `rows` array to surface the most recent non-null bucket value for each scope (domestic/foreign/proprietary/total). The latest row often has a partially populated foreign bucket (provider lag for that segment), and rendering `N/A` made testers think the foreign data was missing entirely.
+- `apps/web/src/components/widgets/TransactionFlowWidget.tsx:323-346` — Summary card render annotates `as of DD MMM` when the surfaced value is older than the latest session date, so users can see at a glance which bucket is freshest.
+- Resolves the QA report's note that "FOREIGN shows N/A rather than last value" on weekends.
+- Verification: `pnpm --filter frontend lint` clean; `tsc --noEmit` clean.
+

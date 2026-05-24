@@ -140,13 +140,27 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
 
   const summaryCards = useMemo(() => {
     if (!latest) return [];
+    // QA-v4 Transaction Flow: when the latest row's bucket is null
+    // (e.g. weekend/post-close where the foreign feed lags one session),
+    // walk back through `rows` to surface the most recent non-null value
+    // instead of rendering "N/A". Track which row was used so the UI can
+    // optionally annotate "as of <date>" if needed.
+    const lastNonNull = (s: FlowScope): { value: number | null; date: string | null } => {
+      for (let i = rows.length - 1; i >= 0; i -= 1) {
+        const v = getScopeValue(rows[i], s, mode);
+        if (v !== null && v !== undefined && Number.isFinite(v)) {
+          return { value: v, date: rows[i]?.date ?? null };
+        }
+      }
+      return { value: null, date: null };
+    };
     return [
-      { label: 'Domestic', value: getScopeValue(latest, 'domestic', mode), tone: 'text-sky-300' },
-      { label: 'Foreign', value: getScopeValue(latest, 'foreign', mode), tone: 'text-fuchsia-300' },
-      { label: 'Prop', value: getScopeValue(latest, 'proprietary', mode), tone: 'text-cyan-300' },
-      { label: 'Total', value: getScopeValue(latest, 'total', mode), tone: 'text-emerald-300' },
+      { label: 'Domestic', ...lastNonNull('domestic'), tone: 'text-sky-300' },
+      { label: 'Foreign', ...lastNonNull('foreign'), tone: 'text-fuchsia-300' },
+      { label: 'Prop', ...lastNonNull('proprietary'), tone: 'text-cyan-300' },
+      { label: 'Total', ...lastNonNull('total'), tone: 'text-emerald-300' },
     ];
-  }, [latest, mode]);
+  }, [latest, mode, rows]);
 
   const note = scope === 'total'
     ? `${mode === 'value' ? 'Net value' : 'Net volume'} stacked by inferred investor bucket`
@@ -306,19 +320,32 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
               </div>
 
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-4">
-                {summaryCards.map((card) => (
-                  <div
-                    key={card.label}
-                    className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3"
-                  >
-                    <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                      {card.label}
+                {summaryCards.map((card) => {
+                  const cardDate = (card as { date?: string | null }).date ?? null;
+                  const isLagged =
+                    cardDate &&
+                    latest?.date &&
+                    cardDate !== latest.date &&
+                    card.value !== null;
+                  return (
+                    <div
+                      key={card.label}
+                      className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3"
+                    >
+                      <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                        {card.label}
+                      </div>
+                      <div className={cn('text-lg font-semibold', card.tone)}>
+                        {formatFlowValue(card.value, mode, unitConfig)}
+                      </div>
+                      {isLagged ? (
+                        <div className="mt-1 text-[10px] text-[var(--text-muted)]">
+                          as of {formatShortDate(cardDate)}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className={cn('text-lg font-semibold', card.tone)}>
-                      {formatFlowValue(card.value, mode, unitConfig)}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="flex min-h-[150px] flex-col rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
