@@ -72,73 +72,87 @@ class InsiderTrackingService:
     async def sync_insider_deals(self, symbols: List[str]) -> Dict[str, int]:
         """
         Sync insider deals for given symbols from vnstock.
-        
+
         Args:
             symbols: List of stock symbols to sync
-            
+
         Returns:
             Dict with sync statistics
+
+        QA-v4 D.4: Previously called `stock.finance.insider_deals()` which
+        does not exist in vnstock>=3.5 (the method is on `stock.company`,
+        not `stock.finance`). Result was that the writer raised on every
+        symbol and the InsiderDeal table stayed empty since v1. Now
+        delegates to VnstockInsiderDealsFetcher which already knows the
+        correct vnstock_data + vnstock entrypoints with proper field-alias
+        normalization across KBS / VCI sources.
         """
+        from vnibb.providers.vnstock.insider_deals import (
+            InsiderDealsQueryParams,
+            VnstockInsiderDealsFetcher,
+        )
+
         stats = {"total": 0, "new": 0, "errors": 0}
-        
+
         for symbol in symbols:
             try:
-                # Fetch insider deals from vnstock
-                stock = self.vnstock.stock(symbol=symbol, source=settings.vnstock_source)
+                deal_records = await VnstockInsiderDealsFetcher.fetch(
+                    InsiderDealsQueryParams(symbol=symbol, limit=50)
+                )
 
-                deals_df = stock.finance.insider_deals()
-                
-                if deals_df is None or deals_df.empty:
+                if not deal_records:
                     logger.debug(f"No insider deals for {symbol}")
                     continue
-                
-                # Process each deal
-                for _, row in deals_df.iterrows():
+
+                for record in deal_records:
                     stats["total"] += 1
-                    
-                    # Check if deal already exists
+                    payload = record.model_dump() if hasattr(record, "model_dump") else dict(record)
+                    announce_date = payload.get("transaction_date") or payload.get("announce_date")
+                    insider_name = payload.get("insider_name") or "Unknown"
+                    transaction_type = payload.get("transaction_type") or "UNKNOWN"
+
                     existing = await self.db.execute(
                         select(InsiderDeal).where(
                             and_(
                                 InsiderDeal.symbol == symbol,
-                                InsiderDeal.announce_date == row.get("announce_date"),
-                                InsiderDeal.insider_name == row.get("insider_name")
+                                InsiderDeal.announce_date == announce_date,
+                                InsiderDeal.insider_name == insider_name,
                             )
                         )
                     )
-                    
                     if existing.scalar_one_or_none():
                         continue
-                    
-                    # Create new insider deal
+
                     deal = InsiderDeal(
-                        symbol=symbol,
-                        announce_date=row.get("announce_date"),
-                        deal_method=row.get("deal_method"),
-                        deal_action=row.get("deal_action"),
-                        deal_quantity=row.get("deal_quantity"),
-                        deal_price=row.get("deal_price"),
-                        deal_value=row.get("deal_value"),
-                        deal_ratio=row.get("deal_ratio"),
-                        insider_name=row.get("insider_name"),
-                        insider_position=row.get("insider_position"),
-                        raw_data=row.to_dict()
+                        symbol=symbol.upper(),
+                        announce_date=announce_date,
+                        deal_method=payload.get("deal_method"),
+                        # transaction_type is normalized by the fetcher to
+                        # short-form tokens (BUY/SELL/UNKNOWN) when possible
+                        deal_action=str(transaction_type)[:50],
+                        deal_quantity=payload.get("transaction_volume")
+                        or payload.get("deal_quantity"),
+                        deal_price=payload.get("transaction_price") or payload.get("deal_price"),
+                        deal_value=payload.get("transaction_value") or payload.get("deal_value"),
+                        deal_ratio=payload.get("ownership_after") or payload.get("deal_ratio"),
+                        insider_name=insider_name,
+                        insider_position=payload.get("insider_position"),
+                        raw_data=payload,
                     )
-                    
+
                     self.db.add(deal)
                     stats["new"] += 1
-                    
-                    # Generate alert for new deal
+
                     await self._generate_insider_alert(deal)
-                
+
                 await self.db.commit()
                 logger.info(f"Synced {stats['new']} new insider deals for {symbol}")
-                
+
             except Exception as e:
                 logger.error(f"Error syncing insider deals for {symbol}: {e}")
                 stats["errors"] += 1
                 await self.db.rollback()
-        
+
         return stats
     
     async def detect_block_trades(

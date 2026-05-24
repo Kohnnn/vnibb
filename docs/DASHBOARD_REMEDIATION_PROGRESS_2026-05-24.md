@@ -113,3 +113,24 @@ C.3 (`19e5203`):
 - F5 (MktCap unify) deferred to Track D where the screener freshness fix in D.1 heals the underlying snapshot lag without a risky comparison-service refactor.
 - Verification: `pnpm --filter frontend lint` clean; `tsc --noEmit` clean.
 
+### Track F — shipped (`07c0960`)
+
+- `apps/web/src/components/ui/AICopilot.tsx:380-396` — `getFriendlyModelLabel` collapsed to always return `'VNIBB Intelligence'`. Raw slug stays in the badge tooltip.
+- `apps/api/vnibb/services/copilot_service.py` — Added `_fmt_metric` defensive formatter; `build_context_prompt` now uses it for ratios, key metrics, and price chart context blocks. Accepts both `pe`/`pe_ratio` short and canonical keys. Adds a system-prompt guard instructing the model to render `unknown` as 'data unavailable' instead of leaving a blank.
+- `apps/api/vnibb/services/ai_context_service.py:162-185,1310-1357` — Ratios snapshot (Postgres + Appwrite/MCP) now emits both short-form `pe`/`pb`/`ps` and canonical `pe_ratio`/`pb_ratio`/`ps_ratio` keys. New `_augment_ratio_aliases` helper.
+- `apps/web/src/components/widgets/TradingViewNativeWidgets.tsx:599-625` — Ticker tape marquee splits into a primary list and an `aria-hidden` seamless-scroll copy, so QA scrapers and screen readers no longer surface duplicate symbols even though the marquee technique requires two render passes.
+- VNIBB MCP integration is already wired end-to-end via `ai_context_service.build_runtime_context` (calls `vnibb_mcp_client_service.get_symbol_snapshot` / `get_market_snapshot` when configured). The Track F commit makes the MCP-fetched snapshot's ratios usable by the prompt builder via the new aliases.
+- Verification: `pnpm --filter frontend lint` clean; backend `pytest -k "copilot or ai_context"` 21/21 pass.
+
+### Track D — shipped
+
+- `apps/api/vnibb/services/cache_manager.py:85-92,160-180` — Added `MAX_STALE_DAYS = 7` ceiling; `get_screener_data` returns a miss when `MAX(snapshot_date)` is older so callers refetch fresh from the provider instead of indefinitely serving the 7-week-stale heatmap snapshot.
+- `apps/api/vnibb/api/v1/market.py` — New `_load_latest_price_time` helper; market heatmap `updated_at` now prefers the freshest `StockPrice.time` (which the daily price feed keeps current) over the stale screener snapshot date.
+- `apps/api/vnibb/api/v1/market.py` — Money Flow Trend broadens universe from VN30 to the full screener-priced universe when the VN30 price frame is empty, restoring "Showing 0 of 0 names" cases.
+- `apps/api/vnibb/api/v1/market.py:1906-1942,1972-1988` — `_sort_top_movers` derives `price_change_pct` from `price_change` and `last_price` when the provider omits it; `_build_last_session_top_movers` lowers the distinct-symbol bar from 30 to 10 so partial post-holiday sessions still surface gainers.
+- `apps/api/vnibb/services/insider_tracking.py:72-149` — `sync_insider_deals` rewrite: routes through `VnstockInsiderDealsFetcher` (the real KBS/VCI-aware provider) instead of the broken `stock.finance.insider_deals()` entrypoint that does not exist in vnstock>=3.5. Maps the modern `InsiderDealData` model to `InsiderDeal` columns.
+- `apps/api/vnibb/models/news.py:166-172` — `InsiderDeal.deal_action` widened from `String(10)` to `String(50)` to fit Vietnamese phrases like "Đăng ký mua" and normalized BUY/SELL/UNKNOWN tokens.
+- `apps/api/migrations/versions/20260524_1600_widen_insider_deals_deal_action.py` — Alembic migration `7f3a8d1e6b22 -> 4e8b1c2a9f17`.
+- `apps/api/vnibb/services/news_crawler.py:80-114` — `_coerce_published_date` pre-processor rewrites `GMT+7`-style timezones to `+0700` and strips Vietnamese weekday prefixes before falling through to ISO-8601 / RFC 822 parsers, fixing the persistent "Date unavailable" on VnExpress.NET articles.
+- Verification: `python -m py_compile` clean; `pnpm run ci:gate` green (frontend lint + build + 19 jest tests, backend `py_compile` + 252 pytest).
+

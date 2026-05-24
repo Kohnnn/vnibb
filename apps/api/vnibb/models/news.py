@@ -166,7 +166,10 @@ class InsiderDeal(Base):
     # Deal details
     announce_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     deal_method: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    deal_action: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # Mua (Buy), Bán (Sell)
+    # QA-v4 D.4: bumped 10 -> 50 chars to fit Vietnamese phrases like
+    # 'Đăng ký mua' / 'Đăng ký bán' / normalized BUY/SELL/UNKNOWN tokens
+    # emitted by VnstockInsiderDealsFetcher.
+    deal_action: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     
     # Quantities
     deal_quantity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

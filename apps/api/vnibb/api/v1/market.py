@@ -1254,6 +1254,33 @@ async def _load_stock_metadata(symbols: List[str]) -> Dict[str, Dict[str, Option
     return metadata
 
 
+async def _load_latest_price_time(symbols: List[str]) -> str | None:
+    """QA-v4 D.1: Return the freshest StockPrice.time across the given
+    symbols as an ISO date string. Used by the market heatmap to surface
+    a meaningful `updated_at` even when the daily screener cron is
+    behind. The price feed (`nightly_price_backfill`) is independent of
+    `ScreenerSnapshot.snapshot_date`, so it stays current.
+    """
+    unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
+    if not unique_symbols:
+        return None
+    try:
+        async with async_session_maker() as session:
+            row = await session.execute(
+                select(func.max(StockPrice.time)).where(
+                    StockPrice.interval == "1D",
+                    StockPrice.symbol.in_(unique_symbols),
+                )
+            )
+            latest = row.scalar()
+            if latest is None:
+                return None
+            return latest.isoformat() if hasattr(latest, "isoformat") else str(latest)
+    except Exception as exc:
+        logger.warning("Latest price time lookup failed: %s", exc)
+        return None
+
+
 async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
@@ -1879,14 +1906,29 @@ def _apply_snapshot_metrics_to_movers(
 def _sort_top_movers(
     payload: List[dict[str, Any]], mover_type: str, limit: int
 ) -> List[dict[str, Any]]:
+    def _effective_pct(item: dict[str, Any]) -> float | None:
+        # QA-v4 D.3: when the provider omits `price_change_pct`, derive
+        # one from `price_change` and `last_price` so a row with otherwise
+        # valid data isn't silently dropped from gainers/losers.
+        pct = _to_float(item.get("price_change_pct"))
+        if pct is not None:
+            return pct
+        change = _to_float(item.get("price_change"))
+        last = _to_float(item.get("price") or item.get("last_price"))
+        if change is not None and last not in (None, 0):
+            base = last - change
+            if base not in (None, 0):
+                return (change / base) * 100.0
+        return None
+
     if mover_type == "gainer":
-        rows = [item for item in payload if (_to_float(item.get("price_change_pct")) or 0.0) > 0]
-        rows.sort(key=lambda item: _to_float(item.get("price_change_pct")) or 0.0, reverse=True)
+        rows = [item for item in payload if (_effective_pct(item) or 0.0) > 0]
+        rows.sort(key=lambda item: _effective_pct(item) or 0.0, reverse=True)
         return rows[:limit]
 
     if mover_type == "loser":
-        rows = [item for item in payload if (_to_float(item.get("price_change_pct")) or 0.0) < 0]
-        rows.sort(key=lambda item: _to_float(item.get("price_change_pct")) or 0.0)
+        rows = [item for item in payload if (_effective_pct(item) or 0.0) < 0]
+        rows.sort(key=lambda item: _effective_pct(item) or 0.0)
         return rows[:limit]
 
     if mover_type == "volume":
@@ -1927,8 +1969,9 @@ async def _build_last_session_top_movers(
 
     async with async_session_maker() as session:
         # Find latest trade date that has meaningful coverage. We require
-        # at least 30 distinct symbols so we don't latch onto a partial
-        # half-loaded session.
+        # at least 10 distinct symbols (lowered from 30 in QA-v4 D.3 so a
+        # partially loaded post-holiday session still surfaces gainers
+        # rather than going empty).
         latest_session_row = await session.execute(
             text(
                 """
@@ -1939,7 +1982,7 @@ async def _build_last_session_top_movers(
                     WHERE interval = '1D'
                     GROUP BY time
                 ) s
-                WHERE n >= 30
+                WHERE n >= 10
                 ORDER BY trade_date DESC
                 LIMIT 1
                 """
@@ -2550,7 +2593,14 @@ async def get_heatmap_data(
 
         total_stocks = sum(len(s.stocks) for s in sectors)
 
-        updated_at = _latest_timestamp([row.get("updated_at") for row in normalized_rows])
+        # QA-v4 D.1: Prefer the freshest StockPrice.time across the heatmap
+        # symbols (which the daily price feed keeps current) over the
+        # screener snapshot's `updated_at` (which can be days/weeks
+        # behind when the screener cron stalls).
+        heatmap_symbols = [s.get("symbol") for s in normalized_rows if s.get("symbol")]
+        price_updated_at = await _load_latest_price_time(heatmap_symbols)
+        snapshot_updated_at = _latest_timestamp([row.get("updated_at") for row in normalized_rows])
+        updated_at = price_updated_at or snapshot_updated_at
 
         return HeatmapResponse(
             count=total_stocks,
@@ -3318,6 +3368,46 @@ async def get_money_flow_trend(
         provider_index_frame = await _fetch_benchmark_history_from_provider(start_date, end_date)
         if not provider_index_frame.empty:
             index_frame = provider_index_frame
+
+    # QA-v4 D.2: Money Flow Trend frequently returned "Showing 0 of 0
+    # names" when the universe defaulted to VN30 but the price feed for
+    # those symbols was thin in the requested window. Try a broader
+    # universe (any symbol in screener_rows with a recorded price) once
+    # before giving up.
+    if (
+        price_frame.empty
+        and not manual_symbols
+        and not sector_name
+    ):
+        broader_symbols = sorted({
+            row["symbol"]
+            for row in screener_rows
+            if row.get("symbol") and row.get("price") is not None
+        })
+        if broader_symbols and broader_symbols != universe_symbols:
+            broader_result = await db.execute(
+                select(StockPrice.symbol, StockPrice.time, StockPrice.close)
+                .where(
+                    StockPrice.symbol.in_(broader_symbols[:200]),
+                    StockPrice.interval == "1D",
+                    StockPrice.time >= start_date,
+                    StockPrice.time <= end_date,
+                )
+                .order_by(StockPrice.symbol, StockPrice.time)
+            )
+            broader_frame = pd.DataFrame(
+                broader_result.all(), columns=["symbol", "time", "close"]
+            )
+            if not broader_frame.empty:
+                logger.info(
+                    "Money Flow universe broadened from VN30 (%d symbols) to "
+                    "screener universe (%d symbols) because VN30 had no prices.",
+                    len(universe_symbols),
+                    len(broader_symbols),
+                )
+                price_frame = broader_frame
+                universe_symbols = broader_symbols[:200]
+
     if price_frame.empty or index_frame.empty:
         return MoneyFlowTrendResponse(
             timeframe=timeframe,

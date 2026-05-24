@@ -84,6 +84,11 @@ class CacheManager:
     # Legacy constants (for backward compatibility)
     SCREENER_TTL_MINUTES = 60
     PROFILE_TTL_HOURS = 168
+    # QA-v4 Heatmap: never serve a screener snapshot older than this from
+    # the stale cache. The daily sync should keep us inside ~1 trading
+    # day; 7 days gives plenty of headroom over weekends and Vietnamese
+    # market holidays before forcing a fresh fetch.
+    MAX_STALE_DAYS = 7
 
     def __init__(self, db: Optional[AsyncSession] = None):
         """
@@ -152,6 +157,21 @@ class CacheManager:
                     latest_date_query = latest_date_query.where(ScreenerSnapshot.source == source)
                 latest_date_result = await session.execute(latest_date_query)
                 latest_date = latest_date_result.scalar()
+
+                # QA-v4 Heatmap: cap stale snapshots at MAX_STALE_DAYS so
+                # an indefinitely-stuck screener cron (the cause of the
+                # 7-week-stale heatmap) doesn't keep poisoning every
+                # downstream caller forever. Older than that, return a
+                # miss so callers fetch fresh from the provider.
+                if latest_date and (today - latest_date).days > self.MAX_STALE_DAYS:
+                    logger.warning(
+                        "Screener snapshot too stale (latest=%s, today=%s, "
+                        "max_stale_days=%s); returning miss so callers refetch.",
+                        latest_date,
+                        today,
+                        self.MAX_STALE_DAYS,
+                    )
+                    return CacheResult(data=None, is_stale=True, cached_at=None, hit=False)
 
                 if latest_date:
                     query = query.where(ScreenerSnapshot.snapshot_date == latest_date)

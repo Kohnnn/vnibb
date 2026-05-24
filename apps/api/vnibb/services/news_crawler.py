@@ -81,6 +81,22 @@ def _coerce_published_date(value: Any) -> datetime | None:
     if not text:
         return None
 
+    # QA-v4 D.5: Some VnExpress feeds emit `pubDate` with a non-RFC-822
+    # timezone (e.g. "Sat, 23 May 2026 14:30:00 GMT+7") and a localized
+    # weekday prefix. Pre-process both before falling through to the
+    # standard parsers.
+    import re as _re
+
+    # Convert "GMT+7" / "GMT-3" to "+0700" / "-0300".
+    text = _re.sub(
+        r"GMT\s*([+-])(\d{1,2})(?::?(\d{2}))?",
+        lambda m: f"{m.group(1)}{int(m.group(2)):02d}{m.group(3) or '00'}",
+        text,
+    )
+    # Strip a leading Vietnamese / abbreviated weekday like "Chủ nhật,"
+    # or "T2," that confuses parsedate_to_datetime.
+    text = _re.sub(r"^(?:Chủ nhật|Chu nhat|Th[ứu] [2-7]|T[2-7]),\s*", "", text, flags=_re.IGNORECASE)
+
     # Try ISO 8601 first (handles "Z" suffix and offsets).
     try:
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
