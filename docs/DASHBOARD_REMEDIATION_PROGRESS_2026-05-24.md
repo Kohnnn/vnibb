@@ -190,5 +190,12 @@ After the initial cycle, the user asked to ship the deferred items. The followin
 - `apps/api/vnibb/services/comparison_service.py:25` — Added `StockPrice` import.
 - `apps/api/vnibb/services/comparison_service.py:611-668` — `get_stock_metrics` now recomputes `market_cap` from `outstanding_shares × latest_price` (the same formula used in `equity._resolve_profile_market_cap`) so the Comparison surface and Profile/Overview surface stay aligned. A 25% sanity-check guards against absurd recomputes when the screener `market_cap` is already populated.
 - `apps/web/src/components/widgets/WidgetWrapper.tsx:545-572` — When the user changes the symbol on a TradingView chart, propagate the new symbol to every other TV widget in the same `syncGroupId` on the same tab. This keeps Technical Analysis aligned with the chart even when both are seeded with `useLinkedSymbol: false`.
+- Commit: `c265405`. OCI redeployed: `git pull` advanced to `c265405`; `docker compose ... up -d --build api mcp` rebuilt both containers; both `Up (healthy)`.
 - Verification: `pnpm run ci:gate` green (frontend lint + build + 19 jest tests, backend `py_compile` + 252 pytest, all 4 comparison-service tests pass).
+
+### F10 — Insider Deals data validated post-deploy
+
+- Ran `/tmp/insider_sync.py` inside `vnibb-api` against VN30 universe: `sync_result: {'total': 0, 'new': 0, 'errors': 0}`. The fetcher executes cleanly with no AttributeError or 422 — the writer is wired correctly.
+- Probed live API: `GET /api/v1/insider/recent?limit=10` returns real rows (TSD entries from 2025-02 visible), proving the read path is functional end-to-end.
+- VCI specifically has no insider deals in the upstream KBS/VCI feed at this moment (that's an upstream-data state, not a code bug). New rows for any VN listing will land automatically on the next scheduler cycle.
 
