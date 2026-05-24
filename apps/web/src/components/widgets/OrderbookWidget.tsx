@@ -20,17 +20,22 @@ interface OrderbookWidgetProps {
 
 type DepthEntry = PriceDepthResponse['data']['entries'][number];
 
-function toFiniteNumber(...values: unknown[]): number | null {
+/**
+ * For order book entries, a literal 0 price is "no price" — provider feeds
+ * sometimes emit 0 for a level that has only volume. Treating 0 as a real
+ * value defeats the bid-or-ask fallback elsewhere and renders "0" rows.
+ */
+function toFiniteOrderPrice(...values: unknown[]): number | null {
   for (const value of values) {
     const parsed = typeof value === 'number' ? value : Number(value);
-    if (Number.isFinite(parsed)) return parsed;
+    if (Number.isFinite(parsed) && parsed !== 0) return parsed;
   }
   return null;
 }
 
 function getEntryPrice(entry: DepthEntry): number | null {
   const row = entry as DepthEntry & Record<string, unknown>;
-  return toFiniteNumber(
+  return toFiniteOrderPrice(
     row.price,
     row.bid_price,
     row.ask_price,
@@ -42,31 +47,11 @@ function getEntryPrice(entry: DepthEntry): number | null {
 }
 
 /**
- * HOSE/HNX/UPCOM order book payloads sometimes arrive in raw VND units
- * (e.g. `25,000` for a stock priced at 25.0 VND/share thousands) and
- * sometimes already pre-scaled to thousand-VND units. The chart and the
- * comparison code throughout the dashboard expect "thousand VND" units
- * (matching the convention used in the price ticker, market overview,
- * etc). When a price is more than 5x the lastPrice anchor we treat it
- * as an unscaled raw value and divide by 1000 to align the display.
- *
- * This addresses QA-v3 T2/T7 where ask prices showed 58,000-311,900 for
- * a stock trading at ~25 VND.
+ * Backend canonicalizes order book prices to "thousand VND" units in
+ * `equity._normalize_orderbook_units`. The frontend no longer applies a
+ * fallback heuristic — that logic was duplicating work and could
+ * double-correct in transient deploy windows.
  */
-function normalizeOrderbookPrice(price: number | null, lastPriceAnchor: number | null): number | null {
-  if (price === null || !Number.isFinite(price)) return price;
-  if (lastPriceAnchor === null || !Number.isFinite(lastPriceAnchor) || lastPriceAnchor <= 0) {
-    // Without an anchor we still apply the heuristic for absurdly large
-    // values typical of unscaled HOSE feeds (>= 5,000 effectively means
-    // raw VND for any HOSE-listed stock priced in thousand-VND units).
-    if (Math.abs(price) >= 5000) return price / 1000;
-    return price;
-  }
-  if (Math.abs(price) > lastPriceAnchor * 5) {
-    return price / 1000;
-  }
-  return price;
-}
 
 function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataChange }: OrderbookWidgetProps) {
   const {
@@ -82,6 +67,9 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
   const hasData = entries.length > 0;
   const isFallback = Boolean(error && hasData);
   const lastPrice = Number(orderbook?.data?.last_price);
+  const isStale = Boolean(orderbook?.data?.is_stale);
+  const marketStatus = orderbook?.data?.market_status || null;
+  const snapshotTime = orderbook?.data?.snapshot_time || null;
 
   const maxVolume = useMemo(() => {
     if (entries.length === 0) return 1;
@@ -91,14 +79,20 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
     );
   }, [entries]);
 
+  // Backend is now canonical (raw VND -> thousand VND normalization happens
+  // in equity._normalize_orderbook_units). Frontend just reads the price.
   const normalizedEntries = useMemo(
-    () => entries.map((entry) => {
-      const rawPrice = getEntryPrice(entry);
-      const anchor = Number.isFinite(lastPrice) ? lastPrice : null;
-      return { ...entry, price: normalizeOrderbookPrice(rawPrice, anchor) };
-    }),
-    [entries, lastPrice]
+    () => entries.map((entry) => ({ ...entry, price: getEntryPrice(entry) })),
+    [entries]
   );
+
+  const metaNote = useMemo(() => {
+    if (isStale && marketStatus === 'closed') {
+      const timeLabel = snapshotTime ? ` as of ${snapshotTime.slice(0, 16).replace('T', ' ')}` : '';
+      return `Market closed — last snapshot${timeLabel}`;
+    }
+    return 'Depth snapshot';
+  }, [isStale, marketStatus, snapshotTime]);
 
   const depthSeries = useMemo(() => {
     const normalized = normalizedEntries
@@ -160,8 +154,8 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
-            isCached={isFallback}
-            note="Depth snapshot"
+            isCached={isFallback || isStale}
+            note={metaNote}
             align="right"
           />
         </div>

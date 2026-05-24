@@ -1304,9 +1304,14 @@ export interface PriceDepthResponse {
         total_ask_volume?: number;
         last_price?: number;
         last_volume?: number;
+        snapshot_time?: string | null;
+        is_stale?: boolean;
+        market_status?: string | null;
+        unit_corrected?: boolean;
     };
     meta?: {
         count: number;
+        last_data_date?: string | null;
     };
     error?: string | null;
 }

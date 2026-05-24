@@ -5656,6 +5656,17 @@ def _depth_value(depth_data: Any, key: str) -> Any:
 def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
     entries: List[dict[str, Any]] = []
 
+    def _meaningful_price(value: Any) -> bool:
+        # Treat 0 (or None) as "no price". Provider feeds sometimes emit 0
+        # for a level that has only volume; if we use 0 as a real price,
+        # `bid OR ask` fallback below picks the wrong side.
+        if value is None:
+            return False
+        try:
+            return float(value) > 0
+        except (TypeError, ValueError):
+            return False
+
     for level in range(1, 4):
         bid_level = _depth_value(depth_data, f"bid_{level}")
         ask_level = _depth_value(depth_data, f"ask_{level}")
@@ -5664,7 +5675,10 @@ def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
         ask_price = _depth_value(ask_level, "price") if ask_level else None
         bid_vol = _depth_value(bid_level, "volume") if bid_level else None
         ask_vol = _depth_value(ask_level, "volume") if ask_level else None
-        price = bid_price if bid_price is not None else ask_price
+        # Use a positivity check, not "is not None": a literal 0 is missing.
+        price = bid_price if _meaningful_price(bid_price) else ask_price
+        if not _meaningful_price(price):
+            price = None
 
         if any(value is not None for value in (price, bid_vol, ask_vol)):
             entries.append(
@@ -5685,7 +5699,9 @@ def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
         ask_price = row.get("offerPrice1") or row.get("askPrice1") or row.get("ask1")
         bid_vol = row.get("bidVol1") or row.get("bidVolume1") or row.get("buyVol")
         ask_vol = row.get("offerVol1") or row.get("askVolume1") or row.get("sellVol")
-        price = bid_price if bid_price is not None else ask_price
+        price = bid_price if _meaningful_price(bid_price) else ask_price
+        if not _meaningful_price(price):
+            price = None
 
         if any(value is not None for value in (price, bid_vol, ask_vol)):
             entries.append(
@@ -5700,74 +5716,76 @@ def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
     return entries
 
 
-# QA-v3 T2/T7: Some HOSE/SSI provider responses transmit bid/ask prices in
-# raw VND (e.g. 25_000) while VNIBB's display convention is "VND thousands"
+# QA-v3 T2 / v4 T2: Some HOSE/SSI/KBS provider responses transmit bid/ask prices
+# in raw VND (e.g. 25_000) while VNIBB's display convention is "VND thousands"
 # (e.g. 25.0). When that happens every level shows up ~1000x the real
-# market price, breaking the Order Book widget visually.
+# market price.
 #
-# We auto-correct by comparing every level's price against the response's
-# `last_price` (the most recent matched trade, which we know is in display
-# units because the rest of the app uses it everywhere). If a level's price
-# is >= 100x the last_price we treat the bid/ask side as raw-VND and divide
-# by 1000.
-_ORDERBOOK_UNIT_THRESHOLD = 100.0
+# We canonicalize at the API boundary by absolute scale: any HOSE/HNX/UPCOM
+# stock trading in display units lives in the [0.5, 1000] thousand-VND range.
+# If we see any level price >= 1000, the entire payload (entries' prices,
+# last_price, totals) is in raw VND and we divide every numeric price by
+# 1000 together so internal relationships stay intact.
+_ORDERBOOK_RAW_VND_THRESHOLD = 1000.0
 
 
-def _coerce_unit_correction_factor(level_price: Any, reference: Any) -> float:
+def _looks_raw_vnd(value: Any) -> bool:
     try:
-        price_f = float(level_price)
-        ref_f = float(reference)
+        f = float(value)
     except (TypeError, ValueError):
-        return 1.0
-    if not (price_f and ref_f) or ref_f <= 0:
-        return 1.0
-    if price_f / ref_f >= _ORDERBOOK_UNIT_THRESHOLD:
-        return 0.001
-    return 1.0
+        return False
+    return f >= _ORDERBOOK_RAW_VND_THRESHOLD
+
+
+def _scale_price(value: Any, factor: float) -> Any:
+    if value is None:
+        return None
+    try:
+        return float(value) * factor
+    except (TypeError, ValueError):
+        return value
 
 
 def _normalize_orderbook_units(payload: dict[str, Any]) -> dict[str, Any]:
     """Apply HOSE display-unit normalization (raw VND -> VND thousands)
     when the provider response is in the wrong scale.
 
-    Returns the payload unchanged when no anomaly detected. Sets
-    ``payload['unit_corrected'] = True`` when at least one level was
-    rescaled so the frontend can surface a discreet hint.
+    Detection is by absolute scale, not ratio against `last_price` (which
+    has historically been unreliable - sometimes also raw VND, sometimes
+    display VND). If ANY level price is >= 1000, the whole payload is raw.
+    Returns the payload unchanged when no anomaly detected.
     """
 
     entries = payload.get("entries") or []
-    reference = payload.get("last_price")
-    if not entries or reference is None:
+    if not entries:
         return payload
 
-    corrected_any = False
+    # Decide once for the whole payload.
+    raw_signal = any(_looks_raw_vnd(e.get("price")) for e in entries if isinstance(e, dict))
+    if not raw_signal:
+        # last_price might still be raw; if so, fix only it.
+        if _looks_raw_vnd(payload.get("last_price")):
+            payload = {**payload, "last_price": _scale_price(payload.get("last_price"), 0.001)}
+        return payload
+
+    factor = 0.001
     new_entries: List[dict[str, Any]] = []
     for entry in entries:
         if not isinstance(entry, dict):
             new_entries.append(entry)
             continue
-        factor = _coerce_unit_correction_factor(entry.get("price"), reference)
-        if factor == 1.0:
-            new_entries.append(entry)
-            continue
-        try:
-            entry = {**entry, "price": float(entry.get("price")) * factor}
-        except (TypeError, ValueError):
-            new_entries.append(entry)
-            continue
-        corrected_any = True
-        new_entries.append(entry)
+        new_entries.append({**entry, "price": _scale_price(entry.get("price"), factor)})
 
-    if corrected_any:
-        logger.warning(
-            "Orderbook unit anomaly detected for %s; auto-corrected by 0.001x",
-            payload.get("symbol"),
-        )
-        payload = {
-            **payload,
-            "entries": new_entries,
-            "unit_corrected": True,
-        }
+    payload = {
+        **payload,
+        "entries": new_entries,
+        "last_price": _scale_price(payload.get("last_price"), factor),
+        "unit_corrected": True,
+    }
+    logger.info(
+        "Orderbook payload rescaled raw VND -> thousand VND for %s",
+        payload.get("symbol"),
+    )
     return payload
 
 
@@ -5810,7 +5828,18 @@ def _build_orderbook_payload_from_snapshot(snapshot: OrderbookSnapshot) -> dict[
         ask_price = getattr(snapshot, f"ask{level}_price")
         bid_volume = getattr(snapshot, f"bid{level}_volume")
         ask_volume = getattr(snapshot, f"ask{level}_volume")
-        price = bid_price if bid_price is not None else ask_price
+        # Same fallback semantics as _normalize_orderbook_entries: a literal
+        # 0 price is "missing", not a real price.
+        try:
+            has_bid = bid_price is not None and float(bid_price) > 0
+        except (TypeError, ValueError):
+            has_bid = False
+        price = bid_price if has_bid else ask_price
+        try:
+            if price is not None and float(price) <= 0:
+                price = None
+        except (TypeError, ValueError):
+            price = None
         if any(value is not None for value in (price, bid_volume, ask_volume)):
             entries.append(
                 {
@@ -5881,7 +5910,7 @@ async def _cache_orderbook_payload(symbol: str, payload: dict[str, Any]) -> None
 
 async def _get_orderbook_payload(symbol: str, db: AsyncSession) -> dict[str, Any]:
     cached_payload = await _load_cached_orderbook_payload(symbol)
-    if cached_payload is not None:
+    if cached_payload is not None and cached_payload.get("entries"):
         return cached_payload
 
     try:
@@ -5890,8 +5919,14 @@ async def _get_orderbook_payload(symbol: str, db: AsyncSession) -> dict[str, Any
             timeout=30,
         )
     except Exception:
+        # Live fetch failed entirely: surface last DB snapshot as stale.
         snapshot_payload = await _load_orderbook_snapshot_from_db(db, symbol)
         if snapshot_payload is not None:
+            snapshot_payload = {
+                **snapshot_payload,
+                "is_stale": True,
+                "market_status": "closed",
+            }
             return snapshot_payload
         raise
 
@@ -5900,6 +5935,19 @@ async def _get_orderbook_payload(symbol: str, db: AsyncSession) -> dict[str, Any
         depth,
         snapshot_time=datetime.utcnow().isoformat(),
     )
+
+    # Live fetch succeeded but returned no rows: market is likely closed.
+    # Fall back to last DB snapshot and tag as stale so UI can annotate.
+    if not payload.get("entries"):
+        snapshot_payload = await _load_orderbook_snapshot_from_db(db, symbol)
+        if snapshot_payload is not None and snapshot_payload.get("entries"):
+            snapshot_payload = {
+                **snapshot_payload,
+                "is_stale": True,
+                "market_status": "closed",
+            }
+            return snapshot_payload
+
     await _cache_orderbook_payload(symbol, payload)
     return payload
 

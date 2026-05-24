@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class OrderLevel(BaseModel):
     """Single price level in order book."""
 
-    price: float
+    price: float | None = None
     volume: int
     order_count: Optional[int] = Field(None, alias="orderCount")
 
@@ -121,7 +121,15 @@ class VnstockPriceDepthFetcher:
                 volume = r.get("volume") or r.get("qty")
 
                 if side:
-                    level = OrderLevel(price=price or 0, volume=volume or 0)
+                    # IMPORTANT: do NOT coerce missing price to 0. A 0-price level
+                    # defeats the bid-or-ask fallback in equity._normalize_orderbook_entries
+                    # because `0 is not None` evaluates True, so the merge picks the
+                    # zero bid price over a real ask price. Pass None when the
+                    # upstream feed omits the price.
+                    level = OrderLevel(
+                        price=(float(price) if price is not None else None),
+                        volume=int(volume or 0),
+                    )
                     if side.lower() in ("bid", "buy", "b"):
                         bids.append(level)
                     elif side.lower() in ("ask", "sell", "s", "offer"):
@@ -143,12 +151,16 @@ class VnstockPriceDepthFetcher:
                     bid_price = r.get(f"bidPrice{i}") or r.get(f"bid{i}")
                     bid_vol = r.get(f"bidVol{i}") or r.get(f"bidVolume{i}")
                     if bid_price:
-                        bids.append(OrderLevel(price=bid_price, volume=bid_vol or 0))
+                        bids.append(
+                            OrderLevel(price=float(bid_price), volume=int(bid_vol or 0))
+                        )
 
                     ask_price = r.get(f"offerPrice{i}") or r.get(f"askPrice{i}") or r.get(f"ask{i}")
                     ask_vol = r.get(f"offerVol{i}") or r.get(f"askVolume{i}") or r.get(f"askVol{i}")
                     if ask_price:
-                        asks.append(OrderLevel(price=ask_price, volume=ask_vol or 0))
+                        asks.append(
+                            OrderLevel(price=float(ask_price), volume=int(ask_vol or 0))
+                        )
 
             return PriceDepthData(
                 symbol=symbol.upper(),

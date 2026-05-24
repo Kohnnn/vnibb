@@ -76,3 +76,15 @@ Goal: Heal stale screener-dependent widgets, restore Insider Deals, fix VnExpres
 - `apps/web/src/components/widgets/FinancialRatiosWidget.tsx:415-422` — added `maxYears={tableColumns.length || 1}` so DenseFinancialTable no longer truncates to 10 columns (slicing oldest 10 historically capped right column at 2021).
 - Verification: `pnpm --filter frontend test --runTestsByPath src/lib/__tests__/financialPeriods.test.ts` 5/5 pass; `pnpm --filter frontend lint` clean; `tsc --noEmit` clean; `python -m py_compile apps/api/vnibb/api/v1/equity.py` clean.
 
+### Track B — shipped
+
+- `apps/api/vnibb/providers/vnstock/price_depth.py:27` — `OrderLevel.price` is now `float | None` (was non-optional), so missing prices propagate as `None` instead of being coerced to `0`.
+- `apps/api/vnibb/providers/vnstock/price_depth.py:124-151` — fetch parser passes `price=None` when upstream omits price (was `price=price or 0`). Volume coerced to `int(volume or 0)` explicitly.
+- `apps/api/vnibb/api/v1/equity.py:5656-5712` — `_normalize_orderbook_entries` now treats a literal 0 as "no price" via `_meaningful_price`, restoring the bid-or-ask fallback that was being defeated by `0 is not None`.
+- `apps/api/vnibb/api/v1/equity.py:5714-5793` — `_normalize_orderbook_units` rewritten to canonicalize raw VND -> thousand VND by absolute scale (`>= 1000`), not by ratio against unreliable `last_price`. Whole payload (entries + last_price) rescaled together so internal relationships stay intact. Also corrects last_price when standalone raw.
+- `apps/api/vnibb/api/v1/equity.py:5825-5856` — DB-snapshot rebuild applies the same 0-as-missing semantics.
+- `apps/api/vnibb/api/v1/equity.py:5910-5943` — `_get_orderbook_payload` falls back to last DB snapshot when live fetch returns empty entries, tagging payload `is_stale: true`, `market_status: "closed"`. Cached payload is no longer accepted if it has empty entries.
+- `apps/web/src/lib/api.ts:1294-1316` — `PriceDepthResponse` extended with `snapshot_time`, `is_stale`, `market_status`, `unit_corrected`, `meta.last_data_date`.
+- `apps/web/src/components/widgets/OrderbookWidget.tsx` — frontend price normalization heuristic removed (backend is canonical). New `toFiniteOrderPrice` treats 0 as null. Stale/closed annotation rendered in `WidgetMeta` note.
+- Verification: `pnpm --filter frontend lint` clean; `tsc --noEmit` clean; `pytest -k "orderbook or order_book or depth"` 2/2 pass; backend `py_compile` clean. Ruff baseline unchanged at 198 (pre-existing) after Optional->`X | None` cleanup on the new field.
+
