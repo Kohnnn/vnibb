@@ -1,3 +1,5 @@
+import { parseFlexibleDate } from './format'
+
 export function normalizeNewsTimestamp(value: unknown): string | null {
   if (value === null || value === undefined) return null
 
@@ -18,7 +20,10 @@ export function normalizeNewsTimestamp(value: unknown): string | null {
   }
 
   const parsed = new Date(text)
-  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : text
+  if (Number.isFinite(parsed.getTime())) return parsed.toISOString()
+
+  const flexible = parseFlexibleDate(text)
+  return flexible ? flexible.toISOString() : text
 }
 
 export function normalizeNewsItemTimestamp(item: Record<string, unknown>): string | null {

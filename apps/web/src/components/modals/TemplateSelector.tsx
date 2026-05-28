@@ -263,7 +263,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
       <button
         type="button"
         onClick={onClose}
-        className="absolute inset-0 bg-slate-950/60"
+        className="absolute inset-0 z-0 bg-slate-950/60"
         aria-label="Close template selector"
       />
       <motion.div 
@@ -275,7 +275,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
         aria-modal="true"
         aria-labelledby="template-selector-title"
         tabIndex={-1}
-        className="w-full max-w-6xl max-h-[88vh] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col"
+        className="relative z-10 w-full max-w-6xl max-h-[88vh] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-[var(--border-default)] bg-[var(--bg-surface)]">

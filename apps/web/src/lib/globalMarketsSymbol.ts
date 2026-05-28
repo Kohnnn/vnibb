@@ -1,5 +1,6 @@
 export const DEFAULT_GLOBAL_MARKETS_SYMBOL = 'AMEX:SPY';
 export const GLOBAL_MARKETS_SYMBOL_STORAGE_KEY = 'vnibb-global-markets-symbol';
+export const LEGACY_GLOBAL_MARKETS_SYMBOLS = new Set(['NASDAQ:VFS', 'SP:SPX']);
 
 // Track C migration: any value that doesn't include an exchange prefix (i.e.
 // has no colon) is a VN ticker that leaked from `applySelectedSymbol` into
@@ -11,12 +12,17 @@ const LEGACY_GLOBAL_MARKETS_SYMBOL_PATTERN = /^[A-Z0-9:_!./-]+$/;
 export function normalizeGlobalMarketsSymbol(rawSymbol: string | null | undefined): string | null {
   const normalized = String(rawSymbol || '').trim().toUpperCase();
   if (!normalized) return null;
+  if (LEGACY_GLOBAL_MARKETS_SYMBOLS.has(normalized)) return null;
 
   // Strict TradingView shape: must look like EXCHANGE:SYMBOL.
   if (GLOBAL_MARKETS_SYMBOL_PATTERN.test(normalized)) {
     return normalized;
   }
   return null;
+}
+
+export function isLegacyGlobalMarketsSymbol(rawSymbol: string | null | undefined): boolean {
+  return LEGACY_GLOBAL_MARKETS_SYMBOLS.has(String(rawSymbol || '').trim().toUpperCase());
 }
 
 /**

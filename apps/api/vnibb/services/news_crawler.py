@@ -13,12 +13,14 @@ Enhanced with AI sentiment analysis.
 import asyncio
 import importlib
 import logging
+import re
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import and_, desc, select, update
+from sqlalchemy import and_, desc, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +51,9 @@ FREE_RSS_FEEDS: dict[str, list[str]] = {
     ],
     "baodautu.vn": [
         "https://baodautu.vn/rss/chung-khoan.rss",
+    ],
+    "vnexpress.net": [
+        "https://vnexpress.net/rss/kinh-doanh.rss",
     ],
 }
 
@@ -136,6 +141,54 @@ def _coerce_published_date(value: Any) -> datetime | None:
     return None
 
 
+def _is_vnexpress_url(value: Any) -> bool:
+    try:
+        hostname = urlparse(str(value or "")).hostname or ""
+    except ValueError:
+        return False
+    return hostname == "vnexpress.net" or hostname.endswith(".vnexpress.net")
+
+
+def _extract_vnexpress_published_date_from_html(html: str) -> datetime | None:
+    """Extract VnExpress article publication metadata from an article page."""
+
+    if not html:
+        return None
+
+    patterns = (
+        r'<meta(?=[^>]+itemprop=["\']datePublished["\'])(?=[^>]+name=["\']pubdate["\'])[^>]+content=["\']([^"\']+)["\']',
+        r'"datePublished"\s*:\s*"([^"]+)"',
+        r"articlePublishDate'\s*:\s*'(\d{14})'",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = match.group(1)
+        if re.fullmatch(r"\d{14}", value):
+            value = f"{value[0:4]}-{value[4:6]}-{value[6:8]}T{value[8:10]}:{value[10:12]}:{value[12:14]}+07:00"
+        parsed = _coerce_published_date(value)
+        if parsed is not None:
+            return parsed
+
+    return None
+
+
+async def _fetch_vnexpress_published_date(url: str) -> datetime | None:
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(6.0),
+            headers={"User-Agent": "Mozilla/5.0 VNIBB/1.0 (news date backfill)"},
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+    except (httpx.HTTPError, httpx.TimeoutException, ValueError):
+        return None
+
+    return _extract_vnexpress_published_date_from_html(response.text)
+
+
 class NewsCrawlerService:
     """
     Multi-source news aggregation using vnstock_news.
@@ -191,6 +244,9 @@ class NewsCrawlerService:
 
         if self._news_available:
             count = await self._crawl_with_vnstock_news(sources, limit)
+            rss_sources = [source for source in sources if source in FREE_RSS_FEEDS]
+            if rss_sources:
+                count += await self._crawl_with_rss(rss_sources, limit)
 
             # Run sentiment analysis on newly crawled articles
             if analyze_sentiment and count > 0:
@@ -453,28 +509,35 @@ class NewsCrawlerService:
             or article.get("date")
         )
         pub_date = _coerce_published_date(pub_date_raw)
+        url = article.get("link") or article.get("url") or ""
+        if pub_date is None and _is_vnexpress_url(url):
+            pub_date = await _fetch_vnexpress_published_date(str(url))
 
         # Extract related symbols if mentioned
         related_symbols = article.get("symbols", [])
         if isinstance(related_symbols, list):
             related_symbols = ",".join(related_symbols[:10])  # Limit to 10 symbols
 
-        stmt = (
-            pg_insert(MarketNews)
-            .values(
-                title=article.get("title", ""),
-                summary=article.get("description") or article.get("summary", ""),
-                content=article.get("content", ""),
-                source=article.get("source", "unknown"),
-                url=article.get("link") or article.get("url", ""),
-                author=article.get("author"),
-                image_url=article.get("image") or article.get("image_url"),
-                category=article.get("category"),
-                related_symbols=related_symbols if related_symbols else None,
-                published_date=pub_date,
-                is_processed=False,  # Mark for sentiment analysis
-            )
-            .on_conflict_do_nothing(index_elements=["url"])
+        insert_stmt = pg_insert(MarketNews).values(
+            title=article.get("title", ""),
+            summary=article.get("description") or article.get("summary", ""),
+            content=article.get("content", ""),
+            source=article.get("source", "unknown"),
+            url=url,
+            author=article.get("author"),
+            image_url=article.get("image") or article.get("image_url"),
+            category=article.get("category"),
+            related_symbols=related_symbols if related_symbols else None,
+            published_date=pub_date,
+            is_processed=False,  # Mark for sentiment analysis
+        )
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=["url"],
+            set_={"published_date": insert_stmt.excluded.published_date},
+            where=and_(
+                MarketNews.published_date.is_(None),
+                insert_stmt.excluded.published_date.is_not(None),
+            ),
         )
 
         await session.execute(stmt)

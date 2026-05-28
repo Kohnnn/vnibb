@@ -10,13 +10,13 @@ Fix every open item in the v1.4.0 evaluation report, with detail tracked as chan
 
 | ID | Priority | Area | Status | Target |
 |---|---:|---|---|---|
-| TMPL-1 | P0 | Templates | Patched | `Use Template` creates/applies an editable workspace with visible feedback. |
-| TMPL-2 | P0 | Templates | Patched | `Save Current` opens a clear save flow, persists layout, and shows saved layouts. |
-| T-1 | P0 | Order Book | Patched | Closed-market order book shows last usable prices, not `--`/`00`. |
-| CRYPTO-1 | P1 | Global Markets | Patched | Crypto sub-tab chart stays on `BINANCE:BTCUSDT` even for old stored layouts. |
-| NE-1 | P1 | News | Patched | VNEXPRESS dates parse across market-news and world-news paths. |
-| OWN-1 | P2 | Foreign Trading | Patched | Cache-age label uses trading-day/ICT semantics instead of midnight age. |
-| F-Q-1 | P2 | Fundamentals | Patched | Quarterly ratios render data or an explicit data-unavailable state. |
+| TMPL-1 | P0 | Templates | Follow-up patched | `Use Template` creates/applies an editable workspace with visible feedback. |
+| TMPL-2 | P0 | Templates | Follow-up patched | `Save Current` opens a clear save flow, persists layout, and shows saved layouts. |
+| T-1 | P0 | Order Book | Public PASS | Closed-market order book shows last usable prices, not `--`/`00`. |
+| CRYPTO-1 | P1 | Global Markets | Follow-up patched | Crypto sub-tab chart stays on `BINANCE:BTCUSDT` even for old stored layouts. |
+| NE-1 | P1 | News | Follow-up patched | VNEXPRESS dates parse across market-news and world-news paths. |
+| OWN-1 | P2 | Foreign Trading | Public PASS | Cache-age label uses trading-day/ICT semantics instead of midnight age. |
+| F-Q-1 | P2 | Fundamentals | Public PASS | Quarterly ratios render data or an explicit data-unavailable state. |
 
 ## Implementation Plan
 
@@ -81,6 +81,26 @@ Fix every open item in the v1.4.0 evaluation report, with detail tracked as chan
 - Public `/api/v1/equity/VCI/foreign-trading?limit=3`: returned fallback rows through `2026-05-28` with `meta.symbol: "VCI"` and `meta.last_data_date: "2026-05-28"`.
 - Public `/api/v1/equity/VCI/ratios?period=quarter`: returned 64 rows with `meta.full_ratio_coverage_starts: "Q1-2024"` and latest `Q1-2026` ratio data.
 
+### 2026-05-29 - Production Recheck And Follow-up Patches
+
+Recheck window: `2026-05-29 00:19:24` to `2026-05-29 00:43:01` ICT (`+07:00`).
+
+- Public `/live`: returned `{"alive":true}`.
+- Public `/ready`: returned `{"ready":true}`.
+- Public `/api/v1/equity/VCI/orderbook`: returned `symbol: "VCI"`, ten rows, every row `price: 25.0`, `price_status: "reference"`, `price_source: "latest_price"`, `last_price: 25.0`, `is_stale: true`, and `market_status: "closed"`. This remains acceptable for the closed-market no-priced-snapshot case, but is reference latest-close pricing rather than true level-by-level bid/ask pricing.
+- Public `/api/v1/equity/VCI/foreign-trading?limit=3`: returned rows dated `2026-05-28`, `2026-05-27`, and `2026-05-26`; `meta.symbol: "VCI"` and `meta.last_data_date: "2026-05-28"`.
+- Public `/api/v1/equity/VCI/ratios?period=quarter`: returned 64 rows; latest row was `Q1-2026`; `meta.full_ratio_coverage_starts: "Q1-2024"`.
+- Dashboard Order Book (`https://vnibb-web.vercel.app/dashboard`, Technical / Trading): PASS. The widget displayed `Last 25` and priced rows (`25`) with the cached/market-closed reference label; it did not display `LAST 00` or an all-`--` price column.
+- Dashboard Foreign Trading (Ownership): PASS. The widget displayed `Updated 2026-05-28 07:00` and `Cached snapshot · 7h old`; it no longer used the misleading midnight-based `12h old` calculation for the `2026-05-28` data date.
+- Dashboard Financial Ratios (Fundamentals, quarterly mode): PASS. The Q view rendered populated quarterly ratio data through `Q1 2026` with the `Full ratio coverage starts Q1-2024` note, not a blank header-only grid.
+- Dashboard Template Library: production still had a modal layering regression where the backdrop intercepted `Use Template` clicks. Follow-up patch: give the backdrop `z-0`, give the dialog `relative z-10`, and add modal regression coverage in `TemplateSelector.test.tsx`.
+- Dashboard Global Markets / Crypto: production still allowed stale `NASDAQ:VFS` persisted state to drive the Global Markets workspace. Follow-up patch: reject legacy global market symbols (`NASDAQ:VFS`, `SP:SPX`), refresh stale Global Markets dashboards/templates, reset stored stale values to `AMEX:SPY`, and preserve the Crypto chart as `BINANCE:BTCUSDT`. Local browser verification after the patch reset a forced `NASDAQ:VFS` value to `AMEX:SPY` and kept the Crypto tab on Bitcoin/TetherUS via Binance.
+- Dashboard News / World News: production still showed VNEXPRESS rows as `Date unavailable`. Evidence screenshot: `output/playwright/vnibb-market-news-date-unavailable-2026-05-29.png`. Raw production API evidence: `/api/v1/news/feed?limit=5&mode=related&symbol=VCI` returned VNEXPRESS rows with `published_date: null`, while `/api/v1/news/world?source=vnexpress_business&limit=5` returned VNEXPRESS timestamps such as `28/05/2026 5:05:00 pm`. Follow-up patch: parse DMY timestamps with AM/PM in the frontend, extract VNEXPRESS article dates from article HTML metadata/dataLayer, supplement premium VNEXPRESS crawls with RSS, and update existing rows only when `published_date` is currently null and the new crawl supplies a date.
+- Focused follow-up tests passed: `pnpm --filter frontend test -- --runTestsByPath src/lib/newsTime.test.ts src/components/modals/TemplateSelector.test.tsx src/lib/globalMarketsSymbol.test.ts --runInBand`.
+- Focused follow-up tests passed: `python -m pytest apps/api/tests/test_api/test_news_service.py -v -k "vnexpress"`.
+- Compile check passed: `python -m py_compile apps/api/vnibb/services/news_crawler.py`.
+- Live extractor check passed for `https://vnexpress.net/dien-may-xanh-muon-huy-dong-hon-14-000-ty-dong-qua-ipo-5077011.html`, resolving `2026-05-22T10:24:00+00:00`.
+
 ## Final Status
 
-All seven open evaluation report items are patched, covered by focused regression tests where appropriate, committed, pushed, deployed to OCI, and publicly smoke-tested. Full CI gate is green.
+Three follow-up remediations from the 2026-05-29 production recheck are patched locally and awaiting full gate, commit, push, deployment, and public re-verification: Template Library modal layering, stale Global Markets/Crypto persisted state, and VNEXPRESS date backfill/rendering. T-1, OWN-1, and F-Q-1 remain public PASS on the deployed build.

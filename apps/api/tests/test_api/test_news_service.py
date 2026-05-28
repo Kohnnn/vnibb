@@ -3,8 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from vnibb.services.news_crawler import (
+    _coerce_published_date,
+    _extract_vnexpress_published_date_from_html,
+)
 from vnibb.services.news_service import get_company_news_rows, get_news_flow
-from vnibb.services.news_crawler import _coerce_published_date
 
 
 def test_news_crawler_parses_vnexpress_vietnamese_gmt7_date():
@@ -12,6 +15,30 @@ def test_news_crawler_parses_vnexpress_vietnamese_gmt7_date():
 
     assert parsed is not None
     assert parsed.astimezone(UTC) == datetime(2026, 5, 28, 10, 0, tzinfo=UTC)
+
+
+def test_news_crawler_extracts_vnexpress_article_meta_date():
+    html = """
+    <html>
+      <head>
+        <meta content="2026-05-22T17:24:00+07:00" itemprop="datePublished" name="pubdate"/>
+      </head>
+    </html>
+    """
+
+    parsed = _extract_vnexpress_published_date_from_html(html)
+
+    assert parsed is not None
+    assert parsed.astimezone(UTC) == datetime(2026, 5, 22, 10, 24, tzinfo=UTC)
+
+
+def test_news_crawler_extracts_vnexpress_datalayer_date():
+    html = "<script>dataLayer.push({'articlePublishDate':'20260522172400'});</script>"
+
+    parsed = _extract_vnexpress_published_date_from_html(html)
+
+    assert parsed is not None
+    assert parsed.astimezone(UTC) == datetime(2026, 5, 22, 10, 24, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

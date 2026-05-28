@@ -26,7 +26,7 @@ import type {
 } from '@/types/dashboard';
 import { DEFAULT_SYNC_GROUP_COLORS } from '@/types/dashboard';
 import { DEFAULT_TICKER, readStoredTicker } from '@/lib/defaultTicker';
-import { DEFAULT_GLOBAL_MARKETS_SYMBOL } from '@/lib/globalMarketsSymbol';
+import { DEFAULT_GLOBAL_MARKETS_SYMBOL, isLegacyGlobalMarketsSymbol } from '@/lib/globalMarketsSymbol';
 import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync, useLoadFromBackend } from '@/lib/useDashboardSync';
 import { config } from '@/lib/config';
@@ -1932,6 +1932,7 @@ const shouldRefreshGlobalMarketsLayout = (dashboard?: Dashboard): boolean => {
     const isTradingViewChartOrTechnical = (type: WidgetInstance['type']) =>
         type === 'tradingview_chart' || type === 'tradingview_technical_analysis';
 
+    const usesLegacyGlobalMarketsSymbol = isLegacyGlobalMarketsSymbol(dashboard.globalMarketsSymbol);
     const usesLegacyTradingViewSymbol = dashboard.tabs.some((tab) =>
         tab.widgets.some(
             (widget) =>
@@ -1981,6 +1982,7 @@ const shouldRefreshGlobalMarketsLayout = (dashboard?: Dashboard): boolean => {
     );
 
     return (
+        usesLegacyGlobalMarketsSymbol ||
         usesLegacyTradingViewSymbol ||
         usesLinkedTradingViewDefaults ||
         cryptoChartMisconfigured ||
@@ -2040,21 +2042,24 @@ const buildSystemDashboard = (existing: Dashboard | undefined, fallback: Dashboa
     ];
 
     const fallbackGlobalMarkets = createGlobalMarketsDashboard();
+    const refreshGlobalMarkets = shouldRefreshGlobalMarketsLayout(existingGlobalMarkets);
     const globalMarketsDashboard: Dashboard = {
         ...(existingGlobalMarkets || fallbackGlobalMarkets),
         id: fallbackGlobalMarkets.id,
         name: fallbackGlobalMarkets.name,
         description: fallbackGlobalMarkets.description,
-        globalMarketsSymbol: existingGlobalMarkets?.globalMarketsSymbol || fallbackGlobalMarkets.globalMarketsSymbol,
+        globalMarketsSymbol: refreshGlobalMarkets
+            ? fallbackGlobalMarkets.globalMarketsSymbol
+            : existingGlobalMarkets?.globalMarketsSymbol || fallbackGlobalMarkets.globalMarketsSymbol,
         folderId: INITIAL_FOLDER_ID,
         order: systemDashboards.length,
         isDefault: false,
         isEditable: false,
         isDeletable: false,
-        tabs: Array.isArray(existingGlobalMarkets?.tabs) && existingGlobalMarkets.tabs.length > 0 && !shouldRefreshGlobalMarketsLayout(existingGlobalMarkets)
+        tabs: Array.isArray(existingGlobalMarkets?.tabs) && existingGlobalMarkets.tabs.length > 0 && !refreshGlobalMarkets
             ? existingGlobalMarkets.tabs
             : fallbackGlobalMarkets.tabs,
-        syncGroups: Array.isArray(existingGlobalMarkets?.syncGroups) && existingGlobalMarkets.syncGroups.length > 0
+        syncGroups: !refreshGlobalMarkets && Array.isArray(existingGlobalMarkets?.syncGroups) && existingGlobalMarkets.syncGroups.length > 0
             ? existingGlobalMarkets.syncGroups
             : fallbackGlobalMarkets.syncGroups,
         createdAt: existingGlobalMarkets?.createdAt || fallbackGlobalMarkets.createdAt,
@@ -2096,7 +2101,12 @@ const applyPublishedSystemTemplates = (
     dashboards: Dashboard[],
     templates: Dashboard[],
 ): Dashboard[] => {
-    const templateMap = new Map(templates.map((dashboard) => [dashboard.id, dashboard]));
+    const templateMap = new Map(templates.map((dashboard) => [
+        dashboard.id,
+        dashboard.id === GLOBAL_MARKETS_DASHBOARD_ID && shouldRefreshGlobalMarketsLayout(dashboard)
+            ? createGlobalMarketsDashboard()
+            : dashboard,
+    ]));
 
     return dashboards.map((dashboard) => {
         const template = templateMap.get(dashboard.id);

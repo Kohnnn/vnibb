@@ -157,15 +157,19 @@ export function parseFlexibleDate(
   }
 
   const dmy = raw.match(
-    /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+    /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(am|pm))?)?$/i
   );
   if (dmy) {
     const year = Number(dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3]);
+    const meridiem = dmy[7]?.toLowerCase();
+    let hour = Number(dmy[4] ?? 0);
+    if (meridiem === 'pm' && hour < 12) hour += 12;
+    if (meridiem === 'am' && hour === 12) hour = 0;
     const parsed = new Date(
       year,
       Number(dmy[2]) - 1,
       Number(dmy[1]),
-      Number(dmy[4] ?? 0),
+      hour,
       Number(dmy[5] ?? 0),
       Number(dmy[6] ?? 0)
     );
