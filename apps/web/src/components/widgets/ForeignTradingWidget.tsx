@@ -38,6 +38,22 @@ function formatDate(dateStr: string | null | undefined): string {
     return formatShortDate(dateStr);
 }
 
+export function parseForeignTradingSnapshotTime(value: string | null | undefined): Date | null {
+    if (!value) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+
+    // Foreign trading is a daily settled feed. A date-only value means the
+    // latest trading session, not midnight; use the post-close settlement
+    // timestamp (17:00 ICT = 10:00 UTC) so 19:00 ICT reads as ~2h old.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+        return new Date(`${text}T10:00:00.000Z`);
+    }
+
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function getNetFlowLabel(net: number): string {
     if (net > 0) return 'Net buy';
     if (net < 0) return 'Net sell';
@@ -140,8 +156,8 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     const snapshotAgeHours = useMemo(() => {
         const lastDateStr = data?.meta?.last_data_date;
         if (!lastDateStr) return null;
-        const lastDate = new Date(lastDateStr);
-        if (Number.isNaN(lastDate.getTime())) return null;
+        const lastDate = parseForeignTradingSnapshotTime(lastDateStr);
+        if (!lastDate) return null;
         const diffMs = Date.now() - lastDate.getTime();
         if (diffMs < 0) return null;
         return diffMs / (1000 * 60 * 60);
@@ -150,8 +166,8 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     const formattedLastSync = useMemo(() => {
         const lastDateStr = data?.meta?.last_data_date;
         if (!lastDateStr) return null;
-        const d = new Date(lastDateStr);
-        if (Number.isNaN(d.getTime())) return null;
+        const d = parseForeignTradingSnapshotTime(lastDateStr);
+        if (!d) return null;
         return d.toLocaleDateString('en-GB', {
             day: '2-digit',
             month: 'short',

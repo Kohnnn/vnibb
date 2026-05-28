@@ -68,8 +68,8 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     category: 'global',
     widgets: [
       { type: 'tradingview_ticker_tape', layout: { x: 0, y: 0, w: 24, h: 4 } },
-      { type: 'tradingview_chart', layout: { x: 0, y: 4, w: 14, h: 10 }, config: { symbol: 'NASDAQ:VFS' } },
-      { type: 'tradingview_technical_analysis', layout: { x: 14, y: 4, w: 10, h: 10 }, config: { symbol: 'NASDAQ:VFS' } },
+      { type: 'tradingview_chart', layout: { x: 0, y: 4, w: 14, h: 10 }, config: { symbol: 'AMEX:SPY', useLinkedSymbol: false, allow_symbol_change: false } },
+      { type: 'tradingview_technical_analysis', layout: { x: 14, y: 4, w: 10, h: 10 }, config: { symbol: 'AMEX:SPY', useLinkedSymbol: false } },
       { type: 'tradingview_market_overview', layout: { x: 0, y: 14, w: 12, h: 8 } },
       { type: 'tradingview_market_data', layout: { x: 12, y: 14, w: 12, h: 8 } },
       { type: 'tradingview_forex_cross_rates', layout: { x: 0, y: 22, w: 8, h: 7 } },

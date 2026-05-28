@@ -113,12 +113,18 @@ def _coerce_published_date(value: Any) -> datetime | None:
 
     # Common Vietnamese / numeric layouts.
     for fmt in (
+        "%Y-%m-%d %H:%M:%S %z",
+        "%Y-%m-%d %H:%M %z",
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d %H:%M",
         "%Y-%m-%d",
+        "%d/%m/%Y %H:%M:%S %z",
+        "%d/%m/%Y %H:%M %z",
         "%d/%m/%Y %H:%M:%S",
         "%d/%m/%Y %H:%M",
         "%d/%m/%Y",
+        "%d-%m-%Y %H:%M:%S %z",
+        "%d-%m-%Y %H:%M %z",
         "%d-%m-%Y %H:%M:%S",
         "%d-%m-%Y",
     ):

@@ -11,7 +11,7 @@ from vnibb.models.news import Dividend
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
-from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
+from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily, OrderbookSnapshot
 from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
 from vnibb.providers.vnstock.equity_profile import EquityProfileData
 from vnibb.providers.vnstock.equity_screener import ScreenerData
@@ -1342,6 +1342,7 @@ async def test_foreign_trading_smoke_returns_data(client, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["meta"]["count"] == 1
+    assert payload["meta"]["last_data_date"] == "2026-02-15"
     assert payload["data"][0]["net_volume"] == 40000
 
 
@@ -1517,6 +1518,57 @@ async def test_orderbook_endpoint_uses_cached_payload_before_provider(client, mo
     assert payload["meta"]["count"] == 1
     assert payload["meta"]["last_data_date"] == "2026-03-17T14:45:00"
     assert payload["data"]["entries"][0]["bid_vol"] == 12000
+
+
+@pytest.mark.asyncio
+async def test_orderbook_endpoint_falls_back_when_live_has_volume_without_prices(client, test_db, monkeypatch):
+    test_db.add(
+        OrderbookSnapshot(
+            id=901,
+            symbol="VCI",
+            snapshot_time=datetime(2026, 5, 28, 14, 45, 0),
+            price_depth={
+                "symbol": "VCI",
+                "entries": [
+                    {"level": 1, "price": 25.0, "bid_vol": 12000, "ask_vol": 9000},
+                ],
+                "last_price": 25.0,
+                "total_bid_volume": 12000,
+                "total_ask_volume": 9000,
+            },
+            bid1_price=25.0,
+            bid1_volume=12000,
+            ask1_price=25.1,
+            ask1_volume=9000,
+            total_bid_volume=12000,
+            total_ask_volume=9000,
+        )
+    )
+    await test_db.commit()
+
+    async def fake_price_depth_fetch(*, symbol: str, source: str):
+        return PriceDepthData(
+            symbol=symbol,
+            raw_levels=[{"buyVol": 12345, "sellVol": 67890}],
+            total_bid_volume=12345,
+            total_ask_volume=67890,
+        )
+
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", lambda _key: None)
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.set_json", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockPriceDepthFetcher.fetch",
+        fake_price_depth_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VCI/orderbook")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["is_stale"] is True
+    assert payload["data"]["market_status"] == "closed"
+    assert payload["data"]["entries"][0]["price"] == 25.0
+    assert payload["data"]["last_price"] == 25.0
 
 
 @pytest.mark.asyncio

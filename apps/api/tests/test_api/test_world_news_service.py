@@ -55,6 +55,39 @@ def test_parse_feed_preserves_live_links_and_classifies_vietnam_markets():
     assert articles[0].live is True
 
 
+def test_parse_feed_handles_vnexpress_gmt7_and_vietnamese_weekday_dates():
+    source = WorldNewsSourceConfig(
+        id="vnexpress_test",
+        name="VNExpress Test",
+        domain="vnexpress.net",
+        region="vietnam",
+        category="business",
+        language="vi",
+        tier=1,
+        homepage_url="https://vnexpress.net",
+        feed_urls=("https://vnexpress.net/rss/kinh-doanh.rss",),
+    )
+    xml = """
+    <rss version="2.0">
+      <channel>
+        <item>
+          <title>Doanh nghiệp chứng khoán báo lãi tăng</title>
+          <description>Thị trường chứng khoán ghi nhận thanh khoản cải thiện.</description>
+          <link>https://vnexpress.net/chung-khoan</link>
+          <guid>vnexpress-1</guid>
+          <pubDate>Thứ 5, 28/05/2026 17:00:00 GMT+7</pubDate>
+          <category>Kinh doanh</category>
+        </item>
+      </channel>
+    </rss>
+    """
+
+    articles = _parse_feed(xml, source=source, feed_url=source.feed_urls[0])
+
+    assert len(articles) == 1
+    assert articles[0].published_at == datetime(2026, 5, 28, 10, 0, tzinfo=UTC)
+
+
 def test_dedupe_articles_filters_similar_headlines_across_sources():
     now = datetime.now(UTC)
     articles = [

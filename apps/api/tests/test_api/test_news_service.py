@@ -1,9 +1,17 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
 from vnibb.services.news_service import get_company_news_rows, get_news_flow
+from vnibb.services.news_crawler import _coerce_published_date
+
+
+def test_news_crawler_parses_vnexpress_vietnamese_gmt7_date():
+    parsed = _coerce_published_date("Thứ 5, 28/05/2026 17:00:00 GMT+7")
+
+    assert parsed is not None
+    assert parsed.astimezone(UTC) == datetime(2026, 5, 28, 10, 0, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

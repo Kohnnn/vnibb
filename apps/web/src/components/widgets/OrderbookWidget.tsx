@@ -66,7 +66,10 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
   const entries = (orderbook?.data?.entries || []) as DepthEntry[];
   const hasData = entries.length > 0;
   const isFallback = Boolean(error && hasData);
-  const lastPrice = Number(orderbook?.data?.last_price);
+  const lastPriceRaw = orderbook?.data?.last_price;
+  const lastPrice = lastPriceRaw === null || lastPriceRaw === undefined
+    ? null
+    : toFiniteOrderPrice(lastPriceRaw);
   const isStale = Boolean(orderbook?.data?.is_stale);
   const marketStatus = orderbook?.data?.market_status || null;
   const snapshotTime = orderbook?.data?.snapshot_time || null;
@@ -174,7 +177,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
             <div className="border-b border-[var(--border-subtle)] px-3 py-3 bg-[var(--bg-primary)]">
               <div className="mb-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
                 <span>Cumulative Depth</span>
-                <span>{Number.isFinite(lastPrice) ? `Last ${formatNumber(lastPrice, { decimals: 0 })}` : '10 levels'}</span>
+                <span>{lastPrice !== null ? `Last ${formatNumber(lastPrice, { decimals: 0 })}` : '10 levels'}</span>
               </div>
               {depthSeries.length < 2 ? (
                 <div className="text-[10px] text-[var(--text-secondary)]">Need at least two levels to draw depth.</div>
@@ -222,7 +225,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
                         ]}
                         labelFormatter={(label) => `Price ${formatNumber(Number(label), { decimals: 0 })}`}
                       />
-                      {Number.isFinite(lastPrice) ? (
+                      {lastPrice !== null ? (
                         <ReferenceLine x={lastPrice} stroke="rgba(56,189,248,0.65)" strokeDasharray="4 4" />
                       ) : null}
                       <Area type="monotone" dataKey="bidCumulative" stroke="#4ade80" strokeWidth={2} fill="url(#orderbookBidFill)" />

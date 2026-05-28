@@ -5789,6 +5789,28 @@ def _normalize_orderbook_units(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _orderbook_payload_has_prices(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+
+    last_price = payload.get("last_price")
+    try:
+        if last_price is not None and float(last_price) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    for entry in payload.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            if entry.get("price") is not None and float(entry.get("price")) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 def _build_orderbook_payload(
     symbol: str,
     depth_data: Any,
@@ -5871,7 +5893,7 @@ async def _load_cached_orderbook_payload(symbol: str) -> dict[str, Any] | None:
         cached,
         snapshot_time=_pick_optional_text(cached.get("snapshot_time"), cached.get("cached_at")),
     )
-    if payload.get("entries") or payload.get("total_bid_volume") is not None:
+    if payload.get("entries") and _orderbook_payload_has_prices(payload):
         return payload
     return None
 
@@ -5910,7 +5932,7 @@ async def _cache_orderbook_payload(symbol: str, payload: dict[str, Any]) -> None
 
 async def _get_orderbook_payload(symbol: str, db: AsyncSession) -> dict[str, Any]:
     cached_payload = await _load_cached_orderbook_payload(symbol)
-    if cached_payload is not None and cached_payload.get("entries"):
+    if cached_payload is not None and _orderbook_payload_has_prices(cached_payload):
         return cached_payload
 
     try:
@@ -5936,11 +5958,12 @@ async def _get_orderbook_payload(symbol: str, db: AsyncSession) -> dict[str, Any
         snapshot_time=datetime.utcnow().isoformat(),
     )
 
-    # Live fetch succeeded but returned no rows: market is likely closed.
-    # Fall back to last DB snapshot and tag as stale so UI can annotate.
-    if not payload.get("entries"):
+    # Live fetch succeeded but returned no usable prices: market is likely
+    # closed. Some providers still emit bid/ask volumes with null/0 prices,
+    # which is worse than the previous session's priced snapshot.
+    if not payload.get("entries") or not _orderbook_payload_has_prices(payload):
         snapshot_payload = await _load_orderbook_snapshot_from_db(db, symbol)
-        if snapshot_payload is not None and snapshot_payload.get("entries"):
+        if snapshot_payload is not None and _orderbook_payload_has_prices(snapshot_payload):
             snapshot_payload = {
                 **snapshot_payload,
                 "is_stale": True,
@@ -6179,6 +6202,16 @@ async def _load_foreign_trading_fallback(
     ]
 
 
+def _latest_foreign_trading_date(data: list[Any]) -> str | None:
+    for row in data:
+        date_value = getattr(row, "date", None)
+        if date_value:
+            return str(date_value)
+        if isinstance(row, dict) and row.get("date"):
+            return str(row.get("date"))
+    return None
+
+
 @router.get("/{symbol}/foreign-trading", response_model=StandardResponse[List[Any]])
 async def get_foreign_trading(
     symbol: str,
@@ -6194,7 +6227,16 @@ async def get_foreign_trading(
             timeout=30,
         )
         if data:
-            return StandardResponse(data=data[:limit], meta=MetaData(count=len(data[:limit])))
+            limited_data = data[:limit]
+            latest_date = _latest_foreign_trading_date(limited_data)
+            return StandardResponse(
+                data=limited_data,
+                meta=MetaData(
+                    count=len(limited_data),
+                    symbol=symbol_upper,
+                    last_data_date=latest_date,
+                ),
+            )
 
         fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
         return StandardResponse(

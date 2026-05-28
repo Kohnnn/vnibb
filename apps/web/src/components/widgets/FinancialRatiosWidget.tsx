@@ -10,7 +10,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
@@ -81,22 +81,28 @@ const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
 const NULL_LIKE_RATIO_KEYS = new Set(['pe', 'pb', 'ps', 'peg_ratio', 'ev_sales', 'ev_ebitda']);
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
+const RATIO_FIELD_ALIASES: Record<string, string[]> = {
+    pe: ['pe', 'pe_ratio', 'priceToEarning'],
+    pb: ['pb', 'pb_ratio', 'priceToBook'],
+    ps: ['ps', 'ps_ratio', 'priceToSales'],
+    ev_ebitda: ['ev_ebitda', 'evToEbitda'],
+    ev_sales: ['ev_sales', 'evToSales'],
+};
 
-const VALID_RATIO_PERIOD_RE = /^(?:20\d{2}(?:-Q[1-4])?|TTM)$/
+function readRatioMetric(entry: Record<string, unknown> | undefined, metricKey: string): number | null {
+    if (!entry) return null;
+    const keys = RATIO_FIELD_ALIASES[metricKey] ?? [metricKey];
+    for (const key of keys) {
+        const value = entry[key];
+        if (value === null || value === undefined || value === '') continue;
+        const numeric = typeof value === 'number' ? value : Number(value);
+        if (Number.isFinite(numeric)) return numeric;
+    }
+    return null;
+}
 
 function normalizeRatioPeriod(period: string | null | undefined): string | null {
-    const cleaned = String(period ?? '').trim().toUpperCase()
-    if (!cleaned) return null
-
-    if (VALID_RATIO_PERIOD_RE.test(cleaned)) return cleaned
-
-    const compactQuarter = cleaned.match(/^(20\d{2})Q([1-4])$/)
-    if (compactQuarter) return `${compactQuarter[1]}-Q${compactQuarter[2]}`
-
-    const slashQuarter = cleaned.match(/^Q([1-4])[-/](20\d{2})$/)
-    if (slashQuarter) return `${slashQuarter[2]}-Q${slashQuarter[1]}`
-
-    return null
+    return normalizeFinancialPeriod(period);
 }
 
 function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemove }: FinancialRatiosWidgetProps) {
@@ -266,8 +272,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         const hasMetricData = (metricKey: string) =>
             visiblePeriods.some((periodValue) => {
                 const entry = ratioLookup.get(periodValue);
-                const value = entry?.[metricKey as keyof typeof entry];
-                return typeof value === 'number' && Number.isFinite(value);
+                return readRatioMetric(entry as Record<string, unknown> | undefined, metricKey) !== null;
             });
 
         Object.entries(categoryMetrics).forEach(([categoryKey, metricKeys]) => {
@@ -295,7 +300,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                             const entry = ratioLookup.get(periodValue);
                             return [
                                 tableColumns[index]?.key ?? `period_${index}`,
-                                entry?.[metricKey as keyof typeof entry] ?? null,
+                                readRatioMetric(entry as Record<string, unknown> | undefined, metricKey),
                             ];
                         })
                     ),
@@ -318,7 +323,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
 
         const addSwingWarnings = (metricKey: 'ps' | 'ev_sales', label: string) => {
             const values = visiblePeriods
-                .map((periodValue) => ({ period: periodValue, value: ratioLookup.get(periodValue)?.[metricKey] }))
+                .map((periodValue) => ({ period: periodValue, value: readRatioMetric(ratioLookup.get(periodValue) as Record<string, unknown> | undefined, metricKey) }))
                 .filter((item): item is { period: string; value: number } => typeof item.value === 'number' && Number.isFinite(item.value) && item.value > 0);
             for (let index = 1; index < values.length; index += 1) {
                 const previous = values[index - 1];

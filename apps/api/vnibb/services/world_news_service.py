@@ -1970,7 +1970,20 @@ def _parse_datetime(value: str | None) -> datetime | None:
     if not value or not value.strip():
         return None
 
-    normalized = value.strip().replace("Z", "+00:00")
+    normalized = value.strip()
+    normalized = re.sub(
+        r"GMT\s*([+-])(\d{1,2})(?::?(\d{2}))?",
+        lambda match: f"{match.group(1)}{int(match.group(2)):02d}{match.group(3) or '00'}",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(
+        r"^(?:Chủ nhật|Chu nhat|Th[ứu] [2-7]|T[2-7]),\s*",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = normalized.replace("Z", "+00:00")
     try:
         return _coerce_utc(datetime.fromisoformat(normalized))
     except ValueError:
@@ -1979,7 +1992,30 @@ def _parse_datetime(value: str | None) -> datetime | None:
     try:
         return _coerce_utc(parsedate_to_datetime(normalized))
     except (TypeError, ValueError, IndexError, OverflowError):
-        return None
+        pass
+
+    for fmt in (
+        "%Y-%m-%d %H:%M:%S %z",
+        "%Y-%m-%d %H:%M %z",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%d/%m/%Y %H:%M:%S %z",
+        "%d/%m/%Y %H:%M %z",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+        "%d-%m-%Y %H:%M:%S %z",
+        "%d-%m-%Y %H:%M %z",
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y",
+    ):
+        try:
+            return _coerce_utc(datetime.strptime(normalized, fmt))
+        except ValueError:
+            continue
+
+    return None
 
 
 def _coerce_utc(value: datetime) -> datetime:

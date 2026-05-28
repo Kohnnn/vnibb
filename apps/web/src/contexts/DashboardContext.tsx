@@ -1929,12 +1929,34 @@ const migrateDashboardPermissions = (dashboards: Dashboard[]): Dashboard[] => {
 
 const shouldRefreshGlobalMarketsLayout = (dashboard?: Dashboard): boolean => {
     if (!dashboard) return false;
+    const isTradingViewChartOrTechnical = (type: WidgetInstance['type']) =>
+        type === 'tradingview_chart' || type === 'tradingview_technical_analysis';
+
     const usesLegacyTradingViewSymbol = dashboard.tabs.some((tab) =>
         tab.widgets.some(
             (widget) =>
-                widget.type === 'tradingview_chart' &&
+                isTradingViewChartOrTechnical(widget.type) &&
                 typeof widget.config?.symbol === 'string' &&
-                widget.config.symbol === 'SP:SPX'
+                ['SP:SPX', 'NASDAQ:VFS'].includes(widget.config.symbol)
+        )
+    );
+    const usesLinkedTradingViewDefaults = dashboard.tabs.some((tab) =>
+        tab.widgets.some(
+            (widget) =>
+                isTradingViewChartOrTechnical(widget.type) &&
+                widget.config?.useLinkedSymbol !== false
+        )
+    );
+    const cryptoTab = dashboard.tabs.find((tab) => /crypto/i.test(tab.name));
+    const cryptoChartMisconfigured = Boolean(
+        cryptoTab?.widgets.some(
+            (widget) =>
+                widget.type === 'tradingview_chart' &&
+                (
+                    widget.config?.symbol !== 'BINANCE:BTCUSDT' ||
+                    widget.config?.useLinkedSymbol !== false ||
+                    widget.config?.allow_symbol_change !== false
+                )
         )
     );
     const usesLegacyWorldIndicesHeight = dashboard.tabs.some((tab) =>
@@ -1960,6 +1982,8 @@ const shouldRefreshGlobalMarketsLayout = (dashboard?: Dashboard): boolean => {
 
     return (
         usesLegacyTradingViewSymbol ||
+        usesLinkedTradingViewDefaults ||
+        cryptoChartMisconfigured ||
         usesLegacyWorldIndicesHeight ||
         usesLegacyMarketNewsMode ||
         !hasWorldNewsMap ||

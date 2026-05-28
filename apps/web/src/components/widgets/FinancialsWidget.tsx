@@ -222,6 +222,30 @@ const RATIO_METRIC_KEYS = [
     'payout_ratio',
 ];
 
+const RATIO_METRIC_ALIASES: Record<string, string[]> = {
+    pe: ['pe', 'pe_ratio', 'priceToEarning'],
+    pb: ['pb', 'pb_ratio', 'priceToBook'],
+    ps: ['ps', 'ps_ratio', 'priceToSales'],
+};
+
+function readRatioValue(row: Record<string, any>, key: string): any {
+    const aliases = RATIO_METRIC_ALIASES[key] || [key];
+    const rowLookup = buildMetricLookup(row);
+    for (const alias of aliases) {
+        const value = rowLookup.get(alias) ?? rowLookup.get(normalizeMetricKey(alias));
+        if (value !== null && value !== undefined && value !== '') return value;
+    }
+    const rawData = row.raw_data || row.rawData || row.raw;
+    const rawLookup = buildMetricLookup(rawData);
+    if (rawLookup.size > 0) {
+        for (const alias of aliases) {
+            const value = rawLookup.get(alias) ?? rawLookup.get(normalizeMetricKey(alias));
+            if (value !== null && value !== undefined && value !== '') return value;
+        }
+    }
+    return null;
+}
+
 function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: FinancialsWidgetProps) {
     const [activeTab, setActiveTab] = useState<FinancialTab>('income_statement');
     const [period, setPeriod] = useState('FY');
@@ -235,14 +259,12 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
     ];
 
     const requestPeriod = period;
-    const periodMode = period === 'TTM' && activeTab === 'ratios'
-        ? 'quarter'
-        : period === 'FY'
-            ? 'year'
-            : period === 'TTM'
-                ? 'ttm'
-                : 'quarter';
-    const periodLabel = period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : `${period} Quarterly`;
+    const periodMode = period === 'FY'
+        ? 'year'
+        : period === 'TTM'
+            ? 'ttm'
+            : 'quarter';
+    const periodLabel = period === 'FY' ? 'Annual' : period === 'TTM' ? 'TTM' : period === 'Q' ? 'Quarterly' : `${period} Quarterly`;
 
     // Backend `limit` caps at 80. We always request the maximum so the
     // table can render the full multi-year history that the user
@@ -299,23 +321,21 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
             const quarterRows = quarterOnlyRows;
 
             if (period === 'TTM') {
-                if (activeTab === 'ratios') {
-                    displayRows = quarterRows.slice(-4);
-                } else {
-                    const ttmRows: any[] = [];
-                    for (let i = 3; i < quarterRows.length; i += 1) {
-                        const windowRows = quarterRows.slice(i - 3, i + 1);
-                        const aggregated: any = { __period: `TTM-${quarterRows[i].__period}` };
-                        selectedMetricKeys.forEach((key) => {
-                            const values = windowRows
-                                .map((row: any) => Number(row[key]))
-                                .filter((value: number) => !Number.isNaN(value) && Number.isFinite(value));
-                            aggregated[key] = values.length ? values.reduce((sum, value) => sum + value, 0) : null;
-                        });
-                        ttmRows.push(aggregated);
-                    }
-                    displayRows = ttmRows;
+                const ttmRows: any[] = [];
+                for (let i = 3; i < quarterRows.length; i += 1) {
+                    const windowRows = quarterRows.slice(i - 3, i + 1);
+                    const aggregated: any = { __period: `TTM-${quarterRows[i].__period}` };
+                    selectedMetricKeys.forEach((key) => {
+                        const values = windowRows
+                            .map((row: any) => Number(row[key]))
+                            .filter((value: number) => !Number.isNaN(value) && Number.isFinite(value));
+                        aggregated[key] = values.length ? values.reduce((sum, value) => sum + value, 0) : null;
+                    });
+                    ttmRows.push(aggregated);
                 }
+                displayRows = ttmRows;
+            } else if (period === 'Q') {
+                displayRows = quarterRows;
             } else {
                 displayRows = quarterRows.filter((row: any) =>
                     matchesFinancialQuarterSelection(row.__period, period as 'Q1' | 'Q2' | 'Q3' | 'Q4')
@@ -366,13 +386,13 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                             return;
                         }
                         const currentVal = activeTab === 'ratios'
-                            ? d[m.key]
+                            ? readRatioValue(d, m.key)
                             : convertFinancialValueForUnit(readMetricValue(d, m.key), unitConfig, periodLabel);
                         const periodIndex = sortedPeriodIndex.get(periodLabel) ?? -1;
                         const prevRow = periodIndex > 0 ? (comparisonRows[periodIndex - 1] as any) : null;
                         const prevValRaw = prevRow
                             ? activeTab === 'ratios'
-                                ? prevRow[m.key]
+                                ? readRatioValue(prevRow, m.key)
                                 : readMetricValue(prevRow, m.key)
                             : null;
                         const prevVal = activeTab === 'ratios'
@@ -495,7 +515,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
 
                     <div className="flex items-center gap-2 ml-auto">
                         <div className="flex bg-muted/30 rounded p-0.5 gap-0.5">
-                            {['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'].map((opt) => (
+                            {['FY', 'Q', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM'].map((opt) => (
                                 <button
                                     key={opt}
                                     onClick={() => setPeriod(opt)}
