@@ -15,7 +15,7 @@ import importlib
 import logging
 import re
 import xml.etree.ElementTree as ET
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -29,6 +29,8 @@ from vnibb.models.market_news import MarketNews
 from vnibb.services.sentiment_analyzer import sentiment_analyzer
 
 logger = logging.getLogger(__name__)
+
+VIETNAM_TZ = timezone(timedelta(hours=7))
 
 
 # Free-tier RSS feed map. Used when `vnstock_news` (premium) is unavailable
@@ -147,6 +149,16 @@ def _is_vnexpress_url(value: Any) -> bool:
     except ValueError:
         return False
     return hostname == "vnexpress.net" or hostname.endswith(".vnexpress.net")
+
+
+def _to_market_news_storage_datetime(value: datetime | None) -> datetime | None:
+    """Normalize aware article dates for the legacy naive timestamp column."""
+
+    if value is None:
+        return None
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return value
+    return value.astimezone(VIETNAM_TZ).replace(tzinfo=None)
 
 
 def _extract_vnexpress_published_date_from_html(html: str) -> datetime | None:
@@ -512,6 +524,7 @@ class NewsCrawlerService:
         url = article.get("link") or article.get("url") or ""
         if pub_date is None and _is_vnexpress_url(url):
             pub_date = await _fetch_vnexpress_published_date(str(url))
+        pub_date = _to_market_news_storage_datetime(pub_date)
 
         # Extract related symbols if mentioned
         related_symbols = article.get("symbols", [])

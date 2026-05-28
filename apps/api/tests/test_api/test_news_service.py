@@ -6,6 +6,7 @@ import pytest
 from vnibb.services.news_crawler import (
     _coerce_published_date,
     _extract_vnexpress_published_date_from_html,
+    _to_market_news_storage_datetime,
 )
 from vnibb.services.news_service import get_company_news_rows, get_news_flow
 
@@ -39,6 +40,15 @@ def test_news_crawler_extracts_vnexpress_datalayer_date():
 
     assert parsed is not None
     assert parsed.astimezone(UTC) == datetime(2026, 5, 22, 10, 24, tzinfo=UTC)
+
+
+def test_news_crawler_converts_aware_dates_to_vietnam_naive_storage_time():
+    parsed = _coerce_published_date("2026-05-22T10:24:00Z")
+
+    stored = _to_market_news_storage_datetime(parsed)
+
+    assert stored == datetime(2026, 5, 22, 17, 24)
+    assert stored.tzinfo is None
 
 
 @pytest.mark.asyncio
