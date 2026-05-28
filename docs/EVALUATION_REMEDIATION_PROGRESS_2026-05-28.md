@@ -68,6 +68,19 @@ Fix every open item in the v1.4.0 evaluation report, with detail tracked as chan
 - Follow-up: `python -m pytest apps/api/tests/test_api/test_smoke_endpoints.py -v -k "orderbook"`: passed, 3 selected / 67 deselected.
 - Follow-up: `python -m py_compile apps/api/vnibb/api/v1/equity.py`: passed.
 
+### 2026-05-28 - Deployment And Public Smoke
+
+- Committed and pushed full remediation as `f4378db fix(dashboard): remediate v1.4 evaluation regressions`.
+- Deployed `f4378db` to OCI `/srv/vnibb`; containers `vnibb-api`, `vnibb-mcp`, and `vnibb-caddy` were healthy and `alembic upgrade head` completed.
+- Public smoke after `f4378db` passed for `/live`, `/ready`, `/foreign-trading?limit=3`, and `/ratios?period=quarter`, but exposed the production-only Order Book gap where live depth had volumes and no prices and no priced DB snapshot was available.
+- Committed and pushed the Order Book follow-up as `a7a4d5a fix(orderbook): fallback to latest price when depth lacks prices`.
+- Deployed `a7a4d5a` to OCI; `alembic upgrade head` completed and `docker compose ps` showed `vnibb-api` healthy, `vnibb-mcp` healthy, and `vnibb-caddy` running.
+- Public `/live`: returned `{"alive":true}`.
+- Public `/ready`: returned `{"ready":true}`.
+- Public `/api/v1/equity/VCI/orderbook`: returned `last_price: 25.0`, ten entries with `price: 25.0`, `price_status: "reference"`, `price_source: "latest_price"`, `is_stale: true`, and `market_status: "closed"`. This confirms T-1 no longer renders `LAST 00` / all `--` in the deployed closed-market no-snapshot case.
+- Public `/api/v1/equity/VCI/foreign-trading?limit=3`: returned fallback rows through `2026-05-28` with `meta.symbol: "VCI"` and `meta.last_data_date: "2026-05-28"`.
+- Public `/api/v1/equity/VCI/ratios?period=quarter`: returned 64 rows with `meta.full_ratio_coverage_starts: "Q1-2024"` and latest `Q1-2026` ratio data.
+
 ## Final Status
 
-All seven open evaluation report items are patched and covered by focused regression tests where appropriate. Full CI gate is green.
+All seven open evaluation report items are patched, covered by focused regression tests where appropriate, committed, pushed, deployed to OCI, and publicly smoke-tested. Full CI gate is green.
