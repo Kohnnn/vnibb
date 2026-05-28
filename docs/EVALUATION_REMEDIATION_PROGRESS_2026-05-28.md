@@ -10,11 +10,11 @@ Fix every open item in the v1.4.0 evaluation report, with detail tracked as chan
 
 | ID | Priority | Area | Status | Target |
 |---|---:|---|---|---|
-| TMPL-1 | P0 | Templates | Follow-up patched | `Use Template` creates/applies an editable workspace with visible feedback. |
-| TMPL-2 | P0 | Templates | Follow-up patched | `Save Current` opens a clear save flow, persists layout, and shows saved layouts. |
+| TMPL-1 | P0 | Templates | Public PASS | `Use Template` creates/applies an editable workspace with visible feedback. |
+| TMPL-2 | P0 | Templates | Public PASS | `Save Current` opens a clear save flow, persists layout, and shows saved layouts. |
 | T-1 | P0 | Order Book | Public PASS | Closed-market order book shows last usable prices, not `--`/`00`. |
-| CRYPTO-1 | P1 | Global Markets | Follow-up patched | Crypto sub-tab chart stays on `BINANCE:BTCUSDT` even for old stored layouts. |
-| NE-1 | P1 | News | Follow-up patched | VNEXPRESS dates parse across market-news and world-news paths. |
+| CRYPTO-1 | P1 | Global Markets | Public PASS | Crypto sub-tab chart stays on `BINANCE:BTCUSDT` even for old stored layouts. |
+| NE-1 | P1 | News | Public PASS | VNEXPRESS dates parse across market-news and world-news paths. |
 | OWN-1 | P2 | Foreign Trading | Public PASS | Cache-age label uses trading-day/ICT semantics instead of midnight age. |
 | F-Q-1 | P2 | Fundamentals | Public PASS | Quarterly ratios render data or an explicit data-unavailable state. |
 
@@ -101,6 +101,28 @@ Recheck window: `2026-05-29 00:19:24` to `2026-05-29 00:43:01` ICT (`+07:00`).
 - Compile check passed: `python -m py_compile apps/api/vnibb/services/news_crawler.py`.
 - Live extractor check passed for `https://vnexpress.net/dien-may-xanh-muon-huy-dong-hon-14-000-ty-dong-qua-ipo-5077011.html`, resolving `2026-05-22T10:24:00+00:00`.
 
+### 2026-05-29 - Follow-up Deployment And Final Public QA
+
+Final verification window: `2026-05-29 01:19:00` to `2026-05-29 01:26:19` ICT (`+07:00`).
+
+- Committed and pushed frontend/backend follow-ups as `686f143 fix(dashboard): harden evaluation remediation follow-ups`.
+- During production VNEXPRESS crawl verification, found one more backend runtime issue: extracted VNEXPRESS dates were timezone-aware while `market_news.published_date` is a legacy naive timestamp column. Patched this as `97fed7f fix(news): normalize vnexpress publish dates for storage`.
+- Verification after `686f143`: `pnpm --filter frontend exec tsc --noEmit` passed; scoped backend ruff for changed files passed; `pnpm run ci:gate` passed with frontend lint/build/Jest and 258 backend tests.
+- Verification after `97fed7f`: scoped backend ruff passed; `python -m pytest apps/api/tests/test_api/test_news_service.py -v -k "vnexpress or storage"` passed; `pnpm run ci:gate` passed with frontend lint/build/Jest and 259 backend tests.
+- Deployed `97fed7f` to OCI `/srv/vnibb`; `docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml ps` showed `vnibb-api` healthy, `vnibb-mcp` healthy, and `vnibb-caddy` running.
+- Ran synchronous production crawl: `POST /api/v1/news/news/crawl?sources=vnexpress.net&limit=50&analyze_sentiment=false&async_mode=false`, which returned `Crawled 49 articles`.
+- Ran controlled Postgres bridge cleanup for existing VNEXPRESS rows with `published_date IS NULL`: first pass updated 381/415 candidates, retry updated 33/34 remaining candidates, then removed the single malformed blank-title VNEXPRESS row whose URL redirected to the VnExpress home page. Remaining VNEXPRESS article rows with null dates: `0`.
+- Final public API smoke at `2026-05-29 01:26:19 +07:00`: `/live` returned alive, `/ready` returned ready, `/orderbook` returned ten `VCI` rows with `price: 25.0`, `price_status: "reference"`, `price_source: "latest_price"`, and `is_stale: true`.
+- Final public API smoke: `/foreign-trading?limit=3` returned `2026-05-28`, `2026-05-27`, `2026-05-26` with `meta.symbol: "VCI"` and `meta.last_data_date: "2026-05-28"`.
+- Final public API smoke: `/ratios?period=quarter` returned 64 rows, latest `Q1-2026`, and `meta.full_ratio_coverage_starts: "Q1-2024"`.
+- Final public API smoke: `/api/v1/news/feed?limit=5&mode=related&symbol=VCI` returned VNEXPRESS rows with concrete `published_date` values such as `2026-05-29T00:05:00`; `/api/v1/news/feed?limit=5&mode=all&source=vnexpress.net` returned zero null dates; `/api/v1/news/world?source=vnexpress_business&limit=5` returned ISO `published_at` values through `2026-05-28T17:05:00Z`.
+- Production dashboard browser QA passed against `https://vnibb-web.vercel.app/dashboard`: Template `Use Template` applied an editable workspace, `Save Current` showed visible saved-layout feedback, stale `NASDAQ:VFS` local storage reset to `AMEX:SPY`, and the Crypto tab stayed on BTC/Binance rather than SPY/VFS.
+- Production dashboard browser QA passed: Order Book had no `LAST 00` and showed reference `25` prices, Foreign Trading had no `12h old` midnight-age label, Financial Ratios Q mode rendered quarterly data, and News/World News had no visible `Unknown` or `Date unavailable`.
+- Screenshot evidence:
+  - `output/playwright/vnibb-template-library-pass-2026-05-29.png`
+  - `output/playwright/vnibb-global-crypto-pass-2026-05-29.png`
+  - `output/playwright/vnibb-news-events-pass-2026-05-29.png`
+
 ## Final Status
 
-Three follow-up remediations from the 2026-05-29 production recheck are patched locally and awaiting full gate, commit, push, deployment, and public re-verification: Template Library modal layering, stale Global Markets/Crypto persisted state, and VNEXPRESS date backfill/rendering. T-1, OWN-1, and F-Q-1 remain public PASS on the deployed build.
+All seven open evaluation report items are patched, covered by focused regression tests where appropriate, committed, pushed, deployed to OCI where backend/runtime changes applied, and publicly smoke-tested. Final Vercel dashboard QA and OCI API smoke checks are green.
