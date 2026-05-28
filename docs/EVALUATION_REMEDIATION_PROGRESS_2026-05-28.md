@@ -42,8 +42,10 @@ Fix every open item in the v1.4.0 evaluation report, with detail tracked as chan
 - `apps/web/src/components/modals/TemplateSelector.tsx`: made save/import success visible after the inline save flow closes, while keeping validation/import failures as red error messages. This addresses the silent-close perception in `SAVE CURRENT`.
 - `apps/web/src/contexts/DashboardContext.tsx`: expanded `shouldRefreshGlobalMarketsLayout()` to refresh old stored Global Markets dashboards when TradingView widgets still use legacy symbols, linked-symbol defaults, or a misconfigured Crypto chart. This heals old `localStorage` snapshots without asking users to clear browser data.
 - `apps/api/vnibb/api/v1/equity.py`: added `_orderbook_payload_has_prices()` and now reject warm/live orderbook payloads that contain only volume with null/zero prices. Those responses fall back to the latest DB snapshot and are tagged `is_stale: true`, `market_status: closed`.
+- `apps/api/vnibb/api/v1/equity.py`: added a second-order Order Book fallback for the deployed no-priced-snapshot case. If live depth and DB snapshots both lack prices, the endpoint now uses the latest close/screener price as a marked `reference` price instead of returning `PRICE "--"` / `LAST 00`.
 - `apps/web/src/components/widgets/OrderbookWidget.tsx`: fixed `last_price` handling so `null` no longer becomes `0` via `Number(null)`. The header now shows `10 levels` unless a positive last price exists.
 - `apps/api/tests/test_api/test_smoke_endpoints.py`: added regression coverage for live volume-only orderbook fallback to a priced stale DB snapshot.
+- `apps/api/tests/test_api/test_smoke_endpoints.py`: added regression coverage for live volume-only orderbook fallback to latest close when no priced orderbook snapshot exists.
 - `apps/api/vnibb/services/news_crawler.py`: extended date layouts to parse Vietnamese numeric dates with explicit timezone offsets after `GMT+7` normalization.
 - `apps/api/vnibb/services/world_news_service.py`: added the same `GMT+7`, Vietnamese weekday, and timezone-aware numeric layout handling to the separate world-news RSS parser.
 - `apps/api/tests/test_api/test_news_service.py`: added coverage for `_coerce_published_date("Thứ 5, 28/05/2026 17:00:00 GMT+7")`.
@@ -63,6 +65,8 @@ Fix every open item in the v1.4.0 evaluation report, with detail tracked as chan
 - `pnpm --filter frontend lint`: passed.
 - `python -m py_compile apps/api/vnibb/api/v1/equity.py apps/api/vnibb/services/news_crawler.py apps/api/vnibb/services/world_news_service.py`: passed.
 - `pnpm run ci:gate`: passed end-to-end. Frontend lint/build/tests passed (8 suites / 21 tests). Backend compile/tests passed (255 tests).
+- Follow-up: `python -m pytest apps/api/tests/test_api/test_smoke_endpoints.py -v -k "orderbook"`: passed, 3 selected / 67 deselected.
+- Follow-up: `python -m py_compile apps/api/vnibb/api/v1/equity.py`: passed.
 
 ## Final Status
 

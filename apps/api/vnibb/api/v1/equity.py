@@ -5766,6 +5766,11 @@ def _normalize_orderbook_units(payload: dict[str, Any]) -> dict[str, Any]:
         # last_price might still be raw; if so, fix only it.
         if _looks_raw_vnd(payload.get("last_price")):
             payload = {**payload, "last_price": _scale_price(payload.get("last_price"), 0.001)}
+        if _looks_raw_vnd(payload.get("reference_price")):
+            payload = {
+                **payload,
+                "reference_price": _scale_price(payload.get("reference_price"), 0.001),
+            }
         return payload
 
     factor = 0.001
@@ -5780,6 +5785,7 @@ def _normalize_orderbook_units(payload: dict[str, Any]) -> dict[str, Any]:
         **payload,
         "entries": new_entries,
         "last_price": _scale_price(payload.get("last_price"), factor),
+        "reference_price": _scale_price(payload.get("reference_price"), factor),
         "unit_corrected": True,
     }
     logger.info(
@@ -5809,6 +5815,53 @@ def _orderbook_payload_has_prices(payload: dict[str, Any] | None) -> bool:
         except (TypeError, ValueError):
             continue
     return False
+
+
+def _apply_orderbook_reference_price(
+    payload: dict[str, Any],
+    reference_price: Any,
+) -> dict[str, Any]:
+    price = _coerce_optional_float(reference_price)
+    if price is None or price <= 0:
+        return payload
+
+    priced_entries: list[dict[str, Any]] = []
+    for entry in payload.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        entry_price = _coerce_optional_float(entry.get("price"))
+        priced_entries.append(
+            entry
+            if entry_price is not None and entry_price > 0
+            else {**entry, "price": price, "price_status": "reference"}
+        )
+
+    if not priced_entries:
+        priced_entries = [
+            {
+                "level": 1,
+                "price": price,
+                "bid_vol": None,
+                "ask_vol": None,
+                "price_status": "reference",
+            }
+        ]
+
+    last_price = _coerce_optional_float(payload.get("last_price"))
+    if last_price is None or last_price <= 0:
+        last_price = price
+
+    return _normalize_orderbook_units(
+        {
+            **payload,
+            "entries": priced_entries,
+            "last_price": last_price,
+            "reference_price": price,
+            "is_stale": True,
+            "market_status": "closed",
+            "price_source": "latest_price",
+        }
+    )
 
 
 def _build_orderbook_payload(
@@ -5970,6 +6023,18 @@ async def _get_orderbook_payload(symbol: str, db: AsyncSession) -> dict[str, Any
                 "market_status": "closed",
             }
             return snapshot_payload
+
+        reference_price = await _get_latest_price(db, symbol.upper())
+        reference_payload = _apply_orderbook_reference_price(payload, reference_price)
+        if _orderbook_payload_has_prices(reference_payload):
+            return reference_payload
+
+        return {
+            **payload,
+            "is_stale": True,
+            "market_status": "closed",
+            "price_source": "unavailable",
+        }
 
     await _cache_orderbook_payload(symbol, payload)
     return payload

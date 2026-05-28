@@ -1572,6 +1572,51 @@ async def test_orderbook_endpoint_falls_back_when_live_has_volume_without_prices
 
 
 @pytest.mark.asyncio
+async def test_orderbook_endpoint_uses_latest_close_when_no_priced_snapshot(client, test_db, monkeypatch):
+    test_db.add(Stock(id=902, symbol="VCI", exchange="HOSE", company_name="Vietcap"))
+    test_db.add(
+        StockPrice(
+            id=902,
+            stock_id=902,
+            symbol="VCI",
+            time=date(2026, 5, 28),
+            open=25.1,
+            high=25.2,
+            low=24.8,
+            close=25.0,
+            volume=1_000_000,
+            interval="1D",
+        )
+    )
+    await test_db.commit()
+
+    async def fake_price_depth_fetch(*, symbol: str, source: str):
+        return PriceDepthData(
+            symbol=symbol,
+            raw_levels=[{"buyVol": 12345, "sellVol": 67890}],
+            total_bid_volume=12345,
+            total_ask_volume=67890,
+        )
+
+    monkeypatch.setattr("vnibb.api.v1.equity.redis_client.get_json", lambda _key: None)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockPriceDepthFetcher.fetch",
+        fake_price_depth_fetch,
+    )
+
+    response = await client.get("/api/v1/equity/VCI/orderbook")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["is_stale"] is True
+    assert payload["data"]["market_status"] == "closed"
+    assert payload["data"]["price_source"] == "latest_price"
+    assert payload["data"]["entries"][0]["price"] == 25.0
+    assert payload["data"]["entries"][0]["price_status"] == "reference"
+    assert payload["data"]["last_price"] == 25.0
+
+
+@pytest.mark.asyncio
 async def test_market_indices_smoke_returns_data(client, monkeypatch):
     async def fake_market_overview_fetch(_params):
         return [
