@@ -4,7 +4,16 @@ Source: `../docs/evaluationreprot.md` (QA Evaluation Report v1.4.0, 2026-05-28).
 
 ## Scope
 
-Fix every open item in the v1.4.0 evaluation report, with detail tracked as changes land.
+Final handoff for all open items in the v1.4.0 evaluation report. This document is the remediation record for what was fixed, how it was verified, and what production caveats remain.
+
+## Handoff Summary
+
+- Final status: all seven evaluation report items are `Public PASS`.
+- Final shipped commits: `686f143 fix(dashboard): harden evaluation remediation follow-ups`, `97fed7f fix(news): normalize vnexpress publish dates for storage`, and `02bea23 docs(evaluation): record final remediation QA`.
+- Backend runtime deployed on OCI: `97fed7f`; `/srv/vnibb` was later fast-forwarded through docs-only commits without a container rebuild.
+- Final public verification window: `2026-05-29 01:19:00` to `2026-05-29 01:26:19` ICT (`+07:00`).
+- Order Book caveat: the closed-market no-priced-snapshot path uses latest close as marked reference pricing (`price_status: "reference"`, `price_source: "latest_price"`), not true level-by-level bid/ask depth.
+- Evidence artifacts are committed under `output/playwright/`, including the production failure capture and the final pass screenshots.
 
 ## Bug Registry
 
@@ -18,7 +27,7 @@ Fix every open item in the v1.4.0 evaluation report, with detail tracked as chan
 | OWN-1 | P2 | Foreign Trading | Public PASS | Cache-age label uses trading-day/ICT semantics instead of midnight age. |
 | F-Q-1 | P2 | Fundamentals | Public PASS | Quarterly ratios render data or an explicit data-unavailable state. |
 
-## Implementation Plan
+## Remediation Approach
 
 1. Reconcile report symptoms with current code and prior remediation docs.
 2. Patch low-risk frontend state/catalog issues first: Templates and Crypto default migration.
@@ -36,7 +45,7 @@ Fix every open item in the v1.4.0 evaluation report, with detail tracked as chan
 - Found concrete stale reusable-template issue: `apps/web/src/types/dashboard-templates.ts` still seeds the Global Markets template with `NASDAQ:VFS` instead of the current system-dashboard `AMEX:SPY` configuration.
 - Found persisted Crypto-state gap: `shouldRefreshGlobalMarketsLayout()` only detects `SP:SPX` and missing WorldNews widgets. It does not detect old Crypto sub-tabs inheriting `AMEX:SPY`, missing `useLinkedSymbol: false`, or missing `allow_symbol_change: false`.
 
-### 2026-05-28 - Current Changes
+### 2026-05-28 - Initial Remediation Changes
 
 - `apps/web/src/types/dashboard-templates.ts`: updated the reusable `Global Markets` template card to seed `AMEX:SPY` and opt out of linked-symbol mutation, matching the system Global Markets dashboard. This removes stale `NASDAQ:VFS` from `Use Template` output.
 - `apps/web/src/components/modals/TemplateSelector.tsx`: made save/import success visible after the inline save flow closes, while keeping validation/import failures as red error messages. This addresses the silent-close perception in `SAVE CURRENT`.
@@ -119,10 +128,11 @@ Final verification window: `2026-05-29 01:19:00` to `2026-05-29 01:26:19` ICT (`
 - Production dashboard browser QA passed against `https://vnibb-web.vercel.app/dashboard`: Template `Use Template` applied an editable workspace, `Save Current` showed visible saved-layout feedback, stale `NASDAQ:VFS` local storage reset to `AMEX:SPY`, and the Crypto tab stayed on BTC/Binance rather than SPY/VFS.
 - Production dashboard browser QA passed: Order Book had no `LAST 00` and showed reference `25` prices, Foreign Trading had no `12h old` midnight-age label, Financial Ratios Q mode rendered quarterly data, and News/World News had no visible `Unknown` or `Date unavailable`.
 - Screenshot evidence:
+  - `output/playwright/vnibb-market-news-date-unavailable-2026-05-29.png`
   - `output/playwright/vnibb-template-library-pass-2026-05-29.png`
   - `output/playwright/vnibb-global-crypto-pass-2026-05-29.png`
   - `output/playwright/vnibb-news-events-pass-2026-05-29.png`
 
 ## Final Status
 
-All seven open evaluation report items are patched, covered by focused regression tests where appropriate, committed, pushed, deployed to OCI where backend/runtime changes applied, and publicly smoke-tested. Final Vercel dashboard QA and OCI API smoke checks are green.
+All seven open evaluation report items are patched, covered by focused regression tests where appropriate, committed, pushed, deployed to OCI where backend/runtime changes applied, and publicly smoke-tested. Final Vercel dashboard QA and OCI API smoke checks are green, and the production VNEXPRESS cleanup left zero VNEXPRESS article rows with null publication dates.
