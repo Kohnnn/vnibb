@@ -76,4 +76,34 @@ describe('TemplateSelector', () => {
     expect(screen.getByText('Saved "QA Saved Layout". It is ready under Your saved layouts.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'QA Saved Layout' })).toBeInTheDocument();
   });
+
+  it('shows a non-destructive error when saved layouts cannot be written', async () => {
+    const user = userEvent.setup();
+    const setItemSpy = jest
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('quota exceeded');
+      });
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    render(
+      <TemplateSelector
+        open
+        onClose={jest.fn()}
+        onSelectTemplate={jest.fn()}
+        currentDashboard={currentDashboard}
+        currentSymbol="VCI"
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /save current/i }));
+    await user.type(screen.getByPlaceholderText('Template name'), 'Quota Layout');
+    await user.click(screen.getByRole('button', { name: /save layout/i }));
+
+    expect(screen.getByText('Saved layouts could not be written to this browser. Existing saved layouts were left unchanged.')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Quota Layout' })).not.toBeInTheDocument();
+
+    setItemSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
 });

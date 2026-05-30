@@ -61,7 +61,7 @@ import {
 } from '@/lib/userPreferences';
 import type { WidgetInstance, WidgetType, WidgetConfig } from '@/types/dashboard';
 import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '@/types/dashboard-templates';
-import { AlertCircle, Grid3X3, PlusCircle, RefreshCw, Shield } from 'lucide-react';
+import { AlertCircle, Grid3X3, PlusCircle, RefreshCw, Shield, X } from 'lucide-react';
 
 export default function DashboardPage() {
     return (
@@ -113,6 +113,8 @@ function DashboardContent() {
         resetTabLayout,
         addWidget,
         setDashboardAdminUnlocked,
+        migrationNotice,
+        dismissMigrationNotice,
     } = useDashboard();
 
     const { setGlobalSymbol: setContextGlobalSymbol } = useWidgetGroups();
@@ -161,6 +163,9 @@ function DashboardContent() {
     const templateApplyStatusClass = templateApplyStatus?.tone === 'warning'
         ? 'border-amber-500/25 bg-amber-500/10 text-amber-100'
         : 'border-blue-500/20 bg-blue-500/10 text-blue-200';
+    const migrationNoticeClass = migrationNotice?.tone === 'warning'
+        ? 'border-amber-500/25 bg-amber-500/10 text-amber-100'
+        : 'border-blue-500/20 bg-blue-500/10 text-blue-100';
 
     const updateViewport = useCallback(() => {
         if (typeof window !== 'undefined') {
@@ -1055,6 +1060,32 @@ function DashboardContent() {
                 <TabBar symbol={stockGlobalSymbol} />
 
                 <WhatsNewPanel />
+
+                {migrationNotice ? (
+                    <div
+                        role={migrationNotice.tone === 'warning' ? 'alert' : 'status'}
+                        className={`mx-2 mt-2 flex items-start gap-2 rounded-xl border px-3 py-2 text-xs shadow-sm sm:mx-3 lg:mx-4 ${migrationNoticeClass}`}
+                    >
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                            <div className="font-black uppercase tracking-[0.14em]">
+                                {migrationNotice.message}
+                            </div>
+                            <div className="mt-1 leading-5 opacity-85">
+                                {migrationNotice.detail}
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={dismissMigrationNotice}
+                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-current/20 text-current/80 hover:bg-white/10 hover:text-current"
+                            aria-label="Dismiss dashboard storage notice"
+                            title="Dismiss"
+                        >
+                            <X size={14} />
+                        </button>
+                    </div>
+                ) : null}
 
                 <div className="relative flex-1 min-h-0 overflow-hidden bg-[var(--bg-primary)] p-2 sm:p-3 lg:p-4">
                     {showAdminSystemLayoutControls && activeDashboard ? (

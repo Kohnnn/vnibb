@@ -983,7 +983,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'orderbook',
         name: 'Order Book',
-        description: 'Real-time order book depth',
+        description: 'Order book depth with cached/reference labels when live pricing is unavailable',
         category: 'core_data',
         defaultConfig: {},
         defaultLayout: { w: 4, h: 8, minW: 3, minH: 6 }

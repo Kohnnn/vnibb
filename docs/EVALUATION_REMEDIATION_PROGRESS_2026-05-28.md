@@ -136,3 +136,44 @@ Final verification window: `2026-05-29 01:19:00` to `2026-05-29 01:26:19` ICT (`
 ## Final Status
 
 All seven open evaluation report items are patched, covered by focused regression tests where appropriate, committed, pushed, deployed to OCI where backend/runtime changes applied, and publicly smoke-tested. Final Vercel dashboard QA and OCI API smoke checks are green, and the production VNEXPRESS cleanup left zero VNEXPRESS article rows with null publication dates.
+
+## Next-Phase Quality Pass - 2026-05-30
+
+Scope: turn the v1.4.0 remediation fixes into durable product behavior and regression coverage without broad crawler or backend rewrites.
+
+- Template Library: saved-layout persistence now reports a visible, non-destructive error when browser storage writes fail instead of showing false success. Deleting saved layouts also reports success/error inline.
+- Dashboard storage: startup now shows a dismissible repair notice when old local dashboard storage is unreadable or when a stale Global Markets snapshot is refreshed. Unreadable dashboard/folder JSON is copied to `vnibb_dashboards_recovery_backup_v1` before defaults load; custom saved layouts are not cleared.
+- Order Book: `price_source: "latest_price"` and row `price_status: "reference"` now render as `Reference close`, `Reference pricing only`, and `Ref Price`, with copy stating this is not live bid/ask depth.
+- Widget catalog copy: Order Book descriptions no longer promise universal real-time Level 2 depth; they mention cached/reference pricing labels.
+- News dates: world-news widgets now show `Date unavailable` for missing timestamps instead of `Live feed`, and the legacy company/market news feed normalizes timestamp aliases before rendering. VNEXPRESS day-first AM/PM timestamp handling is covered in the world-news widget test.
+- Focused regression tests added/updated:
+  - `TemplateSelector.test.tsx`: visible saved-layout write-failure feedback.
+  - `OrderbookWidget.test.tsx`: latest-close reference pricing is labeled as non-live depth.
+  - `WorldNewsMonitorWidget.test.tsx`: VNEXPRESS day-first AM/PM timestamp renders without `Date unavailable`.
+
+Verification:
+
+- `pnpm --filter frontend test -- --runTestsByPath src/components/modals/TemplateSelector.test.tsx src/components/widgets/OrderbookWidget.test.tsx src/components/widgets/WorldNewsMonitorWidget.test.tsx src/lib/newsTime.test.ts --runInBand`: passed, 4 suites / 9 tests. Expected local env warning only.
+- `pnpm --filter frontend exec tsc --noEmit`: passed.
+- `pnpm --filter frontend lint`: passed.
+- `pnpm --filter frontend build`: first run failed during prerender because `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` were not set in the shell. Rerun with `NEXT_PUBLIC_API_URL=https://129.150.58.64.sslip.io/api/v1` and `NEXT_PUBLIC_WS_URL=wss://129.150.58.64.sslip.io/api/v1/ws/prices`: passed.
+- `pnpm --filter frontend test -- --runInBand`: passed, 11 suites / 28 tests. Expected local env warnings only.
+- Public API smoke: `/live` alive, `/ready` ready.
+- Public API smoke: `/api/v1/equity/VCI/orderbook` returned 10 rows with `last_price: 24.65`, `price_source: "latest_price"`, first row `price_status: "reference"`, `is_stale: true`, and `market_status: "closed"`.
+- Public API smoke: `/api/v1/equity/VCI/foreign-trading?limit=3` returned latest `last_data_date: "2026-05-29"`.
+- Public API smoke: `/api/v1/equity/VCI/ratios?period=quarter` returned 64 rows from `Q2-2012` through `Q1-2026`, with `full_ratio_coverage_starts: "Q1-2024"`.
+- Public API smoke: `/api/v1/news/feed?limit=5&mode=related&symbol=VCI` returned 5 rows and zero null `published_date` values.
+- Public API smoke: `/api/v1/news/world?source=vnexpress_business&limit=5` returned 5 rows and zero null `published_at` values.
+
+### Next-Phase QA Checklist
+
+Use this lightweight checklist after any dashboard template, widget data-label, or news-date change:
+
+- Template Library: from a locked system dashboard, `Use Template` creates and switches to a fresh editable workspace with visible success feedback.
+- Template Library: `Save Current` persists a saved layout, displays it under `Your saved layouts`, and shows an inline error if localStorage cannot write.
+- Dashboard migration: stale Global Markets localStorage resets to `AMEX:SPY`, Crypto remains `BINANCE:BTCUSDT`, and any repair notice says custom workspaces/saved layouts were preserved.
+- Order Book: closed-market `latest_price` fallback shows `Reference close` / `Ref Price` and never reads as true live level-by-level bid/ask depth.
+- Foreign Trading: date-only `last_data_date` uses 17:00 ICT settlement semantics and does not show midnight-based stale ages.
+- Financial Ratios: quarterly mode renders populated rows or an explicit no-renderable-metrics state.
+- Market News and World News: sampled VNEXPRESS rows have concrete dates; missing dates render as `Date unavailable`, never as a freshness claim.
+- Production smoke: run `/live`, `/ready`, `/orderbook`, `/foreign-trading`, `/ratios?period=quarter`, `/news/feed`, and `/news/world?source=vnexpress_business` before declaring public PASS.

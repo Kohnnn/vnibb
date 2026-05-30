@@ -46,6 +46,7 @@ const CURRENT_STORAGE_VERSION = 'v73';
 const MIGRATION_VERSION_KEY = 'vnibb_migration_version';
 const CURRENT_MIGRATION_VERSION = 20;
 const LAST_VIEW_STATE_KEY = 'vnibb-dashboard-last-view';
+const DASHBOARD_RECOVERY_BACKUP_KEY = 'vnibb_dashboards_recovery_backup_v1';
 const LEGACY_DASHBOARD_NAME_RE = /^new dashboard(?:\s*\(\d+\))?$/i;
 const LEGACY_SIDEBAR_DASHBOARD_RE = /^(test|dashboard\s*1)$/i;
 const LEGACY_MANAGE_TAB_NAME_RE = /^manage\s+tabs?$/i;
@@ -71,6 +72,31 @@ const GLOBAL_SYSTEM_TEMPLATE_IDS = new Set([
 interface StoredDashboardViewState {
     activeDashboardId: string | null;
     lastActiveTabIdByDashboard: Record<string, string>;
+}
+
+interface DashboardMigrationNotice {
+    tone: 'info' | 'warning';
+    message: string;
+    detail: string;
+}
+
+function backupUnreadableDashboardStorage(rawDashboards: string | null, rawFolders: string | null): boolean {
+    if (typeof window === 'undefined') return false;
+
+    try {
+        window.localStorage.setItem(
+            DASHBOARD_RECOVERY_BACKUP_KEY,
+            JSON.stringify({
+                createdAt: new Date().toISOString(),
+                dashboards: rawDashboards,
+                folders: rawFolders,
+            })
+        );
+        return true;
+    } catch (error) {
+        console.warn('Failed to back up unreadable dashboard storage:', error);
+        return false;
+    }
 }
 
 function readStoredDashboardViewState(): StoredDashboardViewState {
@@ -2812,6 +2838,8 @@ interface DashboardContextValue {
     // Computed values
     activeDashboard: Dashboard | null;
     activeTab: DashboardTab | null;
+    migrationNotice: DashboardMigrationNotice | null;
+    dismissMigrationNotice: () => void;
     // Template helpers
     availableTemplates: string[];
 }
@@ -2834,6 +2862,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         activeTabId: null,
     });
     const [localStateReady, setLocalStateReady] = useState(false);
+    const [migrationNotice, setMigrationNotice] = useState<DashboardMigrationNotice | null>(null);
     // U4 from the QA evaluation report — recently closed tabs ring buffer.
     // Transient (not persisted across reloads); 5-entry cap; FIFO eviction.
     // Updated by `deleteTab` and consumed by `restoreLastClosedTab`.
@@ -2898,20 +2927,45 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             const storedDashboards = localStorage.getItem(STORAGE_KEY);
             const storedFolders = localStorage.getItem(FOLDERS_KEY);
             const storedMigrationVersion = localStorage.getItem(MIGRATION_VERSION_KEY);
-            const migrationVersion = storedMigrationVersion ? parseInt(storedMigrationVersion, 10) : 0;
+            const parsedMigrationVersion = storedMigrationVersion ? parseInt(storedMigrationVersion, 10) : 0;
+            const migrationVersion = Number.isFinite(parsedMigrationVersion) ? parsedMigrationVersion : 0;
 
             let dashboards: Dashboard[] = [];
             let folders: DashboardFolder[] = [];
+            const migrationNotices: DashboardMigrationNotice[] = [];
+            let unreadableStorage = false;
+            let unreadableStorageBackedUp = false;
+
+            const markUnreadableStorage = () => {
+                if (!unreadableStorage) {
+                    unreadableStorageBackedUp = backupUnreadableDashboardStorage(storedDashboards, storedFolders);
+                }
+                unreadableStorage = true;
+            };
 
             if (storedDashboards) {
-                dashboards = JSON.parse(storedDashboards);
-                if (!Array.isArray(dashboards)) {
+                try {
+                    const parsedDashboards = JSON.parse(storedDashboards);
+                    if (Array.isArray(parsedDashboards)) {
+                        dashboards = parsedDashboards;
+                    } else {
+                        markUnreadableStorage();
+                    }
+                } catch {
+                    markUnreadableStorage();
                     dashboards = [];
                 }
             }
             if (storedFolders) {
-                folders = JSON.parse(storedFolders);
-                if (!Array.isArray(folders)) {
+                try {
+                    const parsedFolders = JSON.parse(storedFolders);
+                    if (Array.isArray(parsedFolders)) {
+                        folders = parsedFolders;
+                    } else {
+                        markUnreadableStorage();
+                    }
+                } catch {
+                    markUnreadableStorage();
                     folders = [];
                 }
             }
@@ -2921,6 +2975,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 dashboards = [createMainSystemDashboard()];
                 folders = [createInitialFolder()];
             } else if (migrationVersion < CURRENT_MIGRATION_VERSION) {
+                migrationNotices.push({
+                    tone: 'info',
+                    message: 'Dashboard layouts were updated for this release.',
+                    detail: 'Locked system dashboards were refreshed from the current templates. Editable workspaces and saved layouts were kept.',
+                });
+
                 if (migrationVersion < 2) {
                     dashboards = migrateEmptyTabs(dashboards);
                 }
@@ -2998,6 +3058,12 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 localStorage.setItem(MIGRATION_VERSION_KEY, String(CURRENT_MIGRATION_VERSION));
             }
 
+            const globalMarketsNeedsRefresh = dashboards.some(
+                (dashboard) =>
+                    (dashboard.id === GLOBAL_MARKETS_DASHBOARD_ID || dashboard.name === GLOBAL_MARKETS_DASHBOARD_NAME) &&
+                    shouldRefreshGlobalMarketsLayout(dashboard)
+            );
+
             dashboards = migrateLegacySidebarDashboards(dashboards);
             dashboards = migrateStaleNewTabs(dashboards);
             dashboards = migrateLegacyWidgetTypes(dashboards);
@@ -3007,6 +3073,25 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             folders = cleanedSidebar.folders;
             folders = ensureInitialFolderPresent(folders);
             dashboards = ensureMainDashboardPresent(dashboards);
+
+            if (globalMarketsNeedsRefresh && migrationNotices.length === 0) {
+                migrationNotices.push({
+                    tone: 'info',
+                    message: 'Global Markets was refreshed from an older browser snapshot.',
+                    detail: 'VNIBB reset stale TradingView symbols to the current Global Markets template. Your editable workspaces and saved layouts were not changed.',
+                });
+            }
+
+            if (unreadableStorage) {
+                migrationNotices.unshift({
+                    tone: 'warning',
+                    message: 'Browser dashboard storage was repaired safely.',
+                    detail: unreadableStorageBackedUp
+                        ? `Unreadable dashboard data was copied to ${DASHBOARD_RECOVERY_BACKUP_KEY} before defaults loaded. Custom saved layouts were not cleared.`
+                        : 'VNIBB loaded default system dashboards. Custom saved layouts were not cleared.',
+                });
+            }
+
             const preferredSymbol = readStoredTicker();
             dashboards = dashboards.map((dashboard) => ({
                 ...dashboard,
@@ -3042,10 +3127,15 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                 type: 'SET_STATE',
                 payload: { dashboards, folders, activeDashboardId, activeTabId },
             });
+            setMigrationNotice(migrationNotices[0] || null);
             setLocalStateReady(true);
             void loadPublishedTemplates();
         } catch (error) {
             console.error('Failed to load dashboards from storage:', error);
+            const fallbackBackupSucceeded = backupUnreadableDashboardStorage(
+                localStorage.getItem(STORAGE_KEY),
+                localStorage.getItem(FOLDERS_KEY)
+            );
             const defaultDashboard = createMainSystemDashboard();
             dispatch({
                 type: 'SET_STATE',
@@ -3055,6 +3145,13 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
                     activeDashboardId: defaultDashboard.id,
                     activeTabId: getPreferredActiveTabId(defaultDashboard),
                 },
+            });
+            setMigrationNotice({
+                tone: 'warning',
+                message: 'Browser dashboard storage was repaired safely.',
+                detail: fallbackBackupSucceeded
+                    ? `Unreadable dashboard data was copied to ${DASHBOARD_RECOVERY_BACKUP_KEY} before defaults loaded. Custom saved layouts were not cleared.`
+                    : 'VNIBB loaded default system dashboards. Custom saved layouts were not cleared.',
             });
             setLocalStateReady(true);
             void loadPublishedTemplates();
@@ -3622,6 +3719,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         });
     }, []);
 
+    const dismissMigrationNotice = useCallback(() => {
+        setMigrationNotice(null);
+    }, []);
+
     // ========================================================================
     // Computed Values
     // ========================================================================
@@ -3666,6 +3767,8 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         reorderDashboards,
         activeDashboard,
         activeTab,
+        migrationNotice,
+        dismissMigrationNotice,
         availableTemplates: Object.keys(TAB_WIDGET_TEMPLATES),
     };
 

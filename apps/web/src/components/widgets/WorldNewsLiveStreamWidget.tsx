@@ -69,7 +69,7 @@ function chipClass(active: boolean) {
 
 function formatArticleTime(value: string | null) {
   const formatted = formatTimestamp(value);
-  return formatted === '-' ? 'Live feed' : formatted;
+  return formatted === '-' ? 'Date unavailable' : formatted;
 }
 
 function formatCategory(value: string) {

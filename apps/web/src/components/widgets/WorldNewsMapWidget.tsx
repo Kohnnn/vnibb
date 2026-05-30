@@ -200,7 +200,7 @@ function formatCategory(value: string | null) {
 
 function formatArticleTime(value: string | null) {
   const formatted = formatTimestamp(value);
-  return formatted === '-' ? 'Live feed' : formatted;
+  return formatted === '-' ? 'Date unavailable' : formatted;
 }
 
 function formatFailedFeedTime(value: string) {

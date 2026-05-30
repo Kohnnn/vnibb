@@ -23,6 +23,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
+import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
 
 interface NewsArticle {
     id: number | string;
@@ -34,7 +35,8 @@ interface NewsArticle {
     author?: string;
     image_url?: string;
     category?: string;
-    published_date?: string;
+    published_at?: string | null;
+    published_date?: string | null;
     related_symbols: string[];
     sectors: string[];
     sentiment?: 'bullish' | 'neutral' | 'bearish';
@@ -146,7 +148,13 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
         networkMode: 'online',
     });
 
-    const newsItems: NewsArticle[] = data?.articles || [];
+    const newsItems: NewsArticle[] = useMemo(
+        () => (data?.articles || []).map((item: NewsArticle) => ({
+            ...item,
+            published_date: normalizeNewsItemTimestamp(item as unknown as Record<string, unknown>) || item.published_date || null,
+        })),
+        [data?.articles]
+    );
     const hasData = newsItems.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
@@ -362,12 +370,10 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
 
                                             {/* Meta */}
                                             <div className="flex items-center gap-2 flex-wrap text-[10px] text-[var(--text-muted)]">
-                                                {item.published_date && (
-                                                    <span className="flex items-center gap-1">
-                                                        <Clock size={10} />
-                                                        {formatPublishedTime(item.published_date)}
-                                                    </span>
-                                                )}
+                                                <span className="flex items-center gap-1">
+                                                    <Clock size={10} />
+                                                    {item.published_date ? formatPublishedTime(item.published_date) : 'Date unavailable'}
+                                                </span>
                                                 {item.source && (
                                                     <span className="px-1.5 py-0.5 bg-muted/70 text-foreground rounded">
                                                         {item.source}

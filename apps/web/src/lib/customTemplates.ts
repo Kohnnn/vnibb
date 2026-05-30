@@ -53,10 +53,8 @@ function persist(templates: CustomDashboardTemplate[]): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
   } catch (error) {
-    // Quota exceeded or storage disabled — fail silently. The user can still
-    // create / use templates within the current session via in-memory state
-    // managed by the consumer.
     console.warn('VNIBB: failed to persist custom templates', error);
+    throw new Error('Saved layouts could not be written to this browser. Existing saved layouts were left unchanged.');
   }
 }
 

@@ -11,6 +11,7 @@ import type { PriceDepthResponse } from '@/lib/api';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { usePriceDepth } from '@/lib/queries';
 import { formatNumber } from '@/lib/units';
+import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface OrderbookWidgetProps {
   symbol?: string;
@@ -73,6 +74,9 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
   const isStale = Boolean(orderbook?.data?.is_stale);
   const marketStatus = orderbook?.data?.market_status || null;
   const snapshotTime = orderbook?.data?.snapshot_time || null;
+  const priceSource = orderbook?.data?.price_source || null;
+  const hasReferencePrices = priceSource === 'latest_price'
+    || entries.some((entry) => (entry as DepthEntry & Record<string, unknown>).price_status === 'reference');
 
   const maxVolume = useMemo(() => {
     if (entries.length === 0) return 1;
@@ -90,12 +94,35 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
   );
 
   const metaNote = useMemo(() => {
+    if (hasReferencePrices) {
+      return 'Reference pricing only';
+    }
     if (isStale && marketStatus === 'closed') {
       const timeLabel = snapshotTime ? ` as of ${snapshotTime.slice(0, 16).replace('T', ' ')}` : '';
       return `Market closed — last snapshot${timeLabel}`;
     }
     return 'Depth snapshot';
-  }, [isStale, marketStatus, snapshotTime]);
+  }, [hasReferencePrices, isStale, marketStatus, snapshotTime]);
+
+  const healthState: WidgetHealthState | undefined = useMemo(() => {
+    if (hasReferencePrices) {
+      return {
+        status: 'limited',
+        label: 'Reference close',
+        detail: 'Provider depth had no priced levels. Prices use the latest close as a reference and are not true level-by-level bid/ask quotes.',
+      };
+    }
+    if (isStale) {
+      return {
+        status: 'cached',
+        label: marketStatus === 'closed' ? 'Closed-market snapshot' : 'Cached depth',
+        detail: marketStatus === 'closed'
+          ? 'Showing the latest priced depth snapshot available after market close.'
+          : 'Showing a cached depth snapshot while live refresh catches up.',
+      };
+    }
+    return undefined;
+  }, [hasReferencePrices, isStale, marketStatus]);
 
   const depthSeries = useMemo(() => {
     const normalized = normalizedEntries
@@ -157,7 +184,9 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
           <WidgetMeta
             updatedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
-            isCached={isFallback || isStale}
+            isCached={isFallback && !healthState}
+            isStale={isStale && !healthState}
+            health={healthState}
             note={metaNote}
             align="right"
           />
@@ -175,6 +204,11 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
         ) : (
           <>
             <div className="border-b border-[var(--border-subtle)] px-3 py-3 bg-[var(--bg-primary)]">
+              {hasReferencePrices ? (
+                <div className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-4 text-amber-100">
+                  Provider depth did not include priced levels. The price column uses latest close as a reference, not live bid/ask depth.
+                </div>
+              ) : null}
               <div className="mb-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
                 <span>Cumulative Depth</span>
                 <span>{lastPrice !== null ? `Last ${formatNumber(lastPrice, { decimals: 0 })}` : '10 levels'}</span>
@@ -238,7 +272,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
 
             <div className="grid grid-cols-[minmax(0,1fr)_74px_minmax(0,1fr)] gap-2 border-b border-[var(--border-color)] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
               <div>Bid Vol</div>
-              <div className="text-center">Price</div>
+              <div className="text-center">{hasReferencePrices ? 'Ref Price' : 'Price'}</div>
               <div className="text-right">Ask Vol</div>
             </div>
 
@@ -258,7 +292,11 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
                     {entry.bid_vol?.toLocaleString() || '--'}
                   </div>
                   <div className="text-center text-xs text-[var(--text-primary)] font-bold relative z-10">
-                    {entry.price !== null ? entry.price.toLocaleString() : '--'}
+                    {entry.price !== null ? (
+                      <span className={hasReferencePrices ? 'text-amber-200' : undefined}>
+                        {entry.price.toLocaleString()}
+                      </span>
+                    ) : '--'}
                   </div>
                   <div className="min-w-0 break-all text-right text-xs text-red-400 font-mono relative z-10">
                     {entry.ask_vol?.toLocaleString() || '--'}

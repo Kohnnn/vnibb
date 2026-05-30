@@ -198,8 +198,15 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, currentDas
 
   const handleDeleteCustom = (id: string) => {
     if (!window.confirm('Delete this saved layout?')) return;
-    deleteCustomTemplate(id);
-    setCustomTemplates(loadCustomTemplates());
+    try {
+      deleteCustomTemplate(id);
+      setCustomTemplates(loadCustomTemplates());
+      setSaveSuccess('Saved layout deleted.');
+      setSaveError(null);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Could not delete saved layout.');
+      setSaveSuccess(null);
+    }
   };
 
   const handleImportClick = () => {

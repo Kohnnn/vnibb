@@ -847,7 +847,7 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     alert_settings: 'Notification preferences',
     market_heatmap: 'Interactive market treemap',
     database_inspector: 'Raw data explorer',
-    orderbook: 'Real-time Level 2 depth',
+    orderbook: 'Order book depth with cached/reference pricing labels',
     index_comparison: 'Major indices performance',
     market_news: 'Broad market news stream',
     world_news_monitor: 'Live Vietnam and global RSS/Atom headlines with source and feed links',

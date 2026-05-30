@@ -1299,14 +1299,17 @@ export interface PriceDepthResponse {
             price?: number;
             bid_vol?: number;
             ask_vol?: number;
+            price_status?: string;
         }>;
         total_bid_volume?: number;
         total_ask_volume?: number;
         last_price?: number;
         last_volume?: number;
+        reference_price?: number;
         snapshot_time?: string | null;
         is_stale?: boolean;
         market_status?: string | null;
+        price_source?: string | null;
         unit_corrected?: boolean;
     };
     meta?: {

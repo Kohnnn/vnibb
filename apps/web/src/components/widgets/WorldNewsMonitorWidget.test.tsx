@@ -30,13 +30,13 @@ describe('WorldNewsMonitorWidget', () => {
             id: 'cafef-1',
             title: 'VN-Index extends gains',
             summary: 'Bank stocks led the market higher.',
-            source_id: 'cafef_markets',
-            source: 'CafeF Markets',
-            source_domain: 'cafef.vn',
-            source_url: 'https://cafef.vn/thi-truong-chung-khoan.chn',
-            feed_url: 'https://cafef.vn/thi-truong-chung-khoan.rss',
-            url: 'https://cafef.vn/story',
-            published_at: '2026-05-01T09:00:00Z',
+            source_id: 'vnexpress_business',
+            source: 'VNExpress Business',
+            source_domain: 'vnexpress.net',
+            source_url: 'https://vnexpress.net/kinh-doanh',
+            feed_url: 'https://vnexpress.net/rss/kinh-doanh.rss',
+            url: 'https://vnexpress.net/story',
+            published_at: '28/05/2026 5:05:00 pm',
             region: 'vietnam',
             category: 'markets',
             language: 'vi',
@@ -68,18 +68,19 @@ describe('WorldNewsMonitorWidget', () => {
     render(<WorldNewsMonitorWidget id="world-news" />)
 
     expect(screen.getByText('VN-Index extends gains')).toBeInTheDocument()
-    expect(screen.getByText('cafef.vn')).toBeInTheDocument()
+    expect(screen.getByText('vnexpress.net')).toBeInTheDocument()
+    expect(screen.queryByText('Date unavailable')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: /VN-Index extends gains/i })).toHaveAttribute(
       'href',
-      'https://cafef.vn/story'
+      'https://vnexpress.net/story'
     )
     expect(screen.getByRole('link', { name: 'Source' })).toHaveAttribute(
       'href',
-      'https://cafef.vn/thi-truong-chung-khoan.chn'
+      'https://vnexpress.net/kinh-doanh'
     )
     expect(screen.getByRole('link', { name: /Feed/i })).toHaveAttribute(
       'href',
-      'https://cafef.vn/thi-truong-chung-khoan.rss'
+      'https://vnexpress.net/rss/kinh-doanh.rss'
     )
   })
 })
