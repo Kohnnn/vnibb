@@ -429,9 +429,10 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
         def _fetch_sync() -> List[dict[str, Any]]:
             """Synchronous fetch wrapped for executor."""
             try:
-                from vnstock import Listing
+                from vnibb.providers.vnstock.runtime import get_listing_class
                 from datetime import datetime, timedelta
 
+                Listing = get_listing_class()
                 stock = get_vnstock()
                 source = query.get("source", "KBS")
 

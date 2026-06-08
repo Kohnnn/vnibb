@@ -98,6 +98,19 @@ export function Sidebar({
         return () => document.removeEventListener('mousedown', handleOutsideClick);
     }, [showCreateMenu, showMoveSubmenu]);
 
+    // Move keyboard focus into the context menu when it opens so arrow-key
+    // navigation works for keyboard / screen-reader users.
+    useEffect(() => {
+        if (!contextMenu) return;
+        const frame = requestAnimationFrame(() => {
+            const firstItem = contextMenuRef.current?.querySelector<HTMLButtonElement>(
+                '[role="menuitem"]:not([disabled])',
+            );
+            firstItem?.focus();
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [contextMenu]);
+
 
     const {
         state,
@@ -362,6 +375,31 @@ export function Sidebar({
             return;
         }
         moveDashboard(contextMenu.id, targetFolderId);
+        setContextMenu(null);
+        setShowMoveSubmenu(false);
+    };
+
+    // Keyboard-accessible alternative to drag-and-drop reordering. Moves the
+    // context-menu dashboard up/down within its folder.
+    const handleMoveDashboardOrder = (direction: 'up' | 'down') => {
+        if (!contextMenu || contextMenu.type !== 'dashboard') return;
+        const dashboard = state.dashboards.find(d => d.id === contextMenu.id);
+        if (!isDashboardEditable(dashboard) || !dashboard) {
+            setContextMenu(null);
+            return;
+        }
+        const siblings = state.dashboards
+            .filter(d => d.folderId === dashboard.folderId)
+            .sort((a, b) => a.order - b.order);
+        const currentIndex = siblings.findIndex(d => d.id === dashboard.id);
+        const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= siblings.length) {
+            setContextMenu(null);
+            return;
+        }
+        const reordered = [...siblings];
+        [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+        reorderDashboards(reordered.map(d => d.id), dashboard.folderId);
         setContextMenu(null);
         setShowMoveSubmenu(false);
     };
@@ -656,6 +694,21 @@ export function Sidebar({
     const contextDashboardDeletable = isDashboardDeletable(contextDashboard);
     const contextFolderEditable = !isSystemFolder(contextFolder);
 
+    // Move up/down availability (keyboard reorder alternative to DnD).
+    const contextDashboardSiblings = contextDashboard
+        ? state.dashboards
+              .filter((d) => d.folderId === contextDashboard.folderId)
+              .sort((a, b) => a.order - b.order)
+        : [];
+    const contextDashboardIndex = contextDashboard
+        ? contextDashboardSiblings.findIndex((d) => d.id === contextDashboard.id)
+        : -1;
+    const canMoveDashboardUp = contextDashboardEditable && contextDashboardIndex > 0;
+    const canMoveDashboardDown =
+        contextDashboardEditable &&
+        contextDashboardIndex >= 0 &&
+        contextDashboardIndex < contextDashboardSiblings.length - 1;
+
     return (
         <>
             <aside
@@ -891,8 +944,37 @@ export function Sidebar({
                         ref={contextMenuRef}
                         className="fixed z-[70] min-w-[140px] rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
+                        role="menu"
+                        aria-label={contextMenu.type === 'dashboard' ? 'Workspace actions' : 'Folder actions'}
+                        onKeyDown={(e) => {
+                            const items = Array.from(
+                                contextMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+                                    '[role="menuitem"]:not([disabled])',
+                                ) ?? [],
+                            );
+                            if (items.length === 0) return;
+                            const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+                            if (e.key === 'Escape') {
+                                e.preventDefault();
+                                setContextMenu(null);
+                                setShowMoveSubmenu(false);
+                            } else if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                items[(currentIndex + 1 + items.length) % items.length]?.focus();
+                            } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                items[(currentIndex - 1 + items.length) % items.length]?.focus();
+                            } else if (e.key === 'Home') {
+                                e.preventDefault();
+                                items[0]?.focus();
+                            } else if (e.key === 'End') {
+                                e.preventDefault();
+                                items[items.length - 1]?.focus();
+                            }
+                        }}
                     >
                         <button
+                            role="menuitem"
                             onClick={handleRename}
                             disabled={contextMenu.type === 'dashboard' ? !contextDashboardEditable : !contextFolderEditable}
                             className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
@@ -903,6 +985,7 @@ export function Sidebar({
                         {contextMenu.type === 'dashboard' && (
                             <>
                                 <button
+                                    role="menuitem"
                                     onClick={handleDuplicate}
                                     disabled={!contextDashboardEditable}
                                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
@@ -911,6 +994,25 @@ export function Sidebar({
                                     <span>Duplicate</span>
                                 </button>
                                 <button
+                                    role="menuitem"
+                                    onClick={() => handleMoveDashboardOrder('up')}
+                                    disabled={!canMoveDashboardUp}
+                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                    <ChevronUp size={12} />
+                                    <span>Move up</span>
+                                </button>
+                                <button
+                                    role="menuitem"
+                                    onClick={() => handleMoveDashboardOrder('down')}
+                                    disabled={!canMoveDashboardDown}
+                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                    <ChevronDown size={12} />
+                                    <span>Move down</span>
+                                </button>
+                                <button
+                                    role="menuitem"
                                     onClick={() => {
                                         const dashboard = state.dashboards.find(d => d.id === contextMenu.id);
                                         if (dashboard) {
@@ -935,6 +1037,9 @@ export function Sidebar({
                                 </button>
                                 <div className="relative">
                                     <button
+                                        role="menuitem"
+                                        aria-haspopup="menu"
+                                        aria-expanded={showMoveSubmenu}
                                         onClick={() => setShowMoveSubmenu(!showMoveSubmenu)}
                                         disabled={!contextDashboardEditable}
                                         className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
@@ -944,8 +1049,13 @@ export function Sidebar({
                                         <ChevronRight size={12} className="ml-auto" />
                                     </button>
                                     {showMoveSubmenu && (
-                                        <div className="absolute left-full top-0 z-[80] ml-1 w-40 rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl">
+                                        <div
+                                            className="absolute left-full top-0 z-[80] ml-1 w-40 rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl"
+                                            role="menu"
+                                            aria-label="Move to folder"
+                                        >
                                             <button
+                                                role="menuitem"
                                                 onClick={() => handleMoveToFolder(undefined)}
                                                 className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                             >
@@ -955,6 +1065,7 @@ export function Sidebar({
                                             {state.folders.filter(folder => folder.id !== INITIAL_FOLDER_ID).map(folder => (
                                                 <button
                                                     key={folder.id}
+                                                    role="menuitem"
                                                     onClick={() => handleMoveToFolder(folder.id)}
                                                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                                 >
@@ -969,6 +1080,7 @@ export function Sidebar({
                         )}
                         <div className="my-0.5 border-t border-[var(--border-color)]" />
                         <button
+                            role="menuitem"
                             onClick={handleDelete}
                             disabled={contextMenu.type === 'dashboard' ? !contextDashboardDeletable : !contextFolderEditable}
                             className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-red-500 hover:bg-[var(--bg-tertiary)] hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"

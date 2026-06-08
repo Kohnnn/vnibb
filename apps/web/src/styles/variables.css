@@ -1,46 +1,31 @@
+/**
+ * COMPAT SHIM — most tokens moved to the canonical `design-tokens.css`.
+ *
+ * This file is imported AFTER design-tokens.css in globals.css. It intentionally
+ * no longer redefines the core palette / fonts (that caused conflicting values).
+ * It keeps only a few unique, still-referenced keys plus a couple of legacy
+ * aliases so older references keep resolving. Prefer adding new tokens to
+ * design-tokens.css.
+ */
+
 :root {
-  /* Brand Colors */
-  --color-primary-500: #3b82f6;
-  --color-primary-600: #2563eb;
-  
-  /* Semantic */
-  --color-success: #22c55e;
-  --color-danger: #ef4444;
-  --color-warning: #f59e0b;
-  
-  /* Neutral (Dark) */
-  --color-bg-primary: #0a0e17;
-  --color-bg-secondary: #111827;
-  --color-bg-tertiary: #1f2937;
-  
+  /* Legacy brand aliases (map onto canonical accent). */
+  --color-primary-500: var(--color-accent-primary);
+  --color-primary-600: var(--color-accent-hover);
+  --color-danger: var(--color-error);
+
+  /* Legacy border aliases referenced by some widget CSS. */
   --color-border-primary: rgba(75, 85, 99, 0.5);
-  --color-border-secondary: rgba(55, 65, 81, 0.3);
-  
-  --color-text-primary: #f9fafb;
-  --color-text-secondary: #9ca3af;
-  --color-text-muted: #6b7280;
-  
-  /* Widget */
+  --color-border-secondary: var(--color-border-default);
+  --border-secondary: var(--color-border-default);
+
+  /* Widget layout primitives (unique to this file). */
   --widget-header-height: 40px;
   --widget-padding: 12px;
-  --widget-radius: 8px;
+  --widget-bg: var(--widget-bg-glass);
   --widget-border: var(--color-border-primary);
-  --widget-bg: rgba(17, 24, 39, 0.9);
-  
-  /* Chart Colors */
-  --chart-green: #22c55e;
-  --chart-red: #ef4444;
-  --chart-blue: #3b82f6;
-  
-  /* Typography */
-  --font-sans: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', Menlo, Monaco, monospace;
-  
-  /* Spacing */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
+
+  /* Was only defined in the now-removed tokens.css; WidgetHeader.css relies on
+     it for a border shorthand, so define it here to fix a latent unresolved-var. */
+  --border-width: 1px;
 }

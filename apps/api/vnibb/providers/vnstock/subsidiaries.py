@@ -66,7 +66,9 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
         
         def _fetch_sync() -> List[dict]:
             try:
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
+
+                Vnstock = get_vnstock_class()
                 stock = Vnstock().stock(symbol=query["symbol"], source=settings.vnstock_source)
                 df = stock.company.subsidiaries()
                 

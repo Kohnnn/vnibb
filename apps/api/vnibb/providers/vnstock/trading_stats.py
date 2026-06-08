@@ -79,7 +79,9 @@ class VnstockTradingStatsFetcher:
         """
         try:
             def _fetch():
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
+
+                Vnstock = get_vnstock_class()
                 # trading_stats is primarily a VCI source feature
                 # we try settings source first, then fallback to VCI if needed
                 stock = Vnstock().stock(symbol=symbol.upper(), source=settings.vnstock_source)

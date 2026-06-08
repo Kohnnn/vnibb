@@ -321,6 +321,18 @@ export function TabBar(_props: TabBarProps) {
         }
     };
 
+    // Keyboard-accessible alternative to drag-reorder (Alt+Arrow on a focused
+    // tab). Mirrors the Sidebar's keyboard move support.
+    const moveTab = (tabId: string, direction: 'left' | 'right') => {
+        if (!dashboardEditable) return;
+        const currentIndex = sortedTabs.findIndex((t) => t.id === tabId);
+        const targetIndex = direction === 'left' ? currentIndex - 1 : currentIndex + 1;
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= sortedTabs.length) return;
+        const newTabs = [...sortedTabs];
+        [newTabs[currentIndex], newTabs[targetIndex]] = [newTabs[targetIndex], newTabs[currentIndex]];
+        reorderTabs(activeDashboard.id, newTabs.map((tab, i) => ({ ...tab, order: i })));
+    };
+
     return (
         <>
             <div data-tour="tab-bar" className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80" {...swipeHandlers}>
@@ -354,10 +366,17 @@ export function TabBar(_props: TabBarProps) {
                                     `}
                                     role="button"
                                     tabIndex={0}
+                                    aria-label={dashboardEditable ? `${tab.name} tab. Press Alt plus arrow keys to reorder.` : `${tab.name} tab`}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter' || e.key === ' ') {
                                             e.preventDefault();
                                             handleTabClick(tab.id);
+                                        } else if (dashboardEditable && e.altKey && e.key === 'ArrowLeft') {
+                                            e.preventDefault();
+                                            moveTab(tab.id, 'left');
+                                        } else if (dashboardEditable && e.altKey && e.key === 'ArrowRight') {
+                                            e.preventDefault();
+                                            moveTab(tab.id, 'right');
                                         }
                                     }}
                                     onClick={() => handleTabClick(tab.id)}

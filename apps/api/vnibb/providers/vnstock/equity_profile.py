@@ -120,7 +120,10 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                 return True
 
             try:
-                from vnstock import Listing, Vnstock
+                from vnibb.providers.vnstock.runtime import get_listing_class, get_vnstock_class
+
+                Listing = get_listing_class()
+                Vnstock = get_vnstock_class()
 
                 record: dict[str, Any] = {}
                 candidate_sources: list[str] = []

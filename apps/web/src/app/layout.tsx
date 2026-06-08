@@ -13,6 +13,7 @@ import { ThemeProvider, ThemeScript } from "@/contexts/ThemeContext";
 import { UiPreferencesProvider, UiPreferencesScript } from "@/contexts/UiPreferencesContext";
 import { CommandPaletteWrapper } from "@/components/CommandPaletteWrapper";
 import { AnalyticsBootstrap } from "@/components/analytics/AnalyticsBootstrap";
+import { AppToaster } from "@/components/ui/Toaster";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -86,6 +87,7 @@ export default function RootLayout({
                             </Suspense>
                             <main id="main-content">{children}</main>
                             <CommandPaletteWrapper />
+                            <AppToaster />
                           </UnitProvider>
                         </DataSourcesProvider>
                       </GlobalMarketsSymbolProvider>

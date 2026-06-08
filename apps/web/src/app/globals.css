@@ -1062,3 +1062,173 @@ body {
   box-shadow: 0 0 0 2px white;
 }
 
+/* ============================================================
+   Phase 1 — Semantic price colors, colorblind mode, reduce-effects
+   See docs/UI_UX_IMPROVEMENT_PLAN.md
+   ============================================================ */
+
+/* Token-backed price-direction utility classes. Use via lib/priceColor.ts
+   (priceColorClass) so direction coloring is consistent and theme/colorblind
+   aware. */
+.price-up { color: var(--color-positive); }
+.price-down { color: var(--color-negative); }
+.price-flat { color: var(--color-neutral); }
+.bg-price-up { background-color: var(--color-positive-bg); }
+.bg-price-down { background-color: var(--color-negative-bg); }
+
+/* Light-theme tuning for semantic up/down (slightly darker for contrast on
+   light backgrounds — AA-friendly against #ffffff/#f8fafc surfaces). */
+:root.light,
+:root[data-theme="light"] {
+  --color-positive: #15803d;
+  --color-positive-muted: #16a34a;
+  --color-positive-bg: rgba(21, 128, 61, 0.10);
+  --color-negative: #b91c1c;
+  --color-negative-muted: #dc2626;
+  --color-negative-bg: rgba(185, 28, 28, 0.10);
+  --color-neutral: #475569;
+}
+
+/* Colorblind-safe scheme (deuteranopia/protanopia friendly): blue = up,
+   orange = down. Applied via UiPreferences -> <html data-color-mode>. Works in
+   both dark and light themes; light overrides come after for specificity. */
+:root[data-color-mode="colorblind"] {
+  --color-positive: #2563eb;
+  --color-positive-muted: #60a5fa;
+  --color-positive-bg: rgba(37, 99, 235, 0.14);
+  --color-negative: #ea580c;
+  --color-negative-muted: #fb923c;
+  --color-negative-bg: rgba(234, 88, 12, 0.14);
+  /* Keep chart aliases in sync. */
+  --chart-green: var(--color-positive);
+  --chart-red: var(--color-negative);
+}
+
+:root.light[data-color-mode="colorblind"],
+:root[data-theme="light"][data-color-mode="colorblind"] {
+  --color-positive: #1d4ed8;
+  --color-negative: #c2410c;
+}
+
+/* Reduce visual effects: drop expensive backdrop blur (perf + the documented
+   Header stacking-context bug) and heavy glows for a solid surface. Triggered
+   by the user preference OR the OS prefers-reduced-motion / -transparency. */
+:root[data-reduce-effects="true"] .widget-card-premium,
+:root[data-reduce-effects="true"] .widget-card {
+  background: var(--bg-widget) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+:root[data-reduce-effects="true"] .widget-card-premium:hover {
+  transform: none !important;
+}
+
+:root[data-reduce-effects="true"] .skeleton-premium {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-green,
+  .flash-red,
+  .live-indicator,
+  .skeleton-premium {
+    animation: none !important;
+  }
+  .react-grid-item {
+    transition: none !important;
+  }
+}
+
+/* ============================================================
+   Colorblind mode — global utility remap
+   ------------------------------------------------------------
+   The `price-up`/`price-down` helper classes already follow the colorblind
+   tokens, but the majority of widgets still use raw Tailwind green/red
+   utilities for up/down signaling. Rather than refactor ~95 files, remap the
+   common green/red FOREGROUND utilities (text / border / ring / fill / stroke /
+   gradient stops) to the semantic blue/orange tokens whenever colorblind mode
+   is active. This makes the accessibility toggle effective app-wide in one
+   reversible place.
+
+   Intentionally NOT remapped:
+   - `bg-*` tints: decorative translucent fills; remapping risks solid blocks.
+   - Inline hex (`#22c55e`) and Recharts `fill={...}` props: these drive
+     continuous heatmap / gradient scales (magnitude, not binary direction),
+     which must keep their native ramp.
+   - Amber / cyan / slate: not direction colors.
+   ============================================================ */
+:root[data-color-mode="colorblind"] {
+  /* POSITIVE (emerald / green) -> token positive (blue) */
+  --cb-pos: var(--color-positive);
+  --cb-neg: var(--color-negative);
+}
+
+/* Text */
+:root[data-color-mode="colorblind"] [class*="text-emerald-"],
+:root[data-color-mode="colorblind"] [class*="text-green-"] {
+  color: var(--cb-pos) !important;
+}
+:root[data-color-mode="colorblind"] [class*="text-rose-"],
+:root[data-color-mode="colorblind"] [class*="text-red-"] {
+  color: var(--cb-neg) !important;
+}
+
+/* Border */
+:root[data-color-mode="colorblind"] [class*="border-emerald-"],
+:root[data-color-mode="colorblind"] [class*="border-green-"] {
+  border-color: var(--cb-pos) !important;
+}
+:root[data-color-mode="colorblind"] [class*="border-rose-"],
+:root[data-color-mode="colorblind"] [class*="border-red-"] {
+  border-color: var(--cb-neg) !important;
+}
+
+/* Ring */
+:root[data-color-mode="colorblind"] [class*="ring-emerald-"],
+:root[data-color-mode="colorblind"] [class*="ring-green-"] {
+  --tw-ring-color: var(--cb-pos) !important;
+}
+:root[data-color-mode="colorblind"] [class*="ring-rose-"],
+:root[data-color-mode="colorblind"] [class*="ring-red-"] {
+  --tw-ring-color: var(--cb-neg) !important;
+}
+
+/* SVG fill / stroke (Tailwind utilities only; inline hex is untouched) */
+:root[data-color-mode="colorblind"] [class*="fill-emerald-"],
+:root[data-color-mode="colorblind"] [class*="fill-green-"] {
+  fill: var(--cb-pos) !important;
+}
+:root[data-color-mode="colorblind"] [class*="fill-rose-"],
+:root[data-color-mode="colorblind"] [class*="fill-red-"] {
+  fill: var(--cb-neg) !important;
+}
+:root[data-color-mode="colorblind"] [class*="stroke-emerald-"],
+:root[data-color-mode="colorblind"] [class*="stroke-green-"] {
+  stroke: var(--cb-pos) !important;
+}
+:root[data-color-mode="colorblind"] [class*="stroke-rose-"],
+:root[data-color-mode="colorblind"] [class*="stroke-red-"] {
+  stroke: var(--cb-neg) !important;
+}
+
+/* Gradient stops (e.g. from-emerald-500 to-emerald-400) */
+:root[data-color-mode="colorblind"] [class*="from-emerald-"],
+:root[data-color-mode="colorblind"] [class*="from-green-"] {
+  --tw-gradient-from: var(--cb-pos) !important;
+}
+:root[data-color-mode="colorblind"] [class*="to-emerald-"],
+:root[data-color-mode="colorblind"] [class*="to-green-"] {
+  --tw-gradient-to: var(--cb-pos) !important;
+}
+:root[data-color-mode="colorblind"] [class*="from-rose-"],
+:root[data-color-mode="colorblind"] [class*="from-red-"] {
+  --tw-gradient-from: var(--cb-neg) !important;
+}
+:root[data-color-mode="colorblind"] [class*="to-rose-"],
+:root[data-color-mode="colorblind"] [class*="to-red-"] {
+  --tw-gradient-to: var(--cb-neg) !important;
+}
+
+

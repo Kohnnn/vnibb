@@ -1798,6 +1798,7 @@ export function buildTradingViewRuntimeConfig(
   type: WidgetType | string | null | undefined,
   config: WidgetConfig | undefined,
   symbol: string | undefined,
+  appTheme?: 'dark' | 'light',
 ): WidgetConfig {
   const metadata = getTradingViewWidgetMetadata(type);
   if (!metadata) return { ...(config || {}) };
@@ -1806,6 +1807,19 @@ export function buildTradingViewRuntimeConfig(
     ...metadata.defaultConfig,
     ...(config || {}),
   };
+
+  // App -> TradingView theme sync. Only applied when the user has NOT set an
+  // explicit per-widget theme override (checked against the incoming `config`,
+  // not the merged defaults), so manual choices are always respected.
+  if (appTheme) {
+    const userConfig = config || {};
+    if (userConfig.colorTheme === undefined && 'colorTheme' in metadata.defaultConfig) {
+      merged.colorTheme = appTheme;
+    }
+    if (userConfig.theme === undefined && 'theme' in metadata.defaultConfig) {
+      merged.theme = appTheme;
+    }
+  }
 
   if (metadata.symbolMode === 'widget' && symbol) {
     merged.symbol = symbol;
@@ -1921,11 +1935,12 @@ export function buildTradingViewWebComponentAttributes(
   type: WidgetType | string | null | undefined,
   config: WidgetConfig | undefined,
   symbol: string | undefined,
+  appTheme?: 'dark' | 'light',
 ): Record<string, string> {
   const metadata = getTradingViewWidgetMetadata(type);
   if (!metadata) return {};
 
-  const runtimeConfig = buildTradingViewRuntimeConfig(type, config, symbol);
+  const runtimeConfig = buildTradingViewRuntimeConfig(type, config, symbol, appTheme);
   const attributes: Record<string, string> = {};
 
   Object.entries(runtimeConfig).forEach(([key, value]) => {

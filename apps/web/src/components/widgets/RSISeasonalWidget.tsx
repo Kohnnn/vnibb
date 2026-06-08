@@ -18,6 +18,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { useDirectionColors } from '@/hooks/useDirectionColors'
 
 interface RSISeasonalWidgetProps {
   symbol: string
@@ -33,6 +34,7 @@ function rsiClass(rsi: number): string {
 
 export function RSISeasonalWidget({ symbol }: RSISeasonalWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
+  const dirColors = useDirectionColors()
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
     period,
@@ -128,8 +130,8 @@ export function RSISeasonalWidget({ symbol }: RSISeasonalWidgetProps) {
                     }}
                   />
                   <Bar yAxisId="rsi" dataKey="rsi" name="RSI" fill="#0ea5e9" radius={[2, 2, 0, 0]} />
-                  <Line yAxisId="risk" type="monotone" dataKey="overbought" name="Overbought %" stroke="#ef4444" strokeWidth={2} dot={false} />
-                  <Line yAxisId="risk" type="monotone" dataKey="oversold" name="Oversold %" stroke="#22c55e" strokeWidth={2} dot={false} />
+                  <Line yAxisId="risk" type="monotone" dataKey="overbought" name="Overbought %" stroke={dirColors.negative} strokeWidth={2} dot={false} />
+                  <Line yAxisId="risk" type="monotone" dataKey="oversold" name="Oversold %" stroke={dirColors.positive} strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </ChartMountGuard>

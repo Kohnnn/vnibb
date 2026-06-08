@@ -21,6 +21,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { useDirectionColors } from '@/hooks/useDirectionColors'
 
 interface VolumeFlowWidgetProps {
   symbol: string
@@ -46,6 +47,7 @@ function formatCompact(value: number): string {
 
 export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
+  const dirColors = useDirectionColors()
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
     period,
@@ -141,7 +143,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Cumulative</div>
-              <div className={`font-mono ${Number(metric?.current_20d_cumulative_delta || 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+              <div className={`font-mono ${Number(metric?.current_20d_cumulative_delta || 0) >= 0 ? 'price-up' : 'price-down'}`}>
                 {formatCompact(Number(metric?.current_20d_cumulative_delta || 0))}
               </div>
             </div>
@@ -190,7 +192,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
                     />
                     <Bar dataKey="value" radius={[2, 2, 0, 0]}>
                       {monthRows.map((entry) => (
-                        <Cell key={`month-bar-${entry.month}`} fill={entry.value >= 0 ? '#22c55e' : '#ef4444'} />
+                        <Cell key={`month-bar-${entry.month}`} fill={entry.value >= 0 ? dirColors.positive : dirColors.negative} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -237,12 +239,12 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
                   <div key={row.month} className="flex items-center gap-2">
                     <div className="w-8 text-[10px] text-[var(--text-muted)]">{row.month}</div>
                     <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
-                      <div className={`h-full ${isPositive ? 'bg-emerald-500/70' : 'bg-red-500/70'}`} style={{ width: `${width}%` }} />
+                      <div className={`h-full ${isPositive ? 'bg-[var(--color-positive)]' : 'bg-[var(--color-negative)]'}`} style={{ width: `${width}%` }} />
                     </div>
-                    <div className={`w-16 text-[10px] text-right font-mono ${isPositive ? 'text-emerald-300' : 'text-red-300'}`}>
+                    <div className={`w-16 text-[10px] text-right font-mono ${isPositive ? 'price-up' : 'price-down'}`}>
                       {formatCompact(row.value)}
                     </div>
-                    {isPositive ? <ArrowUpRight size={10} className="text-emerald-400" /> : <ArrowDownRight size={10} className="text-red-400" />}
+                    {isPositive ? <ArrowUpRight size={10} className="price-up" /> : <ArrowDownRight size={10} className="price-down" />}
                   </div>
                 )
               })}

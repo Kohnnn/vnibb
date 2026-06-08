@@ -12,8 +12,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { useQuantMetrics } from '@/lib/queries'
+import { useQuantMetrics, useCompanyEvents } from '@/lib/queries'
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
+import { buildChartEventMarkers } from '@/lib/chartEventMarkers'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -73,6 +74,16 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
   }))
   const episodes = metric?.episodes || []
   const hasData = series.length > 30
+
+  // C1: overlay corporate-action markers (dividends/splits/rights) on the
+  // date-indexed underwater curve, reusing the shared chart-event-marker logic.
+  const chartSeries = series.slice(-252)
+  const eventsQuery = useCompanyEvents(upperSymbol, { limit: 80, enabled: Boolean(upperSymbol) })
+  const eventMarkers = buildChartEventMarkers(
+    eventsQuery.data?.data || [],
+    chartSeries.map((row) => ({ time: row.date })),
+    8,
+  )
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view drawdown recovery" icon={<ShieldAlert size={18} />} />
@@ -136,11 +147,13 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
           <div className="mb-2 flex min-h-[220px] flex-col rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Underwater Curve</div>
-              <div className="text-[10px] text-[var(--text-secondary)]">Current vs 52W high</div>
+              <div className="text-[10px] text-[var(--text-secondary)]">
+                {eventMarkers.length > 0 ? 'Current vs 52W high · D/S/R = corporate actions' : 'Current vs 52W high'}
+              </div>
             </div>
             <ChartMountGuard className="flex-1 min-h-[160px]" minHeight={160}>
               <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                <AreaChart data={series.slice(-252)}>
+                <AreaChart data={chartSeries}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
                   <YAxis
@@ -150,6 +163,21 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
                     domain={[-100, 0]}
                   />
                   <ReferenceLine y={0} stroke="rgba(148,163,184,0.35)" />
+                  {eventMarkers.map((marker) => (
+                    <ReferenceLine
+                      key={`${marker.date}-${marker.shortLabel}`}
+                      x={marker.date}
+                      stroke={marker.color}
+                      strokeDasharray="2 2"
+                      strokeOpacity={0.7}
+                      label={{
+                        value: marker.shortLabel,
+                        position: 'insideTop',
+                        fontSize: 9,
+                        fill: marker.color,
+                      }}
+                    />
+                  ))}
                   <Tooltip
                     contentStyle={{
                       background: 'var(--bg-secondary)',

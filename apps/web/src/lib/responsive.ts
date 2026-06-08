@@ -25,6 +25,32 @@ export const breakpoints = {
 type Breakpoint = keyof typeof breakpoints;
 
 /**
+ * Shared dashboard layout breakpoints — the single source of truth for the
+ * responsive grid (DashboardGrid) and shell chrome (DashboardClient sidebars /
+ * AI copilot overlay). Aligned to the Tailwind `breakpoints` scale above so the
+ * grid column count and the sidebar visibility flip at the same widths (no
+ * "multi-column grid but hidden sidebar" gap band).
+ *
+ * - `lg` (>=1024): full desktop, left sidebar visible, multi-column grid editing.
+ * - `md` (>=768): tablet, scaled-down grid, still editable.
+ * - `sm` (>=640) / `xs` (<640): stacked, static.
+ *
+ * `LEFT_SIDEBAR_HIDE_BELOW` intentionally equals the grid `lg` threshold.
+ * `AI_COPILOT_OVERLAY_BELOW_WIDTH` / `_HEIGHT` keep the copilot docked only when
+ * there is comfortable room; below that it overlays to protect workspace width.
+ */
+export const DASHBOARD_GRID_BREAKPOINTS = {
+  lg: breakpoints.lg, // 1024
+  md: breakpoints.md, // 768
+  sm: breakpoints.sm, // 640
+  xs: 0,
+} as const;
+
+export const LEFT_SIDEBAR_HIDE_BELOW = breakpoints.lg; // 1024
+export const AI_COPILOT_OVERLAY_BELOW_WIDTH = 1480;
+export const AI_COPILOT_OVERLAY_BELOW_HEIGHT = 840;
+
+/**
  * Hook to detect current breakpoint
  */
 export function useBreakpoint() {

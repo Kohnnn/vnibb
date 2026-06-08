@@ -133,8 +133,9 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
 
         def _fetch_sync() -> List[dict]:
             try:
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
 
+                Vnstock = get_vnstock_class()
                 # Foreign flow fields are currently exposed reliably on VCI price board.
                 stock = Vnstock().stock(symbol=query["symbol"], source="VCI")
                 # Preferred path: real-time board snapshot exposes foreign buy/sell fields.

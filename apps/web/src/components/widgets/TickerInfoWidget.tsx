@@ -242,12 +242,12 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             </span>
             <div
               className={cn(
-                'flex items-center gap-1.5 text-xs font-bold px-2 py-0.5 rounded-full w-fit',
+                'flex items-center gap-1.5 text-xs font-bold px-2 py-0.5 rounded-full w-fit border',
                 changeDirection === 'up'
-                  ? 'text-emerald-300 bg-emerald-500/10 border border-emerald-500/20'
+                  ? 'price-up bg-price-up border-[color-mix(in_srgb,var(--color-positive)_28%,transparent)]'
                   : changeDirection === 'down'
-                    ? 'text-rose-300 bg-rose-500/10 border border-rose-500/20'
-                    : 'text-[var(--text-muted)] bg-[var(--bg-secondary)] border border-[var(--border-default)]'
+                    ? 'price-down bg-price-down border-[color-mix(in_srgb,var(--color-negative)_28%,transparent)]'
+                    : 'text-[var(--text-muted)] bg-[var(--bg-secondary)] border-[var(--border-default)]'
               )}
               aria-label={`Daily change: ${changeLabel}`}
             >

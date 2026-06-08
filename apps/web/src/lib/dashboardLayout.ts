@@ -64,7 +64,7 @@ const FALLBACK_BEHAVIOR: LayoutBehavior = {
   expandPriority: 2,
 }
 
-const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
+export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
   screener: { preferredW: 16, preferredH: 10, minW: 12, minH: 8, orientation: 'horizontal', expandPriority: 6 },
   ticker_info: { preferredW: 8, preferredH: 6, minW: 5, minH: 4, orientation: 'balanced', expandPriority: 2 },
   valuation_band: { preferredW: 14, preferredH: 8, minW: 10, minH: 6, orientation: 'horizontal', expandPriority: 4 },
@@ -154,6 +154,67 @@ const WIDGET_LAYOUT_BEHAVIORS: Partial<Record<WidgetType, LayoutBehavior>> = {
   forex_rates: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   commodities: { preferredW: 8, preferredH: 7, minW: 6, minH: 6, orientation: 'vertical', expandPriority: 2 },
   signal_summary: { preferredW: 24, preferredH: 8, minW: 12, minH: 6, orientation: 'horizontal', expandPriority: 6 },
+  // Backfilled so every WidgetType resolves an explicit size contract instead of the
+  // 6x5 fallback (which previously collapsed uncovered types to a broken 3x3 at insertion).
+  // Values preserved from prior widgetDefinitions.defaultLayout / tradingViewWidgetDefaultLayouts.
+  tradingview_symbol_overview: { preferredW: 10, preferredH: 7, minW: 7, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  tradingview_mini_chart: { preferredW: 6, preferredH: 4, minW: 4, minH: 3, orientation: 'horizontal', expandPriority: 2 },
+  tradingview_market_summary: { preferredW: 12, preferredH: 8, minW: 8, minH: 6, orientation: 'horizontal', expandPriority: 2 },
+  tradingview_market_overview: { preferredW: 12, preferredH: 9, minW: 8, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  tradingview_stock_market: { preferredW: 10, preferredH: 9, minW: 8, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  tradingview_market_data: { preferredW: 10, preferredH: 8, minW: 7, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  tradingview_ticker_tag: { preferredW: 4, preferredH: 3, minW: 3, minH: 2, orientation: 'balanced', expandPriority: 2 },
+  tradingview_single_ticker: { preferredW: 4, preferredH: 4, minW: 3, minH: 3, orientation: 'balanced', expandPriority: 2 },
+  tradingview_ticker: { preferredW: 12, preferredH: 4, minW: 8, minH: 3, orientation: 'horizontal', expandPriority: 6 },
+  tradingview_stock_heatmap: { preferredW: 12, preferredH: 10, minW: 8, minH: 7, orientation: 'balanced', expandPriority: 2 },
+  tradingview_crypto_heatmap: { preferredW: 12, preferredH: 10, minW: 8, minH: 7, orientation: 'balanced', expandPriority: 2 },
+  tradingview_forex_cross_rates: { preferredW: 10, preferredH: 8, minW: 7, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  tradingview_etf_heatmap: { preferredW: 12, preferredH: 10, minW: 8, minH: 7, orientation: 'balanced', expandPriority: 2 },
+  tradingview_forex_heatmap: { preferredW: 10, preferredH: 8, minW: 7, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  tradingview_screener: { preferredW: 14, preferredH: 10, minW: 10, minH: 7, orientation: 'balanced', expandPriority: 2 },
+  tradingview_crypto_market: { preferredW: 14, preferredH: 10, minW: 10, minH: 7, orientation: 'balanced', expandPriority: 2 },
+  tradingview_symbol_info: { preferredW: 8, preferredH: 4, minW: 5, minH: 3, orientation: 'horizontal', expandPriority: 2 },
+  tradingview_fundamental_data: { preferredW: 10, preferredH: 9, minW: 8, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  tradingview_company_profile: { preferredW: 8, preferredH: 7, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  tradingview_top_stories: { preferredW: 10, preferredH: 8, minW: 8, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  tradingview_economic_calendar: { preferredW: 10, preferredH: 9, minW: 8, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  tradingview_economic_map: { preferredW: 12, preferredH: 9, minW: 8, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  valuation_multiples_chart: { preferredW: 7, preferredH: 7, minW: 5, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  earnings_history: { preferredW: 6, preferredH: 5, minW: 4, minH: 3, orientation: 'balanced', expandPriority: 2 },
+  dividend_payment: { preferredW: 6, preferredH: 5, minW: 4, minH: 3, orientation: 'balanced', expandPriority: 2 },
+  stock_splits: { preferredW: 5, preferredH: 4, minW: 3, minH: 2, orientation: 'balanced', expandPriority: 2 },
+  company_filings: { preferredW: 6, preferredH: 6, minW: 4, minH: 4, orientation: 'balanced', expandPriority: 2 },
+  analyst_estimates: { preferredW: 6, preferredH: 5, minW: 4, minH: 3, orientation: 'balanced', expandPriority: 2 },
+  bank_metrics: { preferredW: 7, preferredH: 7, minW: 5, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  subsidiaries: { preferredW: 8, preferredH: 8, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  watchlist: { preferredW: 3, preferredH: 5, minW: 2, minH: 4, orientation: 'vertical', expandPriority: 2 },
+  sector_performance: { preferredW: 5, preferredH: 7, minW: 3, minH: 4, orientation: 'vertical', expandPriority: 2 },
+  sector_rotation_radar: { preferredW: 6, preferredH: 7, minW: 4, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  market_movers_sectors: { preferredW: 8, preferredH: 7, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  portfolio_tracker: { preferredW: 6, preferredH: 8, minW: 4, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  price_alerts: { preferredW: 4, preferredH: 7, minW: 2, minH: 4, orientation: 'vertical', expandPriority: 2 },
+  economic_calendar: { preferredW: 5, preferredH: 7, minW: 3, minH: 4, orientation: 'vertical', expandPriority: 2 },
+  dividend_ladder: { preferredW: 5, preferredH: 7, minW: 4, minH: 5, orientation: 'vertical', expandPriority: 2 },
+  drawdown_deep_dive: { preferredW: 8, preferredH: 7, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  gamma_exposure: { preferredW: 6, preferredH: 6, minW: 4, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  earnings_quality: { preferredW: 6, preferredH: 6, minW: 4, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  smart_money: { preferredW: 6, preferredH: 6, minW: 4, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  similar_stocks: { preferredW: 6, preferredH: 8, minW: 5, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  notes: { preferredW: 4, preferredH: 6, minW: 2, minH: 4, orientation: 'vertical', expandPriority: 2 },
+  research_browser: { preferredW: 8, preferredH: 8, minW: 6, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  insider_deal_timeline: { preferredW: 6, preferredH: 7, minW: 4, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  ownership_changes: { preferredW: 5, preferredH: 6, minW: 4, minH: 5, orientation: 'vertical', expandPriority: 2 },
+  database_inspector: { preferredW: 8, preferredH: 8, minW: 4, minH: 6, orientation: 'balanced', expandPriority: 2 },
+  index_comparison: { preferredW: 4, preferredH: 4, minW: 3, minH: 3, orientation: 'balanced', expandPriority: 2 },
+  sector_breakdown: { preferredW: 4, preferredH: 6, minW: 3, minH: 4, orientation: 'vertical', expandPriority: 2 },
+  news_flow: { preferredW: 4, preferredH: 8, minW: 3, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  ai_analysis: { preferredW: 8, preferredH: 10, minW: 4, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  sector_top_movers: { preferredW: 10, preferredH: 7, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  // Renderable-but-not-in-library types (present in the registry, absent from widgetDefinitions).
+  // Values preserved from the former dead defaultWidgetLayouts block.
+  valuation_multiples: { preferredW: 4, preferredH: 6, minW: 3, minH: 5, orientation: 'vertical', expandPriority: 2 },
+  ai_copilot: { preferredW: 5, preferredH: 8, minW: 4, minH: 6, orientation: 'vertical', expandPriority: 2 },
+  alert_settings: { preferredW: 4, preferredH: 7, minW: 3, minH: 6, orientation: 'vertical', expandPriority: 2 },
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
@@ -189,7 +250,7 @@ export function getWidgetDefaultLayout(type?: WidgetType | string, cols = 24): W
   return item.layout as WidgetDefaultLayout
 }
 
-function layoutsOverlap(
+export function layoutsOverlap(
   a: { x: number; y: number; w: number; h: number },
   b: { x: number; y: number; w: number; h: number }
 ) {

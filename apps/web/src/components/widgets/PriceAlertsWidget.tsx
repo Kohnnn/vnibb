@@ -14,6 +14,7 @@ import { fetchStockQuote, quoteQueryKey } from '@/lib/queries';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
+import { useWebSocket } from '@/lib/hooks/useWebSocket';
 
 // ============ Types ============
 
@@ -29,15 +30,6 @@ export interface PriceAlert {
     lastPrice?: number;
 }
 
-interface PriceUpdate {
-    symbol: string;
-    price: number;
-    change: number;
-    change_pct: number;
-    volume: number;
-    timestamp: string;
-}
-
 interface PriceAlertsWidgetProps {
     id: string;
     symbol?: string;
@@ -50,8 +42,6 @@ interface PriceAlertsWidgetProps {
 
 const STORAGE_KEY = 'vnibb_price_alerts';
 const PERMISSION_KEY = 'vnibb_notification_permission';
-const WS_URL = config.wsPriceUrl;
-const MAX_WS_RECONNECT_ATTEMPTS = config.isProd ? 10 : 5;
 
 // ============ Notification Service ============
 
@@ -200,15 +190,13 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
         condition: 'above' as PriceAlert['condition'],
         threshold: '',
     });
-    const [wsConnected, setWsConnected] = useState(false);
 
-    const wsRef = useRef<WebSocket | null>(null);
     const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const reconnectAttemptRef = useRef(0);
-    const shouldReconnectRef = useRef(true);
     const priceCacheRef = useRef<Record<string, number>>({});
     const notificationServiceRef = useRef(NotificationService.getInstance());
+    // Stable callback ref so the shared useWebSocket onUpdate can call the latest
+    // handlePriceUpdate (declared later) without re-subscribing the socket.
+    const handlePriceUpdateRef = useRef<(symbol: string, price: number) => void>(() => {});
 
     // Load alerts and check permission on mount
     useEffect(() => {
@@ -243,106 +231,18 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
         alerts.filter(a => a.isActive && !a.triggeredAt).map(a => a.symbol)
     )];
 
-    // WebSocket connection for real-time price updates
-    useEffect(() => {
-        shouldReconnectRef.current = true;
-
-        if (activeSymbols.length === 0) {
-            // No active alerts, close WebSocket
-            if (wsRef.current) {
-                wsRef.current.close();
-                wsRef.current = null;
+    // Real-time price updates via the shared useWebSocket hook (subscribe + market
+    // status + exponential-backoff reconnect live in the hook). The polling effect
+    // below remains as the degraded-mode fallback, keyed off `wsConnected`.
+    const { isConnected: wsConnected } = useWebSocket({
+        symbols: activeSymbols,
+        enabled: activeSymbols.length > 0,
+        onUpdate: (update) => {
+            if (update.symbol && typeof update.price === 'number') {
+                handlePriceUpdateRef.current(update.symbol, update.price);
             }
-            if (reconnectTimeoutRef.current) {
-                clearTimeout(reconnectTimeoutRef.current);
-                reconnectTimeoutRef.current = null;
-            }
-            reconnectAttemptRef.current = 0;
-            setWsConnected(false);
-            return;
-        }
-
-        const connectWebSocket = () => {
-            if (!shouldReconnectRef.current) return;
-            if (!WS_URL) {
-                setWsConnected(false);
-                return;
-            }
-            if (reconnectAttemptRef.current >= MAX_WS_RECONNECT_ATTEMPTS) {
-                setWsConnected(false);
-                return;
-            }
-
-            try {
-                const ws = new WebSocket(WS_URL);
-
-                ws.onopen = () => {
-                    setWsConnected(true);
-                    reconnectAttemptRef.current = 0;
-                    if (reconnectTimeoutRef.current) {
-                        clearTimeout(reconnectTimeoutRef.current);
-                        reconnectTimeoutRef.current = null;
-                    }
-                    // Subscribe to all active alert symbols
-                    ws.send(JSON.stringify({
-                        action: 'subscribe',
-                        symbols: activeSymbols,
-                    }));
-                };
-
-                ws.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data) as PriceUpdate | { type: string };
-                        if ('type' in data && data.type === 'market_status') return;
-
-                        const priceUpdate = data as PriceUpdate;
-                        if (priceUpdate.symbol && priceUpdate.price) {
-                            handlePriceUpdate(priceUpdate.symbol, priceUpdate.price);
-                        }
-                    } catch (e) {
-                        console.debug('WebSocket message parse error:', e);
-                    }
-                };
-
-                ws.onclose = () => {
-                    setWsConnected(false);
-                    if (!shouldReconnectRef.current) return;
-                    const attempt = reconnectAttemptRef.current;
-                    if (attempt >= MAX_WS_RECONNECT_ATTEMPTS) return;
-
-                    const delayMs = Math.min(1000 * Math.pow(2, attempt), 30000);
-                    reconnectAttemptRef.current = attempt + 1;
-
-                    reconnectTimeoutRef.current = setTimeout(() => {
-                        connectWebSocket();
-                    }, delayMs);
-                };
-
-                ws.onerror = () => {
-                    setWsConnected(false);
-                };
-
-                wsRef.current = ws;
-            } catch (error) {
-                logClientError('WebSocket connection failed:', error);
-                setWsConnected(false);
-            }
-        };
-
-        connectWebSocket();
-
-        return () => {
-            shouldReconnectRef.current = false;
-            if (reconnectTimeoutRef.current) {
-                clearTimeout(reconnectTimeoutRef.current);
-                reconnectTimeoutRef.current = null;
-            }
-            if (wsRef.current) {
-                wsRef.current.close();
-                wsRef.current = null;
-            }
-        };
-    }, [activeSymbols.join(',')]);
+        },
+    });
 
     // Fallback polling when WebSocket is not connected
     useEffect(() => {
@@ -375,7 +275,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                         handlePriceUpdate(symbol, quote.price);
                     }
                 } catch (error) {
-                    console.debug(`Failed to poll price for ${symbol}:`, error);
+                    logClientWarn(`Failed to poll price for ${symbol}:`, error);
                 }
             }
         };
@@ -449,6 +349,10 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
             return hasChanges ? updatedAlerts : currentAlerts;
         });
     }, [triggerAlertNotification]);
+
+    // Keep the stable ref pointed at the latest handlePriceUpdate so the
+    // useWebSocket onUpdate callback always invokes current alert-checking logic.
+    handlePriceUpdateRef.current = handlePriceUpdate;
 
     // Request notification permission
     const handleRequestPermission = async () => {

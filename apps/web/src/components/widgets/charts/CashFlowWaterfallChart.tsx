@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 
 import { EMPTY_VALUE, formatPercent } from '@/lib/units';
+import { useDirectionColors } from '@/hooks/useDirectionColors';
 import type { CashFlowWaterfallModel } from '@/lib/financialVisualizations';
 
 interface CashFlowWaterfallChartProps {
@@ -35,6 +36,7 @@ function formatDelta(changePct: number | null | undefined): string {
 
 export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfallChartProps) {
   const { maxValue, minValue, steps, summary } = model;
+  const dirColors = useDirectionColors();
 
   const laidOut = useMemo(() => {
     const extentMax = maxValue === minValue ? maxValue + 1 : maxValue;
@@ -100,8 +102,8 @@ export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfall
             const fill = bar.tone === 'total'
               ? '#2563eb'
               : bar.value >= 0
-                ? '#16a34a'
-                : '#ef4444';
+                ? dirColors.positive
+                : dirColors.negative;
 
             return (
               <g key={bar.id}>

@@ -98,8 +98,9 @@ class VnstockPriceDepthFetcher:
                     df = quote.price_depth()
                     return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
                 except Exception:
-                    from vnstock import Vnstock
+                    from vnibb.providers.vnstock.runtime import get_vnstock_class
 
+                    Vnstock = get_vnstock_class()
                     stock = Vnstock().stock(symbol=symbol.upper(), source=source.upper())
                     df = stock.quote.price_depth()
                     return df.to_dict(orient="records") if df is not None and len(df) > 0 else []

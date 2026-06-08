@@ -3,6 +3,7 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 import { Sidebar, Header, TabBar, RightSidebar, MobileNav, FreshnessBanner, WhatsNewPanel } from '@/components/layout';
 import { OnboardingWalkthrough } from '@/components/onboarding/OnboardingWalkthrough';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
@@ -41,7 +42,10 @@ import { isTradingViewWidget, usesTradingViewWidgetSymbol } from '@/lib/tradingV
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext';
 import { useSymbolLink } from '@/contexts/SymbolLinkContext';
 import { useUnit } from '@/contexts/UnitContext';
+import { useUrlSync } from '@/hooks/useUrlSync';
 import { autoFitGridItems, findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
+import { LEFT_SIDEBAR_HIDE_BELOW, AI_COPILOT_OVERLAY_BELOW_WIDTH, AI_COPILOT_OVERLAY_BELOW_HEIGHT } from '@/lib/responsive';
+import { useResizeNudge } from '@/hooks/useResizeNudge';
 import { CURRENT_RELEASE } from '@/lib/version';
 import { analyzeDashboardTab } from '@/lib/dashboardIntelligence';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
@@ -115,6 +119,7 @@ function DashboardContent() {
         setDashboardAdminUnlocked,
         migrationNotice,
         dismissMigrationNotice,
+        backendSync,
     } = useDashboard();
 
     const { setGlobalSymbol: setContextGlobalSymbol } = useWidgetGroups();
@@ -139,8 +144,20 @@ function DashboardContent() {
     const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
     const [adminLayoutKey, setAdminLayoutKey] = useState('');
     const [adminLayoutControlsVisible, setAdminLayoutControlsVisible] = useState(false);
-    const [adminLayoutStatus, setAdminLayoutStatus] = useState<string | null>(null);
-    const [templateApplyStatus, setTemplateApplyStatus] = useState<TemplateApplyStatus | null>(null);
+    // Status feedback now routes through sonner toasts (see AppToaster). These
+    // callbacks preserve the previous setter call-sites while removing the
+    // bespoke timed banners and their render blocks.
+    const setAdminLayoutStatus = useCallback((message: string | null) => {
+        if (message) toast(message);
+    }, []);
+    const setTemplateApplyStatus = useCallback((status: TemplateApplyStatus | null) => {
+        if (!status) return;
+        if (status.tone === 'warning') {
+            toast.warning(status.message);
+        } else {
+            toast.success(status.message);
+        }
+    }, []);
     const [isPublishingSystemLayout, setIsPublishingSystemLayout] = useState(false);
     const [draggingPane, setDraggingPane] = useState<'left' | 'right' | null>(null);
     const [widgetSettingsState, setWidgetSettingsState] = useState<{
@@ -160,9 +177,6 @@ function DashboardContent() {
             .map((id) => DASHBOARD_TEMPLATES.find((template) => template.id === id))
             .filter((template): template is DashboardTemplate => Boolean(template));
     }, []);
-    const templateApplyStatusClass = templateApplyStatus?.tone === 'warning'
-        ? 'border-amber-500/25 bg-amber-500/10 text-amber-100'
-        : 'border-blue-500/20 bg-blue-500/10 text-blue-200';
     const migrationNoticeClass = migrationNotice?.tone === 'warning'
         ? 'border-amber-500/25 bg-amber-500/10 text-amber-100'
         : 'border-blue-500/20 bg-blue-500/10 text-blue-100';
@@ -174,11 +188,11 @@ function DashboardContent() {
         }
     }, []);
 
-    const effectiveLeftSidebarWidth = viewportWidth < 1024
+    const effectiveLeftSidebarWidth = viewportWidth < LEFT_SIDEBAR_HIDE_BELOW
         ? 0
         : (isSidebarCollapsed ? LEFT_SIDEBAR_COLLAPSED_WIDTH : sidebarWidth);
 
-    const overlayAICopilot = viewportWidth > 0 && (viewportWidth < 1480 || viewportHeight < 840);
+    const overlayAICopilot = viewportWidth > 0 && (viewportWidth < AI_COPILOT_OVERLAY_BELOW_WIDTH || viewportHeight < AI_COPILOT_OVERLAY_BELOW_HEIGHT);
     const effectiveRightSidebarWidth = overlayAICopilot
         ? Math.min(rightSidebarWidth, Math.max(280, viewportWidth - 24))
         : rightSidebarWidth;
@@ -278,18 +292,6 @@ function DashboardContent() {
         syncAdminKey();
         return subscribeAdminLayoutKey(syncAdminKey);
     }, [mounted]);
-
-    useEffect(() => {
-        if (!adminLayoutStatus) return;
-        const timeoutId = window.setTimeout(() => setAdminLayoutStatus(null), 2600);
-        return () => window.clearTimeout(timeoutId);
-    }, [adminLayoutStatus]);
-
-    useEffect(() => {
-        if (!templateApplyStatus) return;
-        const timeoutId = window.setTimeout(() => setTemplateApplyStatus(null), 3200);
-        return () => window.clearTimeout(timeoutId);
-    }, [templateApplyStatus]);
 
     useEffect(() => {
         if (!activeDashboard || !ADMIN_MANAGED_SYSTEM_IDS.has(activeDashboard.id)) return;
@@ -432,6 +434,26 @@ function DashboardContent() {
             updateSyncGroupSymbol(activeDashboard.id, 1, normalizedSymbol);
         }
     }, [activeDashboard, activeTab?.id, setContextGlobalSymbol, setGlobalMarketsSymbol, setStockGlobalSymbol, stockGlobalSymbol, updateSyncGroupSymbol]);
+
+    // URL deep-linking: ?dashboard=&tab=&symbol= for shareable/bookmarkable
+    // views and browser back/forward support. Self-contained (see useUrlSync).
+    const getTabIds = useCallback(
+        (dashboardId: string) =>
+            state.dashboards.find((d) => d.id === dashboardId)?.tabs.map((t) => t.id) ?? [],
+        [state.dashboards],
+    );
+    const dashboardIds = useMemo(() => state.dashboards.map((d) => d.id), [state.dashboards]);
+    useUrlSync({
+        ready: mounted,
+        activeDashboardId: activeDashboard?.id ?? null,
+        activeTabId: activeTab?.id ?? null,
+        symbol: stockGlobalSymbol,
+        dashboardIds,
+        getTabIds,
+        applyDashboard: setActiveDashboard,
+        applyTab: setActiveTab,
+        applySymbol: (sym) => applySelectedSymbol(sym),
+    });
 
     const isSystemFundamentalsTab =
         activeDashboard?.id === MAIN_FUNDAMENTAL_DASHBOARD_ID &&
@@ -640,6 +662,54 @@ function DashboardContent() {
 
     const canEditCurrentDashboard = (activeDashboard?.adminUnlocked === true) || activeDashboard?.isEditable !== false;
 
+    // Keyboard layout editing (accessibility): when a widget is focused in edit
+    // mode, arrow keys move it by one grid unit and Shift+arrow resizes it. Writes
+    // flow through the same updateTabLayout path as pointer drag/resize. This is the
+    // keyboard-accessible alternative to the pointer-only `.widget-drag-handle`.
+    const handleWidgetLayoutKeyDown = useCallback(
+        (event: React.KeyboardEvent<HTMLDivElement>, widgetId: string) => {
+            if (!isEditing || !canEditCurrentDashboard) return;
+            if (!activeDashboard || !activeTab) return;
+            const arrowKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+            if (!arrowKeys.includes(event.key)) return;
+            // Don't hijack arrows while typing in an input inside the widget.
+            const target = event.target as HTMLElement;
+            if (target && target !== event.currentTarget && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+            if (target && target.isContentEditable) return;
+
+            const widget = activeTab.widgets.find((w) => w.id === widgetId);
+            if (!widget) return;
+
+            event.preventDefault();
+            const GRID_COLS = 24;
+            const resize = event.shiftKey;
+            const { x, y, w, h } = widget.layout;
+            const minW = widget.layout.minW ?? 2;
+            const minH = widget.layout.minH ?? 2;
+
+            let next = { x, y, w, h };
+            if (resize) {
+                if (event.key === 'ArrowLeft') next = { ...next, w: Math.max(minW, w - 1) };
+                if (event.key === 'ArrowRight') next = { ...next, w: Math.min(GRID_COLS - x, w + 1) };
+                if (event.key === 'ArrowUp') next = { ...next, h: Math.max(minH, h - 1) };
+                if (event.key === 'ArrowDown') next = { ...next, h: h + 1 };
+            } else {
+                if (event.key === 'ArrowLeft') next = { ...next, x: Math.max(0, x - 1) };
+                if (event.key === 'ArrowRight') next = { ...next, x: Math.min(GRID_COLS - w, x + 1) };
+                if (event.key === 'ArrowUp') next = { ...next, y: Math.max(0, y - 1) };
+                if (event.key === 'ArrowDown') next = { ...next, y: y + 1 };
+            }
+
+            if (next.x === x && next.y === y && next.w === w && next.h === h) return;
+
+            const updatedWidgets = activeTab.widgets.map((wgt) =>
+                wgt.id === widgetId ? { ...wgt, layout: { ...wgt.layout, ...next } } : wgt
+            );
+            updateTabLayout(activeDashboard.id, activeTab.id, updatedWidgets);
+        },
+        [isEditing, canEditCurrentDashboard, activeDashboard, activeTab, updateTabLayout]
+    );
+
     const handleEditToggle = useCallback(() => {
         if (!canEditCurrentDashboard) {
             return;
@@ -660,27 +730,45 @@ function DashboardContent() {
         }
     }, [activeDashboard?.id, canEditCurrentDashboard, isEditing]);
 
+    // One-time discoverability hint: editing is locked by default and the only
+    // affordance is the header Lock/Unlock toggle, which users miss. Surface a
+    // single dismissible toast the first time someone lands on an editable,
+    // populated dashboard while not editing.
     useEffect(() => {
         if (!mounted || typeof window === 'undefined') return;
+        if (isWalkthroughOpen || shouldShowDashboardWalkthrough()) return;
+        if (!canEditCurrentDashboard || isEditing) return;
+        if (!activeTab?.widgets?.length) return;
 
-        let timeoutId: number | undefined;
-        let frameA: number | undefined;
-        let frameB: number | undefined;
+        const EDIT_HINT_KEY = 'vnibb-edit-hint-seen';
+        try {
+            if (localStorage.getItem(EDIT_HINT_KEY) === 'true') return;
+        } catch {
+            return;
+        }
 
-        timeoutId = window.setTimeout(() => {
-            frameA = window.requestAnimationFrame(() => {
-                frameB = window.requestAnimationFrame(() => {
-                    window.dispatchEvent(new Event('resize'));
-                });
+        const timeoutId = window.setTimeout(() => {
+            toast('Customize this dashboard', {
+                description: 'Click "Layout Locked" in the header to drag, resize, and rearrange widgets.',
+                duration: 8000,
+                action: {
+                    label: 'Edit now',
+                    onClick: () => handleEditToggle(),
+                },
             });
-        }, 140);
+            try {
+                localStorage.setItem(EDIT_HINT_KEY, 'true');
+            } catch {
+                // ignore persistence failure; hint simply may show again
+            }
+        }, 1800);
 
-        return () => {
-            if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-            if (frameA !== undefined) window.cancelAnimationFrame(frameA);
-            if (frameB !== undefined) window.cancelAnimationFrame(frameB);
-        };
-    }, [activeDashboard?.id, activeTab?.id, activeTab?.widgets, mounted]);
+        return () => window.clearTimeout(timeoutId);
+    }, [mounted, isWalkthroughOpen, canEditCurrentDashboard, isEditing, activeTab?.widgets?.length, handleEditToggle]);
+
+    // Nudge container-measuring embeds to re-measure after dashboard/tab/widget
+    // changes. Shared implementation with DashboardGrid via useResizeNudge.
+    useResizeNudge([activeDashboard?.id, activeTab?.id, activeTab?.widgets, mounted], 140);
 
     const handleResetLayout = useCallback(() => {
         if (activeDashboard && activeTab) {
@@ -959,7 +1047,7 @@ function DashboardContent() {
             minW: w.layout.minW ?? 4,
             minH: w.layout.minH ?? 3,
         }));
-    }, [activeTab?.widgets, isEditing]);
+    }, [activeTab?.widgets]);
 
     const activeTabIntelligence = useMemo(
         () => analyzeDashboardTab(activeTab?.widgets || []),
@@ -1057,6 +1145,16 @@ function DashboardContent() {
 
                 <FreshnessBanner />
 
+                {backendSync.loadPaused && (
+                    <div
+                        role="status"
+                        className="mx-3 mt-2 rounded-md border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-100"
+                    >
+                        Cross-device sync is one-way while you have custom workspaces: changes here are
+                        saved to the cloud, but this device won&apos;t auto-pull layouts from other devices.
+                    </div>
+                )}
+
                 <TabBar symbol={stockGlobalSymbol} />
 
                 <WhatsNewPanel />
@@ -1129,12 +1227,6 @@ function DashboardContent() {
                                     >
                                         {isPublishingSystemLayout ? 'Publishing...' : 'Publish Global'}
                                     </button>
-                                    {adminLayoutStatus ? (
-                                        <div className="inline-flex items-center gap-1 text-[11px] text-amber-200/85">
-                                            <AlertCircle className="h-3.5 w-3.5" />
-                                            <span>{adminLayoutStatus}</span>
-                                        </div>
-                                    ) : null}
                                 </div>
                             </div>
                         </div>
@@ -1235,6 +1327,11 @@ function DashboardContent() {
                                                 data-widget-type={widgetType}
                                                 data-widget-symbol={widgetSymbol}
                                                 tabIndex={0}
+                                                role={isEditing && canEditCurrentDashboard ? 'application' : undefined}
+                                                aria-label={isEditing && canEditCurrentDashboard
+                                                    ? `${widgetTitle} — arrow keys move, Shift+arrow resizes`
+                                                    : undefined}
+                                                onKeyDown={(event) => handleWidgetLayoutKeyDown(event, widget.id)}
                                             >
                                                 <WidgetWrapper
                                                     id={widget.id}
@@ -1281,12 +1378,6 @@ function DashboardContent() {
                                         <p className="text-lg font-semibold text-[var(--text-primary)]">Start with a suggested layout</p>
                                         <p className="text-sm text-[var(--text-muted)]">Seed this empty tab with a balanced starter, then refine it widget by widget.</p>
                                     </div>
-
-                                    {templateApplyStatus && (
-                                        <div className={`rounded-lg border px-3 py-2 text-xs font-medium ${templateApplyStatusClass}`}>
-                                            {templateApplyStatus.message}
-                                        </div>
-                                    )}
 
                                     <div className="grid w-full gap-3 md:grid-cols-3">
                                         {starterTemplates.map((template) => (
@@ -1414,12 +1505,6 @@ function DashboardContent() {
                 currentDashboard={activeDashboard ?? null}
                 currentSymbol={stockGlobalSymbol}
             />
-
-            {templateApplyStatus && activeTab?.widgets.length ? (
-                <div className={`fixed bottom-4 left-1/2 z-[120] -translate-x-1/2 rounded-xl border bg-slate-950/95 px-4 py-2 text-xs font-semibold shadow-2xl ${templateApplyStatusClass}`}>
-                    {templateApplyStatus.message}
-                </div>
-            ) : null}
 
             <WidgetSettingsModal
                 isOpen={Boolean(widgetSettingsState)}

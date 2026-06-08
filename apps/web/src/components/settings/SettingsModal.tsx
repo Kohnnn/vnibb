@@ -162,7 +162,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [publicRuntimeModel, setPublicRuntimeModel] = useState<string | null>(null);
   const { preferredVnstockSource, setPreferredVnstockSource } = useDataSources();
   const { theme, setTheme, resolvedTheme } = useTheme();
-  const { density, setDensity, chartStyle, setChartStyle } = useUiPreferences();
+  const {
+    density,
+    setDensity,
+    chartStyle,
+    setChartStyle,
+    colorMode,
+    setColorMode,
+    reduceEffects,
+    setReduceEffects,
+  } = useUiPreferences();
   const {
     config: unitConfig,
     globalUsdVndDefaultRate,
@@ -1286,6 +1295,38 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                   </div>
                 </div>
+                <div>
+                  <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Accessibility</h4>
+                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-sm font-bold text-blue-300">Colorblind-safe colors</div>
+                        <div className="mt-1 text-xs text-[var(--text-muted)]">
+                          Swaps the green/red gain-loss palette for a blue/orange pair that stays distinguishable with deuteranopia or protanopia.
+                        </div>
+                      </div>
+                      <Switch
+                        checked={colorMode === 'colorblind'}
+                        onCheckedChange={(checked) => setColorMode(checked ? 'colorblind' : 'standard')}
+                        aria-label="Toggle colorblind-safe colors"
+                      />
+                    </div>
+                    <div className="flex items-start justify-between gap-4 border-t border-[var(--border-default)] pt-4">
+                      <div>
+                        <div className="text-sm font-bold text-blue-300">Reduce visual effects</div>
+                        <div className="mt-1 text-xs text-[var(--text-muted)]">
+                          Disables widget background blur, hover lift, and shimmer animations for smoother performance on lower-end machines. Motion is also reduced automatically when your system requests it.
+                        </div>
+                      </div>
+                      <Switch
+                        checked={reduceEffects}
+                        onCheckedChange={setReduceEffects}
+                        aria-label="Toggle reduced visual effects"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                   <div className="text-sm font-bold text-[var(--text-primary)]">Display Units</div>
                   <p className="mt-1 text-xs text-[var(--text-muted)]">Applies to financial values across all widgets.</p>

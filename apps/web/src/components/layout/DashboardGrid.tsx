@@ -4,6 +4,8 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { Responsive } from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
+import { DASHBOARD_GRID_BREAKPOINTS } from '@/lib/responsive';
+import { useResizeNudge } from '@/hooks/useResizeNudge';
 // Note: react-resizable styles are bundled with react-grid-layout, no separate import needed
 
 
@@ -33,8 +35,9 @@ export interface ResponsiveLayouts {
 const DEFAULT_MIN_W = 3;
 const DEFAULT_MIN_H = 2;
 
-// Breakpoints matching Tailwind defaults
-const BREAKPOINTS = { lg: 960, md: 768, sm: 640, xs: 0 };
+// Breakpoints come from the shared responsive contract (`@/lib/responsive`) so the
+// grid's column flip aligns with the shell sidebar visibility (no gap band).
+const BREAKPOINTS = DASHBOARD_GRID_BREAKPOINTS;
 const COLS = { lg: 24, md: 12, sm: 6, xs: 2 };
 const GRID_GAP = { lg: 6, md: 6, sm: 8, xs: 6 } as const;
 
@@ -182,27 +185,9 @@ export function DashboardGrid({
     const canEdit = isEditing && (currentBreakpoint === 'lg' || currentBreakpoint === 'md');
     const draggableHandle = canEdit ? '.widget-drag-handle' : undefined;
 
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-
-        let timeoutId: number | undefined;
-        let frameA: number | undefined;
-        let frameB: number | undefined;
-
-        timeoutId = window.setTimeout(() => {
-            frameA = window.requestAnimationFrame(() => {
-                frameB = window.requestAnimationFrame(() => {
-                    window.dispatchEvent(new Event('resize'));
-                });
-            });
-        }, 120);
-
-        return () => {
-            if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-            if (frameA !== undefined) window.cancelAnimationFrame(frameA);
-            if (frameB !== undefined) window.cancelAnimationFrame(frameB);
-        };
-    }, [currentBreakpoint, layouts, rowHeight, width]);
+    // Nudge container-measuring embeds (Recharts/TradingView) to re-measure after
+    // breakpoint/layout/width changes. Shared with DashboardClient via useResizeNudge.
+    useResizeNudge([currentBreakpoint, layouts, rowHeight, width], 120);
 
     const effectiveLayouts = useMemo(() => {
         if (canEdit) return responsiveLayouts;

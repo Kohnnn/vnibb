@@ -8,6 +8,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
+import { useTheme } from '@/contexts/ThemeContext';
 import { toTradingViewSymbol } from '@/lib/tradingView';
 import {
   buildTradingViewRuntimeConfig,
@@ -123,6 +124,8 @@ function TradingViewNativeWidget({
   fallback,
 }: TradingViewNativeWidgetProps) {
   const metadata = getTradingViewWidgetMetadata(widgetType);
+  const { resolvedTheme } = useTheme();
+  const appTheme: 'dark' | 'light' = resolvedTheme === 'light' ? 'light' : 'dark';
   const hostRef = useRef<HTMLDivElement>(null);
   const hasTrackedLoadRef = useRef(false);
   const [loadError, setLoadError] = useState<Error | null>(null);
@@ -179,13 +182,13 @@ function TradingViewNativeWidget({
   }, [symbol]);
 
   const runtimeConfig = useMemo(
-    () => buildTradingViewRuntimeConfig(widgetType, config, resolvedSymbol),
-    [config, resolvedSymbol, widgetType],
+    () => buildTradingViewRuntimeConfig(widgetType, config, resolvedSymbol, appTheme),
+    [config, resolvedSymbol, widgetType, appTheme],
   );
 
   const webComponentAttributes = useMemo(
-    () => buildTradingViewWebComponentAttributes(widgetType, config, resolvedSymbol),
-    [config, resolvedSymbol, widgetType],
+    () => buildTradingViewWebComponentAttributes(widgetType, config, resolvedSymbol, appTheme),
+    [config, resolvedSymbol, widgetType, appTheme],
   );
 
   // IntersectionObserver guard. Once visible we never re-arm — the mount

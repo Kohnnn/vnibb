@@ -148,7 +148,9 @@ class VnstockStockQuoteFetcher:
                 # Fetch last 3 days to ensure we get data even on weekends/holidays
                 start_date = today - timedelta(days=5)
                 
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
+
+                Vnstock = get_vnstock_class()
                 stock = Vnstock().stock(
                     symbol=symbol,
                     source=source.upper(),

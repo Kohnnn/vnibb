@@ -204,7 +204,9 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
 
         def _fetch_sync() -> List[dict[str, Any]]:
             try:
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
+
+                Vnstock = get_vnstock_class()
 
                 candidate_sources: list[str] = []
                 for source in ["VCI", settings.vnstock_source, "KBS"]:

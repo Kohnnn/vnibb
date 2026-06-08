@@ -230,8 +230,9 @@ class DataPipeline:
 
     @property
     def vnstock(self):
-        from vnstock import Vnstock
+        from vnibb.providers.vnstock.runtime import get_vnstock_class
 
+        Vnstock = get_vnstock_class()
         return Vnstock()
 
     @staticmethod
@@ -287,8 +288,9 @@ class DataPipeline:
         last_error: Optional[Exception] = None
         for source in fallback_sources:
             def _fetch_sync(_source: str = source) -> pd.DataFrame:
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
 
+                Vnstock = get_vnstock_class()
                 quote = Vnstock().stock(symbol=symbol, source=_source).quote
                 history_callable = quote.history
                 if bypass_internal_retry:
@@ -878,7 +880,9 @@ class DataPipeline:
         sync_id: Optional[int] = None,
     ) -> int:
         """Sync all stock symbols."""
-        from vnstock import Listing
+        from vnibb.providers.vnstock.runtime import get_listing_class
+
+        Listing = get_listing_class()
 
         logger.info("Syncing stock list...")
         listing_source = settings.vnstock_source or "KBS"
@@ -1055,7 +1059,10 @@ class DataPipeline:
         sync_id: Optional[int] = None,
     ) -> int:
         """Sync comprehensive metrics for stocks using vnstock finance.ratio."""
-        from vnstock import Listing, Vnstock
+        from vnibb.providers.vnstock.runtime import get_listing_class, get_vnstock_class
+
+        Listing = get_listing_class()
+        Vnstock = get_vnstock_class()
 
         logger.info("Syncing screener data...")
         loop = asyncio.get_running_loop()
@@ -2359,8 +2366,9 @@ class DataPipeline:
             symbol = symbols[idx]
             await self._wait_for_rate_limit("profiles")
             try:
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
 
+                Vnstock = get_vnstock_class()
                 stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
 
                 overview_row: Dict[str, Any] = {}
@@ -5046,8 +5054,9 @@ class DataPipeline:
 
                 async def _fetch_intraday() -> List[Dict[str, Any]]:
                     def _sync_fetch() -> List[Dict[str, Any]]:
-                        from vnstock import Vnstock
+                        from vnibb.providers.vnstock.runtime import get_vnstock_class
 
+                        Vnstock = get_vnstock_class()
                         stock = Vnstock().stock(symbol=symbol, source=source)
                         df = stock.quote.intraday()
                         if df is None or df.empty:

@@ -70,7 +70,9 @@ class VnstockGeneralRatingFetcher:
         """
         try:
             def _fetch():
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
+
+                Vnstock = get_vnstock_class()
                 stock = Vnstock().stock(symbol=symbol.upper(), source=settings.vnstock_source)
                 df = stock.company.general_rating()
                 if df is None or len(df) == 0:

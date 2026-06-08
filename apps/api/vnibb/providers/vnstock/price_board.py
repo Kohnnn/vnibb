@@ -107,7 +107,9 @@ class VnstockPriceBoardFetcher:
         for src in fallback_chain:
             try:
                 def _fetch(_src: str = src):
-                    from vnstock import Trading
+                    from vnibb.providers.vnstock.runtime import get_trading_class
+
+                    Trading = get_trading_class()
                     trading = Trading(source=_src.upper())
 
                     df = trading.price_board(

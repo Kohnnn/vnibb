@@ -121,25 +121,25 @@ export function MomentumWidget({ symbol, onDataChange }: MomentumWidgetProps) {
           <div className="grid grid-cols-2 gap-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">1M</div>
-              <div className={r20 !== null && r20 >= 0 ? 'text-emerald-400 font-mono' : 'text-red-400 font-mono'}>
+              <div className={r20 !== null && r20 >= 0 ? 'price-up font-mono' : 'price-down font-mono'}>
                 {formatPct(r20)}
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">3M</div>
-              <div className={r60 !== null && r60 >= 0 ? 'text-emerald-400 font-mono' : 'text-red-400 font-mono'}>
+              <div className={r60 !== null && r60 >= 0 ? 'price-up font-mono' : 'price-down font-mono'}>
                 {formatPct(r60)}
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">6M</div>
-              <div className={r120 !== null && r120 >= 0 ? 'text-emerald-400 font-mono' : 'text-red-400 font-mono'}>
+              <div className={r120 !== null && r120 >= 0 ? 'price-up font-mono' : 'price-down font-mono'}>
                 {formatPct(r120)}
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">12M</div>
-              <div className={r252 !== null && r252 >= 0 ? 'text-emerald-400 font-mono' : 'text-red-400 font-mono'}>
+              <div className={r252 !== null && r252 >= 0 ? 'price-up font-mono' : 'price-down font-mono'}>
                 {formatPct(r252)}
               </div>
             </div>

@@ -3,6 +3,7 @@ import os
 import threading
 import concurrent.futures
 from vnibb.core.config import settings
+from vnibb.providers.vnstock.runtime import get_vnstock_class
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def get_vnstock():
                     else:
                         logger.warning("No vnstock API key found - using default rate limits (60 req/min)")
                     
-                    from vnstock import Vnstock
+                    Vnstock = get_vnstock_class()
                     return Vnstock()
                 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:

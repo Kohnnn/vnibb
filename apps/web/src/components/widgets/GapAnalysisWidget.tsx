@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { useDirectionColors } from '@/hooks/useDirectionColors'
 
 interface GapAnalysisWidgetProps {
   symbol: string
@@ -26,6 +27,7 @@ type GapRow = {
 
 export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
+  const dirColors = useDirectionColors()
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useQuantMetrics(upperSymbol, {
     period,
@@ -130,7 +132,7 @@ export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
                   />
                   <Bar dataKey="value" radius={[2, 2, 0, 0]}>
                     {monthRows.map((entry) => (
-                      <Cell key={`gap-month-${entry.month}`} fill={entry.value >= 0 ? '#22c55e' : '#ef4444'} />
+                      <Cell key={`gap-month-${entry.month}`} fill={entry.value >= 0 ? dirColors.positive : dirColors.negative} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -173,11 +175,11 @@ export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
                   return (
                     <tr key={`${row.date}-${row.type}-${row.gap_pct}`} className="border-b border-[var(--border-subtle)] text-[var(--text-secondary)]">
                       <td className="py-1">{row.date}</td>
-                      <td className={`py-1 ${row.type === 'gap_up' ? 'text-emerald-300' : row.type === 'gap_down' ? 'text-red-300' : 'text-[var(--text-muted)]'}`}>
+                      <td className={`py-1 ${row.type === 'gap_up' ? 'price-up' : row.type === 'gap_down' ? 'price-down' : 'text-[var(--text-muted)]'}`}>
                         {row.type}
                       </td>
                       <td className="py-1 text-right font-mono">{Number(row.gap_pct ?? 0).toFixed(2)}%</td>
-                      <td className={`py-1 text-right font-mono ${Number(row.next_day_return_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
+                      <td className={`py-1 text-right font-mono ${Number(row.next_day_return_pct ?? 0) >= 0 ? 'price-up' : 'price-down'}`}>
                         {Number(row.next_day_return_pct ?? 0).toFixed(2)}%
                       </td>
                       <td className={`py-1 text-center ${statusClass}`} title={ageDays !== null ? `${ageDays}d since gap` : undefined}>

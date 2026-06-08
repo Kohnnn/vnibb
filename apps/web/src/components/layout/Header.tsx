@@ -184,31 +184,23 @@ export function Header({
   }, [historyQuery.data?.data, quote?.changePct])
 
   const quoteDirection = getMovementDirection(displayQuoteChangePct)
+  // Token-backed price-direction classes (see lib/priceColor.ts + globals.css).
+  // These adapt to light theme and colorblind mode automatically.
   const quoteChangeClass =
     quoteDirection === 'unknown' || quoteDirection === 'flat'
       ? 'text-[var(--text-muted)]'
       : quoteDirection === 'up'
-        ? resolvedTheme === 'light'
-          ? 'text-emerald-700'
-          : 'text-emerald-400'
-        : resolvedTheme === 'light'
-          ? 'text-rose-700'
-          : 'text-rose-400'
+        ? 'price-up'
+        : 'price-down'
   const marketStatus = useMemo(() => getVietnamMarketStatus(new Date(marketClock)), [marketClock])
   const getIndexChangeClass = useCallback((changePct: number | null | undefined) => {
     const direction = getMovementDirection(changePct)
     return direction === 'unknown' || direction === 'flat'
       ? 'text-[var(--text-muted)]'
       : direction === 'up'
-        ? resolvedTheme === 'light'
-          ? 'text-emerald-700'
-          : 'text-emerald-400'
-        : resolvedTheme === 'light'
-          ? 'text-rose-700'
-          : 'text-rose-400'
-  },
-    [resolvedTheme]
-  )
+        ? 'price-up'
+        : 'price-down'
+  }, [])
   const marketChips = useMemo(() => {
     const rows = marketOverviewQuery.data?.data || []
     const findIndex = (aliases: string[]) => rows.find((item) => aliases.includes(normalizeIndexName(item.index_name))) || null

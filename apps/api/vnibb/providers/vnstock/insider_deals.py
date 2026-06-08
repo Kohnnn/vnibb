@@ -135,7 +135,9 @@ class VnstockInsiderDealsFetcher:
                 except Exception as e:
                     logger.debug(f"vnstock_data insider trading failed for {symbol}: {e}")
 
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
+
+                Vnstock = get_vnstock_class()
 
                 def _fetch_source(source: str):
                     stock = Vnstock().stock(symbol=symbol.upper(), source=source)

@@ -346,7 +346,7 @@ def _warmup_vnstock_sync():
         get_vnstock()
 
         # Pre-import key modules to avoid _ModuleLock deadlocks in threads
-        from vnstock import Listing, Company, Finance
+        from vnstock_data import Company, Finance, Listing
 
         logger.info("vnstock modules pre-loaded successfully.")
     except BaseException as e:

@@ -9,24 +9,7 @@ export { WidgetWrapper } from './WidgetWrapper';
 export { WidgetLibrary } from './WidgetLibrary';
 export { widgetRegistry } from './WidgetRegistry';
 
-// === Sprint V18: UI Components ===
-export { WidgetHeader } from './WidgetHeader';
-export type { WidgetHeaderProps } from './WidgetHeader';
-
-export {
-    Skeleton,
-    TableSkeleton,
-    ChartSkeleton,
-    CardSkeleton
-} from './Skeleton';
-export type { SkeletonProps, TableSkeletonProps } from './Skeleton';
-
-export {
-    WidgetErrorBoundary,
-    WidgetErrorFallback,
-    WidgetEmptyState,
-    WidgetLoadingState
-} from './ErrorBoundary';
+export { WidgetErrorBoundary } from './ErrorBoundary';
 
 // === Core Widgets ===
 export { TickerInfoWidget } from './TickerInfoWidget';
@@ -152,8 +135,3 @@ export { DatabaseInspectorWidget } from './DatabaseInspectorWidget';
 // === Market Overview ===
 export { CommoditiesWidget } from './CommoditiesWidget';
 export { ForexRatesWidget } from './ForexRatesWidget';
-
-// === Import Styles ===
-import './WidgetHeader.css';
-import './Skeleton.css';
-import './ErrorBoundary.css';

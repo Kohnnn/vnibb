@@ -725,7 +725,10 @@ async def get_technical_indicators_direct(
     from datetime import datetime, timedelta
 
     def _calculate():
-        from vnstock import Quote
+        try:
+            from vnstock_data import Quote
+        except Exception:
+            from vnstock import Quote
         import pandas as pd
 
         q = Quote(symbol=symbol.upper(), source=source)

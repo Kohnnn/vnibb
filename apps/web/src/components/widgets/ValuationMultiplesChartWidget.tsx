@@ -36,6 +36,10 @@ const SERIES = [
 
 export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: ValuationMultiplesChartWidgetProps) {
   const [visibleSeries, setVisibleSeries] = useState<Record<string, boolean>>({})
+  // C3: viewport pinning — default to the most recent window so current valuation
+  // context is visible first, while preserving access to full history.
+  const [focusRecent, setFocusRecent] = useState(true)
+  const RECENT_WINDOW = 15
   const {
     data,
     isLoading,
@@ -54,7 +58,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
   const hasData = rows.length > 0;
   const isFallback = Boolean(error && hasData);
 
-  const chartData = useMemo(() => {
+  const fullChartData = useMemo(() => {
     if (!rows.length) return [];
     return [...rows]
       .map((row) => ({
@@ -66,6 +70,12 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
         ev_sales: row.ev_sales ?? null,
       }));
   }, [rows]);
+
+  const canFocus = fullChartData.length > RECENT_WINDOW;
+  const chartData = useMemo(
+    () => (focusRecent && canFocus ? fullChartData.slice(-RECENT_WINDOW) : fullChartData),
+    [focusRecent, canFocus, fullChartData],
+  );
 
   const activeSeries = SERIES.filter((series) => visibleSeries[series.key] !== false)
 
@@ -115,12 +125,28 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
                   </button>
                 )
               })}
+              {canFocus && (
+                <button
+                  type="button"
+                  onClick={() => setFocusRecent((v) => !v)}
+                  className={cn(
+                    'ml-1 rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors border',
+                    focusRecent
+                      ? 'border-blue-500/30 bg-blue-500/12 text-[var(--text-primary)]'
+                      : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  )}
+                  aria-pressed={focusRecent}
+                  title={focusRecent ? `Showing last ${RECENT_WINDOW} periods` : 'Showing full history'}
+                >
+                  {focusRecent ? `Last ${RECENT_WINDOW}` : 'All'}
+                </button>
+              )}
             </div>
             <WidgetMeta
               updatedAt={dataUpdatedAt}
               isFetching={isFetching && hasData}
               isCached={isFallback}
-              note="Annual · oldest to newest"
+              note={focusRecent && canFocus ? `Annual · last ${RECENT_WINDOW}` : 'Annual · full history'}
               align="right"
             />
           </div>

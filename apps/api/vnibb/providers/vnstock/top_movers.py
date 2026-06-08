@@ -307,7 +307,10 @@ class VnstockTopMoversFetcher:
         try:
 
             def _fetch() -> List[dict]:
-                from vnstock import Listing, Trading
+                from vnibb.providers.vnstock.runtime import get_listing_class, get_trading_class
+
+                Listing = get_listing_class()
+                Trading = get_trading_class()
 
                 group = INDEX_TO_GROUP.get(index, "VN100")
                 last_error: BaseException | None = None
@@ -468,7 +471,10 @@ class VnstockTopMoversFetcher:
         try:
 
             def _fetch() -> Tuple[List[dict], dict]:
-                from vnstock import Listing, Trading
+                from vnibb.providers.vnstock.runtime import get_listing_class, get_trading_class
+
+                Listing = get_listing_class()
+                Trading = get_trading_class()
 
                 last_error: BaseException | None = None
                 for candidate_source in _build_source_candidates(source):

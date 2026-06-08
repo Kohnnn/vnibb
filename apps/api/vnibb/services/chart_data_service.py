@@ -124,8 +124,9 @@ async def fetch_chart_data(
 
     def _fetch_sync() -> List[Dict[str, Any]]:
         try:
-            from vnstock import Vnstock
+            from vnibb.providers.vnstock.runtime import get_vnstock_class
 
+            Vnstock = get_vnstock_class()
             stock = Vnstock().stock(symbol=symbol, source=source)
             df = stock.quote.history(
                 start=start_date.isoformat(),

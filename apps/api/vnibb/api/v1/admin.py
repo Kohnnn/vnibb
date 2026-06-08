@@ -3,6 +3,8 @@
 import json
 import logging
 import re
+from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -33,6 +35,49 @@ from vnibb.services.system_layout_template_service import (
 
 router = APIRouter(tags=["Admin"])
 logger = logging.getLogger(__name__)
+
+
+def _package_status(package_name: str) -> Dict[str, Any]:
+    try:
+        module = import_module(package_name)
+        return {
+            "installed": True,
+            "version": version(package_name),
+            "path": getattr(module, "__file__", None),
+        }
+    except PackageNotFoundError:
+        return {"installed": False, "version": None, "path": None}
+    except Exception as exc:
+        return {
+            "installed": True,
+            "version": None,
+            "path": None,
+            "import_error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def _vnstock_runtime_status() -> Dict[str, Any]:
+    packages = {
+        name: _package_status(name)
+        for name in [
+            "vnstock_data",
+            "vnstock_news",
+            "vnstock_ta",
+            "vnstock_pipeline",
+            "vnii",
+            "vnstock",
+            "vnai",
+        ]
+    }
+    sponsor_names = ["vnstock_data", "vnstock_news", "vnstock_ta", "vnstock_pipeline", "vnii"]
+    return {
+        "api_key_configured": bool(settings.vnstock_api_key),
+        "source": settings.vnstock_source,
+        "timeout_seconds": settings.vnstock_timeout,
+        "preferred_runtime": "vnstock_data" if packages["vnstock_data"]["installed"] else "vnstock",
+        "sponsor_packages_installed": all(packages[name]["installed"] for name in sponsor_names),
+        "packages": packages,
+    }
 
 TABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 YEAR_KEY_RE = re.compile(r"^20\d{2}$")
@@ -245,6 +290,7 @@ async def get_provider_status() -> Dict[str, Any]:
         },
         "appwrite": appwrite_health,
         "appwrite_runtime": appwrite_runtime_summary(),
+        "vnstock_runtime": _vnstock_runtime_status(),
     }
 
 

@@ -101,7 +101,9 @@ class VnstockStockPriceFetcher:
         
         try:
             def _fetch():
-                from vnstock import Trading
+                from vnibb.providers.vnstock.runtime import get_trading_class
+
+                Trading = get_trading_class()
                 trading = Trading(source=source.upper())
 
                 df = trading.price_board(

@@ -176,7 +176,9 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
 
         def _fetch_sync() -> list[dict]:
             try:
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
+
+                Vnstock = get_vnstock_class()
 
                 statement_type = query["statement_type"]
                 period = query["period"]

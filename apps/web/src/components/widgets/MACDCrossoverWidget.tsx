@@ -160,7 +160,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Histogram</div>
               <div
-                className={`font-mono ${Number(metric?.current_histogram ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}
+                className={`font-mono ${Number(metric?.current_histogram ?? 0) >= 0 ? 'price-up' : 'price-down'}`}
               >
                 {Number(metric?.current_histogram ?? 0).toFixed(4)}
               </div>
@@ -272,7 +272,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
                 {crossovers.slice(-12).reverse().map((row) => (
                   <tr key={`${row.date}-${row.type}-${row.price}`} className="border-b border-[var(--border-color)] text-[var(--text-secondary)]">
                     <td className="py-1">{row.date}</td>
-                    <td className={`py-1 uppercase ${row.type === 'bullish' ? 'text-emerald-300' : 'text-red-300'}`}>
+                    <td className={`py-1 uppercase ${row.type === 'bullish' ? 'price-up' : 'price-down'}`}>
                       {row.type}
                     </td>
                     <td className="py-1 text-right font-mono">{Number(row.return_1m_pct ?? 0).toFixed(2)}%</td>

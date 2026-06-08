@@ -177,8 +177,9 @@ class TechnicalAnalysisService:
         import asyncio
 
         def _sync_calculate():
-            from vnstock import Vnstock
+            from vnibb.providers.vnstock.runtime import get_vnstock_class
 
+            Vnstock = get_vnstock_class()
             stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
 
             df = stock.quote.history(
@@ -326,8 +327,9 @@ class TechnicalAnalysisService:
 
         def _fetch():
             try:
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
 
+                Vnstock = get_vnstock_class()
                 stock = Vnstock().stock(symbol=symbol, source=settings.vnstock_source)
 
                 df = stock.quote.history(

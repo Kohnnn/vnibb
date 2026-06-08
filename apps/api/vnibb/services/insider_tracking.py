@@ -64,7 +64,9 @@ class InsiderTrackingService:
     @property
     def vnstock(self):
         if self._vnstock is None:
-            from vnstock import Vnstock
+            from vnibb.providers.vnstock.runtime import get_vnstock_class
+
+            Vnstock = get_vnstock_class()
             self._vnstock = Vnstock()
         return self._vnstock
 

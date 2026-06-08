@@ -184,6 +184,14 @@ sync_premium_modules_from_venv_to_system() {
             continue
         fi
 
+        case "$mod" in
+            vnstock|vnii)
+                # Keep these on the image/runtime baseline. The installer venv
+                # may carry older versions and can otherwise overwrite them.
+                continue
+                ;;
+        esac
+
         if ls "$VENV_SITE_PACKAGES"/${mod}* >/dev/null 2>&1; then
             cp -r "$VENV_SITE_PACKAGES"/${mod}* "$SYSTEM_SITE_PACKAGES"/ 2>/dev/null || true
             synced=1
@@ -197,6 +205,14 @@ sync_premium_modules_from_venv_to_system() {
     fi
 
     return 1
+}
+
+enforce_vnstock_runtime_baseline() {
+    "$PYTHON_BIN" -m pip install --quiet --upgrade \
+        --extra-index-url https://vnstocks.com/api/simple \
+        "vnstock>=4.0.4,<4.1" \
+        "vnii>=0.2.4,<0.3" >/dev/null 2>&1 || \
+        echo "WARNING: VNStock runtime baseline upgrade failed; continuing with installed versions."
 }
 
 acquire_bootstrap_lock() {
@@ -287,7 +303,10 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
         echo "VnStock Premium: Restoring packages from persistent volume..."
         ensure_venv
         set_python_env
-        cp -rn "$PERSISTENT_BACKUP"/* "$SITE_PACKAGES/" || true
+        cp -rn "$PERSISTENT_BACKUP"/vnstock_data* "$SITE_PACKAGES/" 2>/dev/null || true
+        cp -rn "$PERSISTENT_BACKUP"/vnstock_news* "$SITE_PACKAGES/" 2>/dev/null || true
+        cp -rn "$PERSISTENT_BACKUP"/vnstock_ta* "$SITE_PACKAGES/" 2>/dev/null || true
+        cp -rn "$PERSISTENT_BACKUP"/vnstock_pipeline* "$SITE_PACKAGES/" 2>/dev/null || true
     fi
 
     # 2b. Check Execution: Now check if it works
@@ -363,9 +382,12 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
                 # 2c. Backup Code: Save the newly installed packages to volume
                 echo "VnStock Premium: Backing up packages to persistent volume..."
                 mkdir -p "$PERSISTENT_BACKUP"
-                # Copy vnstock related packages AND vnii to avoid bloating
-                cp -r "$SITE_PACKAGES"/vnstock* "$PERSISTENT_BACKUP/" 2>/dev/null || true
-                cp -r "$SITE_PACKAGES"/vnii* "$PERSISTENT_BACKUP/" 2>/dev/null || true
+                # Back up sponsor modules only. Do not persist `vnstock` or
+                # `vnii`; those are controlled by the image/runtime baseline.
+                cp -r "$SITE_PACKAGES"/vnstock_data* "$PERSISTENT_BACKUP/" 2>/dev/null || true
+                cp -r "$SITE_PACKAGES"/vnstock_news* "$PERSISTENT_BACKUP/" 2>/dev/null || true
+                cp -r "$SITE_PACKAGES"/vnstock_ta* "$PERSISTENT_BACKUP/" 2>/dev/null || true
+                cp -r "$SITE_PACKAGES"/vnstock_pipeline* "$PERSISTENT_BACKUP/" 2>/dev/null || true
 
                 if premium_modules_ready; then
                     write_epoch_file "$VNSTOCK_BOOTSTRAP_FAILED_COUNT_FILE" 0
@@ -387,6 +409,8 @@ if [ -n "$VNSTOCK_API_KEY" ]; then
 else
     echo "WARNING: VNSTOCK_API_KEY not found. Running in free mode."
 fi
+
+enforce_vnstock_runtime_baseline
 
 # 3. Start Application
 APP_PORT="${PORT:-${WEB_PORT:-8000}}"

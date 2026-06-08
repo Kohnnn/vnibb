@@ -191,7 +191,9 @@ class RealtimePipeline:
     
     async def _polling_fallback(self, symbols: List[str]):
         """Fallback to polling if WebSocket not available."""
-        from vnstock import Trading
+        from vnibb.providers.vnstock.runtime import get_trading_class
+
+        Trading = get_trading_class()
         
         logger.info(f"Starting polling fallback for {len(symbols)} symbols")
         

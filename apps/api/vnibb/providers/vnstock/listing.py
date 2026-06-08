@@ -10,10 +10,10 @@ import logging
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
-from vnstock import Listing
 
 from vnibb.core.exceptions import ProviderError
 from vnibb.core.config import settings
+from vnibb.providers.vnstock.runtime import get_listing_class
 
 
 logger = logging.getLogger(__name__)
@@ -128,6 +128,7 @@ class VnstockListingFetcher:
         try:
 
             def _fetch():
+                Listing = get_listing_class()
                 listing = Listing(source=source.lower())
                 df = listing.all_symbols(to_df=True)
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
@@ -159,6 +160,7 @@ class VnstockListingFetcher:
         try:
 
             def _fetch():
+                Listing = get_listing_class()
                 listing = Listing(source=source.lower())
                 df = listing.symbols_by_exchange(lang=lang)
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
@@ -192,6 +194,7 @@ class VnstockListingFetcher:
         try:
 
             def _fetch():
+                Listing = get_listing_class()
                 listing = Listing(source=source.lower())
                 df = listing.symbols_by_group(group=group)
                 if df is None or len(df) == 0:
@@ -232,6 +235,7 @@ class VnstockListingFetcher:
         try:
 
             def _fetch():
+                Listing = get_listing_class()
                 listing = Listing(source=source.lower())
                 df = listing.industries_icb()
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []

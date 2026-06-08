@@ -18,13 +18,13 @@ const TIMEFRAME_OPTIONS: Array<{ value: Timeframe; label: string }> = [
 function signalTone(signal: Signal | string) {
   switch (signal) {
     case 'strong_buy':
-      return 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30'
+      return 'bg-[color-mix(in_srgb,var(--color-positive)_20%,transparent)] price-up border-[color-mix(in_srgb,var(--color-positive)_30%,transparent)]'
     case 'buy':
-      return 'bg-emerald-500/12 text-emerald-200 border-emerald-500/20'
+      return 'bg-[color-mix(in_srgb,var(--color-positive)_12%,transparent)] price-up border-[color-mix(in_srgb,var(--color-positive)_20%,transparent)]'
     case 'strong_sell':
-      return 'bg-rose-500/20 text-rose-200 border-rose-400/30'
+      return 'bg-[color-mix(in_srgb,var(--color-negative)_20%,transparent)] price-down border-[color-mix(in_srgb,var(--color-negative)_30%,transparent)]'
     case 'sell':
-      return 'bg-rose-500/12 text-rose-200 border-rose-500/20'
+      return 'bg-[color-mix(in_srgb,var(--color-negative)_12%,transparent)] price-down border-[color-mix(in_srgb,var(--color-negative)_20%,transparent)]'
     default:
       return 'bg-amber-500/12 text-amber-100 border-amber-500/20'
   }
@@ -146,7 +146,7 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
           <div className="grid grid-cols-3 gap-2 text-[10px]">
             <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-center">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Bullish</div>
-              <div className="mt-1 text-lg font-bold text-emerald-300">{data.signals.buy_count}</div>
+              <div className="mt-1 text-lg font-bold price-up">{data.signals.buy_count}</div>
             </div>
             <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-center">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Neutral</div>
@@ -154,7 +154,7 @@ export function SignalSummaryWidget({ symbol }: { symbol?: string }) {
             </div>
             <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-center">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Bearish</div>
-              <div className="mt-1 text-lg font-bold text-rose-300">{data.signals.sell_count}</div>
+              <div className="mt-1 text-lg font-bold price-down">{data.signals.sell_count}</div>
             </div>
           </div>
 

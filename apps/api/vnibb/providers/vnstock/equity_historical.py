@@ -180,8 +180,9 @@ class VnstockEquityHistoricalFetcher(
         def _fetch_sync() -> List[dict[str, Any]]:
             """Synchronous fetch wrapped for executor."""
             try:
-                from vnstock import Vnstock
+                from vnibb.providers.vnstock.runtime import get_vnstock_class
 
+                Vnstock = get_vnstock_class()
                 stock = Vnstock().stock(
                     symbol=query["symbol"],
                     source=query["source"],

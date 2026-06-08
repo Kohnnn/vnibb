@@ -40,13 +40,13 @@ COPY . .
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir . \
-    && pip install --no-cache-dir --upgrade "vnstock>=3.5.0,<3.6" "vnai>=2.4.0,<2.5" \
+    && pip install --no-cache-dir --upgrade "vnstock>=4.0.4,<4.1" "vnai>=2.4.0,<2.5" \
     && python3 -c "from importlib.metadata import version; print(f'vnstock {version(\"vnstock\")} | vnai {version(\"vnai\")}')"
 
 # Optional: install vnii from VNStock index for premium checks.
 # Do not fail the image build if index/package is unavailable.
 ARG VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple
-RUN pip install --no-cache-dir --extra-index-url "${VNSTOCK_EXTRA_INDEX_URL}" "vnii>=0.1.5" || \
+RUN pip install --no-cache-dir --upgrade --extra-index-url "${VNSTOCK_EXTRA_INDEX_URL}" "vnii>=0.2.4,<0.3" || \
     echo "INFO: vnii unavailable from extra index; continuing in free-compatible mode."
 
 # Explicitly verify vnai remains importable for the installer/runtime path
@@ -79,6 +79,15 @@ RUN if [ -n "$VNSTOCK_API_KEY" ]; then \
 # never regress (QA-v2 oracle rebuild — discovered when re-deploying
 # v1.3.0 left market_news pipeline still producing 0 articles).
 RUN pip install --no-cache-dir html2text pta_reload tqdm
+
+# The premium installer can downgrade `vnstock`/`vnii` while installing sponsor
+# packages into its environment. Re-apply the runtime baseline last so runtime
+# warnings and imports see the intended package versions.
+RUN pip install --no-cache-dir --upgrade \
+    --extra-index-url "${VNSTOCK_EXTRA_INDEX_URL}" \
+    "vnstock>=4.0.4,<4.1" \
+    "vnii>=0.2.4,<0.3" \
+    && python3 -c "from importlib.metadata import version; print(f'final vnstock {version(\"vnstock\")} | vnii {version(\"vnii\")}')"
 
 
 # Copy entrypoint script and set permissions (as root)

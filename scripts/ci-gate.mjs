@@ -124,6 +124,7 @@ const pnpmCommand = resolvePnpmCommand()
 const pythonCommand = resolvePythonCommand()
 
 runStep('Frontend Lint', pnpmCommand, ['--filter', 'frontend', 'lint'], frontendEnv)
+runStep('Frontend Typecheck', pnpmCommand, ['--filter', 'frontend', 'exec', 'tsc', '--noEmit'], frontendEnv)
 runStep('Frontend Build', pnpmCommand, ['--filter', 'frontend', 'build'], frontendEnv)
 runStep(
   'Frontend Tests',

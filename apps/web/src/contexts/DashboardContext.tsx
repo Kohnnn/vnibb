@@ -31,7 +31,7 @@ import { findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences
 import { useDashboardSync, useLoadFromBackend } from '@/lib/useDashboardSync';
 import { config } from '@/lib/config';
 import { normalizeWidgetType } from '@/data/widgetDefinitions';
-import { autoFitGridItems, compactGridItems, findNextAvailableLayout, getWidgetDefaultLayout, preserveTemplateGridItems } from '@/lib/dashboardLayout';
+import { autoFitGridItems, compactGridItems, findNextAvailableLayout, getWidgetDefaultLayout, layoutsOverlap, preserveTemplateGridItems } from '@/lib/dashboardLayout';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { getPublishedSystemDashboardTemplates } from '@/lib/api';
 
@@ -1628,13 +1628,6 @@ const createDefaultTab = (name: string, order: number): DashboardTab => ({
     widgets: [],
 });
 
-function layoutsOverlap(
-    a: { x: number; y: number; w: number; h: number },
-    b: { x: number; y: number; w: number; h: number }
-) {
-    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-
 function findSafeWidgetPlacement(
     widgets: WidgetInstance[],
     type: WidgetCreate['type'],
@@ -2840,6 +2833,17 @@ interface DashboardContextValue {
     activeTab: DashboardTab | null;
     migrationNotice: DashboardMigrationNotice | null;
     dismissMigrationNotice: () => void;
+    /**
+     * Observable backend-sync state. `status` reflects the last push attempt.
+     * `loadPaused` is true when cross-device LOAD is suppressed because the user
+     * has local custom dashboards (push still runs). Exposed so the shell can show
+     * a non-alarming indicator instead of the sync state being silent/surprising.
+     */
+    backendSync: {
+        enabled: boolean;
+        status: 'idle' | 'syncing' | 'synced' | 'error';
+        loadPaused: boolean;
+    };
     // Template helpers
     availableTemplates: string[];
 }
@@ -3225,6 +3229,14 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         (dashboard) => !GLOBAL_SYSTEM_TEMPLATE_IDS.has(dashboard.id)
     );
 
+    // Cross-device LOAD from backend is intentionally suppressed once the user has
+    // any local custom dashboard, to avoid clobbering local work with a remote
+    // snapshot. Push still happens. This asymmetry is surprising ("my other device
+    // didn't update"), so we expose it as observable state instead of leaving it
+    // silent. Semantics are unchanged here — only visibility is added.
+    const backendLoadPaused =
+        config.enableDashboardBackendSync && localStateReady && hasLocalCustomDashboards;
+
     const mergeDashboardsFromBackend = useCallback((dashboards: Dashboard[]) => {
         dispatch({ type: 'MERGE_REMOTE_DASHBOARDS', payload: dashboards });
     }, []);
@@ -3240,6 +3252,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
     useDashboardSync(state, {
         enabled: config.enableDashboardBackendSync,
+        onSyncStart: () => setSyncStatus('syncing'),
         onSyncSuccess: () => setSyncStatus('synced'),
         onSyncError: () => setSyncStatus('error'),
         onDashboardIdReconciled: reconcileDashboardId,
@@ -3769,6 +3782,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         activeTab,
         migrationNotice,
         dismissMigrationNotice,
+        backendSync: {
+            enabled: config.enableDashboardBackendSync,
+            status: syncStatus,
+            loadPaused: backendLoadPaused,
+        },
         availableTemplates: Object.keys(TAB_WIDGET_TEMPLATES),
     };
 

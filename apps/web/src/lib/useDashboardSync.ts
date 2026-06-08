@@ -28,6 +28,7 @@ interface BackendDashboardRecord {
 
 interface UseDashboardSyncOptions {
     enabled?: boolean;
+    onSyncStart?: () => void;
     onSyncError?: (error: Error) => void;
     onSyncSuccess?: () => void;
     onDashboardIdReconciled?: (localId: string, dashboard: Dashboard) => void;
@@ -90,7 +91,7 @@ export function useDashboardSync(
     state: DashboardState,
     options: UseDashboardSyncOptions = {}
 ) {
-    const { enabled = true, onSyncError, onSyncSuccess, onDashboardIdReconciled } = options;
+    const { enabled = true, onSyncStart, onSyncError, onSyncSuccess, onDashboardIdReconciled } = options;
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
     const previousState = useRef<string>('');
     const isBackendAvailable = useRef<boolean | null>(null);
@@ -120,6 +121,7 @@ export function useDashboardSync(
     const syncToBackend = useCallback(async (dashboards: Dashboard[]) => {
         if (!isBackendAvailable.current) return;
 
+        onSyncStart?.();
         try {
             const currentDashboardIds = new Set(dashboards.map((dashboard) => dashboard.id));
 
@@ -174,7 +176,7 @@ export function useDashboardSync(
             logClientError('[DashboardSync] Sync failed:', error);
             onSyncError?.(error as Error);
         }
-    }, [onDashboardIdReconciled, onSyncError, onSyncSuccess]);
+    }, [onDashboardIdReconciled, onSyncError, onSyncSuccess, onSyncStart]);
 
     // Watch for state changes and debounce sync
     useEffect(() => {
