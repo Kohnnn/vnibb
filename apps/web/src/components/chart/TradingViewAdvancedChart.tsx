@@ -6,6 +6,8 @@ import { RefreshCw } from 'lucide-react';
 import { getCompanyEvents, getHistoricalPrices, getQuote } from '@/lib/api';
 import { buildChartEventMarkers, type ChartEventMarker } from '@/lib/chartEventMarkers';
 import { cn } from '@/lib/utils';
+import { useTheme } from '@/contexts/ThemeContext';
+import { useUiPreferences } from '@/contexts/UiPreferencesContext';
 
 export type AdvancedChartMode = 'candles' | 'line' | 'area';
 export type AdvancedChartTimeframe = '1D' | '5D' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX' | 'YTD';
@@ -230,6 +232,8 @@ export function TradingViewAdvancedChart({
 }: TradingViewAdvancedChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const { resolvedTheme } = useTheme();
+  const { colorMode } = useUiPreferences();
   const mainSeriesRef = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Line'> | ISeriesApi<'Area'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
@@ -378,6 +382,18 @@ export function TradingViewAdvancedChart({
         const textMuted = cssVars.getPropertyValue('--text-muted').trim() || '#94a3b8';
         const borderColor = cssVars.getPropertyValue('--border-color').trim() || '#334155';
         const borderSubtle = cssVars.getPropertyValue('--border-subtle').trim() || '#1f2937';
+        // Direction colors come from the semantic tokens so colorblind mode +
+        // light/dark overrides reach the candlesticks and volume bars. (DEF-001)
+        const upColor = cssVars.getPropertyValue('--color-positive').trim() || '#22c55e';
+        const downColor = cssVars.getPropertyValue('--color-negative').trim() || '#ef4444';
+        const hexToRgba = (hex: string, alpha: number): string => {
+          const h = hex.replace('#', '').trim();
+          if (h.length !== 6) return `rgba(148,163,184,${alpha})`;
+          const r = parseInt(h.slice(0, 2), 16);
+          const g = parseInt(h.slice(2, 4), 16);
+          const b = parseInt(h.slice(4, 6), 16);
+          return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        };
 
         const chart = createChart(containerRef.current, {
           width: safeSize.width,
@@ -473,12 +489,12 @@ export function TradingViewAdvancedChart({
             series.setData(safePoints.map((point) => ({ time: point.time, value: point.close })));
           } else {
             series = chart.addCandlestickSeries({
-              upColor: '#22c55e',
-              downColor: '#ef4444',
-              borderUpColor: '#22c55e',
-              borderDownColor: '#ef4444',
-              wickUpColor: '#22c55e',
-              wickDownColor: '#ef4444',
+              upColor: upColor,
+              downColor: downColor,
+              borderUpColor: upColor,
+              borderDownColor: downColor,
+              wickUpColor: upColor,
+              wickDownColor: downColor,
             });
             series.setData(
               safePoints.map((point) => ({
@@ -553,7 +569,7 @@ export function TradingViewAdvancedChart({
           safePoints.map((point) => ({
             time: point.time,
             value: Number.isFinite(point.volume) ? point.volume : 0,
-            color: point.close >= point.open ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)',
+            color: point.close >= point.open ? hexToRgba(upColor, 0.35) : hexToRgba(downColor, 0.35),
           }))
         );
         volumeSeriesRef.current = volumeSeries;
@@ -633,7 +649,7 @@ export function TradingViewAdvancedChart({
       mainSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, [activeCompareSymbol, comparePoints, eventMarkers, mode, points, timeframe]);
+  }, [activeCompareSymbol, comparePoints, eventMarkers, mode, points, timeframe, resolvedTheme, colorMode]);
 
   return (
     <div className={cn('relative h-full w-full', className)} style={{ minHeight: height }}>

@@ -1188,7 +1188,7 @@ function DashboardContent() {
                 <div className="relative flex-1 min-h-0 overflow-hidden bg-[var(--bg-primary)] p-2 sm:p-3 lg:p-4">
                     {showAdminSystemLayoutControls && activeDashboard ? (
                         <div className="pointer-events-none absolute right-4 top-4 z-20">
-                            <div className="pointer-events-auto flex min-w-[260px] max-w-[min(520px,calc(100vw-2rem))] flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.18),rgba(30,41,59,0.96))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.25)] backdrop-blur-sm">
+                            <div className="pointer-events-auto flex min-w-[260px] max-w-[min(520px,calc(100vw-2rem))] flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[color-mix(in_srgb,var(--bg-secondary)_86%,#f59e0b_14%)] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.25)] backdrop-blur-sm">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="flex min-w-0 items-start gap-2">
                                         <Shield className="mt-0.5 h-4 w-4 text-amber-300" />
@@ -1238,7 +1238,7 @@ function DashboardContent() {
                                 <>
                             <div className="h-full w-full overflow-y-auto scrollbar-hide">
                             {activeTabIntelligence.recommendations.length > 0 && (isEditing || activeTabIntelligence.isDeadTab) ? (
-                                <div className="mb-2 flex flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[linear-gradient(135deg,rgba(120,53,15,0.14),rgba(15,23,42,0.94))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.18)]">
+                                <div className="mb-2 flex flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[color-mix(in_srgb,var(--bg-secondary)_88%,#f59e0b_12%)] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.18)]">
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <div>
                                             <div className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
@@ -1275,7 +1275,7 @@ function DashboardContent() {
                                 </div>
                             ) : null}
                             {isSystemFundamentalsTab ? (
-                                <div className="mb-2 flex flex-col gap-2 rounded-2xl border border-blue-500/20 bg-[linear-gradient(135deg,rgba(30,41,59,0.92),rgba(15,23,42,0.92))] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.22)]">
+                                <div className="mb-2 flex flex-col gap-2 rounded-2xl border border-blue-500/20 bg-[var(--bg-secondary)] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.12)]">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div>
                                             <div className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300/80">

@@ -56,6 +56,9 @@ export function useUrlSync({
   // URL change (deep-link restore or popstate), so we don't immediately
   // overwrite the URL we just read from.
   const suppressWriteRef = useRef(false);
+  // Tracks whether we've written to the URL at least once. The first write
+  // (right after deep-link restore) uses replaceState; subsequent ones push.
+  const hasWrittenRef = useRef(false);
 
   const applyFromSearch = useCallback(
     (search: string) => {
@@ -159,7 +162,17 @@ export function useUrlSync({
     const next = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
     const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next !== current) {
-      window.history.replaceState(window.history.state, '', next);
+      // Use pushState for genuine in-app navigations so browser Back/Forward
+      // move between views via `popstate` (handled below) instead of exiting
+      // /dashboard entirely — which previously caused a full remount + blank
+      // screen. The very first write right after deep-link restore uses
+      // replaceState so we don't leave a duplicate initial history entry.
+      if (hasWrittenRef.current) {
+        window.history.pushState(window.history.state, '', next);
+      } else {
+        window.history.replaceState(window.history.state, '', next);
+        hasWrittenRef.current = true;
+      }
     }
   }, [ready, activeDashboardId, activeTabId, symbol]);
 }
