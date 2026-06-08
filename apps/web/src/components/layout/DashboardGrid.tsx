@@ -5,6 +5,7 @@ import { Responsive } from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import { DASHBOARD_GRID_BREAKPOINTS } from '@/lib/responsive';
+import { autoFitGridItems } from '@/lib/dashboardLayout';
 import { useResizeNudge } from '@/hooks/useResizeNudge';
 // Note: react-resizable styles are bundled with react-grid-layout, no separate import needed
 
@@ -21,6 +22,8 @@ export interface LayoutItem {
     maxW?: number;
     maxH?: number;
     static?: boolean;
+    /** Optional widget type, used to resolve size contracts during responsive derivation. */
+    type?: string;
 }
 
 // Responsive layouts for different breakpoints
@@ -35,8 +38,17 @@ export interface ResponsiveLayouts {
 const DEFAULT_MIN_W = 3;
 const DEFAULT_MIN_H = 2;
 
-// Breakpoints come from the shared responsive contract (`@/lib/responsive`) so the
-// grid's column flip aligns with the shell sidebar visibility (no gap band).
+/**
+ * Grid contract (single source of truth):
+ * - Columns: lg=24, md=12, sm=6, xs=2 (from the shared responsive breakpoints).
+ * - rowHeight: 40px (passed by DashboardClient; the legacy "fixed at 70" note was wrong).
+ * - Gap: 6/6/8/6 px per breakpoint.
+ *
+ * `lg` is the only PERSISTED layout. `md`/`sm`/`xs` are always *derived* from `lg`
+ * at render time via the shared `autoFitGridItems` engine (see step 2/3), so there
+ * is one packing algorithm instead of three ad-hoc transforms, and tablet/phone
+ * never write back to the stored layout.
+ */
 const BREAKPOINTS = DASHBOARD_GRID_BREAKPOINTS;
 const COLS = { lg: 24, md: 12, sm: 6, xs: 2 };
 const GRID_GAP = { lg: 6, md: 6, sm: 8, xs: 6 } as const;
@@ -46,10 +58,8 @@ interface DashboardGridProps {
     layouts: LayoutItem[];
     onLayoutChange?: (layout: LayoutItem[]) => void;
     isEditing?: boolean;
-    /** @deprecated - rowHeight is now fixed at 70 */
+    /** Row height in grid units (px). Defaults to 40, the canonical value. */
     rowHeight?: number;
-    /** @deprecated - cols is now responsive */
-    cols?: number;
 }
 
 export function DashboardGrid({
@@ -109,7 +119,14 @@ export function DashboardGrid({
     }, []);
 
 
-    // Generate responsive layouts from base layout
+    // Generate responsive layouts from the persisted base (lg) layout.
+    //
+    // `lg` is authored/persisted as-is. `md`/`sm`/`xs` are DERIVED via the shared
+    // `autoFitGridItems` engine (the same one used for add-widget + templates),
+    // parameterized by each breakpoint's column count. Items are fed in current
+    // visual order (y, then x) so the derived stack preserves the author's
+    // reading order, and the engine applies each widget's size contract
+    // (min/preferred W/H, orientation, expand priority) instead of naive halving.
     const responsiveLayouts = useMemo(() => {
         const normalized = layouts.map(item => ({
             ...item,
@@ -117,36 +134,65 @@ export function DashboardGrid({
             minH: item.minH ?? DEFAULT_MIN_H,
         }));
 
-        // Desktop (lg) - use original layout
+        // Desktop (lg) — use the persisted layout unchanged.
         const lg = normalized;
 
-        // Tablet (md) - 12 columns, scale down
-        const md = normalized.map(item => ({
-            ...item,
-            x: Math.floor(item.x / 2),
-            w: Math.min(Math.ceil(item.w / 2), 12),
-            minW: Math.min(item.minW ?? DEFAULT_MIN_W, 6),
-        }));
+        // Order by current visual position so derivation preserves reading order.
+        const ordered = [...normalized].sort((a, b) => a.y - b.y || a.x - b.x);
 
-        // Mobile landscape (sm) - 6 columns, stack more
-        const sm = normalized.map((item, index) => ({
-            ...item,
-            x: 0,
-            y: index * (item.h || 4),
-            w: 6,
-            minW: 3,
-        }));
+        // Pack the ordered items into `cols` columns using the shared engine, then
+        // map the result back onto LayoutItem (carrying i/static/maxima through).
+        const derive = (cols: number): LayoutItem[] => {
+            const packed = autoFitGridItems(
+                ordered.map(item => ({
+                    type: item.type,
+                    // Preserve identity + flags on the wrapper so we can restore them.
+                    __i: item.i,
+                    __static: item.static,
+                    __maxW: item.maxW,
+                    __maxH: item.maxH,
+                    layout: {
+                        x: item.x,
+                        y: item.y,
+                        w: item.w,
+                        h: item.h,
+                        minW: item.minW,
+                        minH: item.minH,
+                        maxW: item.maxW,
+                        maxH: item.maxH,
+                    },
+                })),
+                cols,
+            );
 
-        // Mobile portrait (xs) - 2 columns, full stack
-        const xs = normalized.map((item, index) => ({
-            ...item,
-            x: 0,
-            y: index * (item.h || 4),
-            w: 2,
-            minW: 2,
-        }));
+            return packed.map((p) => {
+                const wrapper = p as typeof p & {
+                    __i: string;
+                    __static?: boolean;
+                    __maxW?: number;
+                    __maxH?: number;
+                };
+                return {
+                    i: wrapper.__i,
+                    x: p.layout.x,
+                    y: p.layout.y,
+                    w: p.layout.w,
+                    h: p.layout.h,
+                    minW: p.layout.minW,
+                    minH: p.layout.minH,
+                    maxW: wrapper.__maxW,
+                    maxH: wrapper.__maxH,
+                    static: wrapper.__static,
+                };
+            });
+        };
 
-        return { lg, md, sm, xs };
+        return {
+            lg,
+            md: derive(COLS.md),
+            sm: derive(COLS.sm),
+            xs: derive(COLS.xs),
+        };
     }, [layouts]);
 
     const [currentBreakpoint, setCurrentBreakpoint] = useState('lg');
@@ -155,21 +201,12 @@ export function DashboardGrid({
         (currentLayout: Layout, allLayouts: Partial<Record<string, Layout>>) => {
             if (!onLayoutChange) return;
 
+            // Only the `lg` layout is persisted. `md`/`sm`/`xs` are derived
+            // (view-only) from `lg`, so we never write tablet/phone edits back —
+            // this removes the previous `x*2`/`w*2` round-trip that corrupted the
+            // stored layout on repeated tablet edits.
             if (currentBreakpoint === 'lg' && allLayouts.lg) {
                 onLayoutChange(allLayouts.lg as unknown as LayoutItem[]);
-                return;
-            }
-
-            if (currentBreakpoint === 'md') {
-                onLayoutChange(
-                    currentLayout.map((item) => ({
-                        ...item,
-                        x: item.x * 2,
-                        w: Math.min(item.w * 2, COLS.lg),
-                        minW: item.minW ? Math.min(item.minW * 2, COLS.lg) : undefined,
-                        maxW: item.maxW ? Math.min(item.maxW * 2, COLS.lg) : undefined,
-                    })) as unknown as LayoutItem[]
-                );
             }
         },
         [currentBreakpoint, onLayoutChange]
@@ -182,7 +219,10 @@ export function DashboardGrid({
     const gridSpacing = GRID_GAP[currentBreakpoint as keyof typeof GRID_GAP] ?? GRID_GAP.lg;
     const gridMargin: [number, number] = [gridSpacing, gridSpacing];
 
-    const canEdit = isEditing && (currentBreakpoint === 'lg' || currentBreakpoint === 'md');
+    // Editing is only allowed at `lg`, the single persisted layout. At md/sm/xs
+    // the layout is derived (view-only), so drag/resize is disabled there to
+    // avoid implying edits that won't be saved.
+    const canEdit = isEditing && currentBreakpoint === 'lg';
     const draggableHandle = canEdit ? '.widget-drag-handle' : undefined;
 
     // Nudge container-measuring embeds (Recharts/TradingView) to re-measure after

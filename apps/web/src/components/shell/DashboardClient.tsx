@@ -1044,6 +1044,9 @@ function DashboardContent() {
         return activeTab.widgets.map(w => ({
             ...w.layout,
             i: w.id,
+            // Carry the widget type so DashboardGrid's responsive derivation can
+            // resolve each widget's size contract (min/preferred W/H, orientation).
+            type: w.type,
             minW: w.layout.minW ?? 4,
             minH: w.layout.minH ?? 3,
         }));
@@ -1299,7 +1302,6 @@ function DashboardContent() {
                                     onLayoutChange={handleLayoutChange}
                                     isEditing={isEditing}
                                     rowHeight={40}
-                                    cols={24}
                                 >
                                     {activeTab.widgets.map((widget) => {
                                         const widgetType = widget.type;

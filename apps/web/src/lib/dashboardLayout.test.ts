@@ -2,6 +2,8 @@ import {
   WIDGET_LAYOUT_BEHAVIORS,
   getWidgetDefaultLayout,
   getWidgetSizeContract,
+  autoFitGridItems,
+  type CompactableLayoutItem,
 } from '@/lib/dashboardLayout';
 import { widgetDefinitions } from '@/data/widgetDefinitions';
 import { tradingViewWidgetDefaultLayouts } from '@/lib/tradingViewWidgets';
@@ -61,5 +63,45 @@ describe('widget layout contract', () => {
       }
     }
     expect(invalid).toEqual([]);
+  });
+});
+
+/**
+ * Responsive derivation guarantees. DashboardGrid derives md/sm/xs from the
+ * persisted lg layout via `autoFitGridItems(items, cols)`. These lock in the
+ * properties that derivation relies on: width clamping to the target column
+ * count and identity preservation.
+ */
+describe('autoFitGridItems responsive derivation', () => {
+  const baseItems: Array<CompactableLayoutItem & { i: string }> = [
+    { i: 'a', type: 'price_chart', layout: { x: 0, y: 0, w: 16, h: 10 } },
+    { i: 'b', type: 'watchlist', layout: { x: 16, y: 0, w: 4, h: 5 } },
+    { i: 'c', type: 'news_feed', layout: { x: 0, y: 10, w: 10, h: 7 } },
+  ];
+
+  for (const cols of [12, 6, 2]) {
+    it(`clamps every item width to <= ${cols} columns`, () => {
+      const out = autoFitGridItems(baseItems, cols);
+      for (const item of out) {
+        expect(item.layout.w).toBeLessThanOrEqual(cols);
+        expect(item.layout.x + item.layout.w).toBeLessThanOrEqual(cols);
+      }
+    });
+  }
+
+  it('preserves item identity and count across derivation', () => {
+    const out = autoFitGridItems(baseItems, 6) as Array<CompactableLayoutItem & { i?: string }>;
+    expect(out).toHaveLength(baseItems.length);
+    expect(out.map((i) => i.i).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('keeps coordinates finite and non-negative', () => {
+    const out = autoFitGridItems(baseItems, 2);
+    for (const item of out) {
+      expect(Number.isFinite(item.layout.x)).toBe(true);
+      expect(Number.isFinite(item.layout.y)).toBe(true);
+      expect(item.layout.x).toBeGreaterThanOrEqual(0);
+      expect(item.layout.y).toBeGreaterThanOrEqual(0);
+    }
   });
 });
