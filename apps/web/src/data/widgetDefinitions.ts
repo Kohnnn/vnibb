@@ -863,6 +863,16 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['world news', 'sources', 'rss', 'feeds', 'registry', 'audit', 'source transparency']
     },
     {
+        type: 'source_transparent_research_notebook',
+        name: 'Research Notebook',
+        description: 'Pin news, widget snapshots, and VniAgent answers into an exportable, source-preserving research note (browser-local)',
+        category: 'analysis',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 8, minW: 4, minH: 5 },
+        recommended: true,
+        searchKeywords: ['notebook', 'research', 'evidence', 'pin', 'sources', 'export', 'markdown', 'notes']
+    },
+    {
         type: 'similar_stocks',
         name: 'Similar Stocks',
         description: 'Find stocks similar to current symbol',

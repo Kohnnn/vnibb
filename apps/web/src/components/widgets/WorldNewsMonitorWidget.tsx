@@ -2,13 +2,14 @@
 
 import { memo, useEffect, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Clock, ExternalLink, Globe2, Newspaper, Radio, Rss, X } from 'lucide-react';
+import { Clock, ExternalLink, Globe2, Newspaper, Radio, Rss, X, BookmarkPlus, Check } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { formatTimestamp } from '@/lib/format';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
+import { addNotebookItem } from '@/lib/researchNotebook';
 import {
   getWorldNews,
   type WorldNewsArticle,
@@ -136,8 +137,35 @@ function WorldNewsMonitorWidgetComponent({
   const [customNameInput, setCustomNameInput] = useState(() => getInitialCustomFeed(config)?.name || '');
   const [customError, setCustomError] = useState<string | null>(null);
   const [customNotice, setCustomNotice] = useState<string | null>(null);
+  const [pinnedIds, setPinnedIds] = useState<Record<string, boolean>>({});
   const limit = getNumberConfig(config, 'limit', 50);
   const freshnessHours = getNumberConfig(config, 'freshnessHours', 72);
+
+  const handlePinArticle = (article: WorldNewsArticle) => {
+    addNotebookItem({
+      kind: 'news',
+      title: article.title,
+      body: article.summary || undefined,
+      tags: [article.region, article.category].filter(Boolean),
+      sources: [
+        {
+          label: article.source || article.source_domain,
+          sourceName: article.source,
+          url: article.url,
+          sourceUrl: article.source_url,
+          feedUrl: article.feed_url,
+          publishedAt: article.published_at || undefined,
+        },
+      ],
+      provenance: {
+        sourceLabel: article.source || article.source_domain,
+        apiGroup: '/news',
+        endpoint: '/news/world',
+        updatedAt: article.published_at || undefined,
+      },
+    });
+    setPinnedIds((prev) => ({ ...prev, [article.id]: true }));
+  };
 
   useEffect(() => {
     setRegion(getInitialRegion(config));
@@ -391,6 +419,16 @@ function WorldNewsMonitorWidgetComponent({
                       <Rss className="h-2.5 w-2.5" />
                       Feed
                     </a>
+                    <button
+                      type="button"
+                      onClick={() => handlePinArticle(article)}
+                      disabled={pinnedIds[article.id]}
+                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase transition-colors hover:border-amber-400/50 hover:text-amber-300 disabled:cursor-default disabled:border-emerald-400/40 disabled:text-emerald-300"
+                      title={pinnedIds[article.id] ? 'Pinned to research notebook' : 'Pin to research notebook'}
+                    >
+                      {pinnedIds[article.id] ? <Check className="h-2.5 w-2.5" /> : <BookmarkPlus className="h-2.5 w-2.5" />}
+                      {pinnedIds[article.id] ? 'Pinned' : 'Pin'}
+                    </button>
                   </div>
                 </article>
               ))}

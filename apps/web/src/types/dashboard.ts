@@ -96,6 +96,7 @@ export type WidgetType =
     | 'world_news_map'
     | 'world_news_live_stream'
     | 'world_news_sources'
+    | 'source_transparent_research_notebook'
     | 'sector_performance'
     | 'market_movers_sectors'
     | 'sector_rotation_radar'
