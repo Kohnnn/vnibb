@@ -79,6 +79,9 @@ import { WorldNewsSourcesWidget } from './WorldNewsSourcesWidget';
 import { ResearchNotebookWidget } from './ResearchNotebookWidget';
 import { MarketLabWidget } from './MarketLabWidget';
 import { ValuationLabWidget } from './ValuationLabWidget';
+import { PositioningDashboardWidget } from './PositioningDashboardWidget';
+import { MarketStructureWidget } from './MarketStructureWidget';
+import { SignalRobustnessLabWidget } from './SignalRobustnessLabWidget';
 import { SectorBreakdownWidget } from './SectorBreakdownWidget';
 import { MarketMoversSectorsWidget } from './MarketMoversSectorsWidget';
 import { NewsFlowWidget } from './NewsFlowWidget';
@@ -360,6 +363,9 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
     source_transparent_research_notebook: ResearchNotebookWidget as ComponentType<WidgetProps>,
     market_lab: MarketLabWidget as ComponentType<WidgetProps>,
     valuation_lab: ValuationLabWidget as ComponentType<WidgetProps>,
+    positioning_dashboard: PositioningDashboardWidget as ComponentType<WidgetProps>,
+    market_structure: MarketStructureWidget as ComponentType<WidgetProps>,
+    signal_robustness_lab: SignalRobustnessLabWidget as ComponentType<WidgetProps>,
     news_flow: NewsFlowWidget as ComponentType<WidgetProps>,
     news_corporate_actions: NewsCorporateActionsWidget as ComponentType<WidgetProps>,
     dividend_ladder: DividendLadderWidget as ComponentType<WidgetProps>,
@@ -566,6 +572,9 @@ export const widgetNames: Record<WidgetType, string> = {
     source_transparent_research_notebook: 'Research Notebook',
     market_lab: 'Market Lab',
     valuation_lab: 'Valuation Lab',
+    positioning_dashboard: 'Positioning Dashboard',
+    market_structure: 'Market Structure',
+    signal_robustness_lab: 'Signal Robustness Lab',
     sector_breakdown: 'Sector Breakdown',
     market_movers_sectors: 'Market Movers & Sectors',
     comparison_analysis: 'Comparison Analysis',
@@ -693,6 +702,9 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     source_transparent_research_notebook: 'Pin news, widget snapshots, and VniAgent answers into an exportable, source-preserving research note (browser-local)',
     market_lab: 'Descriptive return, risk, tail, and seasonality statistics derived locally from adjusted EOD history',
     valuation_lab: 'Transparent DCF and reverse-DCF with editable assumptions seeded from VNIBB TTM data',
+    positioning_dashboard: 'Foreign / proprietary / domestic net-flow positioning across a VN universe (5D/20D)',
+    market_structure: 'Volume-by-price profile with POC/VAH/VAL, key high-volume levels, and foreign-flow tilt',
+    signal_robustness_lab: 'Cross-sectional descriptive test of a signal threshold across the screener universe with a passing-vs-universe return edge read',
     sector_breakdown: 'Market cap by industry',
     market_movers_sectors: 'Sector performance with top movers',
     comparison_analysis: 'Side-by-side fundamentals',

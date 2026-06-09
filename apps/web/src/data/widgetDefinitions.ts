@@ -893,6 +893,36 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['valuation', 'dcf', 'reverse dcf', 'intrinsic value', 'fair value', 'discount rate', 'wacc', 'fcf', 'fundamental']
     },
     {
+        type: 'positioning_dashboard',
+        name: 'Positioning Dashboard',
+        description: 'Foreign / proprietary / domestic net-flow positioning across a VN universe (5D/20D)',
+        category: 'ownership',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 8, minW: 5, minH: 5 },
+        recommended: true,
+        searchKeywords: ['positioning', 'foreign', 'proprietary', 'domestic', 'net flow', 'participants', 'vn30', 'flow']
+    },
+    {
+        type: 'market_structure',
+        name: 'Market Structure',
+        description: 'Volume-by-price profile with POC/VAH/VAL, key high-volume levels, and foreign-flow tilt',
+        category: 'charting',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 9, minW: 4, minH: 6 },
+        recommended: true,
+        searchKeywords: ['market structure', 'volume profile', 'poc', 'vah', 'val', 'value area', 'key levels', 'support', 'resistance']
+    },
+    {
+        type: 'signal_robustness_lab',
+        name: 'Signal Robustness Lab',
+        description: 'Cross-sectional descriptive test of a signal threshold across the screener universe with a passing-vs-universe return edge read',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 7, h: 9, minW: 5, minH: 6 },
+        recommended: true,
+        searchKeywords: ['signal', 'robustness', 'edge', 'rs rating', 'screen', 'cross-sectional', 'hit rate', 'backtest', 'validation']
+    },
+    {
         type: 'similar_stocks',
         name: 'Similar Stocks',
         description: 'Find stocks similar to current symbol',
