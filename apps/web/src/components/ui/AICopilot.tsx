@@ -57,6 +57,14 @@ import {
     removeRecentVniAgentSession,
     type VniAgentSessionArchive,
 } from '@/lib/vniagentSessions';
+import {
+    recordVniAgentRun,
+    readVniAgentRuns,
+    removeVniAgentRun,
+    runToMarkdown,
+    type VniAgentRunEntry,
+    type VniAgentRunSource,
+} from '@/lib/vniagentRunLedger';
 
 interface Message {
     id: string;
@@ -452,7 +460,8 @@ export function AICopilot({
     const [runtimeConfig, setRuntimeConfig] = useState<{ provider: string; model: string } | null>(null);
     const [isComposerToolsOpen, setIsComposerToolsOpen] = useState(false);
     const [recentSessions, setRecentSessions] = useState<VniAgentSessionArchive[]>([]);
-
+    const [runLedger, setRunLedger] = useState<VniAgentRunEntry[]>([]);
+    const [isRunLedgerOpen, setIsRunLedgerOpen] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -518,6 +527,7 @@ export function AICopilot({
     useEffect(() => {
         if (!isOpen) return;
         setRecentSessions(readRecentVniAgentSessions());
+        setRunLedger(readVniAgentRuns());
     }, [isOpen, sessionKey]);
 
     useEffect(() => {
@@ -666,6 +676,10 @@ export function AICopilot({
         // reasoning once `onReasoning` events start firing.
         setCurrentStatus('Thinking…');
 
+        // Run-ledger timing: capture start so we can record run latency even
+        // when the backend does not surface responseMeta.latencyMs.
+        const runStartedAt = Date.now();
+
         // 30-second SSE inactivity timer. If no chunk arrives in that
         // window, abort the read so the UI doesn't hang on a stalled
         // connection. Each chunk reset extends the deadline.
@@ -784,6 +798,45 @@ export function AICopilot({
                             }
                             : msg
                     ));
+
+                    // Run ledger: record this completed run locally so the answer
+                    // is auditable (prompt, sources/evidence, tools, metadata).
+                    try {
+                        const ledgerSources: VniAgentRunSource[] = (event.sources || []).map((source) => ({
+                            id: source.id,
+                            label: source.label,
+                            kind: source.kind,
+                            source: source.source,
+                            symbol: source.symbol,
+                            asOf: source.asOf,
+                        }));
+                        const toolsUsed = Array.from(
+                            new Set(
+                                (event.sources || [])
+                                    .map((source) => source.source)
+                                    .filter((value): value is string => Boolean(value)),
+                            ),
+                        );
+                        recordVniAgentRun({
+                            symbol: currentSymbol || 'UNKNOWN',
+                            widgetContext,
+                            activeTabName,
+                            prompt: messageText,
+                            answer: sanitizeCopilotContent(fullContent),
+                            status: timedOut ? 'timeout' : 'completed',
+                            provider: event.responseMeta?.provider || runtimeConfig?.provider || aiSettings.provider,
+                            model: event.responseMeta?.model || runtimeConfig?.model || aiSettings.model,
+                            latencyMs: event.responseMeta?.latencyMs ?? (Date.now() - runStartedAt),
+                            sources: ledgerSources,
+                            toolsUsed,
+                            sourceCount: event.sources?.length || 0,
+                            artifactCount: event.artifacts?.length || 0,
+                            actionCount: event.actions?.length || 0,
+                        });
+                        setRunLedger(readVniAgentRuns());
+                    } catch {
+                        // Ledger is best-effort; never block the answer on it.
+                    }
                 },
             });
 
@@ -803,6 +856,24 @@ export function AICopilot({
                     ? { ...msg, content: `**Error**: Failed to connect to VniAgent service. \n\n${String(error)}` }
                     : msg
             ));
+            try {
+                recordVniAgentRun({
+                    symbol: currentSymbol || 'UNKNOWN',
+                    widgetContext,
+                    activeTabName,
+                    prompt: messageText,
+                    answer: '',
+                    status: 'error',
+                    provider: aiSettings.provider,
+                    model: aiSettings.model,
+                    latencyMs: Date.now() - runStartedAt,
+                    sources: [],
+                    toolsUsed: [],
+                });
+                setRunLedger(readVniAgentRuns());
+            } catch {
+                // Ledger is best-effort.
+            }
         } finally {
             clearSseInactivityTimer();
             setIsLoading(false);
@@ -878,6 +949,29 @@ export function AICopilot({
 
     const handleDeleteRecentSession = (archiveId: string) => {
         setRecentSessions(removeRecentVniAgentSession(archiveId));
+    };
+
+    const handleExportRun = (run: VniAgentRunEntry) => {
+        captureAnalyticsEvent(ANALYTICS_EVENTS.copilotExported, {
+            symbol: run.symbol,
+            tab_name: run.activeTabName,
+            widget_context: run.widgetContext,
+            message_count: 1,
+        });
+        const markdown = runToMarkdown(run);
+        const blob = new Blob([markdown], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `vniagent-run-${run.symbol}-${run.createdAt.slice(0, 10)}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    const handleDeleteRun = (runId: string) => {
+        setRunLedger(removeVniAgentRun(runId));
     };
 
     const toggleDetails = (messageId: string) => {
@@ -1109,6 +1203,71 @@ export function AICopilot({
                             </div>
                         ))}
                     </div>
+                </div>
+            )}
+
+            {/* Run ledger: auditable local record of completed runs */}
+            {runLedger.length > 0 && (
+                <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/40 space-y-2">
+                    <button
+                        type="button"
+                        onClick={() => setIsRunLedgerOpen((prev) => !prev)}
+                        className="flex w-full items-center justify-between gap-2"
+                    >
+                        <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
+                            <Terminal size={12} /> Run Ledger
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+                            {runLedger.length} run{runLedger.length === 1 ? '' : 's'}
+                            {isRunLedgerOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                        </span>
+                    </button>
+                    {isRunLedgerOpen && (
+                        <div className="space-y-2">
+                            {runLedger.slice(0, 8).map((run) => (
+                                <div key={run.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="truncate text-[11px] font-semibold text-[var(--text-primary)]">{run.prompt}</div>
+                                            <div className="mt-1 truncate text-[10px] text-[var(--text-secondary)]">{run.answerPreview || '(no answer captured)'}</div>
+                                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                                                <span>{run.symbol}</span>
+                                                <span className={
+                                                    run.status === 'completed'
+                                                        ? 'text-emerald-400'
+                                                        : run.status === 'timeout'
+                                                            ? 'text-amber-400'
+                                                            : 'text-rose-400'
+                                                }>• {run.status}</span>
+                                                <span>• {run.sourceCount} src</span>
+                                                {run.toolsUsed.length > 0 ? <span>• {run.toolsUsed.length} tool{run.toolsUsed.length === 1 ? '' : 's'}</span> : null}
+                                                {run.latencyMs != null ? <span>• {Math.round(run.latencyMs)}ms</span> : null}
+                                                <span>• {formatSessionTimestamp(run.createdAt)}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleExportRun(run)}
+                                                className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                                                aria-label="Export run as markdown"
+                                            >
+                                                <Download size={11} />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDeleteRun(run.id)}
+                                                className="rounded-md border border-[var(--border-default)] px-2 py-1 text-[10px] text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+                                                aria-label="Delete run"
+                                            >
+                                                <Trash2 size={11} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
 
