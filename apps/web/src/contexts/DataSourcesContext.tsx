@@ -16,9 +16,9 @@ import { createDataSource } from '@/types/dataSource';
 const STORAGE_KEY = 'vnibb_data_sources';
 const VNSTOCK_SOURCE_KEY = 'vnibb_vnstock_source';
 
-export type VnstockSource = 'KBS' | 'VCI' | 'DNSE';
+export type VnstockSource = 'KBS' | 'VCI' | 'MSN' | 'FMP';
 
-const VNSTOCK_SOURCES: readonly VnstockSource[] = ['KBS', 'VCI', 'DNSE'];
+const VNSTOCK_SOURCES: readonly VnstockSource[] = ['KBS', 'VCI', 'MSN', 'FMP'];
 
 function normalizeVnstockSource(value: string | null): VnstockSource | null {
     if (!value) {
@@ -26,7 +26,9 @@ function normalizeVnstockSource(value: string | null): VnstockSource | null {
     }
 
     const upperValue = value.toUpperCase();
-    const migratedValue = upperValue === 'TCBS' ? 'VCI' : upperValue;
+    // vnstock 4.x dropped TCBS and DNSE; migrate legacy stored values to KBS so
+    // the UI never offers a source the backend now rejects with 422.
+    const migratedValue = upperValue === 'TCBS' || upperValue === 'DNSE' ? 'KBS' : upperValue;
     return VNSTOCK_SOURCES.includes(migratedValue as VnstockSource)
         ? (migratedValue as VnstockSource)
         : null;

@@ -5,7 +5,7 @@ import { X, Settings as SettingsIcon, Database, Bell, Palette, RotateCcw, Shield
 import { Switch } from '@/components/ui/switch';
 import { AICopilotTelemetryReview } from '@/components/admin/AICopilotTelemetryReview';
 import { DataSourcesHealthPanel } from '@/components/settings/DataSourcesHealthPanel';
-import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
+import { McpToolCatalogPanel } from '@/components/settings/McpToolCatalogPanel';import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -1139,7 +1139,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">vnstock Data Source</h4>
                   <div className="grid grid-cols-2 gap-2">
-                    {(['KBS', 'VCI', 'DNSE'] as VnstockSource[]).map(src => (
+                    {(['KBS', 'VCI', 'MSN', 'FMP'] as VnstockSource[]).map(src => (
                       <button
                         key={src}
                         onClick={() => {
@@ -1160,13 +1160,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-[var(--text-muted)] mt-2">KBS is the recommended default for vnstock 3.5.0+</p>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-2">KBS is the recommended default for vnstock 4.x (KBS, VCI, MSN, FMP)</p>
                 </div>
 
                 {/* Phase 2 of the QA evaluation remediation plan: per-source
                     freshness lets users see when each backend table last
                     synced and when the next refresh is scheduled. */}
                 <DataSourcesHealthPanel />
+
+                <McpToolCatalogPanel />
 
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                   <div className="text-sm font-bold text-[var(--text-primary)]">Display Units, FX overrides, and decimal precision moved</div>

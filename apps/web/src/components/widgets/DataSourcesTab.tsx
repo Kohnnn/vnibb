@@ -19,9 +19,10 @@ import {
 import type { VnstockSource } from '@/contexts/DataSourcesContext';
 
 const VNSTOCK_SOURCES: { value: VnstockSource; label: string; description: string }[] = [
-    { value: 'KBS', label: 'KBS (Korea)', description: '✨ Recommended - default in vnstock 3.5.0+' },
+    { value: 'KBS', label: 'KBS (Korea)', description: '✨ Recommended - default in vnstock 4.x' },
     { value: 'VCI', label: 'VCI (Vietcap)', description: 'Most stable, comprehensive coverage' },
-    { value: 'DNSE', label: 'DNSE', description: 'Good historical data, minute-level resolution' },
+    { value: 'MSN', label: 'MSN', description: 'Microsoft Money source (vnstock 4.x)' },
+    { value: 'FMP', label: 'FMP', description: 'Financial Modeling Prep source (vnstock 4.x)' },
 ];
 
 export function DataSourcesTab() {

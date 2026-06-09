@@ -992,7 +992,7 @@ export interface ScreenerFilterParams {
     exchange?: string;
     industry?: string;
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'DNSE';
+    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
 
     // Dynamic Filters
     filters?: string; // JSON FilterGroup
@@ -1663,7 +1663,7 @@ export async function getSectorsCatalog(options?: {
 export async function getSectorTopMovers(options?: {
     type?: 'gainers' | 'losers';
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'DNSE';
+    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
 
 }): Promise<SectorTopMoversResponse> {
     const params = {
@@ -1704,7 +1704,7 @@ export interface SectorPerformanceResponse {
 }
 
 export async function getSectorPerformance(_options?: {
-    source?: 'KBS' | 'VCI' | 'DNSE';
+    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
 
 }): Promise<SectorPerformanceResponse> {
     return fetchAPI<SectorPerformanceResponse>('/market/sector-performance');
@@ -2124,7 +2124,7 @@ export async function getQuantMetrics(
     options?: {
         period?: QuantPeriod
         metrics?: QuantMetric[]
-        source?: 'KBS' | 'VCI' | 'DNSE'
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
         adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<QuantResponse> {
@@ -2144,7 +2144,7 @@ export async function getSeasonalityMatrix(
     options?: {
         granularity?: SeasonalityGranularity
         period?: QuantPeriod
-        source?: 'KBS' | 'VCI' | 'DNSE'
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
         adjustmentMode?: 'raw' | 'adjusted'
     }
 ): Promise<SeasonalityMatrixResponse> {
@@ -2321,7 +2321,7 @@ export async function getGammaExposure(
     symbol: string,
     options?: {
         period?: QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'DNSE';
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
         adjustmentMode?: 'raw' | 'adjusted';
     }
 ): Promise<GammaExposureResponse> {
@@ -2339,7 +2339,7 @@ export async function getMomentumProfile(
     symbol: string,
     options?: {
         period?: QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'DNSE';
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
         adjustmentMode?: 'raw' | 'adjusted';
     }
 ): Promise<MomentumProfileResponse> {

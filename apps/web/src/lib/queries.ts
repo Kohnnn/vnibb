@@ -527,7 +527,7 @@ export function useScreenerData(options?: {
     exchange?: string;
     industry?: string;
     limit?: number;
-    source?: 'KBS' | 'VCI' | 'DNSE';
+    source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
     // Dynamic filters (new)
     filters?: string; // JSON encoded FilterGroup
     sort?: string;    // Multi-sort string: "field:order,field2:order2"
@@ -1323,7 +1323,7 @@ export function useQuantMetrics(
     options?: {
         period?: api.QuantPeriod;
         metrics?: api.QuantMetric[];
-        source?: 'KBS' | 'VCI' | 'DNSE';
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1347,7 +1347,7 @@ export function useSeasonalityMatrix(
     options?: {
         granularity?: api.SeasonalityGranularity;
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'DNSE';
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1371,7 +1371,7 @@ export function useGammaExposure(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'DNSE';
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
@@ -1394,7 +1394,7 @@ export function useMomentumProfile(
     symbol: string,
     options?: {
         period?: api.QuantPeriod;
-        source?: 'KBS' | 'VCI' | 'DNSE';
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
         adjustmentMode?: 'raw' | 'adjusted';
         enabled?: boolean;
     }
