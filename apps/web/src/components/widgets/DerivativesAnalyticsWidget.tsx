@@ -132,13 +132,13 @@ export function DerivativesAnalyticsWidget({ id, onRemove }: DerivativesAnalytic
               <MetricCard label="Avg Vol 20D" value={formatCompact(front?.avgVolume20d)} tone="text-[var(--text-primary)]" />
             </div>
 
-            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+            <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
               <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
                 <TrendingUp size={12} />
                 Short Curve
               </div>
-              <ChartMountGuard className="min-h-[220px]" minHeight={220}>
-                <ResponsiveContainer width="100%" height={240}>
+              <ChartMountGuard className="min-h-[200px] flex-1" minHeight={200}>
+                <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={latestCurve} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" />
                     <XAxis dataKey="tenor" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(value) => `${value}d`} />

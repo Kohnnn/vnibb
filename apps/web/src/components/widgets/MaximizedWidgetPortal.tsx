@@ -97,8 +97,11 @@ export function MaximizedWidgetPortal({
                         <Minimize2 size={16} />
                     </button>
                 </div>
-                {/* Content - flex-1 ensures it fills remaining space */}
-                <div className="flex-1 overflow-auto">
+                {/* Content - flex-1 ensures it fills remaining space. Padding
+                    matches the grid widget content host (WidgetWrapper) so
+                    maximized widgets keep a consistent inset now that
+                    WidgetContainer no longer self-pads. */}
+                <div className="flex-1 overflow-auto p-2 sm:p-2.5">
                     {children}
                 </div>
             </div>

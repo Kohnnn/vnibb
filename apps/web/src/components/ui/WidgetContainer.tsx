@@ -54,7 +54,6 @@ export function WidgetContainer({
   headerActions,
   showSettings = false,
   onSettingsClick,
-  noPadding = false,
   exportData,
   exportFilename,
   widgetId,
@@ -93,8 +92,12 @@ export function WidgetContainer({
         />
       )}
       <div className={cn(
-        "flex-1 overflow-auto scrollbar-hide",
-        !noPadding && "p-2.5",
+        "flex-1 overflow-auto scrollbar-hide min-h-0",
+        // NOTE: outer padding is supplied by WidgetWrapper's content host
+        // (`p-2 sm:p-2.5`), which wraps every widget. WidgetContainer therefore
+        // does NOT add its own default padding — doing so double-padded the body.
+        // `noPadding` is kept for backwards-compat but is now a no-op for the
+        // default case; pass `bodyClassName` for any widget-specific insets.
         bodyClassName
       )}>
         {children}

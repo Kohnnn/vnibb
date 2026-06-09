@@ -24,7 +24,7 @@ export function WidgetSkeleton({ lines = 3, variant = 'default' }: WidgetSkeleto
     }
 
     return (
-        <div className="animate-pulse space-y-3 p-4">
+        <div className="animate-pulse space-y-3 p-4 h-full">
             {Array.from({ length: lines }).map((_, i) => (
                 <div key={i} className="space-y-2">
                     <div
@@ -47,7 +47,7 @@ export function WidgetSkeleton({ lines = 3, variant = 'default' }: WidgetSkeleto
 export function TableSkeleton({ rows = 5 }: { rows?: number }) {
     return (
         <div
-            className="animate-pulse p-4 space-y-2"
+            className="animate-pulse p-4 space-y-2 h-full"
             role="status"
             aria-label="Loading data..."
         >
@@ -102,7 +102,7 @@ export function ChartSkeleton() {
  */
 export function CompactSkeleton() {
     return (
-        <div className="animate-pulse p-3 space-y-2">
+        <div className="animate-pulse p-3 space-y-2 h-full">
             <div className="h-2.5 w-3/4 rounded bg-[var(--bg-tertiary)]" />
             <div className="h-2 w-1/2 rounded bg-[var(--bg-secondary)]" />
         </div>

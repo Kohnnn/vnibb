@@ -103,7 +103,7 @@ export function DerivativesPriceHistoryWidget({
           ) : chartData.length === 0 ? (
             <WidgetEmpty message="No derivatives price history available." icon={<LineChart size={18} />} />
           ) : (
-            <div className="space-y-3">
+            <div className="flex h-full flex-col gap-3">
               <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
                 <MiniMetric label="Latest close" value={formatNumber(latest?.close ?? null, { decimals: 2 })} />
                 <MiniMetric label="Latest volume" value={formatNumber(latest?.volume ?? null, { decimals: 0 })} />
@@ -111,13 +111,13 @@ export function DerivativesPriceHistoryWidget({
                 <MiniMetric label="Range" value={`${chartData[0]?.time || '-'} to ${chartData[chartData.length - 1]?.time || '-'}`} />
               </div>
 
-              <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+              <div className="flex min-h-0 flex-1 flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
                 <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
                   <TrendingUp size={12} />
                   Close price
                 </div>
-                <ChartMountGuard className="min-h-[220px]" minHeight={220}>
-                  <ResponsiveContainer width="100%" height={260}>
+                <ChartMountGuard className="min-h-[200px] flex-1" minHeight={200}>
+                  <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.12)" />
                       <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} interval={chartData.length > 12 ? Math.max(1, Math.ceil(chartData.length / 8)) - 1 : 0} minTickGap={12} />
