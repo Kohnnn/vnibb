@@ -47,8 +47,8 @@ class EquityHistoricalQueryParams(BaseModel):
     )
     source: str = Field(
         default="KBS",
-        pattern=r"^(KBS|VCI|DNSE)$",
-        description="Data source: KBS (default), VCI, or DNSE",
+        pattern=r"^(KBS|VCI|MSN|FMP)$",
+        description="Data source: KBS (default), VCI, MSN, or FMP (vnstock 4.x)",
     )
 
     @field_validator("symbol")

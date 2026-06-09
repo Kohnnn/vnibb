@@ -353,7 +353,7 @@ async def sync_prices(
     ),
     source: str = Query(
         default=settings.vnstock_source,
-        pattern=r"^(KBS|VCI|DNSE)$",
+        pattern=r"^(KBS|VCI|MSN|FMP)$",
         description="vnstock source to use for Appwrite-direct historical backfills",
     ),
     appwrite_direct: bool = Query(

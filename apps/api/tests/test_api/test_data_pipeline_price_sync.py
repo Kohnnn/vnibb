@@ -64,6 +64,14 @@ async def test_fetch_quote_history_frame_bypasses_vnstock_retry_wrapper(monkeypa
     fake_module.Vnstock = FakeVnstock
     monkeypatch.setitem(sys.modules, "vnstock", fake_module)
 
+    # Replicate the real deployed runtime: `vnstock_data` is importable but has
+    # no `Vnstock` attribute, so import_vnstock_symbol() falls back to the free
+    # `vnstock` package. The global conftest mock for `vnstock_data` is a bare
+    # MagicMock whose getattr auto-vivifies a `.Vnstock` child, which would
+    # otherwise hide the fallback path this test is asserting.
+    fake_vnstock_data = types.ModuleType("vnstock_data")
+    monkeypatch.setitem(sys.modules, "vnstock_data", fake_vnstock_data)
+
     pipeline = DataPipeline()
     result = await pipeline._fetch_quote_history_frame(
         symbol="VNM",

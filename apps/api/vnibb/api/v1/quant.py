@@ -1977,7 +1977,7 @@ def _grade_from_quality_score(score: float | None) -> str:
 async def get_gamma_exposure_proxy(
     symbol: str,
     period: str = Query(default="3Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2063,7 +2063,7 @@ async def get_gamma_exposure_proxy(
 async def get_momentum_profile(
     symbol: str,
     period: str = Query(default="3Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2744,7 +2744,7 @@ async def get_relative_rotation(
 async def get_volume_flow_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2762,7 +2762,7 @@ async def get_volume_flow_metric(
 async def get_seasonality_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2780,7 +2780,7 @@ async def get_seasonality_metric(
 async def get_rsi_seasonal_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2798,7 +2798,7 @@ async def get_rsi_seasonal_metric(
 async def get_bollinger_squeeze_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2816,7 +2816,7 @@ async def get_bollinger_squeeze_metric(
 async def get_atr_regime_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2834,7 +2834,7 @@ async def get_atr_regime_metric(
 async def get_sortino_monthly_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2852,7 +2852,7 @@ async def get_sortino_monthly_metric(
 async def get_macd_crossover_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2870,7 +2870,7 @@ async def get_macd_crossover_metric(
 async def get_parkinson_volatility_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2888,7 +2888,7 @@ async def get_parkinson_volatility_metric(
 async def get_ema_respect_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2906,7 +2906,7 @@ async def get_ema_respect_metric(
 async def get_drawdown_recovery_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2924,7 +2924,7 @@ async def get_drawdown_recovery_metric(
 async def get_benchmark_risk_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2942,7 +2942,7 @@ async def get_benchmark_risk_metric(
 async def get_gap_analysis_metric(
     symbol: str,
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2969,7 +2969,7 @@ async def get_quant_metrics(
         ),
     ),
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3092,7 +3092,7 @@ async def get_seasonality_matrix(
     symbol: str,
     granularity: str = Query(default="monthly"),
     period: str = Query(default="5Y"),
-    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):

@@ -27,9 +27,9 @@ _executor = ThreadPoolExecutor(max_workers=10)
 def _build_source_candidates(preferred_source: str | None) -> list[str]:
     preferred = (preferred_source or "").strip().upper()
     if preferred == "KBS":
-        ordered = ("VCI", "DNSE", "KBS")
+        ordered = ("VCI", "MSN", "KBS")
     else:
-        ordered = (preferred, "VCI", "DNSE", "KBS")
+        ordered = (preferred, "VCI", "MSN", "KBS")
 
     candidates: list[str] = []
     for source in ordered:

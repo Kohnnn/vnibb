@@ -4400,7 +4400,7 @@ async def get_historical_prices(
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),
     end_date: date = Query(default_factory=date.today),
     interval: str = Query(default="1D", pattern=r"^(1m|5m|15m|30m|1H|1D|1W|1M)$"),
-    source: str = Query(default="VCI", pattern=r"^(KBS|VCI|DNSE)$"),
+    source: str = Query(default="VCI", pattern=r"^(KBS|VCI|MSN|FMP)$"),
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
