@@ -873,6 +873,26 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['notebook', 'research', 'evidence', 'pin', 'sources', 'export', 'markdown', 'notes']
     },
     {
+        type: 'market_lab',
+        name: 'Market Lab',
+        description: 'Descriptive return, risk, tail, and seasonality statistics derived locally from adjusted EOD history',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 },
+        recommended: true,
+        searchKeywords: ['market lab', 'statistics', 'volatility', 'sharpe', 'sortino', 'var', 'skew', 'kurtosis', 'seasonality', 'distribution', 'risk']
+    },
+    {
+        type: 'valuation_lab',
+        name: 'Valuation Lab',
+        description: 'Transparent DCF and reverse-DCF with editable assumptions seeded from VNIBB TTM data',
+        category: 'estimates',
+        defaultConfig: {},
+        defaultLayout: { w: 5, h: 8, minW: 4, minH: 6 },
+        recommended: true,
+        searchKeywords: ['valuation', 'dcf', 'reverse dcf', 'intrinsic value', 'fair value', 'discount rate', 'wacc', 'fcf', 'fundamental']
+    },
+    {
         type: 'similar_stocks',
         name: 'Similar Stocks',
         description: 'Find stocks similar to current symbol',

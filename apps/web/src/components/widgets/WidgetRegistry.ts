@@ -77,6 +77,8 @@ import { WorldNewsMapWidget } from './WorldNewsMapWidget';
 import { WorldNewsMonitorWidget } from './WorldNewsMonitorWidget';
 import { WorldNewsSourcesWidget } from './WorldNewsSourcesWidget';
 import { ResearchNotebookWidget } from './ResearchNotebookWidget';
+import { MarketLabWidget } from './MarketLabWidget';
+import { ValuationLabWidget } from './ValuationLabWidget';
 import { SectorBreakdownWidget } from './SectorBreakdownWidget';
 import { MarketMoversSectorsWidget } from './MarketMoversSectorsWidget';
 import { NewsFlowWidget } from './NewsFlowWidget';
@@ -356,6 +358,8 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
     world_news_live_stream: WorldNewsLiveStreamWidget as ComponentType<WidgetProps>,
     world_news_sources: WorldNewsSourcesWidget as ComponentType<WidgetProps>,
     source_transparent_research_notebook: ResearchNotebookWidget as ComponentType<WidgetProps>,
+    market_lab: MarketLabWidget as ComponentType<WidgetProps>,
+    valuation_lab: ValuationLabWidget as ComponentType<WidgetProps>,
     news_flow: NewsFlowWidget as ComponentType<WidgetProps>,
     news_corporate_actions: NewsCorporateActionsWidget as ComponentType<WidgetProps>,
     dividend_ladder: DividendLadderWidget as ComponentType<WidgetProps>,
@@ -560,6 +564,8 @@ export const widgetNames: Record<WidgetType, string> = {
     world_news_live_stream: 'World News Live Stream',
     world_news_sources: 'World News Sources',
     source_transparent_research_notebook: 'Research Notebook',
+    market_lab: 'Market Lab',
+    valuation_lab: 'Valuation Lab',
     sector_breakdown: 'Sector Breakdown',
     market_movers_sectors: 'Market Movers & Sectors',
     comparison_analysis: 'Comparison Analysis',
@@ -685,6 +691,8 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     world_news_live_stream: 'Polling headline stream for fresh global and Vietnam market-risk signals',
     world_news_sources: 'Auditable source registry with homepage, feed, geography, tier, and filter metadata',
     source_transparent_research_notebook: 'Pin news, widget snapshots, and VniAgent answers into an exportable, source-preserving research note (browser-local)',
+    market_lab: 'Descriptive return, risk, tail, and seasonality statistics derived locally from adjusted EOD history',
+    valuation_lab: 'Transparent DCF and reverse-DCF with editable assumptions seeded from VNIBB TTM data',
     sector_breakdown: 'Market cap by industry',
     market_movers_sectors: 'Sector performance with top movers',
     comparison_analysis: 'Side-by-side fundamentals',
