@@ -40,16 +40,17 @@
   --color-error: #EF4444;
 
   /* ---- Semantic up/down (financial direction) ---- */
-  /* Single source for gain/loss coloring. Consume via lib/priceColor.ts or
-     the var(--color-positive)/var(--color-negative) tokens. Overridden by the
-     colorblind scheme in globals.css. */
-  --color-positive: #22c55e;
-  --color-positive-muted: #4ade80;
-  --color-positive-bg: rgba(34, 197, 94, 0.12);
-  --color-negative: #ef4444;
-  --color-negative-muted: #f87171;
-  --color-negative-bg: rgba(239, 68, 68, 0.12);
-  --color-neutral: #9ca3af;
+  /* Single source for gain/loss coloring. Consume via lib/priceColor.ts or the
+     var(--color-positive)/var(--color-negative) tokens. Brightened for strong
+     visibility against the dark background; light-theme overrides live in
+     globals.css. */
+  --color-positive: #2ee06a;
+  --color-positive-muted: #6ee79a;
+  --color-positive-bg: rgba(46, 224, 106, 0.16);
+  --color-negative: #ff5a5a;
+  --color-negative-muted: #ff8a8a;
+  --color-negative-bg: rgba(255, 90, 90, 0.16);
+  --color-neutral: #aab4c2;
 
   /* ---- Typography ---- */
   /* Real loaded fonts are Geist (next/font local). The geist vars are attached

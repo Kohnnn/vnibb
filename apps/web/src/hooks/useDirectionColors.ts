@@ -5,18 +5,16 @@
  *
  * Recharts `fill`/`stroke` props and canvas contexts can't use CSS `var(...)`,
  * so charts historically hardcoded `#22c55e` / `#ef4444` for up/down. That
- * bypassed the colorblind + light-theme token system entirely.
+ * bypassed the semantic + light-theme token system entirely.
  *
- * This hook reads the *computed* semantic CSS variables off `<html>` (which the
- * UiPreferences color-mode and ThemeContext already drive), so chart fills track
- * the same blue/orange colorblind remap and light/dark overrides as the rest of
- * the UI — without duplicating hex values in JS.
+ * This hook reads the *computed* semantic CSS variables off `<html>` (driven by
+ * ThemeContext), so chart fills track the same up/down tokens and light/dark
+ * overrides as the rest of the UI — without duplicating hex values in JS.
  *
  * Returns sensible static fallbacks during SSR / before mount.
  */
 
 import { useEffect, useState } from 'react';
-import { useUiPreferences } from '@/contexts/UiPreferencesContext';
 import { useTheme } from '@/contexts/ThemeContext';
 
 export interface DirectionColors {
@@ -31,10 +29,10 @@ export interface DirectionColors {
 
 // Dark-theme standard defaults (match design-tokens.css) for SSR / pre-hydration.
 const FALLBACK: Omit<DirectionColors, 'forValue'> = {
-  positive: '#22c55e',
-  negative: '#ef4444',
-  positiveMuted: '#4ade80',
-  negativeMuted: '#f87171',
+  positive: '#2ee06a',
+  negative: '#ff5a5a',
+  positiveMuted: '#6ee79a',
+  negativeMuted: '#ff8a8a',
   neutral: '#9ca3af',
 };
 
@@ -44,8 +42,7 @@ function readVar(styles: CSSStyleDeclaration, name: string, fallback: string): s
 }
 
 export function useDirectionColors(): DirectionColors {
-  // Re-resolve whenever the color mode or theme changes.
-  const { colorMode } = useUiPreferences();
+  // Re-resolve whenever the theme changes.
   const { resolvedTheme } = useTheme();
   const [colors, setColors] = useState<Omit<DirectionColors, 'forValue'>>(FALLBACK);
 
@@ -59,7 +56,7 @@ export function useDirectionColors(): DirectionColors {
       negativeMuted: readVar(styles, '--color-negative-muted', FALLBACK.negativeMuted),
       neutral: readVar(styles, '--color-neutral', FALLBACK.neutral),
     });
-  }, [colorMode, resolvedTheme]);
+  }, [resolvedTheme]);
 
   return {
     ...colors,

@@ -5,7 +5,7 @@ import { Responsive } from 'react-grid-layout';
 import type { Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import { DASHBOARD_GRID_BREAKPOINTS } from '@/lib/responsive';
-import { autoFitGridItems } from '@/lib/dashboardLayout';
+import { autoFitGridItems, compactGridItems } from '@/lib/dashboardLayout';
 import { useResizeNudge } from '@/hooks/useResizeNudge';
 // Note: react-resizable styles are bundled with react-grid-layout, no separate import needed
 
@@ -232,17 +232,52 @@ export function DashboardGrid({
     const effectiveLayouts = useMemo(() => {
         if (canEdit) return responsiveLayouts;
 
-        const toStatic = (items?: LayoutItem[]) =>
-            (items || []).map((item) => ({
-                ...item,
-                static: true,
-            }));
+        // For the static (non-editing) view, vertically compact each breakpoint
+        // so any authored vertical gaps collapse and widgets fit together with
+        // no blank rows. Edit mode is left untouched (RGL handles compaction
+        // there) so drag/resize keeps its familiar reflow.
+        const compactStatic = (items: LayoutItem[] | undefined, cols: number): LayoutItem[] => {
+            const packed = compactGridItems(
+                (items || []).map((item) => ({
+                    type: item.type,
+                    __i: item.i,
+                    __maxW: item.maxW,
+                    __maxH: item.maxH,
+                    layout: {
+                        x: item.x,
+                        y: item.y,
+                        w: item.w,
+                        h: item.h,
+                        minW: item.minW,
+                        minH: item.minH,
+                        maxW: item.maxW,
+                        maxH: item.maxH,
+                    },
+                })),
+                cols,
+            );
+            return packed.map((p) => {
+                const wrapper = p as typeof p & { __i: string; __maxW?: number; __maxH?: number };
+                return {
+                    i: wrapper.__i,
+                    x: p.layout.x,
+                    y: p.layout.y,
+                    w: p.layout.w,
+                    h: p.layout.h,
+                    minW: p.layout.minW,
+                    minH: p.layout.minH,
+                    maxW: wrapper.__maxW,
+                    maxH: wrapper.__maxH,
+                    static: true,
+                };
+            });
+        };
 
         return {
-            lg: toStatic(responsiveLayouts.lg),
-            md: toStatic(responsiveLayouts.md),
-            sm: toStatic(responsiveLayouts.sm),
-            xs: toStatic(responsiveLayouts.xs),
+            lg: compactStatic(responsiveLayouts.lg, COLS.lg),
+            md: compactStatic(responsiveLayouts.md, COLS.md),
+            sm: compactStatic(responsiveLayouts.sm, COLS.sm),
+            xs: compactStatic(responsiveLayouts.xs, COLS.xs),
         };
     }, [canEdit, responsiveLayouts]);
 

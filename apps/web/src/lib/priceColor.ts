@@ -3,11 +3,10 @@
  *
  * Single source of truth for gain/loss/neutral coloring. Components should use
  * these helpers instead of hardcoding `emerald-*`/`rose-*` Tailwind classes or
- * raw hex, so that the colorblind scheme (`[data-color-mode='colorblind']`) and
- * light-theme overrides apply consistently everywhere.
+ * raw hex, so that the light-theme overrides apply consistently everywhere.
  *
- * The CSS variables are defined in `styles/design-tokens.css` and remapped for
- * light/colorblind in `app/globals.css`.
+ * The CSS variables are defined in `styles/design-tokens.css` and overridden for
+ * light theme in `app/globals.css`.
  */
 
 export type PriceDirection = 'up' | 'down' | 'flat';

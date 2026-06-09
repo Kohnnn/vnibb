@@ -7,7 +7,6 @@ import { getCompanyEvents, getHistoricalPrices, getQuote } from '@/lib/api';
 import { buildChartEventMarkers, type ChartEventMarker } from '@/lib/chartEventMarkers';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useUiPreferences } from '@/contexts/UiPreferencesContext';
 
 export type AdvancedChartMode = 'candles' | 'line' | 'area';
 export type AdvancedChartTimeframe = '1D' | '5D' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX' | 'YTD';
@@ -233,7 +232,6 @@ export function TradingViewAdvancedChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const { resolvedTheme } = useTheme();
-  const { colorMode } = useUiPreferences();
   const mainSeriesRef = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Line'> | ISeriesApi<'Area'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
@@ -649,7 +647,7 @@ export function TradingViewAdvancedChart({
       mainSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, [activeCompareSymbol, comparePoints, eventMarkers, mode, points, timeframe, resolvedTheme, colorMode]);
+  }, [activeCompareSymbol, comparePoints, eventMarkers, mode, points, timeframe, resolvedTheme]);
 
   return (
     <div className={cn('relative h-full w-full', className)} style={{ minHeight: height }}>

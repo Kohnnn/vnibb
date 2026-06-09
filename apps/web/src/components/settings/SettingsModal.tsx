@@ -167,8 +167,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setDensity,
     chartStyle,
     setChartStyle,
-    colorMode,
-    setColorMode,
     reduceEffects,
     setReduceEffects,
   } = useUiPreferences();
@@ -1299,19 +1297,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Accessibility</h4>
                   <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3 space-y-4">
                     <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-sm font-bold text-blue-300">Colorblind-safe colors</div>
-                        <div className="mt-1 text-xs text-[var(--text-muted)]">
-                          Swaps the green/red gain-loss palette for a blue/orange pair that stays distinguishable with deuteranopia or protanopia.
-                        </div>
-                      </div>
-                      <Switch
-                        checked={colorMode === 'colorblind'}
-                        onCheckedChange={(checked) => setColorMode(checked ? 'colorblind' : 'standard')}
-                        aria-label="Toggle colorblind-safe colors"
-                      />
-                    </div>
-                    <div className="flex items-start justify-between gap-4 border-t border-[var(--border-default)] pt-4">
                       <div>
                         <div className="text-sm font-bold text-blue-300">Reduce visual effects</div>
                         <div className="mt-1 text-xs text-[var(--text-muted)]">
