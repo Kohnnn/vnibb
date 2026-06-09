@@ -32,6 +32,7 @@ interface WidgetToolbarProps {
   tickerSelector?: React.ReactNode;
   parameters?: React.ReactNode;
   actions?: React.ReactNode;
+  healthChip?: React.ReactNode;
   highlightSettings?: boolean;
 }
 
@@ -54,6 +55,7 @@ export function WidgetToolbar({
   tickerSelector,
   parameters,
   actions,
+  healthChip,
   highlightSettings = false,
 }: WidgetToolbarProps) {
   const description = widgetType ? WIDGET_DESCRIPTIONS[widgetType] : undefined;
@@ -167,6 +169,8 @@ export function WidgetToolbar({
 
       {/* Right: Controls */}
       <div className="flex items-center gap-1">
+        {healthChip}
+
         {isEditing && (
           <div className="widget-drag-handle p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-grab active:cursor-grabbing">
             <Move size={12} />

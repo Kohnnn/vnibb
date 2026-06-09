@@ -194,9 +194,15 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
           empty: !hasRenderableFlowData,
           compactHeight: 4,
         },
+        provenance: {
+          sourceLabel: 'Transaction flow',
+          apiGroup: '/equity',
+          endpoint: `/equity/${upperSymbol}/transaction-flow`,
+          updatedAt: data?.meta?.last_data_date ?? (dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined),
+        },
       },
     });
-  }, [hasRenderableFlowData, onDataChange]);
+  }, [hasRenderableFlowData, onDataChange, upperSymbol, data?.meta?.last_data_date, dataUpdatedAt]);
 
   return (
     <WidgetContainer

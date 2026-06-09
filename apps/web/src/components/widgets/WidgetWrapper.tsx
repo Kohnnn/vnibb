@@ -52,8 +52,9 @@ import { isTradingViewWidget, usesTradingViewWidgetSymbol } from '@/lib/tradingV
 import { getWidgetLayoutInsight } from '@/lib/dashboardIntelligence';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
-import { exportToCSV, exportToJSON, exportToPNG } from '@/lib/exportWidget';
-
+import { exportToCSV, exportToJSON, exportToPNG, type ExportProvenance } from '@/lib/exportWidget';
+import { WidgetHealthChip } from '@/components/ui/WidgetHealthChip';
+import { deriveWidgetHealth } from '@/lib/widgetHealth';
 interface WidgetRuntimeLayoutHint {
     compactHeight?: number;
     empty?: boolean;
@@ -62,6 +63,7 @@ interface WidgetRuntimeLayoutHint {
 interface WidgetRuntimePayload {
     __widgetRuntime?: {
         layoutHint?: WidgetRuntimeLayoutHint;
+        provenance?: Partial<ExportProvenance>;
     };
 }
 
@@ -385,6 +387,45 @@ export function WidgetWrapper({
         [currentWidget]
     );
 
+    // Dashboard-wide source-health chip. Widgets opt in by publishing a
+    // `provenance` object through their runtime payload (onDataChange). When a
+    // widget does not publish provenance, no chip is shown, so this stays a
+    // progressive enhancement rather than a forced UI change.
+    const publishedProvenance = useMemo<Partial<ExportProvenance> | undefined>(() => {
+        if (
+            internalData &&
+            typeof internalData === 'object' &&
+            !Array.isArray(internalData)
+        ) {
+            return (internalData as WidgetRuntimePayload).__widgetRuntime?.provenance;
+        }
+        return undefined;
+    }, [internalData]);
+
+    const widgetHealth = useMemo(() => {
+        if (!publishedProvenance) return null;
+        return deriveWidgetHealth({
+            cached: publishedProvenance.cached,
+            stale: publishedProvenance.stale,
+            localOnly: publishedProvenance.localOnly,
+            updatedAt: publishedProvenance.updatedAt,
+            sourceLabel: publishedProvenance.sourceLabel,
+        });
+    }, [publishedProvenance]);
+
+    const healthChip = widgetHealth ? (
+        <WidgetHealthChip
+            health={widgetHealth}
+            details={{
+                sourceLabel: publishedProvenance?.sourceLabel,
+                apiGroup: publishedProvenance?.apiGroup,
+                endpoint: publishedProvenance?.endpoint,
+                updatedAt: publishedProvenance?.updatedAt,
+                adjustmentMode: publishedProvenance?.adjustmentMode,
+            }}
+        />
+    ) : null;
+
     const trackWidgetAction = (action: string, properties?: Record<string, string | number | boolean | string[] | null | undefined>) => {
         captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
             action,
@@ -578,16 +619,32 @@ export function WidgetWrapper({
             export_format: format,
         });
 
+        // Source-aware provenance: combine what the wrapper knows (widget type,
+        // title, symbol) with any provenance the child widget published through
+        // its runtime payload, so every export remains self-describing.
+        const runtimeProvenance =
+            internalData &&
+            typeof internalData === 'object' &&
+            !Array.isArray(internalData)
+                ? (internalData as WidgetRuntimePayload).__widgetRuntime?.provenance
+                : undefined;
+        const provenance: ExportProvenance = {
+            widgetType,
+            widgetTitle: title,
+            symbol: displaySymbol || undefined,
+            ...runtimeProvenance,
+        };
+
         switch (format) {
             case 'csv':
                 if (dataToExport) {
                     const rows = Array.isArray(dataToExport) ? dataToExport : [dataToExport];
-                    exportToCSV(rows, filename);
+                    exportToCSV(rows, filename, provenance);
                 }
                 break;
             case 'json':
                 if (dataToExport) {
-                    exportToJSON(dataToExport, filename);
+                    exportToJSON(dataToExport, filename, provenance);
                 }
                 break;
             case 'png':
@@ -643,6 +700,7 @@ export function WidgetWrapper({
                     widgetType={widgetType}
                     symbol={displaySymbol}
                     isEditing={isEditing}
+                    healthChip={healthChip}
                     showSymbolSelector={showTickerSelector}
                     onSymbolChange={() => setIsTickerDropdownOpen(true)}
                     showGroupSelector={showGroupLabels}

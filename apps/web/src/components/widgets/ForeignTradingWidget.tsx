@@ -232,9 +232,15 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                     empty: !hasData,
                     compactHeight: 3,
                 },
+                provenance: {
+                    sourceLabel: 'Foreign trading',
+                    apiGroup: '/equity',
+                    endpoint: `/equity/${symbol}/foreign-trading`,
+                    updatedAt: dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined,
+                },
             },
         });
-    }, [hasData, onDataChange]);
+    }, [hasData, onDataChange, symbol, dataUpdatedAt]);
 
     return (
         <WidgetContainer

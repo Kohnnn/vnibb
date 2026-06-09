@@ -163,9 +163,17 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
           empty: !hasData,
           compactHeight: 6,
         },
+        provenance: {
+          sourceLabel: 'Order book depth',
+          apiGroup: '/equity',
+          endpoint: `/equity/${symbol}/orderbook`,
+          stale: isStale,
+          localOnly: false,
+          updatedAt: snapshotTime || (dataUpdatedAt ? new Date(dataUpdatedAt).toISOString() : undefined),
+        },
       },
     });
-  }, [hasData, onDataChange]);
+  }, [hasData, onDataChange, symbol, isStale, snapshotTime, dataUpdatedAt]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view order book" />;
