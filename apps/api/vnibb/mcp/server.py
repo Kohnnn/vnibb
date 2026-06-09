@@ -23,6 +23,7 @@ from vnibb.core.appwrite_client import (
 )
 from vnibb.core.config import settings
 from vnibb.services.ai_context_service import AIContextService, sanitize_context_value
+from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,9 @@ Use this server to read curated VNIBB market data from Appwrite without mutating
 Guardrails:
 - Prefer `get_symbol_snapshot` and `get_market_snapshot` before low-level collection queries.
 - Treat `query_appwrite_collection` as a narrow escape hatch, not the first choice.
+- For deep analytical history (EOD prices, fundamentals, intraday, macro), use the MongoDB-backed
+  tools: `get_eod_price_history`, `get_premium_dataset`, `get_intraday_trades`, `get_price_depth`.
+  Call `list_premium_datasets` to discover allowlisted dataset names.
 - This server is intentionally read-only. It does not expose admin, write, delete, backfill, or schema-mutation tools.
 - User-owned and operationally sensitive collections are intentionally excluded.
 - Include freshness and source notes when summarizing data for downstream agents.
@@ -252,6 +256,101 @@ STATEMENT_COLLECTIONS = {
 }
 
 MARKET_INDEX_CODES = ("VNINDEX", "VN30", "HNX", "UPCOM")
+
+
+@dataclass(frozen=True)
+class PremiumDatasetSpec:
+    """Allowlist entry for a MongoDB-backed vnstock premium dataset.
+
+    These datasets live in the shared `market_vnstock_premium_records` collection
+    on the private (Tailscale) MongoDB host. Each is identified by its `dataset`
+    field value, which matches the canonical names written by the catalog backfill.
+    """
+
+    dataset: str
+    description: str
+    max_limit: int
+    scope_type: str = "symbol"
+
+
+# Curated, read-only allowlist for the generic `get_premium_dataset` tool.
+# Disabled/empty source datasets are intentionally excluded:
+# company.capital_history, company.insider_deals, equity.block_trades,
+# equity.put_through, and the legacy quote.* names.
+PREMIUM_DATASET_SPECS: dict[str, PremiumDatasetSpec] = {
+    spec.dataset: spec
+    for spec in (
+        # Fundamentals
+        PremiumDatasetSpec("finance.ratio", "Financial ratios (year + quarter).", 200),
+        PremiumDatasetSpec("finance.income_statement", "Income statements (year + quarter).", 200),
+        PremiumDatasetSpec("finance.balance_sheet", "Balance sheets (year + quarter).", 200),
+        PremiumDatasetSpec("finance.cash_flow", "Cash flow statements (year + quarter).", 200),
+        # Company reference
+        PremiumDatasetSpec("company.info", "Company profile and metadata.", 20),
+        PremiumDatasetSpec("company.events", "Corporate events.", 200),
+        PremiumDatasetSpec("company.officers", "Company officers/management.", 200),
+        PremiumDatasetSpec("company.subsidiaries", "Company subsidiaries.", 200),
+        PremiumDatasetSpec("company.affiliate", "Company affiliates.", 200),
+        PremiumDatasetSpec("company.news", "Company news records.", 200),
+        PremiumDatasetSpec("reference.shareholders", "Major shareholders.", 200),
+        # Equity market datasets
+        PremiumDatasetSpec("equity.summary", "Equity summary snapshot.", 20),
+        PremiumDatasetSpec("equity.session_stats", "Equity session statistics.", 60),
+        PremiumDatasetSpec("equity.foreign_flow", "Foreign trading flow history.", 500),
+        PremiumDatasetSpec("equity.trade_history", "Equity trade history.", 500),
+        PremiumDatasetSpec("equity.proprietary_flow", "Proprietary trading flow.", 200),
+        PremiumDatasetSpec("equity.quote", "Latest equity quote snapshot.", 60),
+        PremiumDatasetSpec("equity.intraday", "Intraday tick trades (bounded symbols).", 1000),
+        PremiumDatasetSpec("equity.trades", "Matched trades (bounded symbols).", 1000),
+        PremiumDatasetSpec("equity.price_depth", "Volume-at-price depth.", 500),
+        PremiumDatasetSpec("equity.order_book", "Order book snapshot.", 200),
+        PremiumDatasetSpec("equity.matched_by_price", "Matched volume by price.", 500),
+        PremiumDatasetSpec("equity.odd_lot", "Odd-lot session data.", 200),
+        PremiumDatasetSpec("equity.volume_profile", "Volume profile by price.", 500),
+        # Valuation
+        PremiumDatasetSpec("market.pe", "Market P/E series.", 200),
+        PremiumDatasetSpec("market.pb", "Market P/B series.", 200),
+        PremiumDatasetSpec("market.evaluation", "Market valuation evaluation.", 200),
+        PremiumDatasetSpec("analytics.valuation.pe", "Analytics valuation P/E.", 200),
+        PremiumDatasetSpec("analytics.valuation.pb", "Analytics valuation P/B.", 200),
+        # Macro series (market-scope)
+        PremiumDatasetSpec("macro.gdp", "Macro GDP series.", 500, scope_type="market"),
+        PremiumDatasetSpec("macro.cpi", "Macro CPI series.", 500, scope_type="market"),
+        PremiumDatasetSpec("macro.exchange_rate", "Macro exchange-rate series.", 500, scope_type="market"),
+        PremiumDatasetSpec("macro.interest_rate", "Macro interest-rate series.", 200, scope_type="market"),
+        PremiumDatasetSpec("macro.money_supply", "Macro money-supply series.", 500, scope_type="market"),
+        PremiumDatasetSpec("macro.fdi", "Macro FDI series.", 500, scope_type="market"),
+        PremiumDatasetSpec("macro.import_export", "Macro import/export series.", 500, scope_type="market"),
+        PremiumDatasetSpec("macro.industry_prod", "Macro industrial-production series.", 500, scope_type="market"),
+        PremiumDatasetSpec("macro.population_labor", "Macro population/labor series.", 300, scope_type="market"),
+        PremiumDatasetSpec("macro.retail", "Macro retail series.", 500, scope_type="market"),
+    )
+}
+
+
+def _ensure_mongo_available() -> None:
+    if not get_mongo_market_data_service().enabled:
+        raise RuntimeError(
+            "MongoDB analytical source is not configured for VNIBB MCP "
+            "(set MONGODB_ENABLED and MONGODB_URL)"
+        )
+
+
+def _normalize_dataset_name(dataset: str) -> str:
+    return str(dataset or "").strip().lower()
+
+
+def _serialize_premium_dataset_specs() -> list[dict[str, Any]]:
+    return [
+        {
+            "dataset": spec.dataset,
+            "description": spec.description,
+            "max_limit": spec.max_limit,
+            "scope_type": spec.scope_type,
+            "read_only": True,
+        }
+        for spec in sorted(PREMIUM_DATASET_SPECS.values(), key=lambda item: item.dataset)
+    ]
 
 
 def normalize_symbol_input(symbol: str) -> str:
@@ -535,11 +634,45 @@ def _ensure_appwrite_available() -> None:
         raise RuntimeError("Appwrite is not configured for VNIBB MCP")
 
 
+def _build_transport_security() -> Any:
+    """Build streamable-HTTP transport security from settings.
+
+    By default the MCP SDK enforces DNS-rebinding protection and only accepts
+    `localhost`/`127.0.0.1` Host headers. To let trusted machines (e.g. Tailscale
+    peers) connect directly to the published port, set VNIBB_MCP_ALLOWED_HOSTS /
+    VNIBB_MCP_ALLOWED_ORIGINS. When neither is set, defaults are preserved.
+    """
+    allowed_hosts = list(settings.vnibb_mcp_allowed_hosts or [])
+    allowed_origins = list(settings.vnibb_mcp_allowed_origins or [])
+    if not allowed_hosts and not allowed_origins:
+        return None
+
+    try:
+        from mcp.server.transport_security import TransportSecuritySettings
+    except Exception:  # pragma: no cover - depends on SDK version
+        logger.warning(
+            "mcp.server.transport_security unavailable; ignoring MCP allowlist settings"
+        )
+        return None
+
+    # Always keep loopback so the Caddy reverse proxy (Host: localhost:8001) works.
+    default_hosts = ["localhost", "localhost:8001", "127.0.0.1", "127.0.0.1:8001"]
+    default_origins = ["http://localhost", "http://localhost:8001", "http://127.0.0.1", "http://127.0.0.1:8001"]
+    merged_hosts = sorted({*default_hosts, *allowed_hosts})
+    merged_origins = sorted({*default_origins, *allowed_origins})
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=merged_hosts,
+        allowed_origins=merged_origins,
+    )
+
+
 mcp = FastMCP(
     name="VNIBB Read-Only MCP",
     instructions=MCP_INSTRUCTIONS,
     json_response=True,
     stateless_http=True,
+    transport_security=_build_transport_security(),
 )
 
 
@@ -553,6 +686,12 @@ def resource_guardrails() -> str:
 def resource_supported_collections() -> str:
     """Supported Appwrite collection metadata for the VNIBB read-only MCP."""
     return json.dumps(_serialize_collection_specs(), indent=2, sort_keys=True)
+
+
+@mcp.resource("vnibb://mongo/datasets")
+def resource_premium_datasets() -> str:
+    """Supported MongoDB vnstock premium dataset metadata for the VNIBB read-only MCP."""
+    return json.dumps(_serialize_premium_dataset_specs(), indent=2, sort_keys=True)
 
 
 @mcp.resource("vnibb://appwrite/schema/{collection}")
@@ -880,6 +1019,177 @@ async def query_appwrite_collection(
         sort_by=sort_by,
         descending=descending,
     )
+
+
+@mcp.tool()
+async def get_mongo_status() -> dict[str, Any]:
+    """Check the read-only MongoDB analytical source and summarize available collections.
+
+    The MongoDB source holds the full vnstock premium corpus (EOD prices and the
+    shared `market_vnstock_premium_records` datasets) on a private Tailscale host.
+    """
+    service = get_mongo_market_data_service()
+    if not service.enabled:
+        return {
+            "enabled": False,
+            "read_only": True,
+            "message": "MongoDB analytical source is not configured (MONGODB_ENABLED / MONGODB_URL).",
+        }
+    collections = await service.inspect_collections(sample_limit=1)
+    return {
+        "enabled": True,
+        "read_only": True,
+        "database": settings.mongodb_database,
+        "collections": sanitize_context_value(collections),
+    }
+
+
+@mcp.tool()
+def list_premium_datasets() -> dict[str, Any]:
+    """List the MongoDB vnstock premium datasets exposed by `get_premium_dataset`."""
+    return {
+        "server": "VNIBB Read-Only MCP",
+        "read_only": True,
+        "source": "mongodb:market_vnstock_premium_records",
+        "datasets": _serialize_premium_dataset_specs(),
+    }
+
+
+@mcp.tool()
+async def get_eod_price_history(
+    symbol: str,
+    lookback_days: int = 365,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    """Get read-only end-of-day OHLCV history for one symbol from MongoDB.
+
+    Provide either `lookback_days` (default 365) or an explicit `start_date`/`end_date`
+    range (YYYY-MM-DD). Results are capped to protect the shared data host.
+    """
+    _ensure_mongo_available()
+    normalized = normalize_symbol_input(symbol)
+    if not normalized:
+        raise ValueError("A stock symbol is required")
+
+    service = get_mongo_market_data_service()
+    bounded_limit = _coerce_limit(limit, 5000)
+    parsed_start = parse_iso_date(start_date)
+    parsed_end = parse_iso_date(end_date)
+
+    if parsed_start and parsed_end:
+        if parsed_start > parsed_end:
+            raise ValueError("start_date must be on or before end_date")
+        rows = await service.get_eod_prices_between(
+            normalized,
+            start_date=parsed_start,
+            end_date=parsed_end,
+            limit=bounded_limit,
+        )
+    else:
+        rows = await service.get_eod_prices(
+            normalized,
+            lookback_days=max(1, int(lookback_days)),
+            limit=bounded_limit,
+        )
+
+    return {
+        "symbol": normalized,
+        "source": "mongodb:market_prices_eod",
+        "row_count": len(rows),
+        "start_date": start_date,
+        "end_date": end_date,
+        "items": sanitize_context_value(rows),
+    }
+
+
+@mcp.tool()
+async def get_premium_dataset(
+    symbol: str,
+    dataset: str,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Read a guarded MongoDB vnstock premium dataset for one symbol.
+
+    `dataset` must be one of the allowlisted names from `list_premium_datasets`.
+    Unknown or disabled datasets are rejected. Limits are capped per dataset.
+    """
+    _ensure_mongo_available()
+    normalized_symbol = normalize_symbol_input(symbol)
+    if not normalized_symbol:
+        raise ValueError("A stock symbol is required")
+
+    normalized_dataset = _normalize_dataset_name(dataset)
+    spec = PREMIUM_DATASET_SPECS.get(normalized_dataset)
+    if spec is None:
+        raise ValueError(
+            f"Dataset '{dataset}' is not exposed by the read-only VNIBB MCP. "
+            "Call `list_premium_datasets` for the allowed names."
+        )
+
+    bounded_limit = _coerce_limit(limit, spec.max_limit)
+    service = get_mongo_market_data_service()
+    records = await service.get_raw_dataset_records(
+        normalized_symbol,
+        dataset=spec.dataset,
+        limit=bounded_limit,
+    )
+    return {
+        "symbol": normalized_symbol,
+        "dataset": spec.dataset,
+        "scope_type": spec.scope_type,
+        "source": "mongodb:market_vnstock_premium_records",
+        "row_count": len(records),
+        "items": sanitize_context_value(records),
+    }
+
+
+@mcp.tool()
+async def get_intraday_trades(
+    symbol: str,
+    lookback_days: int = 7,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    """Get read-only intraday tick trades for one symbol from MongoDB (bounded symbols)."""
+    _ensure_mongo_available()
+    normalized = normalize_symbol_input(symbol)
+    if not normalized:
+        raise ValueError("A stock symbol is required")
+
+    service = get_mongo_market_data_service()
+    rows = await service.get_intraday_trades(
+        normalized,
+        lookback_days=max(1, int(lookback_days)),
+        limit=_coerce_limit(limit, 20000),
+    )
+    return {
+        "symbol": normalized,
+        "source": "mongodb:market_vnstock_premium_records",
+        "row_count": len(rows),
+        "items": sanitize_context_value(rows),
+    }
+
+
+@mcp.tool()
+async def get_price_depth(symbol: str, limit: int = 500) -> dict[str, Any]:
+    """Get read-only volume-at-price depth rows for one symbol from MongoDB."""
+    _ensure_mongo_available()
+    normalized = normalize_symbol_input(symbol)
+    if not normalized:
+        raise ValueError("A stock symbol is required")
+
+    service = get_mongo_market_data_service()
+    rows = await service.get_price_depth(
+        normalized,
+        limit=_coerce_limit(limit, 5000),
+    )
+    return {
+        "symbol": normalized,
+        "source": "mongodb:market_vnstock_premium_records",
+        "row_count": len(rows),
+        "items": sanitize_context_value(rows),
+    }
 
 
 def create_http_app() -> FastAPI:

@@ -728,10 +728,10 @@ export async function getRatioHistory(
 
 export interface MetricsHistoryResponse {
     symbol: string;
-    roe: number[];
-    roa: number[];
-    pe_ratio: number[];
-    pb_ratio: number[];
+    roe: (number | null)[];
+    roa: (number | null)[];
+    pe_ratio: (number | null)[];
+    pb_ratio: (number | null)[];
     periods: string[];
 }
 

@@ -43,8 +43,13 @@ def _normalize_dividend_yield(value: Any) -> Optional[float]:
     while abs(normalized) > 100:
         normalized /= 100
 
-    if abs(normalized) > 50:
-        normalized = 50.0 if normalized > 0 else -50.0
+    # DQ remediation 2026-06-08: an equity dividend yield above ~40% is almost
+    # always a unit/denominator artifact (e.g. period-mismatched price, VND scale
+    # mismatch), as seen with VCI showing 100%/clamped-50%. Returning a fabricated
+    # clamped boundary (50/100) is misleading; prefer null so the UI shows "—"
+    # rather than a wrong number an analyst could act on.
+    if abs(normalized) > 40:
+        return None
 
     return normalized
 

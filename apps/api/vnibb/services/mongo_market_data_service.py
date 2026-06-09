@@ -151,7 +151,7 @@ class MongoMarketDataService:
             cursor = (
                 coll.find(
                     {
-                        "dataset": "quote.intraday",
+                        "dataset": "equity.intraday",
                         "symbol": symbol_upper,
                         "observedAt": {"$gte": lookback_start.replace(tzinfo=None)},
                     },
@@ -193,7 +193,7 @@ class MongoMarketDataService:
         def _read() -> list[dict[str, Any]]:
             coll = self._get_collection("market_vnstock_premium_records")
             cursor = coll.find(
-                {"dataset": "quote.price_depth", "symbol": symbol_upper},
+                {"dataset": "equity.price_depth", "symbol": symbol_upper},
                 {
                     "_id": 0,
                     "raw.price": 1,
@@ -339,6 +339,99 @@ class MongoMarketDataService:
             return await asyncio.to_thread(_read)
         except Exception as exc:
             logger.warning("Mongo EOD range read failed for %s: %s", symbol_upper, exc)
+            return []
+
+    async def get_universe_latest_eod(
+        self,
+        *,
+        limit: int = 2000,
+    ) -> list[dict[str, Any]]:
+        """Return the two most recent EOD bars per symbol across the universe.
+
+        Used as a resilience fallback for market-wide widgets (heatmap / breadth /
+        money-flow) so a stale or empty Postgres ScreenerSnapshot cannot blank them
+        while the n6v `market_prices_eod` collection is fresh. Returns one dict per
+        symbol with the latest close/volume plus the prior close so callers can
+        derive change_pct without a second query.
+        """
+
+        limit = max(1, min(limit, 5000))
+
+        def _read() -> list[dict[str, Any]]:
+            coll = self._get_collection("market_prices_eod")
+            # Latest tradeDate present in the collection.
+            latest_doc = list(
+                coll.find({}, {"_id": 0, "tradeDate": 1}).sort("tradeDate", -1).limit(1)
+            )
+            if not latest_doc:
+                return []
+            latest_trade_date = latest_doc[0].get("tradeDate")
+            if latest_trade_date is None:
+                return []
+
+            # Pull a recent window so we can compute prior close per symbol.
+            window_start = latest_trade_date - timedelta(days=12)
+            cursor = coll.find(
+                {"tradeDate": {"$gte": window_start, "$lte": latest_trade_date}},
+                {
+                    "_id": 0,
+                    "symbol": 1,
+                    "tradeDate": 1,
+                    "close": 1,
+                    "open": 1,
+                    "high": 1,
+                    "low": 1,
+                    "volume": 1,
+                    "value": 1,
+                },
+            ).sort("tradeDate", 1)
+
+            by_symbol: dict[str, list[dict[str, Any]]] = {}
+            for doc in cursor:
+                sym = str(doc.get("symbol") or "").upper()
+                if not sym:
+                    continue
+                by_symbol.setdefault(sym, []).append(doc)
+
+            results: list[dict[str, Any]] = []
+            for sym, bars in by_symbol.items():
+                if not bars:
+                    continue
+                latest = bars[-1]
+                prev_close = bars[-2].get("close") if len(bars) >= 2 else None
+                latest_close = latest.get("close")
+                change_pct = None
+                try:
+                    if prev_close not in (None, 0) and latest_close is not None:
+                        change_pct = ((float(latest_close) - float(prev_close)) / float(prev_close)) * 100
+                except (TypeError, ValueError, ZeroDivisionError):
+                    change_pct = None
+                results.append(
+                    {
+                        "symbol": sym,
+                        "tradeDate": latest.get("tradeDate"),
+                        "price": latest_close,
+                        "open": latest.get("open"),
+                        "high": latest.get("high"),
+                        "low": latest.get("low"),
+                        "volume": latest.get("volume"),
+                        "value": latest.get("value"),
+                        "prev_close": prev_close,
+                        "change_pct": change_pct,
+                    }
+                )
+
+            # Largest by traded value first as a rough liquidity proxy.
+            results.sort(
+                key=lambda r: (r.get("value") or 0, r.get("volume") or 0),
+                reverse=True,
+            )
+            return results[:limit]
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("Mongo universe latest-EOD read failed: %s", exc)
             return []
 
 

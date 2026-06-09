@@ -339,7 +339,7 @@ function buildMarketOverviewTabsPreset(preset: string) {
           originalTitle: 'Risk Pulse',
           symbols: [
             { s: 'ICEUS:DX1!', d: 'Dollar Index Fut' },
-            { s: 'CBOE:VIX', d: 'VIX' },
+            { s: 'TVC:VIX', d: 'VIX' },
             { s: 'BINANCE:BTCUSDT', d: 'Bitcoin' },
             { s: 'CBOT:ZN1!', d: 'US 10Y Note Fut' },
           ],
@@ -412,7 +412,7 @@ function buildMarketOverviewTabsPreset(preset: string) {
           symbols: [
             { s: 'NASDAQ:QQQ', d: 'QQQ' },
             { s: 'AMEX:ARKK', d: 'ARKK' },
-            { s: 'CBOE:VIX', d: 'VIX' },
+            { s: 'TVC:VIX', d: 'VIX' },
             { s: 'ICEUS:DX1!', d: 'Dollar Index Fut' },
           ],
         },
@@ -429,7 +429,7 @@ function buildMarketOverviewTabsPreset(preset: string) {
             { s: 'AMEX:IWM', d: 'Russell 2000 ETF' },
             { s: 'AMEX:EEM', d: 'Emerging Markets ETF' },
             { s: 'AMEX:ARKK', d: 'ARK Innovation ETF' },
-            { s: 'CBOE:VIX', d: 'VIX' },
+            { s: 'TVC:VIX', d: 'VIX' },
           ],
         },
         {
@@ -490,7 +490,7 @@ function buildMarketDataGroupsPreset(preset: string) {
           name: 'Risk Pulse',
           symbols: [
             { name: 'ICEUS:DX1!', displayName: 'Dollar Index Fut' },
-            { name: 'CBOE:VIX', displayName: 'VIX' },
+            { name: 'TVC:VIX', displayName: 'VIX' },
             { name: 'BINANCE:BTCUSDT', displayName: 'Bitcoin' },
             { name: 'CBOT:ZN1!', displayName: 'US 10Y Note Fut' },
           ],
@@ -558,7 +558,7 @@ function buildMarketDataGroupsPreset(preset: string) {
             { name: 'AMEX:IWM', displayName: 'Russell 2000' },
             { name: 'AMEX:EEM', displayName: 'EM ETF' },
             { name: 'AMEX:ARKK', displayName: 'ARKK' },
-            { name: 'CBOE:VIX', displayName: 'VIX' },
+            { name: 'TVC:VIX', displayName: 'VIX' },
           ],
         },
         {

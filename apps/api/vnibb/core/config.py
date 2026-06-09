@@ -11,10 +11,10 @@ environment variables in production will cause the application to fail fast.
 import logging
 import sys
 from functools import lru_cache
-from typing import Optional, List, Any
+from typing import Annotated, Any, List, Optional
 
 from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     vnibb_mcp_url: Optional[str] = None
     vnibb_mcp_timeout_seconds: int = 20
     vnibb_mcp_shared_bearer_token: Optional[str] = None
+    vnibb_mcp_allowed_hosts: Annotated[List[str], NoDecode] = []
+    vnibb_mcp_allowed_origins: Annotated[List[str], NoDecode] = []
     cors_origins: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -289,6 +291,24 @@ class Settings(BaseSettings):
 
             # Handle comma-separated string: "http://localhost:3000,http://example.com"
             return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v or []
+
+    @field_validator("vnibb_mcp_allowed_hosts", "vnibb_mcp_allowed_origins", mode="before")
+    @classmethod
+    def parse_mcp_allowlists(cls, v: Any) -> List[str]:
+        """Parse MCP host/origin allowlists from a JSON array or comma-separated string."""
+        if isinstance(v, str):
+            v_clean = v.strip()
+            if not v_clean:
+                return []
+            if v_clean.startswith("[") and v_clean.endswith("]"):
+                import json
+
+                try:
+                    return [str(item).strip() for item in json.loads(v_clean) if str(item).strip()]
+                except json.JSONDecodeError:
+                    v_clean = v_clean[1:-1]
+            return [item.strip().strip("\"'") for item in v_clean.split(",") if item.strip()]
         return v or []
 
     @field_validator("cors_origins")

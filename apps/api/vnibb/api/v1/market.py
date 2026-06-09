@@ -47,6 +47,7 @@ from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.models.trading import FinancialRatio
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.sector_service import SectorService
+from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.providers.vnstock import get_vnstock
 
 try:
@@ -1592,7 +1593,39 @@ async def _load_latest_screener_rows_from_db(limit: int = 500) -> List[dict[str,
                 }
             )
         )
-    return [row for row in normalized_rows if row.get("symbol")]
+    normalized_rows = [row for row in normalized_rows if row.get("symbol")]
+
+    # RC-2 (data-quality remediation 2026-06-08): if the Postgres ScreenerSnapshot
+    # universe is empty (stale/abandoned cron) but the n6v Mongo `market_prices_eod`
+    # corpus is fresh, fall back to it so market-wide widgets (heatmap/breadth/
+    # money-flow) keep working. Mongo only carries price/volume/change, so this is a
+    # liquidity-and-returns universe (no fundamentals); enough to render those widgets.
+    if not normalized_rows:
+        try:
+            mongo_universe = await get_mongo_market_data_service().get_universe_latest_eod(
+                limit=limit
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Mongo universe fallback failed: %s", exc)
+            mongo_universe = []
+        for row in mongo_universe:
+            normalized = _normalize_screener_row(
+                {
+                    "symbol": row.get("symbol"),
+                    "price": row.get("price"),
+                    "volume": row.get("volume"),
+                    "change_pct": row.get("change_pct"),
+                }
+            )
+            if normalized.get("symbol"):
+                normalized_rows.append(normalized)
+        if normalized_rows:
+            logger.info(
+                "Screener universe served from Mongo market_prices_eod fallback (%d symbols).",
+                len(normalized_rows),
+            )
+
+    return normalized_rows
 
 
 async def _fetch_market_screener_rows(limit: int = 1500) -> List[dict[str, Any]]:
@@ -2425,6 +2458,19 @@ async def get_heatmap_data(
 
         # Fetch from API if no cache
         if not screener_data:
+            # RC-2: before the slow live provider fetch, try the Postgres DB rows
+            # (which now fall back to the fresh n6v Mongo universe). This keeps the
+            # heatmap populated after-hours instead of timing out into an empty grid.
+            try:
+                db_rows = await _load_latest_screener_rows_from_db(limit=limit)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Heatmap DB screener fallback failed: %s", exc)
+                db_rows = []
+            if db_rows:
+                screener_data = db_rows
+                logger.info("Heatmap universe served from DB/Mongo fallback (%d rows)", len(db_rows))
+
+        if not screener_data:
             try:
                 screener_data = await asyncio.wait_for(
                     VnstockScreenerFetcher.fetch(params),
@@ -2435,7 +2481,10 @@ async def get_heatmap_data(
             logger.info(f"Fetched {len(screener_data)} stocks from API for heatmap")
 
         # Step 2: Normalize input rows and enrich missing metadata/returns from DB snapshots.
-        normalized_rows = [_normalize_screener_row(item) for item in screener_data]
+        normalized_rows = [
+            row if isinstance(row, dict) else _normalize_screener_row(row)
+            for row in screener_data
+        ]
         normalized_rows = [row for row in normalized_rows if row.get("symbol")]
 
         if exchange != "ALL":

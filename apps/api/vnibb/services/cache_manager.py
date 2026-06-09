@@ -135,52 +135,71 @@ class CacheManager:
             today = date.today()
             fresh_threshold = now - timedelta(minutes=self.SCREENER_TTL_MINUTES)
 
-            # Build query conditions
-            # If allow_stale is True, we don't strictly require snapshot_date == today
-            conditions = []
-            if source:
-                conditions.append(ScreenerSnapshot.source == source)
-            if not allow_stale:
-                conditions.append(ScreenerSnapshot.snapshot_date == today)
+            # RC-1 (data-quality remediation 2026-06-08): the `source` filter used to
+            # be strict. ScreenerSnapshot rows are written with source "vnstock"/
+            # "vnstock_ratio" (model default + data_pipeline), but universe widgets
+            # (heatmap/breadth) read with source=settings.vnstock_source ("KBS").
+            # A strict match returned zero rows -> cache miss -> slow live fetch ->
+            # timeout -> empty heatmap/breadth. We now treat `source` as a soft
+            # preference: try source-specific first, then fall back to
+            # source-agnostic so a label mismatch can't blank the universe.
+            async def _resolve(match_source: bool):
+                conditions = []
+                if match_source and source:
+                    conditions.append(ScreenerSnapshot.source == source)
+                if not allow_stale:
+                    conditions.append(ScreenerSnapshot.snapshot_date == today)
+                if symbol:
+                    conditions.append(ScreenerSnapshot.symbol == symbol.upper())
 
-            if symbol:
-                conditions.append(ScreenerSnapshot.symbol == symbol.upper())
+                query = select(ScreenerSnapshot).where(and_(*conditions))
 
-            # Query for cached data
-            query = select(ScreenerSnapshot).where(and_(*conditions))
+                if allow_stale:
+                    latest_date_query = select(func.max(ScreenerSnapshot.snapshot_date))
+                    if match_source and source:
+                        latest_date_query = latest_date_query.where(
+                            ScreenerSnapshot.source == source
+                        )
+                    latest_date_result = await session.execute(latest_date_query)
+                    latest_date = latest_date_result.scalar()
 
-            if allow_stale:
-                # If allowing stale, we should only take the most recent snapshots
-                # First find the latest date
-                latest_date_query = select(func.max(ScreenerSnapshot.snapshot_date))
-                if source:
-                    latest_date_query = latest_date_query.where(ScreenerSnapshot.source == source)
-                latest_date_result = await session.execute(latest_date_query)
-                latest_date = latest_date_result.scalar()
+                    if latest_date is None:
+                        return None, None  # nothing for this source scope
 
-                # QA-v4 Heatmap: cap stale snapshots at MAX_STALE_DAYS so
-                # an indefinitely-stuck screener cron (the cause of the
-                # 7-week-stale heatmap) doesn't keep poisoning every
-                # downstream caller forever. Older than that, return a
-                # miss so callers fetch fresh from the provider.
-                if latest_date and (today - latest_date).days > self.MAX_STALE_DAYS:
-                    logger.warning(
-                        "Screener snapshot too stale (latest=%s, today=%s, "
-                        "max_stale_days=%s); returning miss so callers refetch.",
-                        latest_date,
-                        today,
-                        self.MAX_STALE_DAYS,
-                    )
-                    return CacheResult(data=None, is_stale=True, cached_at=None, hit=False)
+                    # QA-v4 Heatmap: cap stale snapshots at MAX_STALE_DAYS so an
+                    # indefinitely-stuck screener cron doesn't keep poisoning every
+                    # downstream caller forever. Older than that, treat as a miss.
+                    if (today - latest_date).days > self.MAX_STALE_DAYS:
+                        return "stale", None
 
-                if latest_date:
                     query = query.where(ScreenerSnapshot.snapshot_date == latest_date)
-                else:
-                    return CacheResult(data=None, is_stale=False, cached_at=None, hit=False)
 
-            result = await session.execute(query)
+                result = await session.execute(query)
+                return "ok", list(result.scalars().all())
 
-            snapshots = list(result.scalars().all())
+            status, snapshots = await _resolve(match_source=True)
+            if (not snapshots) and source:
+                # Soft fallback: read latest snapshots regardless of source label.
+                fb_status, fb_snapshots = await _resolve(match_source=False)
+                if fb_snapshots:
+                    logger.info(
+                        "Screener source '%s' matched no rows; using source-agnostic "
+                        "snapshot fallback (%d records).",
+                        source,
+                        len(fb_snapshots),
+                    )
+                    status, snapshots = fb_status, fb_snapshots
+                elif status != "stale":
+                    status = fb_status
+
+            if status == "stale":
+                logger.warning(
+                    "Screener snapshot too stale (today=%s, max_stale_days=%s); "
+                    "returning miss so callers refetch.",
+                    today,
+                    self.MAX_STALE_DAYS,
+                )
+                return CacheResult(data=None, is_stale=True, cached_at=None, hit=False)
 
             if not snapshots:
                 logger.debug(f"Cache miss for screener data (symbol={symbol}, source={source})")

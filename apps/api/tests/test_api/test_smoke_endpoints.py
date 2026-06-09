@@ -644,6 +644,61 @@ async def test_quote_prefers_fresher_screener_snapshot_when_price_history_is_sta
 
 
 @pytest.mark.asyncio
+async def test_quote_prev_close_sourced_from_settled_price_after_hours(client, test_db):
+    """RC-3: PREV CLOSE must be populated from the prior settled close even when the
+    snapshot carries no live change_pct (after-market-hours), instead of being null."""
+    test_db.add(Stock(id=2, symbol="VCI", exchange="HOSE", company_name="VCI"))
+    test_db.add_all(
+        [
+            StockPrice(
+                id=11,
+                stock_id=2,
+                symbol="VCI",
+                time=date(2026, 3, 14),
+                open=24.5,
+                high=24.8,
+                low=24.2,
+                close=24.5,
+                volume=5_000_000,
+                interval="1D",
+                source="vnstock",
+            ),
+            StockPrice(
+                id=12,
+                stock_id=2,
+                symbol="VCI",
+                time=date(2026, 3, 13),
+                open=24.7,
+                high=24.9,
+                low=24.6,
+                close=24.7,
+                volume=4_800_000,
+                interval="1D",
+                source="vnstock",
+            ),
+            # Snapshot is same-day-fresh but has no live change metric (after close).
+            ScreenerSnapshot(
+                id=2,
+                symbol="VCI",
+                snapshot_date=date(2026, 3, 14),
+                price=24.5,
+                volume=5_000_000,
+                source="vnstock_ratio",
+                extended_metrics={"updated_at": "2026-03-14T15:30:00"},
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/VCI/quote")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["symbol"] == "VCI"
+    # PREV CLOSE must come from the prior settled close (24.7), never null.
+    assert payload["data"]["prevClose"] == 24.7
+
+
+@pytest.mark.asyncio
 async def test_trading_stats_backfills_52_week_range_from_price_history(
     client, test_db, monkeypatch
 ):

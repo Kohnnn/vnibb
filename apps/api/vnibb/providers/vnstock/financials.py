@@ -24,6 +24,11 @@ from vnibb.providers.base import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
+# Metrics that may be reported across multiple item rows (e.g. current + deferred
+# income tax, or split SG&A lines) and must be SUMMED rather than overwritten when
+# building period values. Shared by both the pivot and non-pivot transform paths.
+_ADDITIVE_PIVOT_METRICS = {"tax_expense", "selling_general_admin"}
+
 
 class StatementType(str, Enum):
     """Financial statement types."""
@@ -992,7 +997,18 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     if numeric is not None:
                         if row_source == "KBS" and metric_key not in {"eps", "eps_diluted"}:
                             numeric *= 1000
-                        period_values[period][metric_key] = numeric
+                        # DQ remediation 2026-06-08: some metrics (tax, SG&A) are split
+                        # across multiple item rows (e.g. current + deferred tax). The
+                        # pivot path previously overwrote, so a 0/absent component zeroed
+                        # the metric (VCI tax = 0.00). Sum these like the non-pivot path.
+                        if (
+                            metric_key in _ADDITIVE_PIVOT_METRICS
+                            and metric_key in period_values[period]
+                            and period_values[period][metric_key] is not None
+                        ):
+                            period_values[period][metric_key] += numeric
+                        else:
+                            period_values[period][metric_key] = numeric
 
             # Keep latest periods by limit
             if params.limit:
@@ -1065,7 +1081,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             return pivoted
 
         statement_mapping = _metric_mapping(params.statement_type.value)
-        additive_metrics = {"tax_expense", "selling_general_admin"}
+        additive_metrics = _ADDITIVE_PIVOT_METRICS
 
         for row in data:
             try:

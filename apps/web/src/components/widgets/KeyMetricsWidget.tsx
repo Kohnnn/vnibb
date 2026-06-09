@@ -27,7 +27,7 @@ interface KeyMetricsWidgetProps {
 interface MetricRowProps {
     label: string;
     value: string | number | null;
-    sparklineData?: number[];
+    sparklineData?: (number | null)[];
     source?: string;
 }
 
@@ -48,6 +48,11 @@ const CATEGORY_DESCRIPTIONS: Record<MetricsCategory, string> = {
 }
 
 function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
+    // Sparkline data may now contain nulls (gaps for pre-coverage periods). Plot only
+    // the finite points so a missing year doesn't render as a misleading 0.
+    const finiteSpark = sparklineData
+        ? sparklineData.filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+        : [];
     return (
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2 transition-colors hover:border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]/80">
             <div className="min-w-0">
@@ -59,8 +64,8 @@ function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
                 )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
-                {sparklineData && sparklineData.length > 0 && (
-                    <Sparkline data={sparklineData} width={40} height={16} />
+                {finiteSpark.length > 0 && (
+                    <Sparkline data={finiteSpark} width={40} height={16} />
                 )}
                 <span className="text-[var(--text-primary)] font-mono text-xs tabular-nums">{value ?? '-'}</span>
             </div>

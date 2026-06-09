@@ -176,27 +176,53 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
   const hurstState = classifyHurst(hurst);
 
   const riskComputation = useMemo(() => {
-    const drawdownPenalty = Math.min(Math.abs(Number(drawdown?.max_drawdown_from_52w_high_pct || 0)) * 1.1, 35);
-    const volatilityPenalty = Math.min(Number(parkinson?.current_parkinson_vol_30d_pct || 0), 30);
-    const sortinoPenalty = sortinoAverage === null ? 12 : Math.min(Math.max(2 - sortinoAverage, 0) * 12, 20);
-    const hurstPenalty = hurst === null ? 8 : Math.abs(hurst - 0.5) < 0.08 ? 6 : 0;
-    const relativeDrawdownPenalty = Math.min(Math.abs(Math.min(Number(benchmarkRisk?.current_relative_drawdown_pct || 0), 0)) * 1.2, 14);
-    const trackingPenalty = Math.min(Number(benchmarkRisk?.current_tracking_error_30d_pct || 0) * 0.6, 14);
-    const downsidePenalty = Math.min(Number(benchmarkRisk?.downside_deviation_30d_pct || 0) * 0.6, 16);
-    const score = Math.max(0, Math.min(100, Math.round(100 - drawdownPenalty - volatilityPenalty - sortinoPenalty - hurstPenalty - relativeDrawdownPenalty - trackingPenalty - downsidePenalty)));
+    // DQ remediation 2026-06-08 (DQ-023): the previous model subtracted up to
+    // 35+30+20+8+14+14+16 = 137 penalty points from a base of 100, so a genuinely
+    // volatile-but-solid stock (e.g. VCI) underflowed to 0 and was mislabelled
+    // "Critical". Replace the additive over-budget with a weighted average of
+    // normalized sub-stresses (each in [0,1], weights sum to 1) so the score is
+    // always a meaningful 0..100 with no clamp artifact.
+    const drawdownStress = Math.min(Math.abs(Number(drawdown?.max_drawdown_from_52w_high_pct || 0)) / 50, 1);
+    const volStress = Math.min(Number(parkinson?.current_parkinson_vol_30d_pct || 0) / 60, 1);
+    const sortinoStress = sortinoAverage === null ? 0.6 : Math.min(Math.max(2 - sortinoAverage, 0) / 2, 1);
+    const hurstStress = hurst === null ? 0.5 : (Math.abs(hurst - 0.5) < 0.08 ? 0.75 : 0);
+    const relDdStress = Math.min(Math.abs(Math.min(Number(benchmarkRisk?.current_relative_drawdown_pct || 0), 0)) / 25, 1);
+    const trackingStress = Math.min(Number(benchmarkRisk?.current_tracking_error_30d_pct || 0) / 40, 1);
+    const downsideStress = Math.min(Number(benchmarkRisk?.downside_deviation_30d_pct || 0) / 40, 1);
 
-    return {
-      score,
-      drivers: [
-        { label: 'Drawdown Stress', value: drawdownPenalty, tone: 'text-rose-300' },
-        { label: 'Volatility Stress', value: volatilityPenalty, tone: 'text-amber-300' },
-        { label: 'Relative DD', value: relativeDrawdownPenalty, tone: 'text-fuchsia-300' },
-        { label: 'Tracking Error', value: trackingPenalty, tone: 'text-cyan-300' },
-        { label: 'Downside Dev', value: downsidePenalty, tone: 'text-sky-300' },
-        { label: 'Sortino Penalty', value: sortinoPenalty, tone: 'text-cyan-300' },
-        { label: 'Structure Penalty', value: hurstPenalty, tone: 'text-violet-300' },
-      ],
-    }
+    const weights = {
+      drawdown: 0.25,
+      vol: 0.2,
+      sortino: 0.15,
+      relDd: 0.12,
+      tracking: 0.1,
+      downside: 0.1,
+      hurst: 0.08,
+    };
+    const weightedStress =
+      weights.drawdown * drawdownStress +
+      weights.vol * volStress +
+      weights.sortino * sortinoStress +
+      weights.relDd * relDdStress +
+      weights.tracking * trackingStress +
+      weights.downside * downsideStress +
+      weights.hurst * hurstStress; // weights sum to 1 -> weightedStress in [0,1]
+
+    const score = Math.max(0, Math.min(100, Math.round(100 * (1 - weightedStress))));
+
+    // Driver cards show the actual point deduction each factor contributes
+    // (weight * stress * 100), so they sum to the total deduction (100 - score).
+    const drivers = [
+      { label: 'Drawdown Stress', value: weights.drawdown * drawdownStress * 100, tone: 'text-rose-300' },
+      { label: 'Volatility Stress', value: weights.vol * volStress * 100, tone: 'text-amber-300' },
+      { label: 'Relative DD', value: weights.relDd * relDdStress * 100, tone: 'text-fuchsia-300' },
+      { label: 'Tracking Error', value: weights.tracking * trackingStress * 100, tone: 'text-cyan-300' },
+      { label: 'Downside Dev', value: weights.downside * downsideStress * 100, tone: 'text-sky-300' },
+      { label: 'Sortino Penalty', value: weights.sortino * sortinoStress * 100, tone: 'text-cyan-300' },
+      { label: 'Structure Penalty', value: weights.hurst * hurstStress * 100, tone: 'text-violet-300' },
+    ];
+
+    return { score, drivers };
   }, [benchmarkRisk?.current_relative_drawdown_pct, benchmarkRisk?.current_tracking_error_30d_pct, benchmarkRisk?.downside_deviation_30d_pct, drawdown?.max_drawdown_from_52w_high_pct, parkinson?.current_parkinson_vol_30d_pct, sortinoAverage, hurst]);
 
   const riskScore = riskComputation.score

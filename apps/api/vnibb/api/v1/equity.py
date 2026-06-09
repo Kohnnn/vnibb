@@ -220,10 +220,10 @@ def _is_control_flow_exception(exc: BaseException) -> bool:
 class MetricsHistoryResponse(BaseModel):
     symbol: str
     periods: List[str] = []
-    roe: List[float] = []
-    roa: List[float] = []
-    pe_ratio: List[float] = []
-    pb_ratio: List[float] = []
+    roe: List[Optional[float]] = []
+    roa: List[Optional[float]] = []
+    pe_ratio: List[Optional[float]] = []
+    pb_ratio: List[Optional[float]] = []
 
 
 async def _refresh_profile_cache(symbol: str) -> None:
@@ -602,6 +602,29 @@ def _build_ratio_ttm_rows(rows: List[FinancialRatioData]) -> List[FinancialRatio
             value = getattr(row, "ev_ebitda", None)
             if isinstance(value, (int, float)) and value == value and value > 0:
                 payload["ev_ebitda"] = float(value)
+                break
+
+    # DQ remediation 2026-06-08 (DQ-019): the TTM payload was built from a single
+    # latest quarter row, so point-in-time sections (LIQUIDITY/EFFICIENCY/
+    # PROFITABILITY/LEVERAGE/COVERAGE/OCF/GROWTH) that happened to be null on that
+    # one quarter were dropped entirely, leaving TTM showing only VALUATION+DIVIDEND.
+    # Inherit each missing ratio field from the most recent row that carries a value
+    # (most-recent-available convention) so those sections render. Flow-summed metrics
+    # (eps/dps) handled above keep their TTM sums.
+    _ttm_summed = {"eps", "dps"}
+    candidate_fields = [
+        name
+        for name in latest.model_dump(mode="json").keys()
+        if name not in {"period", "symbol"} and name not in _ttm_summed
+    ]
+    for attr in candidate_fields:
+        current = payload.get(attr)
+        if isinstance(current, (int, float)) and current == current:
+            continue  # already populated on the latest row
+        for row in reversed(ordered_rows):
+            value = getattr(row, attr, None)
+            if isinstance(value, (int, float)) and value == value:
+                payload[attr] = float(value)
                 break
 
     return [FinancialRatioData.model_validate(payload)]
@@ -2159,6 +2182,7 @@ def _provider_timeout_budget(reserve_seconds: int = 5) -> float:
 def _build_quote_from_screener_snapshot(
     snapshot_row: ScreenerSnapshot,
     latest_row: Optional[StockPrice] = None,
+    previous_row: Optional[StockPrice] = None,
 ) -> Optional[StockQuoteData]:
     if snapshot_row.price is None:
         return None
@@ -2187,6 +2211,24 @@ def _build_quote_from_screener_snapshot(
         latest_row and latest_row.time is not None and latest_row.time >= snapshot_row.snapshot_date
     )
 
+    # RC-3 (data-quality remediation 2026-06-08): PREV CLOSE is a settled EOD value and
+    # must never be blank after market close. The live-session-derived `snapshot_prev_close`
+    # is null after-hours (no live change_pct). Prefer the actual previous settled close
+    # from StockPrice; fall back to the derived value only when no prior row exists.
+    settled_prev_close = (
+        float(previous_row.close)
+        if previous_row is not None and previous_row.close is not None
+        else None
+    )
+    prev_close = settled_prev_close if settled_prev_close is not None else snapshot_prev_close
+    if snapshot_change is None and prev_close is not None:
+        snapshot_change = snapshot_row.price - prev_close
+        if snapshot_change_pct is None and prev_close not in (0, None):
+            snapshot_change_pct = (snapshot_change / prev_close) * 100
+
+    # OPEN/HIGH/LOW are session-specific. Only surface them when the settled price row
+    # actually corresponds to (or is newer than) the snapshot session; otherwise leave
+    # them null rather than show stale OHLC that contradicts a fresher snapshot price.
     return StockQuoteData(
         symbol=str(snapshot_row.symbol or "").upper(),
         price=snapshot_row.price,
@@ -2203,7 +2245,7 @@ def _build_quote_from_screener_snapshot(
         low=(
             float(latest_row.low) if latest_row_is_current and latest_row.low is not None else None
         ),
-        prev_close=snapshot_prev_close,
+        prev_close=prev_close,
         change=snapshot_change,
         change_pct=round(snapshot_change_pct, 2) if snapshot_change_pct is not None else None,
         volume=int(snapshot_row.volume) if snapshot_row.volume is not None else None,
@@ -2225,15 +2267,23 @@ async def _load_latest_screener_snapshot_quote(
     if not snapshot_row:
         return None
 
-    latest_row = (
-        await db.execute(
-            select(StockPrice)
-            .where(StockPrice.symbol == symbol)
-            .order_by(StockPrice.time.desc())
-            .limit(1)
+    # Fetch the two most recent settled rows so we have both the latest OHLC and the
+    # prior close for a non-null PREV CLOSE after market hours (RC-3).
+    recent_rows = (
+        (
+            await db.execute(
+                select(StockPrice)
+                .where(StockPrice.symbol == symbol)
+                .order_by(StockPrice.time.desc())
+                .limit(2)
+            )
         )
-    ).scalar_one_or_none()
-    return _build_quote_from_screener_snapshot(snapshot_row, latest_row)
+        .scalars()
+        .all()
+    )
+    latest_row = recent_rows[0] if recent_rows else None
+    previous_row = recent_rows[1] if len(recent_rows) >= 2 else None
+    return _build_quote_from_screener_snapshot(snapshot_row, latest_row, previous_row)
 
 
 def _quote_effective_timestamp(quote: Optional[StockQuoteData]) -> Optional[datetime]:
@@ -2324,8 +2374,11 @@ def _normalize_dividend_yield_percent(value: Any) -> Optional[float]:
     while abs(normalized) > 100:
         normalized /= 100
 
-    if abs(normalized) > 50:
-        normalized = 50.0 if normalized > 0 else -50.0
+    # DQ remediation 2026-06-08: prefer null over a fabricated clamp for implausible
+    # equity dividend yields (>~40%), which are unit/denominator artifacts (see
+    # _normalize_dividend_yield in providers/vnstock/financial_ratios.py).
+    if abs(normalized) > 40:
+        return None
 
     return normalized
 
@@ -3220,9 +3273,18 @@ async def _enrich_ratio_ev_sales_from_income(
 
         computed_ev_sales = None
         if ev_ebitda is not None and ebitda_value not in (None, 0):
+            # Path A: EV/Sales = (EV/EBITDA) * EBITDA / Revenue. EBITDA and Revenue
+            # come from the same income rows, so units are internally consistent.
             computed_ev_sales = (ev_ebitda * ebitda_value) / revenue_value
         elif latest_market_cap_value not in (None, 0):
-            computed_ev_sales = latest_market_cap_value / revenue_value
+            # Path B: market_cap / Revenue. market_cap (screener) and Revenue (KBS-scaled)
+            # can be in different unit scales, which historically produced ~10^3 swings
+            # (DQ EV/Sales 301x). Only accept this fallback when the result is in a
+            # plausible EV/Sales band; otherwise leave null rather than emit a value
+            # that contradicts adjacent periods.
+            candidate = latest_market_cap_value / revenue_value
+            if 0 < candidate <= 60:
+                computed_ev_sales = candidate
 
         if computed_ev_sales is not None:
             item.ev_sales = computed_ev_sales
@@ -4624,7 +4686,7 @@ async def get_quote(
             )
 
             if snapshot_is_fresher and snapshot_row and snapshot_row.price is not None:
-                return _build_quote_from_screener_snapshot(snapshot_row, latest_row)
+                return _build_quote_from_screener_snapshot(snapshot_row, latest_row, previous_row)
 
             if latest_row:
                 return StockQuoteData(
@@ -6632,10 +6694,13 @@ async def get_metrics_history(
     symbol_upper = symbol.upper()
     start_date = date.today() - timedelta(days=days)
 
-    def build_series_from_rows(rows: List[Any], metric_key: str, attr: str) -> List[float]:
+    def build_series_from_rows(rows: List[Any], metric_key: str, attr: str) -> List[Optional[float]]:
         if not (include_all or metric_key in metrics_list):
             return []
-        return [float(getattr(r, attr) or 0) for r in rows]
+        # DQ remediation 2026-06-08: preserve nulls instead of coercing missing
+        # values to 0.0. A 0 P/E or 0% ROE is a real, misleading value; pre-coverage
+        # years (e.g. 2012-2019 with valuation-only KBS rows) must render as gaps, not 0.
+        return [_coerce_optional_float(getattr(r, attr, None)) for r in rows]
 
     try:
         from vnibb.models.screener import ScreenerSnapshot
@@ -6695,10 +6760,11 @@ async def get_metrics_history(
     ordered = list(reversed(data))
     periods = [r.period or "" for r in ordered]
 
-    def build_series(metric_key: str, attr: str) -> List[float]:
+    def build_series(metric_key: str, attr: str) -> List[Optional[float]]:
         if not (include_all or metric_key in metrics_list):
             return []
-        return [float(getattr(r, attr) or 0) for r in ordered]
+        # DQ remediation 2026-06-08: preserve nulls (see build_series_from_rows).
+        return [_coerce_optional_float(getattr(r, attr, None)) for r in ordered]
 
     return MetricsHistoryResponse(
         symbol=symbol_upper,

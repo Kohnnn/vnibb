@@ -271,7 +271,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             { label: 'Open', value: formatPriceValueForUnit(openPrice, unitConfig) },
             {
               label: 'Mkt Cap',
-              value: formatCompactValueForUnit(marketCap, unitConfig),
+              value: formatCompactValueForUnit(marketCap, unitConfig, { decimals: 2 }),
               source: marketCapSource,
             },
           ].slice(0, 8).map((item, i) => (

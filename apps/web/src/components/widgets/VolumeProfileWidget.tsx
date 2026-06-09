@@ -134,9 +134,20 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
 
   const maxVolume = profile.reduce((max, bin) => Math.max(max, bin.volume), 0);
   const fallbackValueArea = calculateValueArea(profile, 0.7);
-  const pocPrice = hasMicroProfile ? microProfile?.poc_price ?? null : fallbackValueArea.pocPrice;
-  const vahPrice = hasMicroProfile ? microProfile?.vah_price ?? null : fallbackValueArea.vahPrice;
-  const valPrice = hasMicroProfile ? microProfile?.val_price ?? null : fallbackValueArea.valPrice;
+  // DQ remediation 2026-06-08 (DQ-024): the POC/VAH/VAL header KPIs used to read ONLY
+  // the microstructure summary fields once bins existed, so when bins rendered but the
+  // summary triple came back null (VCI 6M), the KPIs stranded at "—". Decouple the KPI
+  // fallback from hasMicroProfile: prefer the micro summary, else the always-computable
+  // candle-derived value area. Finite-checked so a 0/NaN never masks a real value.
+  const pickFinite = (...vals: Array<number | null | undefined>): number | null => {
+    for (const v of vals) {
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+    }
+    return null;
+  };
+  const pocPrice = pickFinite(microProfile?.poc_price, fallbackValueArea.pocPrice);
+  const vahPrice = pickFinite(microProfile?.vah_price, fallbackValueArea.vahPrice);
+  const valPrice = pickFinite(microProfile?.val_price, fallbackValueArea.valPrice);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume profile" icon={<BarChart2 size={18} />} />;
@@ -201,15 +212,15 @@ export function VolumeProfileWidget({ symbol }: VolumeProfileWidgetProps) {
       <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="Point of Control · price level with the highest traded volume in the lookback window. VND/share.">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">POC <span className="ml-1 text-[8px] normal-case tracking-normal opacity-60">VND/share</span></div>
-          <div className="text-cyan-300 font-mono">{pocPrice ? pocPrice.toFixed(2) : '-'}</div>
+          <div className="text-cyan-300 font-mono">{pocPrice != null ? pocPrice.toFixed(2) : '-'}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="Value Area High · upper bound of the price range that contained 70% of volume.">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">VAH <span className="ml-1 text-[8px] normal-case tracking-normal opacity-60">VND/share</span></div>
-          <div className="text-emerald-300 font-mono">{vahPrice ? vahPrice.toFixed(2) : '-'}</div>
+          <div className="text-emerald-300 font-mono">{vahPrice != null ? vahPrice.toFixed(2) : '-'}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="Value Area Low · lower bound of the price range that contained 70% of volume.">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">VAL <span className="ml-1 text-[8px] normal-case tracking-normal opacity-60">VND/share</span></div>
-          <div className="text-amber-300 font-mono">{valPrice ? valPrice.toFixed(2) : '-'}</div>
+          <div className="text-amber-300 font-mono">{valPrice != null ? valPrice.toFixed(2) : '-'}</div>
         </div>
       </div>
 

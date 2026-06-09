@@ -38,6 +38,10 @@ interface FinancialsWidgetProps {
     onRemove?: () => void;
 }
 
+// Per-share metrics (EPS/BVPS/DPS) are absolute VND-per-share values and must NOT be
+// divided by the table-wide billions scale. Without this, e.g. EPS ~2000 VND / 1e9 -> 0.00.
+const PER_SHARE_METRIC_KEYS = new Set<string>(['eps', 'bvps', 'dps', 'book_value_per_share']);
+
 const STATEMENT_METRIC_KEYS: Record<'income_statement' | 'balance_sheet' | 'cash_flow', string[]> = {
     income_statement: [
         'revenue',
@@ -406,7 +410,7 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
 
                     values[periodLabel] = { val: currentVal, growth };
                 });
-                return { label: m.label, isPct: m.isPct, values };
+                return { label: m.label, isPct: m.isPct, metricKey: m.key, values };
             })
         };
     }, [activeQuery?.data, activeTab, periodMode, period, unitConfig]);
@@ -437,9 +441,12 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
 
     const tableScale = useMemo(() => {
         if (!tableData || activeTab === 'ratios') return resolveUnitScale([], unitConfig);
-        const values = tableData.rows.flatMap((row) =>
-            tableData.periods.map((period) => row.values[period]?.val)
-        );
+        // Exclude per-share rows (EPS/BVPS/DPS) from scale resolution: their tiny
+        // VND-per-share magnitudes must not influence the billions/millions scale, and
+        // they are formatted independently (see valueFormatter).
+        const values = tableData.rows
+            .filter((row) => !PER_SHARE_METRIC_KEYS.has(String(row.metricKey || '')))
+            .flatMap((row) => tableData.periods.map((period) => row.values[period]?.val));
         return resolveUnitScale(values, unitConfig);
     }, [tableData, activeTab, unitConfig]);
 
@@ -470,9 +477,12 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
     }, [activeTab, tableData])
 
     const denseRowMeta = useMemo(() => {
-        if (!tableData) return new Map<string, { isPct?: boolean }>()
+        if (!tableData) return new Map<string, { isPct?: boolean; isPerShare?: boolean }>()
         return new Map(
-            tableData.rows.map((row, index) => [`${activeTab}-${index}`, { isPct: row.isPct }])
+            tableData.rows.map((row, index) => [
+                `${activeTab}-${index}`,
+                { isPct: row.isPct, isPerShare: PER_SHARE_METRIC_KEYS.has(String(row.metricKey || '')) },
+            ])
         )
     }, [activeTab, tableData])
 
@@ -580,6 +590,11 @@ function FinancialsWidgetComponent({ id, symbol, hideHeader, onRemove }: Financi
                                     }
                                     if (activeTab === 'ratios') {
                                         return formatRatio(Number.isFinite(numericValue) ? numericValue : null)
+                                    }
+                                    if (meta?.isPerShare) {
+                                        // Per-share values (EPS/BVPS/DPS) are absolute VND-per-share;
+                                        // format with plain 2-decimal numbers, NOT the billions scale.
+                                        return formatNumber(Number.isFinite(numericValue) ? numericValue : null, { decimals: 2 })
                                     }
                                     return formatUnitValuePlain(Number.isFinite(numericValue) ? numericValue : null, tableScale, unitConfig)
                                 }}
