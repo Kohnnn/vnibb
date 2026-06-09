@@ -289,7 +289,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
             </div>
 
             <div className="grid flex-1 grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+              <div className="flex min-h-0 flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Quant Radar</div>
                   <div className="text-[10px] text-[var(--text-secondary)]">8-factor blend</div>

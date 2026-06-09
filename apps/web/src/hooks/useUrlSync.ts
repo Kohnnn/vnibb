@@ -15,8 +15,10 @@
  *  - On first mount, reads params and applies them once (deep-link restore).
  *    This runs after the context has restored its own persisted state, and
  *    only overrides when the URL actually specifies something valid.
- *  - On subsequent state changes, writes params with `replaceState` (no history
- *    spam). Browser back/forward updates are picked up via `popstate`.
+ *  - On subsequent state changes, writes params with `replaceState` only (never
+ *    pushState). This keeps the URL shareable without creating extra history
+ *    entries that the Next App Router cannot reconcile (which caused a blank
+ *    screen on browser Back — DEF-15).
  */
 
 import { useCallback, useEffect, useRef } from 'react';
@@ -40,6 +42,31 @@ const PARAM_DASHBOARD = 'dashboard';
 const PARAM_TAB = 'tab';
 const PARAM_SYMBOL = 'symbol';
 
+/**
+ * Back-compat aliases for dashboard slugs. Older share/bookmark links (and some
+ * docs) used short slugs that don't match the canonical dashboard ids. Map them
+ * so deep-links resolve instead of silently falling back to the default
+ * dashboard. (DEF-02: `default-global` → `default-global-markets`.)
+ */
+const DASHBOARD_SLUG_ALIASES: Record<string, string> = {
+  'default-global': 'default-global-markets',
+  'global': 'default-global-markets',
+  'global-markets': 'default-global-markets',
+  'fundamental': 'default-fundamental',
+  'technical': 'default-technical',
+  'quant': 'default-quant',
+};
+
+const resolveDashboardSlug = (slug: string, validIds: string[]): string | null => {
+  if (validIds.includes(slug)) return slug;
+  const aliased = DASHBOARD_SLUG_ALIASES[slug];
+  if (aliased && validIds.includes(aliased)) return aliased;
+  return null;
+};
+
+/** Exported for unit testing the slug-alias resolution (DEF-02). */
+export const __resolveDashboardSlug = resolveDashboardSlug;
+
 export function useUrlSync({
   ready,
   activeDashboardId,
@@ -56,9 +83,6 @@ export function useUrlSync({
   // URL change (deep-link restore or popstate), so we don't immediately
   // overwrite the URL we just read from.
   const suppressWriteRef = useRef(false);
-  // Tracks whether we've written to the URL at least once. The first write
-  // (right after deep-link restore) uses replaceState; subsequent ones push.
-  const hasWrittenRef = useRef(false);
 
   const applyFromSearch = useCallback(
     (search: string) => {
@@ -69,10 +93,14 @@ export function useUrlSync({
 
       let applied = false;
 
-      if (urlDashboard && dashboardIds.includes(urlDashboard) && urlDashboard !== activeDashboardId) {
-        applyDashboard(urlDashboard);
+      const resolvedDashboard = urlDashboard
+        ? resolveDashboardSlug(urlDashboard, dashboardIds)
+        : null;
+
+      if (resolvedDashboard && resolvedDashboard !== activeDashboardId) {
+        applyDashboard(resolvedDashboard);
         applied = true;
-        if (urlTab && getTabIds(urlDashboard).includes(urlTab)) {
+        if (urlTab && getTabIds(resolvedDashboard).includes(urlTab)) {
           applyTab(urlTab);
         }
       } else if (
@@ -162,17 +190,16 @@ export function useUrlSync({
     const next = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
     const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next !== current) {
-      // Use pushState for genuine in-app navigations so browser Back/Forward
-      // move between views via `popstate` (handled below) instead of exiting
-      // /dashboard entirely — which previously caused a full remount + blank
-      // screen. The very first write right after deep-link restore uses
-      // replaceState so we don't leave a duplicate initial history entry.
-      if (hasWrittenRef.current) {
-        window.history.pushState(window.history.state, '', next);
-      } else {
-        window.history.replaceState(window.history.state, '', next);
-        hasWrittenRef.current = true;
-      }
+      // IMPORTANT: only ever `replaceState`, never `pushState`.
+      //
+      // Next.js App Router owns the History API + the popstate event. Pushing
+      // our own entries created phantom history that Next could not reconcile,
+      // so a browser Back triggered a full route re-render with a multi-second
+      // blank screen (DEF-15). replaceState updates the URL of the *current*
+      // entry only — keeping deep-links shareable/bookmarkable — without adding
+      // navigations that confuse the router. Browser Back/Forward then behaves
+      // as normal document navigation.
+      window.history.replaceState(window.history.state, '', next);
     }
   }, [ready, activeDashboardId, activeTabId, symbol]);
 }
