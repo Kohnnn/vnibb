@@ -4877,7 +4877,6 @@ async def get_profile(
                     company.sector,
                     raw_profile.get("sector"),
                     raw_profile.get("icb_name2"),
-                    raw_profile.get("company_type"),
                     stock_row[3] if stock_row else None,
                     industry,
                 )
@@ -5103,7 +5102,6 @@ async def get_profile(
                 profile_data.sector,
                 raw_profile.get("sector"),
                 raw_profile.get("icb_name2"),
-                raw_profile.get("company_type"),
                 stock_row[3] if stock_row else None,
                 profile_data.industry,
             )

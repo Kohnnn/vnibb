@@ -151,17 +151,24 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   const changePct = quote?.changePct
 
   const screenerMarketCap = toPositiveNumber(screenerRow?.market_cap)
+  const profileMarketCap = toPositiveNumber(profileData?.market_cap)
   const sharesOutstanding = toPositiveNumber(profileData?.outstanding_shares)
   const derivedMarketCap =
     sharesOutstanding && toPositiveNumber(price)
       ? sharesOutstanding * (toPositiveNumber(price) || 0)
       : null
-  const marketCap = screenerMarketCap ?? derivedMarketCap
+  // Prefer the backend-computed market cap (full VND) over the locally derived
+  // value, which multiplies shares by the quote price (thousands of VND) and is
+  // therefore ~1000x too small — this caused the "514.71B vs 514.71T" mismatch
+  // with TickerProfileWidget (DEF-06). Order: screener -> profile -> derived.
+  const marketCap = screenerMarketCap ?? profileMarketCap ?? derivedMarketCap
   const marketCapSource = screenerMarketCap
     ? 'Screener'
-    : derivedMarketCap
-      ? 'Derived'
-      : 'Unavailable'
+    : profileMarketCap
+      ? 'Profile'
+      : derivedMarketCap
+        ? 'Derived'
+        : 'Unavailable'
 
   const companyName =
     profileData?.company_name ||

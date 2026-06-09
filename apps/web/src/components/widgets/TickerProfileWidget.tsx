@@ -152,7 +152,13 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
 
     const companyName = cleanText(profileData.company_name) || symbol
     const shortName = cleanText(profileData.short_name)
-    const industry = cleanText(profileData.industry)
+    // Fall back to the screener's ICB industry if the profile's industry is
+    // missing (older/cached profiles), so the Industry field never shows a
+    // legal entity type. (DEF-05)
+    const industry =
+        cleanText(profileData.industry) ||
+        cleanText(screenerRow?.industry as string | undefined) ||
+        cleanText(screenerRow?.industry_name as string | undefined)
     const exchange = cleanText(profileData.exchange)
     const website = cleanText(profileData.website)
     const companyType = cleanText(profileData.company_type) || cleanText(profileData.sector) || 'Company information'

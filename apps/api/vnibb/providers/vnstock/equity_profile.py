@@ -269,11 +269,13 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                     company_name=row.get("organ_name"),
                     short_name=None,  # Not available in VCI overview
                     exchange=row.get("exchange"),
-                    # Industry classification from ICB levels
-                    industry=row.get("icb_name3")
-                    or row.get("icb_name4")
-                    or row.get("company_type"),
-                    sector=row.get("icb_name2") or row.get("company_type") or row.get("icb_name3"),
+                    # Industry classification from ICB levels only. `company_type`
+                    # (e.g. "Công ty cổ phần" / joint-stock company) is a legal
+                    # form, NOT an industry/sector, so it must never be used as a
+                    # fallback here — doing so showed the legal type in the
+                    # Industry field for non-bank tickers like FPT/HPG (DEF-05).
+                    industry=row.get("icb_name3") or row.get("icb_name4"),
+                    sector=row.get("icb_name2") or row.get("icb_name3"),
                     established_date=_pick_first(
                         row.get("founded_date"), row.get("established_date")
                     ),
