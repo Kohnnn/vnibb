@@ -498,6 +498,15 @@ class MongoMarketDataService:
                 trade_date = raw.get("tradeDate")
                 if not isinstance(trade_date, datetime):
                     continue
+                # The existing corpus stores tradeDate at 07:00:00 (ICT close,
+                # naive). Normalize to that exact instant so the
+                # (symbol, tradeDate, source) upsert key matches the existing
+                # document and overwrites it in place. A date-only (00:00:00)
+                # key would miss the existing bar and insert a duplicate for the
+                # same trading day, which poisons the chart series.
+                trade_date = trade_date.replace(
+                    hour=7, minute=0, second=0, microsecond=0
+                )
                 close_value = raw.get("close")
                 if close_value is None:
                     # An EOD bar without a close is unusable downstream; skip it

@@ -170,11 +170,18 @@ async def test_bulk_upsert_eod_prices_builds_idempotent_ops(monkeypatch):
     ops = captured["ops"]
     assert len(ops) == 2
     first = ops[0]
-    # Idempotency key matches the read/backfill source so refresh overwrites in place.
-    assert first.filter == {"symbol": "VCI", "tradeDate": datetime(2026, 6, 5), "source": "vnstock-data"}
+    # Idempotency key matches the read/backfill source AND the corpus's 07:00:00
+    # tradeDate convention so a refresh overwrites in place instead of inserting a
+    # duplicate bar for the same trading day.
+    assert first.filter == {
+        "symbol": "VCI",
+        "tradeDate": datetime(2026, 6, 5, 7, 0, 0),
+        "source": "vnstock-data",
+    }
     assert first.upsert is True
     doc = first.update["$set"]
     assert doc["symbol"] == "VCI"
+    assert doc["tradeDate"] == datetime(2026, 6, 5, 7, 0, 0)
     assert doc["close"] == 1.5
     assert doc["value"] == 150.0
     assert doc["interval"] == "1D"
