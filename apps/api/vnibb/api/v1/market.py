@@ -1524,6 +1524,46 @@ async def _load_latest_income_revenue(symbols: List[str]) -> Dict[str, Optional[
     return {_normalize_symbol(row["symbol"]): _to_float(row.get("revenue")) for row in rows}
 
 
+def _expected_latest_trading_day(today: Optional[date] = None) -> date:
+    """Most recent weekday on/before ``today`` (ignores VN holidays).
+
+    Used only as a *staleness floor*: if the freshest screener snapshot predates
+    this date, the Postgres universe is considered behind and the canonical Mongo
+    corpus is consulted. Holidays are not modeled, so the floor is intentionally
+    lenient (a holiday simply means Mongo will also be a day behind and the
+    "only replace when Mongo is strictly fresher" guard prevents a downgrade).
+    """
+
+    anchor = today or date.today()
+    while anchor.weekday() >= 5:  # 5=Sat, 6=Sun
+        anchor -= timedelta(days=1)
+    return anchor
+
+
+def _coerce_to_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _freshest_snapshot_date(rows: Any) -> Optional[date]:
+    latest: Optional[date] = None
+    for row in rows:
+        candidate = _coerce_to_date(row.get("snapshot_date"))
+        if candidate is None:
+            continue
+        if latest is None or candidate > latest:
+            latest = candidate
+    return latest
+
+
 async def _load_latest_screener_rows_from_db(limit: int = 500) -> List[dict[str, Any]]:
     async with async_session_maker() as session:
         ranked_snapshots = select(
@@ -1595,35 +1635,62 @@ async def _load_latest_screener_rows_from_db(limit: int = 500) -> List[dict[str,
         )
     normalized_rows = [row for row in normalized_rows if row.get("symbol")]
 
-    # RC-2 (data-quality remediation 2026-06-08): if the Postgres ScreenerSnapshot
-    # universe is empty (stale/abandoned cron) but the n6v Mongo `market_prices_eod`
-    # corpus is fresh, fall back to it so market-wide widgets (heatmap/breadth/
-    # money-flow) keep working. Mongo only carries price/volume/change, so this is a
-    # liquidity-and-returns universe (no fundamentals); enough to render those widgets.
-    if not normalized_rows:
+    # RC-2 (2026-06-08) + staleness upgrade (2026-06-09): the canonical price
+    # corpus is Mongo `market_prices_eod`, advanced daily by the `mongo_eod_sync`
+    # scheduler job. The Postgres ScreenerSnapshot universe can fall behind (the
+    # screener cron lagging or only writing a partial set), which previously left
+    # heatmap/breadth/money-flow serving stale-but-nonempty rows because the Mongo
+    # fallback only fired when Postgres was *empty*. Now we also consult Mongo when
+    # the freshest snapshot predates the latest expected trading day. To avoid ever
+    # downgrading good data, Mongo only *replaces* the Postgres universe when its
+    # latest trade date is strictly newer.
+    snapshot_date = _freshest_snapshot_date(rows)
+    expected_day = _expected_latest_trading_day()
+    is_stale = snapshot_date is None or snapshot_date < expected_day
+
+    if not normalized_rows or is_stale:
         try:
-            mongo_universe = await get_mongo_market_data_service().get_universe_latest_eod(
-                limit=limit
-            )
+            service = get_mongo_market_data_service()
+            mongo_latest = await service.get_universe_latest_trade_date()
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Mongo universe fallback failed: %s", exc)
-            mongo_universe = []
-        for row in mongo_universe:
-            normalized = _normalize_screener_row(
-                {
-                    "symbol": row.get("symbol"),
-                    "price": row.get("price"),
-                    "volume": row.get("volume"),
-                    "change_pct": row.get("change_pct"),
-                }
-            )
-            if normalized.get("symbol"):
-                normalized_rows.append(normalized)
-        if normalized_rows:
-            logger.info(
-                "Screener universe served from Mongo market_prices_eod fallback (%d symbols).",
-                len(normalized_rows),
-            )
+            logger.warning("Mongo latest-date probe failed: %s", exc)
+            mongo_latest = None
+
+        mongo_is_fresher = mongo_latest is not None and (
+            snapshot_date is None or mongo_latest > snapshot_date
+        )
+
+        # Replace when Postgres is empty, or when Mongo genuinely carries a newer
+        # trading day than the snapshot universe we just loaded.
+        if not normalized_rows or mongo_is_fresher:
+            try:
+                mongo_universe = await service.get_universe_latest_eod(limit=limit)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Mongo universe fallback failed: %s", exc)
+                mongo_universe = []
+
+            mongo_rows: List[dict[str, Any]] = []
+            for row in mongo_universe:
+                normalized = _normalize_screener_row(
+                    {
+                        "symbol": row.get("symbol"),
+                        "price": row.get("price"),
+                        "volume": row.get("volume"),
+                        "change_pct": row.get("change_pct"),
+                    }
+                )
+                if normalized.get("symbol"):
+                    mongo_rows.append(normalized)
+
+            if mongo_rows:
+                normalized_rows = mongo_rows
+                logger.info(
+                    "Screener universe served from Mongo market_prices_eod fallback "
+                    "(%d symbols; snapshot_date=%s mongo_date=%s).",
+                    len(mongo_rows),
+                    snapshot_date,
+                    mongo_latest,
+                )
 
     return normalized_rows
 

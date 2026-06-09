@@ -4636,6 +4636,59 @@ async def get_quote(
         "hybrid",
     }
 
+    async def _get_mongo_quote() -> Optional[StockQuoteData]:
+        """Build a quote from the canonical Mongo `market_prices_eod` corpus.
+
+        Mongo only carries settled EOD bars, so this is used as a fallback when
+        Postgres `StockPrice` is empty/unavailable and as a last resort before
+        the empty/mock quote — never to override a fresher intraday Postgres or
+        live value. The caller decides freshness; this just returns the latest
+        two-bar-derived quote if Mongo has data.
+        """
+        try:
+            mongo = get_mongo_market_data_service()
+            if not mongo.enabled:
+                return None
+            docs = await mongo.get_eod_prices(symbol_upper, lookback_days=30, limit=2)
+        except Exception as mongo_err:  # pragma: no cover - defensive
+            logger.warning("Quote Mongo fallback failed for %s: %s", symbol_upper, mongo_err)
+            return None
+
+        if not docs:
+            return None
+
+        # get_eod_prices sorts ascending by tradeDate, so the last element is newest.
+        latest = docs[-1]
+        previous = docs[-2] if len(docs) > 1 else None
+        latest_close = _coerce_optional_float(latest.get("close"))
+        if latest_close is None:
+            return None
+        prev_close = _coerce_optional_float(previous.get("close")) if previous else None
+        change = (
+            latest_close - prev_close
+            if latest_close is not None and prev_close is not None
+            else None
+        )
+        change_pct = (
+            (change / prev_close) * 100
+            if change is not None and prev_close not in (None, 0)
+            else None
+        )
+        trade_date = latest.get("tradeDate")
+        updated_at = trade_date if isinstance(trade_date, datetime) else datetime.utcnow()
+        return StockQuoteData(
+            symbol=symbol_upper,
+            price=latest_close,
+            open=_coerce_optional_float(latest.get("open")),
+            high=_coerce_optional_float(latest.get("high")),
+            low=_coerce_optional_float(latest.get("low")),
+            prev_close=prev_close,
+            change=change,
+            change_pct=round(change_pct, 2) if change_pct is not None else None,
+            volume=_appwrite_optional_int(latest.get("volume")),
+            updated_at=updated_at,
+        )
+
     async def _get_db_quote() -> Optional[StockQuoteData]:
         try:
             price_stmt = (
@@ -4725,6 +4778,14 @@ async def get_quote(
         if cached_quote:
             return StandardResponse(data=cached_quote, meta=MetaData(count=1))
 
+        # Canonical Mongo EOD as a fallback when Postgres has no rows for this
+        # symbol (e.g. outside the curated/active universe). Settled bars only,
+        # so it sits below the Postgres/intraday path but above live vnstock,
+        # which can time out and blank the quote widgets.
+        mongo_quote = await _get_mongo_quote()
+        if mongo_quote:
+            return StandardResponse(data=mongo_quote, meta=MetaData(count=1))
+
         if settings.resolved_data_backend == "appwrite" and use_appwrite_data:
             appwrite_quote = await _load_quote_from_appwrite(symbol_upper)
             if appwrite_quote:
@@ -4756,6 +4817,10 @@ async def get_quote(
         fallback = await _get_db_quote()
         if fallback:
             return StandardResponse(data=fallback, meta=MetaData(count=1), error=str(e))
+
+        mongo_fallback = await _get_mongo_quote()
+        if mongo_fallback:
+            return StandardResponse(data=mongo_fallback, meta=MetaData(count=1), error=str(e))
 
         # Return mock/empty quote structure to keep UI alive
         return StandardResponse(

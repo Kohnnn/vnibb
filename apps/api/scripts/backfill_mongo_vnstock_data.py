@@ -262,7 +262,7 @@ def main() -> int:
     args = parser.parse_args()
 
     mongo_url = os.getenv("MONGODB_URL")
-    mongo_db = os.getenv("MONGODB_DATABASE", "frb")
+    mongo_db = os.getenv("MONGODB_DATABASE", "vnibb-market")
     if not mongo_url:
         raise SystemExit("MONGODB_URL is required")
 

@@ -1,0 +1,219 @@
+"""Unit tests for the daily-freshness remediation (2026-06-09).
+
+Covers the new canonical-Mongo wiring:
+- mongo_eod_sync frame normalization + run loop (mocked fetcher/service)
+- MongoMarketDataService.bulk_upsert_eod_prices document shape (mocked pymongo)
+- market.py screener-universe staleness helpers
+"""
+
+from datetime import date, datetime
+
+import pandas as pd
+import pytest
+
+from vnibb.services import mongo_eod_sync
+from vnibb.api.v1.market import (
+    _coerce_to_date,
+    _expected_latest_trading_day,
+    _freshest_snapshot_date,
+)
+
+
+# ---------------------------------------------------------------------------
+# mongo_eod_sync frame normalization
+# ---------------------------------------------------------------------------
+def test_frame_to_rows_normalizes_and_skips_bad_dates():
+    frame = pd.DataFrame(
+        [
+            {"time": "2026-06-05", "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100, "value": 150.0},
+            {"time": None, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1},  # dropped: no date
+        ]
+    )
+    rows = mongo_eod_sync._frame_to_rows(frame)
+    assert len(rows) == 1
+    row = rows[0]
+    assert isinstance(row["tradeDate"], datetime)
+    assert row["tradeDate"].date() == date(2026, 6, 5)
+    assert row["close"] == 1.5
+    assert row["volume"] == 100
+    assert row["value"] == 150.0
+
+
+def test_frame_to_rows_handles_empty_and_none():
+    assert mongo_eod_sync._frame_to_rows(None) == []
+    assert mongo_eod_sync._frame_to_rows(pd.DataFrame()) == []
+
+
+def test_coerce_float_rejects_nan():
+    assert mongo_eod_sync._coerce_float(float("nan")) is None
+    assert mongo_eod_sync._coerce_float("abc") is None
+    assert mongo_eod_sync._coerce_float("3.5") == 3.5
+
+
+@pytest.mark.asyncio
+async def test_run_mongo_eod_sync_disabled_service(monkeypatch):
+    class DisabledService:
+        enabled = False
+
+    monkeypatch.setattr(
+        mongo_eod_sync, "get_mongo_market_data_service", lambda: DisabledService()
+    )
+    result = await mongo_eod_sync.run_mongo_eod_sync()
+    assert result == {"symbols": 0, "rows": 0, "failures": 0}
+
+
+@pytest.mark.asyncio
+async def test_run_mongo_eod_sync_writes_explicit_symbols(monkeypatch):
+    written: dict[str, int] = {}
+
+    class FakeService:
+        enabled = True
+
+        async def bulk_upsert_eod_prices(self, symbol, rows):
+            written[symbol] = len(rows)
+            return len(rows)
+
+    monkeypatch.setattr(
+        mongo_eod_sync, "get_mongo_market_data_service", lambda: FakeService()
+    )
+
+    async def fake_wait(bucket):
+        return None
+
+    async def fake_fetch(*, symbol, start, end, interval, bypass_internal_retry):
+        return pd.DataFrame(
+            [{"time": "2026-06-05", "open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 10, "value": 15}]
+        )
+
+    monkeypatch.setattr(mongo_eod_sync.data_pipeline, "_wait_for_rate_limit", fake_wait)
+    monkeypatch.setattr(mongo_eod_sync.data_pipeline, "_fetch_quote_history_frame", fake_fetch)
+
+    result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["vci", "ssi"], window_days=5)
+    assert result["symbols"] == 2
+    assert result["rows"] == 2
+    assert result["failures"] == 0
+    assert written == {"VCI": 1, "SSI": 1}
+
+
+@pytest.mark.asyncio
+async def test_run_mongo_eod_sync_isolates_symbol_failures(monkeypatch):
+    class FakeService:
+        enabled = True
+
+        async def bulk_upsert_eod_prices(self, symbol, rows):
+            return len(rows)
+
+    monkeypatch.setattr(
+        mongo_eod_sync, "get_mongo_market_data_service", lambda: FakeService()
+    )
+
+    async def fake_wait(bucket):
+        return None
+
+    async def fake_fetch(*, symbol, start, end, interval, bypass_internal_retry):
+        if symbol == "BAD":
+            raise RuntimeError("provider down")
+        return pd.DataFrame(
+            [{"time": "2026-06-05", "open": 1, "high": 2, "low": 1, "close": 1.5, "volume": 10}]
+        )
+
+    monkeypatch.setattr(mongo_eod_sync.data_pipeline, "_wait_for_rate_limit", fake_wait)
+    monkeypatch.setattr(mongo_eod_sync.data_pipeline, "_fetch_quote_history_frame", fake_fetch)
+
+    result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["GOOD", "BAD"], window_days=5)
+    assert result["symbols"] == 1
+    assert result["failures"] == 1
+
+
+# ---------------------------------------------------------------------------
+# MongoMarketDataService.bulk_upsert_eod_prices document shape
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_bulk_upsert_eod_prices_builds_idempotent_ops(monkeypatch):
+    import sys
+    import types
+    from unittest.mock import MagicMock
+
+    captured = {}
+
+    class FakeUpdateOne:
+        def __init__(self, flt, update, upsert=False):
+            self.filter = flt
+            self.update = update
+            self.upsert = upsert
+
+    fake_pymongo = types.ModuleType("pymongo")
+    fake_pymongo.UpdateOne = FakeUpdateOne
+    monkeypatch.setitem(sys.modules, "pymongo", fake_pymongo)
+
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    svc = MongoMarketDataService()
+
+    fake_coll = MagicMock()
+
+    def fake_bulk_write(ops, ordered=False):
+        captured["ops"] = ops
+
+    fake_coll.bulk_write.side_effect = fake_bulk_write
+    monkeypatch.setattr(svc, "_get_collection", lambda name: fake_coll)
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+
+    rows = [
+        {"tradeDate": datetime(2026, 6, 5), "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100, "value": 150.0},
+        {"tradeDate": datetime(2026, 6, 6), "open": 1.5, "high": 2.5, "low": 1.0, "close": 2.0, "volume": 200, "value": 400.0},
+        {"tradeDate": datetime(2026, 6, 7), "open": 2.0, "high": 2.0, "low": 2.0, "close": None, "volume": 0},  # dropped: null close
+    ]
+    written = await svc.bulk_upsert_eod_prices("vci", rows)
+    assert written == 2
+
+    ops = captured["ops"]
+    assert len(ops) == 2
+    first = ops[0]
+    # Idempotency key matches the read/backfill source so refresh overwrites in place.
+    assert first.filter == {"symbol": "VCI", "tradeDate": datetime(2026, 6, 5), "source": "vnstock-data"}
+    assert first.upsert is True
+    doc = first.update["$set"]
+    assert doc["symbol"] == "VCI"
+    assert doc["close"] == 1.5
+    assert doc["value"] == 150.0
+    assert doc["interval"] == "1D"
+    assert doc["source"] == "vnstock-data"
+
+
+@pytest.mark.asyncio
+async def test_bulk_upsert_eod_prices_empty_rows_returns_zero():
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    svc = MongoMarketDataService()
+    assert await svc.bulk_upsert_eod_prices("VCI", []) == 0
+
+
+# ---------------------------------------------------------------------------
+# market.py staleness helpers
+# ---------------------------------------------------------------------------
+def test_expected_latest_trading_day_skips_weekend():
+    # Saturday 2026-06-06 -> Friday 2026-06-05
+    assert _expected_latest_trading_day(date(2026, 6, 6)) == date(2026, 6, 5)
+    # Sunday 2026-06-07 -> Friday 2026-06-05
+    assert _expected_latest_trading_day(date(2026, 6, 7)) == date(2026, 6, 5)
+    # Monday stays Monday
+    assert _expected_latest_trading_day(date(2026, 6, 8)) == date(2026, 6, 8)
+
+
+def test_coerce_to_date_variants():
+    assert _coerce_to_date(date(2026, 6, 5)) == date(2026, 6, 5)
+    assert _coerce_to_date(datetime(2026, 6, 5, 12, 0)) == date(2026, 6, 5)
+    assert _coerce_to_date("2026-06-05") == date(2026, 6, 5)
+    assert _coerce_to_date(None) is None
+    assert _coerce_to_date("not-a-date") is None
+
+
+def test_freshest_snapshot_date_picks_max():
+    rows = [
+        {"snapshot_date": date(2026, 6, 3)},
+        {"snapshot_date": "2026-06-05"},
+        {"snapshot_date": None},
+    ]
+    assert _freshest_snapshot_date(rows) == date(2026, 6, 5)
+    assert _freshest_snapshot_date([]) is None

@@ -14,9 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 class MongoMarketDataService:
-    """Lazy MongoDB reader for FRB market data.
+    """Lazy MongoDB accessor for the canonical `vnibb-market` corpus.
 
-    The service intentionally performs no writes and never logs the connection string.
+    Reads are the primary use. A single controlled writer
+    (`bulk_upsert_eod_prices`) exists so the scheduled daily-EOD sync can keep
+    `market_prices_eod` fresh through the same db-name/connection the reads use,
+    avoiding the drift that occurs when only operator-run scripts write.
+    The service never logs the connection string.
     """
 
     def __init__(self) -> None:
@@ -433,6 +437,112 @@ class MongoMarketDataService:
         except Exception as exc:
             logger.warning("Mongo universe latest-EOD read failed: %s", exc)
             return []
+
+    async def get_universe_latest_trade_date(self) -> date | None:
+        """Return the most recent ``tradeDate`` present in ``market_prices_eod``.
+
+        Used by the daily writer (to size the catch-up window) and by callers
+        that need to decide whether a Postgres snapshot is stale relative to the
+        canonical Mongo corpus.
+        """
+
+        def _read() -> date | None:
+            coll = self._get_collection("market_prices_eod")
+            doc = list(
+                coll.find({}, {"_id": 0, "tradeDate": 1}).sort("tradeDate", -1).limit(1)
+            )
+            if not doc:
+                return None
+            value = doc[0].get("tradeDate")
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date):
+                return value
+            return None
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("Mongo latest trade-date read failed: %s", exc)
+            return None
+
+    async def bulk_upsert_eod_prices(
+        self,
+        symbol: str,
+        rows: list[dict[str, Any]],
+    ) -> int:
+        """Upsert normalized EOD OHLCV rows into ``market_prices_eod``.
+
+        The write is keyed on ``(symbol, tradeDate, source)`` to stay idempotent.
+        It deliberately reuses the existing backfill ``source`` value
+        (``vnstock-data``) so a daily refresh overwrites the matching bar in
+        place instead of creating a parallel document — the read methods filter
+        only on ``symbol``/``tradeDate``, so a divergent source would surface as
+        duplicate bars. Rows must already be normalized dicts carrying
+        ``tradeDate`` (a naive ``datetime``) plus OHLCV fields; ``value`` is
+        persisted when present so reads that project it stay populated. Returns
+        the number of upsert operations issued.
+        """
+
+        symbol_upper = symbol.upper()
+        if not rows:
+            return 0
+
+        def _write() -> int:
+            from pymongo import UpdateOne
+
+            coll = self._get_collection("market_prices_eod")
+            synced_at = datetime.now(UTC).replace(tzinfo=None)
+            ops: list[Any] = []
+            for raw in rows:
+                trade_date = raw.get("tradeDate")
+                if not isinstance(trade_date, datetime):
+                    continue
+                close_value = raw.get("close")
+                if close_value is None:
+                    # An EOD bar without a close is unusable downstream; skip it
+                    # rather than overwrite a good prior value with a null.
+                    continue
+                doc = {
+                    "symbol": symbol_upper,
+                    "tradeDate": trade_date,
+                    "interval": "1D",
+                    "source": "vnstock-data",
+                    "sourceKey": (
+                        f"vnstock-data:{symbol_upper}:eod:"
+                        f"{trade_date.date().isoformat()}"
+                    ),
+                    "open": raw.get("open"),
+                    "high": raw.get("high"),
+                    "low": raw.get("low"),
+                    "close": close_value,
+                    "volume": raw.get("volume"),
+                    "value": raw.get("value"),
+                    "updatedAt": synced_at,
+                    "syncedAt": synced_at,
+                    "schemaVersion": 1,
+                }
+                ops.append(
+                    UpdateOne(
+                        {
+                            "symbol": symbol_upper,
+                            "tradeDate": trade_date,
+                            "source": "vnstock-data",
+                        },
+                        {"$set": doc, "$setOnInsert": {"createdAt": synced_at}},
+                        upsert=True,
+                    )
+                )
+            if not ops:
+                return 0
+            coll.bulk_write(ops, ordered=False)
+            return len(ops)
+
+        try:
+            return await asyncio.to_thread(_write)
+        except Exception as exc:
+            logger.warning("Mongo EOD upsert failed for %s: %s", symbol_upper, exc)
+            return 0
 
 
 @lru_cache(maxsize=1)

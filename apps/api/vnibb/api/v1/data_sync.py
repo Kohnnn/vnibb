@@ -842,6 +842,41 @@ async def sync_daily_trading(
 
 
 @router.post(
+    "/sync/mongo-eod",
+    response_model=SyncResponse,
+    summary="Sync Mongo EOD Prices",
+    description="Refresh the canonical Mongo market_prices_eod corpus for a rolling window.",
+)
+async def sync_mongo_eod(
+    background_tasks: BackgroundTasks,
+    window_days: int = Query(default=7, ge=1, le=30, description="Rolling catch-up window in days"),
+    async_mode: bool = Query(default=True, description="Run in background"),
+) -> SyncResponse:
+    """Advance the canonical Mongo `market_prices_eod` corpus on demand."""
+    from vnibb.services.mongo_eod_sync import run_mongo_eod_sync
+
+    if async_mode:
+        background_tasks.add_task(run_mongo_eod_sync, window_days=window_days)
+        return SyncResponse(
+            status="started",
+            message="Mongo EOD sync started in background",
+        )
+
+    try:
+        summary = await run_mongo_eod_sync(window_days=window_days)
+        return SyncResponse(
+            status="success",
+            message=(
+                f"Mongo EOD sync completed: {summary['symbols']} symbols, "
+                f"{summary['rows']} rows upserted, {summary['failures']} failures"
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Mongo EOD sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
     "/sync/cleanup",
     response_model=CleanupResponse,
     summary="Run Retention Cleanup",

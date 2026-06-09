@@ -18,6 +18,7 @@ from vnibb.api.v1.equity import (
     _load_corporate_actions_for_adjustment,
     _load_historical_from_appwrite,
     _load_historical_from_db,
+    _load_historical_from_mongo,
     _load_historical_from_recent_cache,
 )
 from vnibb.api.v1.schemas import MetaData, StandardResponse
@@ -1211,6 +1212,26 @@ async def _load_price_frame(
         else []
     )
 
+    # Canonical source first: Mongo `market_prices_eod` is the daily-fresh corpus
+    # (advanced by the `mongo_eod_sync` scheduler job). The `/equity/historical`
+    # endpoint already prefers it; the quant family historically read only
+    # Postgres `StockPrice`, so ~17 quant widgets diverged from the chart widgets
+    # whenever StockPrice lagged. Reading Mongo here aligns them. We still always
+    # consult Postgres/cache/provider below and merge, so a symbol missing from
+    # Mongo (or a Mongo outage) degrades gracefully instead of blanking.
+    mongo_rows: list[EquityHistoricalData] = []
+    try:
+        mongo_rows = await _load_historical_from_mongo(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            interval="1D",
+            adjustment_mode="raw",
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Quant Mongo price read failed for %s: %s", symbol, exc)
+        mongo_rows = []
+
     try:
         rows = await _load_historical_from_db(
             db=db,
@@ -1231,6 +1252,12 @@ async def _load_price_frame(
         else:
             logger.warning("Quant price frame query failed for %s: %s", symbol, exc)
         rows = []
+
+    # Merge Mongo with Postgres immediately so the staleness check below sees the
+    # freshest available bar across both stores (Mongo wins ties by recency since
+    # _merge_historical_rows is last-write-by-time and we pass Postgres last).
+    if mongo_rows:
+        rows = _merge_historical_rows(mongo_rows, rows)
 
     use_appwrite_data = settings.is_appwrite_configured and settings.resolved_data_backend in {
         "appwrite",

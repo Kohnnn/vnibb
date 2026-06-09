@@ -70,7 +70,7 @@ Edit `deployment/env.oracle` and set:
 - `APPWRITE_WRITE_ENABLED=false` for the current month
 - `ALLOW_ANONYMOUS_DASHBOARD_WRITES=true`
 - `MONGODB_URL` for shared market/raw analytical records used by microstructure widgets
-- `MONGODB_DATABASE=frb`
+- `MONGODB_DATABASE=vnibb-market`
 - `MONGODB_ENABLED=true`
 - `SUPABASE_URL`
 - `SUPABASE_ANON_KEY`

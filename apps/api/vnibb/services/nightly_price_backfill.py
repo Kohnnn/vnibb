@@ -1,10 +1,15 @@
 """APScheduler hook: nightly retry for the price-sync stage.
 
-The daily_trading scheduler keeps writing stage rows but the price stage
-has been silently writing only a handful of symbols since Tet 2026.
-Until the upstream provider issue is identified, this nightly job runs
-the curated active-symbol backfill so the dashboard always has next-day
-data for the most-watched tickers.
+This curated-universe backfill keeps next-day data hot for the most-watched
+tickers as a cheap safety net layered on top of the broad Postgres daily sync.
+It targets Postgres `StockPrice`; the canonical Mongo `market_prices_eod` corpus
+is advanced separately by `mongo_eod_sync` (see `core/scheduler.py`).
+
+Note: an earlier revision of this file claimed the upstream price stage had been
+"silently writing only a handful of symbols since Tet 2026". Live verification on
+2026-06-09 showed the broad Postgres daily sync is in fact current across the
+universe (non-curated symbols updating same-day), so that note was stale and has
+been removed. This job remains as a low-cost redundancy for the priority list.
 
 Triggered after HOSE close (set in `core/scheduler.py`).
 """

@@ -126,7 +126,7 @@ class Settings(BaseSettings):
     # MongoDB Analytical Source
     # ==========================================================================
     mongodb_url: Optional[str] = None
-    mongodb_database: str = "frb"
+    mongodb_database: str = "vnibb-market"
     mongodb_enabled: bool = True
     mongodb_timeout_ms: int = 10000
 

@@ -28,6 +28,7 @@ SUPPLEMENTAL_SYNC_TIMEOUT_SECONDS = 90 * 60
 RS_RATING_TIMEOUT_SECONDS = 15 * 60
 HOURLY_NEWS_TIMEOUT_SECONDS = 20 * 60
 INTRADAY_TIMEOUT_SECONDS = 30 * 60
+MONGO_EOD_SYNC_TIMEOUT_SECONDS = 90 * 60
 
 
 async def _run_guarded_job(
@@ -83,9 +84,9 @@ def configure_scheduler():
         run_hourly_news_sync,
         run_intraday_sync,
     )
-    from vnibb.services.sync_all_data import run_daily_market_sync, run_supplemental_company_sync
     from vnibb.services.data_quality import run_scheduled_data_quality_check
     from vnibb.services.realtime_pipeline import get_realtime_pipeline
+    from vnibb.services.sync_all_data import run_daily_market_sync, run_supplemental_company_sync
 
     scheduler = get_scheduler()
 
@@ -195,6 +196,34 @@ def configure_scheduler():
         misfire_grace_time=300,
     )
     logger.info("Scheduled: nightly_price_backfill at 10:00 UTC (5:00 PM VNT)")
+
+    # =========================================================================
+    # Mongo EOD Daily Sync - 5:15 PM VNT (10:15 AM UTC)
+    # Advances the canonical Mongo `market_prices_eod` corpus, which otherwise
+    # only ever moved via operator-run backfill scripts. Runs after the Postgres
+    # daily sync + nightly backfill so upstream is warm. Bounded rolling window
+    # keeps it cheap; idempotent upserts keyed on (symbol, tradeDate, source).
+    # =========================================================================
+    async def guarded_mongo_eod_sync():
+        from vnibb.services.mongo_eod_sync import run_mongo_eod_sync
+
+        await _run_guarded_job(
+            "mongo_eod_sync",
+            run_mongo_eod_sync,
+            MONGO_EOD_SYNC_TIMEOUT_SECONDS,
+        )
+
+    scheduler.add_job(
+        guarded_mongo_eod_sync,
+        trigger=CronTrigger(hour=10, minute=15, timezone="UTC"),
+        id="mongo_eod_sync",
+        name="Mongo EOD Daily Sync",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Scheduled: mongo_eod_sync at 10:15 UTC (5:15 PM VNT)")
 
     # =========================================================================
     # RS Rating Calculation - 4:10 PM VNT (9:10 AM UTC)
