@@ -76,7 +76,9 @@ class Settings(BaseSettings):
         "https://vnibb.vercel.app",
     ]
     cors_origin_regex: str = (
-        r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://[a-z0-9-]+\.vercel\.app$"
+        # Localhost dev + this project's own Vercel deployments only.
+        # Any *.vercel.app would let third-party Vercel apps send credentialed requests.
+        r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://vnibb[a-z0-9-]*\.vercel\.app$"
     )
 
     # ==========================================================================

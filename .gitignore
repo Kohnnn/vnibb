@@ -120,3 +120,8 @@ docs/NEXT_PHASES_EXECUTION_PLAN.md
 docs/NEXT_PHASES_EXECUTION_PLAN.md
 docs/EVALUATION_REMEDIATION_PLAN_2026-05-15.md
 output/playwright/vnibb-home.png
+output/playwright/*.png
+
+# pnpm-only workspace: forbid npm/yarn lockfiles
+package-lock.json
+yarn.lock

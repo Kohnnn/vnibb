@@ -3,7 +3,7 @@ name: Reliability Gate
 on:
   workflow_dispatch:
   schedule:
-    - cron: "15 * * * *"
+    - cron: "15 */6 * * *"
 
 env:
   RELIABILITY_BASE_URL: ${{ vars.VNIBB_RELIABILITY_BASE_URL }}

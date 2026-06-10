@@ -1,5 +1,6 @@
 """Admin API endpoints for database inspection and management."""
 
+import hmac
 import json
 import logging
 import re
@@ -115,17 +116,15 @@ SYNC_STATUS_STALE_HOURS = 24
 def require_admin_access(
     x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key"),
 ) -> None:
-    """Protect sensitive admin endpoints with optional API key auth."""
+    """Protect sensitive admin endpoints with API key auth (fail-closed)."""
     configured_key = settings.admin_api_key
     if not configured_key:
-        if settings.environment.lower() == "production":
-            raise HTTPException(
-                status_code=503,
-                detail="ADMIN_API_KEY must be configured to access this endpoint in production",
-            )
-        return
+        raise HTTPException(
+            status_code=503,
+            detail="ADMIN_API_KEY must be configured to access this endpoint",
+        )
 
-    if x_admin_key != configured_key:
+    if not x_admin_key or not hmac.compare_digest(x_admin_key, configured_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
@@ -969,7 +968,7 @@ async def get_data_health(db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/data-health/auto-backfill")
+@router.post("/data-health/auto-backfill", dependencies=[Depends(require_admin_access)])
 async def trigger_data_health_auto_backfill(
     background_tasks: BackgroundTasks,
     days_stale: int = Query(default=7, ge=1, le=90),
@@ -1237,7 +1236,7 @@ async def _schedule_data_reinforcement(
     }
 
 
-@router.get("/reinforce")
+@router.get("/reinforce", dependencies=[Depends(require_admin_access)])
 async def trigger_data_reinforcement_get(
     background_tasks: BackgroundTasks,
     mode: str = Query(
@@ -1275,8 +1274,8 @@ async def trigger_data_reinforcement_get(
     )
 
 
-@router.post("/reinforce")
-@router.post("/data-health/reinforce")
+@router.post("/reinforce", dependencies=[Depends(require_admin_access)])
+@router.post("/data-health/reinforce", dependencies=[Depends(require_admin_access)])
 async def trigger_data_reinforcement(
     background_tasks: BackgroundTasks,
     mode: Optional[str] = Body(default=None, embed=True),
@@ -1444,7 +1443,7 @@ async def get_table_sample(
         return {"error": str(e)}
 
 
-@router.post("/database/query")
+@router.post("/database/query", dependencies=[Depends(require_admin_access)])
 async def execute_query(query: str = Body(..., embed=True), db: AsyncSession = Depends(get_db)):
     """Execute read-only SQL query (SELECT only)."""
     if not query.strip().upper().startswith("SELECT"):
@@ -1607,7 +1606,7 @@ async def get_cache_stats():
         }
 
 
-@router.post("/database/seed/{seed_type}")
+@router.post("/database/seed/{seed_type}", dependencies=[Depends(require_admin_access)])
 async def trigger_seed(seed_type: str, background_tasks: BackgroundTasks):
     from vnibb.services.data_pipeline import data_pipeline
 

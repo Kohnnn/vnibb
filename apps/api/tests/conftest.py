@@ -36,7 +36,7 @@ os.environ["OPENROUTER_API_KEY"] = "mock_openrouter_key"
 os.environ["GEMINI_API_KEY"] = "mock_key"
 os.environ["OPENAI_API_KEY"] = "mock_key"
 os.environ["VNIBB_MCP_URL"] = ""
-os.environ["ADMIN_API_KEY"] = ""
+os.environ["ADMIN_API_KEY"] = "test-admin-key"
 os.environ["DATA_BACKEND"] = "postgres"
 os.environ["MONGODB_ENABLED"] = "false"
 os.environ["APPWRITE_ENDPOINT"] = ""
@@ -119,7 +119,13 @@ async def client(test_db) -> AsyncGenerator[AsyncClient, None]:
 
     app.dependency_overrides[get_db] = override_get_db
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        # Admin auth is fail-closed; send the test key by default so
+        # admin/data-sync endpoint tests exercise business logic.
+        headers={"X-Admin-Key": "test-admin-key"},
+    ) as ac:
         yield ac
 
     # Clean up overrides

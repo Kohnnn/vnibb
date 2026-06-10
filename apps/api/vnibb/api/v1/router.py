@@ -5,8 +5,9 @@ Collects all v1 endpoint routers and mounts them
 under a common prefix.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from vnibb.api.v1.admin import require_admin_access
 from vnibb.api.v1.equity import router as equity_router
 from vnibb.api.v1.screener import router as screener_router
 from vnibb.api.v1.financials import router as financials_router
@@ -86,6 +87,8 @@ api_router.include_router(
     data_sync_router,
     prefix="/data",
     tags=["Data Pipeline"],
+    # Seeding/sync endpoints are destructive and expensive; admin key required.
+    dependencies=[Depends(require_admin_access)],
 )
 
 # New vnstock premium endpoints

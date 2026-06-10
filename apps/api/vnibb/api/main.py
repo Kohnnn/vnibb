@@ -94,15 +94,14 @@ def get_cors_headers(request: Request) -> dict[str, str]:
     """
     Generate CORS headers based on request origin.
 
-    Returns appropriate headers if origin is in allowed list.
+    Returns appropriate headers only if the origin is explicitly allowed;
+    unknown origins get no CORS headers (browser blocks the response).
     """
     origin = request.headers.get("origin", "")
 
     localhost_pattern = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
-    vercel_preview_pattern = r"^https://[a-z0-9-]+\.vercel\.app$"
     configured_pattern = settings.cors_origin_regex
     is_localhost_origin = bool(origin and re.match(localhost_pattern, origin))
-    is_vercel_preview_origin = bool(origin and re.match(vercel_preview_pattern, origin))
     is_configured_regex_origin = bool(
         origin and configured_pattern and re.match(configured_pattern, origin)
     )
@@ -120,22 +119,11 @@ def get_cors_headers(request: Request) -> dict[str, str]:
     # Check if origin is allowed
     if (
         origin in settings.cors_origins
-        or "*" in settings.cors_origins
         or is_localhost_origin
-        or is_vercel_preview_origin
         or is_configured_regex_origin
     ):
         return {
-            "Access-Control-Allow-Origin": origin or settings.cors_origins[0],
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-            "Access-Control-Allow-Headers": allow_headers,
-        }
-
-    # Default to first allowed origin if no match
-    if settings.cors_origins:
-        return {
-            "Access-Control-Allow-Origin": settings.cors_origins[0],
+            "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true",
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
             "Access-Control-Allow-Headers": allow_headers,
@@ -329,7 +317,7 @@ async def _safe_warmup():
         from vnibb.services.warmup_service import warmup_cache
 
         await warmup_cache()
-    except BaseException as e:
+    except Exception as e:
         logger.warning(f"Background warmup failed: {e}")
 
 
@@ -349,7 +337,7 @@ def _warmup_vnstock_sync():
         from vnstock_data import Company, Finance, Listing
 
         logger.info("vnstock modules pre-loaded successfully.")
-    except BaseException as e:
+    except Exception as e:
         logger.warning(f"vnstock pre-initialization failed: {e}")
 
 
@@ -379,7 +367,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             def warmup_with_timeout():
                 try:
                     _warmup_vnstock_sync()
-                except BaseException as e:
+                except Exception as e:
                     logger.warning(f"vnstock pre-init failed (non-fatal): {e}")
 
             # Run in thread with 5s timeout to avoid blocking event loop startup
@@ -424,9 +412,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except asyncio.TimeoutError:
         db_ok = False
         logger.warning("Database connection check timed out after %ss", db_timeout_seconds)
-    except BaseException as exc:
-        if isinstance(exc, (KeyboardInterrupt, GeneratorExit)):
-            raise
+    except Exception as exc:
         db_ok = False
         logger.warning("Database connection check failed (non-fatal): %s", exc)
 
@@ -483,10 +469,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         else:
             logger.warning("Redis URL not configured - caching disabled")
     except Exception as e:
-        if settings.is_production:
-            logger.warning(f"Redis connection failed (non-fatal): {e}")
-        else:
-            logger.warning(f"Redis connection failed (non-fatal): {e}")
+        logger.warning(f"Redis connection failed (non-fatal): {e}")
 
     # Register VNStock API key once per deployment
     try:
@@ -508,7 +491,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.warning(f"VNStock registration skipped: {result.reason}")
     except asyncio.TimeoutError:
         logger.warning("VNStock registration timed out (non-fatal)")
-    except BaseException as e:
+    except Exception as e:
         logger.warning(f"VNStock registration failed (non-fatal): {e}")
 
     # Start scheduler for background data sync jobs
@@ -518,7 +501,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             start_scheduler()
             logger.info("Scheduler started with data sync jobs")
-        except BaseException as e:
+        except Exception as e:
             logger.warning(f"Scheduler start failed (non-fatal): {e}")
 
     # Start WebSocket price broadcaster for real-time updates
@@ -534,7 +517,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("WebSocket price broadcaster started")
         except asyncio.TimeoutError:
             logger.warning("WebSocket broadcaster startup timed out (non-fatal)")
-        except BaseException as e:
+        except Exception as e:
             logger.warning(f"WebSocket broadcaster start failed (non-fatal): {e}")
 
     # Log startup complete
@@ -555,14 +538,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         await stop_background_fetcher()
         logger.info("WebSocket broadcaster stopped")
-    except BaseException as e:
+    except Exception as e:
         logger.warning(f"WebSocket broadcaster shutdown error: {e}")
 
     # Stop scheduler
     try:
         shutdown_scheduler()
         logger.info("Scheduler stopped")
-    except BaseException as e:
+    except Exception as e:
         logger.warning(f"Scheduler shutdown error: {e}")
 
     if settings.redis_url:

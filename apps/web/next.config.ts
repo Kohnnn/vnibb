@@ -15,7 +15,7 @@ const nextConfig: NextConfig = {
     root: path.resolve(__dirname, "../.."),
   },
   
-  // Disable TypeScript errors during builds for faster iteration
+  // TypeScript errors fail the build (do not set ignoreBuildErrors: true)
   typescript: {
     ignoreBuildErrors: false,
   },

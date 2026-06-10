@@ -1,7 +1,13 @@
-import psycopg2
+import os
 import sys
 
-DB_URL = "postgresql://postgres.cbatjktmwtbhelgtweoi:***REMOVED***@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres"
+import psycopg2
+
+# Operator script: requires DATABASE_URL_SYNC (or DATABASE_URL) in the environment.
+DB_URL = os.environ.get("DATABASE_URL_SYNC") or os.environ.get("DATABASE_URL")
+if not DB_URL:
+    print("❌ Set DATABASE_URL_SYNC (or DATABASE_URL) before running this script.")
+    sys.exit(1)
 
 print("Connecting to clean types...")
 try:
