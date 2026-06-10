@@ -18,6 +18,7 @@ interface SeasonalityHeatmapWidgetProps {
 const GRANULARITY_OPTIONS: Array<{ value: SeasonalityGranularity; label: string; note: string }> = [
   { value: 'monthly', label: 'Month', note: 'monthly returns' },
   { value: 'weekly', label: 'Week', note: 'weekly returns' },
+  { value: 'daily', label: 'Day', note: 'day-of-week returns' },
 ]
 
 function formatPct(value: number | null | undefined): string {

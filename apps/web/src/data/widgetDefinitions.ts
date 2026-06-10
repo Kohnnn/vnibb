@@ -933,6 +933,36 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['block trade', 'big flow', 'large orders', 'prints', 'tape', 'foreign', 'proprietary', 'smart money', 'institutional']
     },
     {
+        type: 'edge_half_life',
+        name: 'Edge Half-Life',
+        description: 'Rolling Sharpe with peak/decay read across 21/63/126D windows — descriptive edge-decay diagnostics',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 },
+        recommended: true,
+        searchKeywords: ['rolling sharpe', 'edge decay', 'half-life', 'edge half life', 'momentum decay', 'sharpe', 'window sweep']
+    },
+    {
+        type: 'pair_lab',
+        name: 'Pair Lab',
+        description: 'Two-symbol rolling correlation, log-spread z-score, and AR(1) mean-reversion half-life',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 8, minW: 4, minH: 5 },
+        recommended: true,
+        searchKeywords: ['pair', 'pairs', 'correlation', 'spread', 'z-score', 'cointegration', 'mean reversion', 'half-life', 'relative value']
+    },
+    {
+        type: 'monte_carlo_lab',
+        name: 'Monte Carlo Lab',
+        description: 'IID bootstrap of past daily returns into forward max-drawdown and terminal-return percentile tables',
+        category: 'quant',
+        defaultConfig: {},
+        defaultLayout: { w: 5, h: 7, minW: 4, minH: 5 },
+        recommended: true,
+        searchKeywords: ['monte carlo', 'bootstrap', 'simulation', 'drawdown cone', 'risk', 'percentile', 'resampling', 'scenario']
+    },
+    {
         type: 'similar_stocks',
         name: 'Similar Stocks',
         description: 'Find stocks similar to current symbol',

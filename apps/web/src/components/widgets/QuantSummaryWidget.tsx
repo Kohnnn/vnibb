@@ -68,6 +68,12 @@ type DrawdownMetric = {
   avg_days_to_recovery?: number | null
 }
 
+type CalmarMetric = {
+  annualized_return_pct?: number | null
+  max_drawdown_pct?: number | null
+  calmar_ratio?: number | null
+}
+
 type BenchmarkRiskMetric = {
   benchmark?: string | null
   current_beta_63d?: number | null
@@ -105,9 +111,12 @@ function scoreDownsideDeviation(value: number | null | undefined): number {
 }
 
 function averageSortino(metric: SortinoMetric | undefined): number | null {
+  // F1: backend clips zero-downside months to ±99 sentinels; excluding them
+  // keeps one freak month from dominating the cross-month average.
   return average(
     Object.values(metric?.monthly_sortino || {}).filter(
-      (value): value is number => typeof value === 'number' && Number.isFinite(value),
+      (value): value is number =>
+        typeof value === 'number' && Number.isFinite(value) && Math.abs(value) < 99,
     ),
   )
 }
@@ -118,7 +127,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
 
   const quantQuery = useQuantMetrics(upperSymbol, {
     period,
-    metrics: ['seasonality', 'volume_delta', 'sortino', 'ema_respect', 'drawdown_recovery', 'benchmark_risk'],
+    metrics: ['seasonality', 'volume_delta', 'sortino', 'ema_respect', 'drawdown_recovery', 'benchmark_risk', 'calmar'],
     enabled: Boolean(upperSymbol),
   })
   const regime = useQuantRegime(upperSymbol, { period, enabled: Boolean(upperSymbol) })
@@ -130,6 +139,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
   const emaRespect = metrics.ema_respect as EmaMetric | undefined
   const drawdown = metrics.drawdown_recovery as DrawdownMetric | undefined
   const benchmarkRisk = metrics.benchmark_risk as BenchmarkRiskMetric | undefined
+  const calmar = metrics.calmar as CalmarMetric | undefined
 
   const sortinoAverage = averageSortino(sortino)
   const seasonalityScore = scoreSeasonality(seasonality?.hit_rate_pct ?? null)
@@ -191,6 +201,8 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
       downside_deviation_30d_pct: benchmarkRisk?.downside_deviation_30d_pct ?? null,
       var_95_1d_pct: benchmarkRisk?.var_95_1d_pct ?? null,
       cvar_95_1d_pct: benchmarkRisk?.cvar_95_1d_pct ?? null,
+      annualized_return_pct: calmar?.annualized_return_pct ?? null,
+      calmar_ratio: calmar?.calmar_ratio ?? null,
       composite_risk_score: compositeRiskScore,
     },
   ]
@@ -368,12 +380,20 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
                       <div className="mt-1 text-[var(--text-primary)]">{formatSigned(benchmarkRisk?.downside_deviation_30d_pct, '%')}</div>
                     </div>
                     <div>
-                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">VaR 95</div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">VaR 95 (period)</div>
                       <div className="mt-1 text-amber-300">{formatSigned(benchmarkRisk?.var_95_1d_pct, '%')}</div>
                     </div>
                     <div>
-                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">CVaR 95</div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">CVaR 95 (period)</div>
                       <div className="mt-1 text-rose-300">{formatSigned(benchmarkRisk?.cvar_95_1d_pct, '%')}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Ann. Return</div>
+                      <div className="mt-1 text-[var(--text-primary)]">{formatSigned(calmar?.annualized_return_pct, '%')}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Calmar</div>
+                      <div className="mt-1 text-cyan-300">{formatSigned(calmar?.calmar_ratio)}</div>
                     </div>
                   </div>
 

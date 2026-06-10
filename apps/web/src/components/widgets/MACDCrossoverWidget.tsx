@@ -145,7 +145,7 @@ export function MACDCrossoverWidget({ symbol }: MACDCrossoverWidgetProps) {
         <WidgetEmpty message={backendError || 'No crossover history'} icon={<ActivitySquare size={18} />} size="compact" />
       ) : (
         <>
-          <QuantWarningBanner warning={quantWarning} className="mb-2" />
+          <QuantWarningBanner warning={quantWarning} forwardLooking className="mb-2" />
           <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">State</div>

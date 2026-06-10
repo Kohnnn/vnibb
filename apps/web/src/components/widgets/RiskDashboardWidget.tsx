@@ -447,11 +447,11 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
                       <div className="mt-1 font-mono text-[var(--text-primary)]">{formatSigned(benchmarkRisk?.benchmark_correlation_63d)}</div>
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
-                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">VaR 95</div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">VaR 95 (period)</div>
                       <div className="mt-1 font-mono text-amber-300">{formatSigned(benchmarkRisk?.var_95_1d_pct, '%')}</div>
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
-                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">CVaR 95</div>
+                      <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">CVaR 95 (period)</div>
                       <div className="mt-1 font-mono text-rose-300">{formatSigned(benchmarkRisk?.cvar_95_1d_pct, '%')}</div>
                     </div>
                   </div>

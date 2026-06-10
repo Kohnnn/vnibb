@@ -216,6 +216,9 @@ export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
   market_structure: { preferredW: 6, preferredH: 9, minW: 4, minH: 6, orientation: 'vertical', expandPriority: 2 },
   signal_robustness_lab: { preferredW: 7, preferredH: 9, minW: 5, minH: 6, orientation: 'balanced', expandPriority: 2 },
   big_flow_monitor: { preferredW: 6, preferredH: 8, minW: 4, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  edge_half_life: { preferredW: 6, preferredH: 7, minW: 4, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  pair_lab: { preferredW: 6, preferredH: 8, minW: 4, minH: 5, orientation: 'balanced', expandPriority: 2 },
+  monte_carlo_lab: { preferredW: 5, preferredH: 7, minW: 4, minH: 5, orientation: 'vertical', expandPriority: 2 },
   sector_top_movers: { preferredW: 10, preferredH: 7, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
   // Renderable-but-not-in-library types (present in the registry, absent from widgetDefinitions).
   // Values preserved from the former dead defaultWidgetLayouts block.

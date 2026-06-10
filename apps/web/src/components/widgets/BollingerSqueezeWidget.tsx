@@ -64,6 +64,28 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
   const bbPctProgress = Math.max(0, Math.min(100, bbPct * 100))
   const quantWarning = extractQuantWarning(data, 'bollinger')
 
+  // E: client-side threshold sweep over the returned width series. Shows how
+  // the squeeze definition shifts across percentile choices — the backend's
+  // fixed P20 is one point on this curve, not the only defensible one.
+  const sweepRows = (() => {
+    const widths = widthSeries.map((row) => row.bbWidth).filter((value) => Number.isFinite(value) && value > 0)
+    if (widths.length < 30) return []
+    const sorted = [...widths].sort((a, b) => a - b)
+    const currentWidth = widths[widths.length - 1]
+    return [0.1, 0.2, 0.3].map((p) => {
+      const idx = Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))))
+      const cut = sorted[idx]
+      const daysIn = widths.filter((value) => value <= cut).length
+      return {
+        label: `P${Math.round(p * 100)}`,
+        threshold: cut,
+        pctDaysIn: (daysIn / widths.length) * 100,
+        activeNow: currentWidth <= cut,
+        isBackendDefault: p === 0.2,
+      }
+    })
+  })()
+
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Bollinger squeeze" icon={<Minimize2 size={18} />} />
   }
@@ -163,6 +185,39 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
               {metric?.squeeze_active ? 'SQUEEZE ACTIVE' : 'NORMAL'}
             </div>
           </div>
+
+          {sweepRows.length > 0 && (
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 mb-2">
+              <div className="mb-1 flex items-center justify-between text-[10px]">
+                <span className="text-[var(--text-muted)] uppercase tracking-widest">Threshold Sweep</span>
+                <span className="text-[var(--text-secondary)]">width percentile, {period} window</span>
+              </div>
+              <table className="w-full text-[10px]">
+                <thead className="text-[9px] uppercase tracking-wide text-[var(--text-muted)]">
+                  <tr>
+                    <th className="px-1 py-0.5 text-left">Cut</th>
+                    <th className="px-1 py-0.5 text-right">Width ≤</th>
+                    <th className="px-1 py-0.5 text-right">Days In</th>
+                    <th className="px-1 py-0.5 text-right">Now</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sweepRows.map((row) => (
+                    <tr key={row.label} className={`border-t border-[var(--border-subtle)] ${row.isBackendDefault ? 'bg-[var(--bg-tertiary)]/40' : ''}`}>
+                      <td className="px-1 py-1 font-semibold text-[var(--text-secondary)]">
+                        {row.label}{row.isBackendDefault ? ' ·' : ''}
+                      </td>
+                      <td className="px-1 py-1 text-right font-mono text-amber-300">{row.threshold.toFixed(3)}%</td>
+                      <td className="px-1 py-1 text-right font-mono text-[var(--text-primary)]">{row.pctDaysIn.toFixed(1)}%</td>
+                      <td className={`px-1 py-1 text-right font-semibold ${row.activeNow ? 'text-emerald-300' : 'text-[var(--text-muted)]'}`}>
+                        {row.activeNow ? 'IN' : 'OUT'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 text-[11px] text-[var(--text-secondary)] leading-relaxed">
             Low BB width often indicates compressed volatility. Watch for expansion after a squeeze, especially when price holds above the mid band.

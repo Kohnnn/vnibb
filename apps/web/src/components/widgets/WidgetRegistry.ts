@@ -83,6 +83,9 @@ import { PositioningDashboardWidget } from './PositioningDashboardWidget';
 import { MarketStructureWidget } from './MarketStructureWidget';
 import { SignalRobustnessLabWidget } from './SignalRobustnessLabWidget';
 import { BigFlowMonitorWidget } from './BigFlowMonitorWidget';
+import { EdgeHalfLifeWidget } from './EdgeHalfLifeWidget';
+import { PairLabWidget } from './PairLabWidget';
+import { MonteCarloLabWidget } from './MonteCarloLabWidget';
 import { SectorBreakdownWidget } from './SectorBreakdownWidget';
 import { MarketMoversSectorsWidget } from './MarketMoversSectorsWidget';
 import { NewsFlowWidget } from './NewsFlowWidget';
@@ -368,6 +371,9 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
     market_structure: MarketStructureWidget as ComponentType<WidgetProps>,
     signal_robustness_lab: SignalRobustnessLabWidget as ComponentType<WidgetProps>,
     big_flow_monitor: BigFlowMonitorWidget as ComponentType<WidgetProps>,
+    edge_half_life: EdgeHalfLifeWidget as ComponentType<WidgetProps>,
+    pair_lab: PairLabWidget as ComponentType<WidgetProps>,
+    monte_carlo_lab: MonteCarloLabWidget as ComponentType<WidgetProps>,
     news_flow: NewsFlowWidget as ComponentType<WidgetProps>,
     news_corporate_actions: NewsCorporateActionsWidget as ComponentType<WidgetProps>,
     dividend_ladder: DividendLadderWidget as ComponentType<WidgetProps>,
@@ -578,6 +584,9 @@ export const widgetNames: Record<WidgetType, string> = {
     market_structure: 'Market Structure',
     signal_robustness_lab: 'Signal Robustness Lab',
     big_flow_monitor: 'Big Flow Monitor',
+    edge_half_life: 'Edge Half-Life',
+    pair_lab: 'Pair Lab',
+    monte_carlo_lab: 'Monte Carlo Lab',
     sector_breakdown: 'Sector Breakdown',
     market_movers_sectors: 'Market Movers & Sectors',
     comparison_analysis: 'Comparison Analysis',
@@ -709,6 +718,9 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     market_structure: 'Volume-by-price profile with POC/VAH/VAL, key high-volume levels, and foreign-flow tilt',
     signal_robustness_lab: 'Cross-sectional descriptive test of a signal threshold across the screener universe with a passing-vs-universe return edge read',
     big_flow_monitor: 'Market-wide block-trade tape with print-size threshold and foreign/proprietary scope filters',
+    edge_half_life: 'Rolling Sharpe with peak/decay read across 21/63/126D windows — descriptive edge-decay diagnostics',
+    pair_lab: 'Two-symbol rolling correlation, log-spread z-score, and AR(1) mean-reversion half-life',
+    monte_carlo_lab: 'IID bootstrap of past daily returns into forward max-drawdown and terminal-return percentile tables',
     sector_breakdown: 'Market cap by industry',
     market_movers_sectors: 'Sector performance with top movers',
     comparison_analysis: 'Side-by-side fundamentals',

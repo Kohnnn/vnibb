@@ -81,7 +81,7 @@ export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
               </button>
             ))}
           </div>
-          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} gap stats`} align="right" />
+          <WidgetMeta updatedAt={data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt} isFetching={isFetching && hasData} note={`${period} gap stats · same-day fills`} align="right" />
         </div>
       </div>
 
@@ -93,7 +93,7 @@ export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
         <WidgetEmpty message="No gap data" icon={<ArrowUpDown size={18} />} />
       ) : (
         <>
-          <QuantWarningBanner warning={quantWarning} className="mb-2" />
+          <QuantWarningBanner warning={quantWarning} forwardLooking className="mb-2" />
           <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Up</div>
