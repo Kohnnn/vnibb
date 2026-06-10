@@ -11,7 +11,7 @@ The daily updater syncs and caches:
 - Derivatives/futures prices
 - Optional warrants (configured symbols only)
 
-Data is persisted to Supabase (PostgreSQL) and cached to Upstash (Redis) with resume support.
+Data is persisted to the database stack and cached to the cache tier with resume support.
 
 ## Key Tables
 
@@ -28,7 +28,7 @@ Data is persisted to Supabase (PostgreSQL) and cached to Upstash (Redis) with re
 - TTL: 3 days
 - Safe to rerun after interruptions; it resumes from the last stage/symbol.
 
-## Cache Keys (Upstash)
+## Cache Keys (cache tier)
 
 - `vnibb:foreign_trading:{SYMBOL}:{YYYY-MM-DD}` (per-symbol, optional)
 - `vnibb:foreign_trading:{YYYY-MM-DD}:{EXCHANGE}:{CHUNK}` (chunked, default)
@@ -81,9 +81,9 @@ Notes:
 - All vnstock calls use `VNSTOCK_SOURCE` (`KBS` by default in VNIBB; valid sources are `KBS`, `VCI`, `DNSE`).
 - Intraday raw storage is disabled by default; only daily order flow is persisted.
 
-## Redis Budget Controls
+## Cache Budget Controls
 
-To keep Upstash commands under the 500k/month free-tier limit:
+To keep cache-tier commands under the 500k/month free-tier limit:
 
 1. **Progress throttling**
    - Checkpoints are written every N symbols (`PROGRESS_CHECKPOINT_EVERY`, default 50).

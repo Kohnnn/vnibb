@@ -221,25 +221,34 @@ class MongoMarketDataService:
         symbol: str,
         *,
         dataset: str,
+        variant: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Return raw shared vnstock records for a symbol/dataset pair."""
+        """Return raw shared vnstock records for a symbol/dataset pair.
+
+        ``variant`` filters on ``datasetVariant`` (e.g. the year/quarter split:
+        dataset ``finance.ratio`` stores variants ``finance.ratio.year`` and
+        ``finance.ratio.quarter``).
+        """
 
         symbol_upper = symbol.upper()
         limit = max(1, min(limit, 5000))
 
         def _read() -> list[dict[str, Any]]:
             coll = self._get_collection("market_vnstock_premium_records")
+            query: dict[str, Any] = {
+                "dataset": dataset,
+                "$or": [
+                    {"symbol": symbol_upper},
+                    {"scopeKey": symbol_upper},
+                    {"raw.symbol": symbol_upper},
+                ],
+            }
+            if variant is not None:
+                query["datasetVariant"] = variant
             cursor = (
                 coll.find(
-                    {
-                        "dataset": dataset,
-                        "$or": [
-                            {"symbol": symbol_upper},
-                            {"scopeKey": symbol_upper},
-                            {"raw.symbol": symbol_upper},
-                        ],
-                    },
+                    query,
                     {"_id": 0, "raw": 1, "observedAt": 1, "updatedAt": 1, "dataset": 1},
                 )
                 .sort([("observedAt", -1), ("updatedAt", -1)])
@@ -465,6 +474,47 @@ class MongoMarketDataService:
         except Exception as exc:
             logger.warning("Mongo latest trade-date read failed: %s", exc)
             return None
+
+    async def get_latest_fundamental_snapshots(
+        self,
+        symbols: list[str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Return the latest fundamental-screener snapshot per symbol.
+
+        Reads ``market_fundamental_screener`` (written by the fundamental
+        valuation backfill). Missing collection or any Mongo failure degrades
+        to an empty mapping so screener responses simply carry null fields.
+        """
+
+        symbol_filter = sorted({s.upper() for s in symbols if s}) if symbols else None
+
+        def _read() -> dict[str, dict[str, Any]]:
+            coll = self._get_collection("market_fundamental_screener")
+            pipeline: list[dict[str, Any]] = []
+            if symbol_filter:
+                pipeline.append({"$match": {"symbol": {"$in": symbol_filter}}})
+            pipeline.extend(
+                [
+                    {"$sort": {"symbol": 1, "snapshotDate": -1}},
+                    {"$group": {"_id": "$symbol", "doc": {"$first": "$$ROOT"}}},
+                ]
+            )
+            results: dict[str, dict[str, Any]] = {}
+            for row in coll.aggregate(pipeline):
+                doc = row.get("doc")
+                if not isinstance(doc, dict):
+                    continue
+                doc.pop("_id", None)
+                symbol = str(doc.get("symbol") or "").upper()
+                if symbol:
+                    results[symbol] = doc
+            return results
+
+        try:
+            return await asyncio.to_thread(_read)
+        except Exception as exc:
+            logger.warning("Mongo fundamental snapshot read failed: %s", exc)
+            return {}
 
     async def bulk_upsert_eod_prices(
         self,

@@ -45,7 +45,7 @@ MCP_PUBLIC_BIND=127.0.0.1
 MCP_PUBLIC_PORT=8001
 ```
 
-MongoDB analytical source (required for the MongoDB-backed MCP tools):
+Database stack analytical source (required for the database-backed MCP tools):
 
 ```env
 MONGODB_ENABLED=true
@@ -55,23 +55,23 @@ MONGODB_TIMEOUT_MS=10000
 ```
 
 The `mcp` service loads `deployment/env.oracle` via `env_file`, so these
-MongoDB variables reach the MCP container without extra compose wiring. The MCP
-server reads MongoDB directly through the read-only `MongoMarketDataService`;
+database variables reach the MCP container without extra compose wiring. The MCP
+server reads the database stack directly through the read-only `MongoMarketDataService`;
 it does not proxy through the FastAPI app.
 
 Important notes:
 
 - `VNIBB_MCP_URL` is used by the backend so VniAgent can call the MCP sidecar server-side
 - `VNIBB_MCP_SHARED_BEARER_TOKEN` protects remote MCP HTTP access when requests arrive through Caddy or the tailnet-bound port
-- the backend and MCP service should share the same runtime data-source intent; Appwrite remains the intended VNIBB market corpus, MongoDB carries the vnstock premium analytical corpus, while Supabase/Postgres may temporarily carry write-side bridge responsibilities during quota pressure
+- the backend and MCP service should share the same runtime data-source intent; the database stack is the single self-hosted system of record holding the VNIBB market corpus, the vnstock premium analytical corpus, and any write-side bridge responsibilities
 - `MCP_PUBLIC_BIND=127.0.0.1` makes the raw MCP HTTP port reachable on the OCI host outside Docker without exposing it publicly on the internet
-- set `MCP_PUBLIC_BIND=<tailscale-ip>` to allow direct connections from other tailnet machines (see "Tailscale-direct access")
+- set `MCP_PUBLIC_BIND=<private-ip>` to allow direct connections from other private-network machines (see "Private-network-direct access")
 - if you intentionally want a public raw MCP port, change `MCP_PUBLIC_BIND=0.0.0.0` and open the security rule explicitly, but prefer the Caddy-routed `/mcp` endpoint whenever possible
 
-## Tailscale-direct access
+## Private-network-direct access
 
 To let other machines connect to the MCP directly for data over the private
-tailnet (current model; public TLS via Caddy stays available and can become the
+network (current model; public TLS via Caddy stays available and can become the
 primary path later):
 
 ```env
@@ -82,9 +82,9 @@ VNIBB_MCP_ALLOWED_ORIGINS=http://100.107.9.31:8001
 VNIBB_MCP_SHARED_BEARER_TOKEN=replace-with-long-random-value
 ```
 
-- `MCP_PUBLIC_BIND` publishes the raw port on the OCI Tailscale IP (`100.107.9.31`), not the public internet.
-- `VNIBB_MCP_ALLOWED_HOSTS` / `VNIBB_MCP_ALLOWED_ORIGINS` extend the MCP transport's DNS-rebinding allowlist so the tailnet `Host`/`Origin` headers are accepted. Loopback stays allowed for the Caddy reverse proxy. Both accept a comma-separated list or a JSON array; when both are empty the SDK defaults are preserved.
-- Without the allowlist, direct tailnet clients get `Invalid Host header` because the streamable-HTTP transport only accepts `localhost`/`127.0.0.1` by default.
+- `MCP_PUBLIC_BIND` publishes the raw port on the OCI private-network IP (`100.107.9.31`), not the public internet.
+- `VNIBB_MCP_ALLOWED_HOSTS` / `VNIBB_MCP_ALLOWED_ORIGINS` extend the MCP transport's DNS-rebinding allowlist so the private-network `Host`/`Origin` headers are accepted. Loopback stays allowed for the Caddy reverse proxy. Both accept a comma-separated list or a JSON array; when both are empty the SDK defaults are preserved.
+- Without the allowlist, direct private-network clients get `Invalid Host header` because the streamable-HTTP transport only accepts `localhost`/`127.0.0.1` by default.
 
 Direct-connect client config from another tailnet machine:
 
@@ -92,7 +92,7 @@ Direct-connect client config from another tailnet machine:
 - header: `Authorization: Bearer <VNIBB_MCP_SHARED_BEARER_TOKEN>`
 - health (no auth): `http://100.107.9.31:8001/health`
 
-Keep MongoDB private over Tailscale. Only the MCP read surface is published; the database is never exposed publicly.
+Keep the database stack private over the private network. Only the MCP read surface is published; the database is never exposed publicly.
 
 ## Public endpoints
 
@@ -140,11 +140,11 @@ What success looks like:
 - `/mcp-health` returns `200`
 - or `/health` returns `200` when using the direct host port
 - MCP initialization succeeds
-- tool listing succeeds (includes Appwrite tools and the MongoDB tools: `get_mongo_status`, `list_premium_datasets`, `get_eod_price_history`, `get_premium_dataset`, `get_intraday_trades`, `get_price_depth`)
+- tool listing succeeds (includes app-collection tools and the database-stack tools: `get_mongo_status`, `list_premium_datasets`, `get_eod_price_history`, `get_premium_dataset`, `get_intraday_trades`, `get_price_depth`)
 - `get_appwrite_status` returns successfully
-- `get_mongo_status` reports `enabled: true` when the MongoDB source is configured
+- `get_mongo_status` reports `enabled: true` when the database stack is configured
 
-Quick MongoDB-tool checks over the tailnet bind (replace token):
+Quick database-stack-tool checks over the private-network bind (replace token):
 
 ```bash
 TOKEN=...; IP=100.107.9.31
@@ -157,14 +157,14 @@ curl -s -X POST http://$IP:8001/mcp \
 
 ## VniAgent expectation
 
-When `VNIBB_MCP_URL` is configured in the backend runtime, VniAgent server-side runtime context reads should prefer the dedicated `vnibb-mcp` service for selected Appwrite-backed reads.
+When `VNIBB_MCP_URL` is configured in the backend runtime, VniAgent server-side runtime context reads should prefer the dedicated `vnibb-mcp` service for selected database-backed reads.
 
 Current MCP-backed VniAgent reads:
 
 - `get_market_snapshot`
 - `get_symbol_snapshot`
 
-If the MCP sidecar is unavailable, backend logs should show a warning and VniAgent should fall back to direct Appwrite/Postgres context assembly instead of fully failing.
+If the MCP sidecar is unavailable, backend logs should show a warning and VniAgent should fall back to direct database-stack context assembly instead of fully failing.
 
 ## Operational warning
 

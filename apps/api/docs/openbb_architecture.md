@@ -85,7 +85,7 @@ Patterns VNIBB now implements:
 2. **Grounded source attribution**
    - VNIBB now generates a `source_catalog`, validates `used_source_ids`, and exposes evidence metadata to the UI.
 3. **Context-aware copilot behavior**
-   - VNIBB uses active symbol, active tab, widget snapshots, and Appwrite-first backend context.
+   - VNIBB uses active symbol, active tab, widget snapshots, and database-stack-first backend context.
 4. **Table artifact responses**
    - VNIBB now returns deterministic comparison and ranking tables derived from validated runtime context.
 5. **Chart artifact responses**

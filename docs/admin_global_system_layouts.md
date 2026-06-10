@@ -3,30 +3,30 @@
 ## Purpose
 Enable an admin to edit locked Initial dashboards in the UI, save drafts, and publish layouts globally without needing SSH access, manual backend edits, or a frontend redeploy for layout-only changes.
 
-For the exact click-by-click setup, see `docs/appwrite_system_layouts_manual_setup.md`.
+For the exact click-by-click setup, see the archived `appwrite_system_layouts_manual_setup.md` under the workspace archive (`../docs/archive/vnibb-docs-2026-06-09/`, outside this repo).
 
 This document also defines the recommended tenant-ready path so the current admin-first model can evolve cleanly into role-based tenant layout management later.
 
 ## Recommended Storage Model
-Use the **current VNIBB Appwrite database** as the source of truth for global and tenant layout templates.
+Use the **current VNIBB database stack** as the source of truth for global and tenant layout templates.
 
 ### Recommendation
 - Keep using the existing `APPWRITE_DATABASE_ID`
 - Add **separate collections** for layout management
 - Keep backend APIs as the write boundary
-- Do **not** reintroduce Supabase for layout/template storage
+- Do **not** reintroduce a second store for layout/template storage
 
-### Why share the current Appwrite database
+### Why share the current database stack
 - simpler deployment and fewer secrets
 - easier backup/export/inspection
 - easier to relate runtime VNIBB data and layout templates
-- no second Appwrite database to provision or maintain
+- no second database to provision or maintain
 - best fit for the current admin-first rollout
 
-### Why not Supabase
-- this feature is document-oriented and fits Appwrite collections well
-- your runtime direction is already Appwrite-first
-- using Supabase here would reintroduce split ownership and extra operational overhead
+### Why not a separate store
+- this feature is document-oriented and fits the database collections well
+- your runtime direction is already consolidated on the single database stack
+- using a separate store here would reintroduce split ownership and extra operational overhead
 - later tenant RBAC can still be enforced in backend APIs without changing storage
 
 ## Scope Levels
@@ -54,8 +54,8 @@ For the current rollout, only **Global** is implemented in code. Tenant and user
 - admin can save a hash key locally in the browser
 - admin can unlock a locked Initial dashboard in the UI
 - admin can save a draft or publish a global version through backend APIs
-- published global templates are fetched from Appwrite on load
-- if Appwrite is unavailable, frontend falls back to built-in templates in `apps/web/src/contexts/DashboardContext.tsx`
+- published global templates are fetched from the database stack on load
+- if the database stack is unavailable, frontend falls back to built-in templates in `apps/web/src/contexts/DashboardContext.tsx`
 
 ### Current backend endpoints
 #### Public
@@ -74,9 +74,9 @@ For the current rollout, only **Global** is implemented in code. Tenant and user
 - this is acceptable for initial admin-first operation
 - later this should be replaced by a short-lived admin session/token
 
-## Appwrite Collections
+## Layout Collections
 ### Implement now
-Use the existing Appwrite database and create this collection now:
+Use the existing database and create this collection now:
 - `system_dashboard_templates`
 
 ### Recommended schema: `system_dashboard_templates`
@@ -176,10 +176,10 @@ Recommended fields:
 ### Persistence rules
 - global Initial layouts should not depend on local storage as the source of truth
 - local storage may keep lightweight UI state only
-- published layout JSON should live in Appwrite and be loaded through backend APIs
+- published layout JSON should live in the database stack and be loaded through backend APIs
 
 ## Oracle / Production Environment
-For the current implementation, keep using the existing Appwrite database only as an optional legacy fallback for system-template mirroring. SQL is the primary store during Appwrite quota pressure.
+For the current implementation, keep using the existing database collections only as an optional legacy fallback for system-template mirroring. The primary durable storage is the system of record during mirroring quota pressure.
 
 ### Required backend env
 Add these to your Oracle deployment env:
@@ -198,7 +198,7 @@ APPWRITE_WRITE_ENABLED=false
 ```
 
 ### Frontend env
-The frontend does not need direct collection access. It only needs the normal API + auth/public Appwrite settings:
+The frontend does not need direct collection access. It only needs the normal API + auth/public settings:
 
 ```env
 NEXT_PUBLIC_API_URL=https://api.example.com
@@ -209,7 +209,7 @@ NEXT_PUBLIC_APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
 NEXT_PUBLIC_APPWRITE_PROJECT_ID=your-appwrite-project-id
 ```
 
-If auth remains on Supabase temporarily, you can keep:
+If auth remains on the legacy auth provider temporarily, you can keep:
 
 ```env
 NEXT_PUBLIC_AUTH_PROVIDER=supabase
@@ -217,10 +217,10 @@ NEXT_PUBLIC_AUTH_PROVIDER=supabase
 
 That does **not** change the recommendation to keep system-layout APIs backend-mediated.
 
-During the current Appwrite write-freeze mode, the primary template store is SQL `app_kv`, with Appwrite mirroring disabled.
+During the current write-freeze mode, the primary template store is the durable `app_kv` store, with database-collection mirroring disabled.
 
 ## What "no backend access anymore" should mean
-After the initial deploy and Appwrite setup:
+After the initial deploy and database-stack setup:
 - no SSH needed for layout-only changes
 - no code changes needed for layout-only changes
 - no frontend redeploy needed for layout-only changes
@@ -231,12 +231,12 @@ What it should **not** mean:
 
 The backend should remain the security boundary because:
 - it validates `X-Admin-Key`
-- it controls writes to Appwrite
+- it controls writes to the database stack
 - it can later enforce tenant RBAC cleanly
 
 ## Rollout Checklist
 ### Implement now
-1. keep current Appwrite database
+1. keep current database stack
 2. create collection `system_dashboard_templates`
 3. set:
    - `APPWRITE_ENDPOINT`
@@ -259,7 +259,7 @@ The backend should remain the security boundary because:
 6. replace raw admin key with short-lived admin session
 
 ## Recommended Next Steps
-1. Finish the admin-first global workflow using the shared Appwrite database
+1. Finish the admin-first global workflow using the shared database stack
 2. Add rollback/version history for global templates
 3. Add tenant collections and backend tenant resolution
 4. Add tenant-scoped publish controls in the UI

@@ -1,31 +1,31 @@
-# Appwrite Migration Scripts
+# Database Migration Scripts
 
-This folder contains utilities to migrate VNIBB data from Supabase Postgres to Appwrite.
+This folder contains utilities to migrate VNIBB data into the database stack. Script and env names below retain their original tokens for code compatibility.
 
 Runtime model:
 
-- Appwrite is the primary runtime datastore for Appwrite-enabled reads.
-- Supabase/Postgres stays in place as the fallback source and seed source.
-- Backend sync flows can call this migration runner to populate Appwrite after Postgres syncs.
-- Production backend now has a Python HTTP mirror fallback, so Appwrite population can still run in OCI/Docker Python-only containers even when `node` is unavailable in the runtime image.
+- The database stack is the primary runtime datastore.
+- The SQL source stays in place as the fallback source and seed source.
+- Backend sync flows can call this migration runner to populate the database stack after source syncs.
+- Production backend now has a Python HTTP mirror fallback, so database-stack population can still run in OCI/Docker Python-only containers even when `node` is unavailable in the runtime image.
 
 ## Files
 
 - `migrate_supabase_to_appwrite.mjs`: batch migration runner (idempotent upsert behavior).
 - `schema-map.example.json`: sample table->collection mapping config.
 - `export_supabase_baseline.mjs`: exports source baseline counts + sample hashes for parity checks.
-- `check_appwrite_connectivity.mjs`: validates Appwrite endpoint/project/database connectivity.
-- `run_mcp_from_env.mjs`: starts Appwrite MCP server using vars loaded from `apps/api/.env`.
-- `ensure_appwrite_collections.mjs`: creates missing Appwrite collections from schema map.
+- `check_appwrite_connectivity.mjs`: validates database-stack endpoint/project/database connectivity.
+- `run_mcp_from_env.mjs`: starts the database-stack MCP server using vars loaded from `apps/api/.env`.
+- `ensure_appwrite_collections.mjs`: creates missing collections from schema map.
 - `ensure_appwrite_attributes_textsafe.mjs`: creates longtext attributes from source table columns.
 - `ensure_appwrite_query_attributes.mjs`: creates typed query overlay attributes from schema map.
-- `ensure_appwrite_indexes.mjs`: creates Appwrite indexes from schema map.
+- `ensure_appwrite_indexes.mjs`: creates indexes from schema map.
 - `reset_appwrite_collections.mjs`: deletes + recreates selected collections.
-- `verify_appwrite_counts.mjs`: compares Supabase row counts vs Appwrite document counts.
+- `verify_appwrite_counts.mjs`: compares source row counts vs database-stack document counts.
 - `run_backfill_loop.mjs`: repeatedly runs chunked backfills for one table until caught up or chunk limit is reached.
 - `inspect_migration_state.mjs`: prints per-table keyset checkpoint progress from migration state.
-- `check_cutover_readiness.mjs`: baseline-based readiness gate for full Appwrite data cutover.
-- `generate_cutover_env_checklist.mjs`: prints backend/frontend Appwrite env checklist from `apps/api/.env`.
+- `check_cutover_readiness.mjs`: baseline-based readiness gate for full database-stack cutover.
+- `generate_cutover_env_checklist.mjs`: prints backend/frontend database env checklist from `apps/api/.env`.
 
 ## Prerequisites
 
@@ -124,13 +124,13 @@ Generate baseline report (before migration):
 node ./scripts/appwrite/export_supabase_baseline.mjs
 ```
 
-Validate Appwrite connectivity:
+Validate database-stack connectivity:
 
 ```bash
 node ./scripts/appwrite/check_appwrite_connectivity.mjs
 ```
 
-Start Appwrite MCP server from `apps/api/.env`:
+Start the database-stack MCP server from `apps/api/.env`:
 
 ```bash
 node ./scripts/appwrite/run_mcp_from_env.mjs --databases
@@ -142,7 +142,7 @@ Enable all tools if needed:
 node ./scripts/appwrite/run_mcp_from_env.mjs --all
 ```
 
-Runtime sync/seed helpers that now populate Appwrite automatically:
+Runtime sync/seed helpers that now populate the database stack automatically:
 
 - `apps/api/vnibb/services/sync_all_data.py`
 - `apps/api/scripts/seed_historical.py`
@@ -225,7 +225,7 @@ node ./scripts/appwrite/migrate_supabase_to_appwrite.mjs
 Resume by rerunning the same command; keyset mode checkpoint is stored in `MIGRATION_STATE_FILE`.
 
 If you are switching from old offset-based partial migrations, you can bootstrap keyset cursor from
-current Appwrite document count:
+current database-stack document count:
 
 ```bash
 MIGRATION_BOOTSTRAP_CURSOR_FROM_TARGET_COUNT=true node ./scripts/appwrite/migrate_supabase_to_appwrite.mjs
@@ -251,11 +251,11 @@ node ./scripts/appwrite/run_backfill_loop.mjs
 - The script uses deterministic document IDs to support retries/resume.
 - On duplicate IDs, it updates existing documents.
 - Monetary and ratio fields can be coerced to strings using `precisionColumns` in schema map.
-- Use query overlay attributes and indexes for Appwrite-side filtering (`symbol_q`, `time_dt`, `fiscal_year_i`, etc.).
+- Use query overlay attributes and indexes for database-side filtering (`symbol_q`, `time_dt`, `fiscal_year_i`, etc.).
 - Use `MIGRATION_COERCE_ALL_TO_STRING=true` with text-safe longtext attributes to avoid precision drift.
 - Start with immutable data collections before user-owned mutable collections.
 - Always generate `supabase_baseline.json` before first live migration batch.
 - Prefer `MIGRATION_PAGINATION_MODE=keyset` for large/volatile tables; it is safer than OFFSET under concurrent writes/deletes.
 - Use `MIGRATION_MAX_ROWS` to control chunk size per run; use `MIGRATION_START_CURSOR` only for manual keyset overrides.
 - `MIGRATION_START_OFFSET` is legacy and only used in `offset` mode.
-- During active source cleanup/ingestion windows, source row counts may drift; Appwrite may intentionally hold a superset to preserve historical data.
+- During active source cleanup/ingestion windows, source row counts may drift; the database stack may intentionally hold a superset to preserve historical data.

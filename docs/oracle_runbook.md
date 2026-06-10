@@ -78,24 +78,24 @@ Edit `deployment/env.oracle` and set:
 - `APPWRITE_ENDPOINT`
 - `APPWRITE_PROJECT_ID`
 - `APPWRITE_API_KEY`
-- `APPWRITE_DATABASE_ID` (reuse the existing VNIBB Appwrite database)
+- `APPWRITE_DATABASE_ID` (reuse the existing VNIBB database)
 - `APPWRITE_SYSTEM_TEMPLATES_COLLECTION_ID=system_dashboard_templates`
 - `VNIBB_MCP_URL=http://mcp:8001/mcp`
 - `VNIBB_MCP_SHARED_BEARER_TOKEN`
 - `MCP_PUBLIC_BIND=127.0.0.1`
 - `MCP_PUBLIC_PORT=8001`
-- `REDIS_URL` if Redis remains enabled
-- `MEMORY_CACHE_MAX_ENTRY_BYTES=1048576` or larger if Redis is disabled and microstructure payloads must fit memory fallback
+- `REDIS_URL` if the cache tier remains enabled
+- `MEMORY_CACHE_MAX_ENTRY_BYTES=1048576` or larger if the cache tier is disabled and microstructure payloads must fit memory fallback
 - `SENTRY_DSN`
 - `ADMIN_API_KEY`
 - `LOG_FORMAT=json`
 - `CORS_ORIGINS`
 
-### Create the Appwrite collection
+### Create the system templates collection
 
-For the exact click-by-click setup, see `docs/appwrite_system_layouts_manual_setup.md`.
+For the exact click-by-click setup, see the archived `appwrite_system_layouts_manual_setup.md` under the workspace archive (`../docs/archive/vnibb-docs-2026-06-09/`, outside this repo).
 
-Before expecting admin draft/publish to work, create collection `system_dashboard_templates` in the existing VNIBB Appwrite database with these attributes:
+Before expecting admin draft/publish to work, create collection `system_dashboard_templates` in the existing VNIBB database with these attributes:
 
 - `dashboard_key` string
 - `status` string
@@ -201,7 +201,7 @@ docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml log
 - `/api/v1/dashboard/` returns `200` when called with `X-VNIBB-Client-ID`
 - `/mcp-health` returns `200`
 - `/mcp` accepts MCP initialization and `get_appwrite_status`
-- Appwrite is reported as connected
+- the database stack is reported as connected
 - CORS preflight succeeds for `https://vnibb-web.vercel.app`
 - Key API endpoints succeed
 - Websocket probe succeeds or is explicitly skipped with a known reason
@@ -215,13 +215,13 @@ docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml log
 5. Switch the stable hostname from the previous backend or OCI canary hostname to the Oracle reserved IP.
 6. Wait for DNS propagation.
 7. Test the production Vercel frontend against the stable hostname.
-8. Confirm the frontend build is using `NEXT_PUBLIC_AUTH_PROVIDER=supabase` by verifying the browser no longer calls `/account/jwts` on Appwrite during dashboard load.
+8. Confirm the frontend build is using `NEXT_PUBLIC_AUTH_PROVIDER=supabase` by verifying the browser no longer calls `/account/jwts` on the legacy auth path during dashboard load.
 9. Monitor minute 0-15:
    - uptime
    - 5xx rate
    - p95 latency
    - websocket reconnects
-   - Appwrite connectivity
+   - database stack connectivity
 10. Declare success only after the 15-minute window stays green.
 
 ### Required confirmation roles
@@ -252,7 +252,7 @@ docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml res
 
 - `/ready` or `/api/v1/health` is non-200 after restart attempts
 - sustained 5xx errors
-- broken Appwrite auth/session behavior
+- broken auth/session behavior
 - websocket instability severe enough to degrade user experience
 - latency regression that breaches the agreed threshold
 

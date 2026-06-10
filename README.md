@@ -15,10 +15,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-4-06B6D4?logo=tailwindcss)](https://tailwindcss.com/)
 [![TanStack Query](https://img.shields.io/badge/TanStack%20Query-5-FF4154?logo=reactquery)](https://tanstack.com/query)
-[![Supabase](https://img.shields.io/badge/Supabase-3-3ECF8E?logo=supabase)](https://supabase.com/)
-[![Appwrite](https://img.shields.io/badge/Appwrite-F02-FF61CD?logo=appwrite)](https://appwrite.io/)
-[![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis)](https://redis.io/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)](https://postgresql.org/)
+![Database Stack](https://img.shields.io/badge/Database-Self--hosted%20stack-555555)
 [![Pydantic](https://img.shields.io/badge/Pydantic-2-E92063?logo=pydantic)](https://docs.pydantic.dev/)
 [![pnpm](https://img.shields.io/badge/pnpm-9-F69220?logo=pnpm)](https://pnpm.io/)
 [![Turbo](https://img.shields.io/badge/Turbo-2-26A65B?logo=vercel)](https://turbo.build/)
@@ -40,7 +37,7 @@ It combines:
 
 - a high-density widget workspace for fundamentals, technicals, quant, sector rotation, and company intelligence
 - a FastAPI backend that normalizes messy local-market data into product-ready responses
-- a dedicated `vnibb-mcp` sidecar so VniAgent and other trusted clients can read VNIBB/Appwrite data through a curated MCP surface
+- a dedicated `vnibb-mcp` sidecar so VniAgent and other trusted clients can read VNIBB data through a curated MCP surface
 - bank-aware analytics, market-structure tools, and Vietnam-specific workflows that generic global terminals usually miss
 - a repo structure and documentation style that make it practical for AI agents to continue development, debugging, and deployment work
 
@@ -50,7 +47,7 @@ The goal is not to be just another screener or charting page. VNIBB is meant to 
 
 - **Vietnam-first modeling**: the app is designed around Vietnamese equities, not retrofitted from a US-market product
 - **OpenBB-inspired workflow**: dense, modular, multi-widget research surfaces instead of shallow page-by-page navigation
-- **VniAgent**: Appwrite-first context, validated source citations, evidence panels, and reasoning/status events
+- **VniAgent**: database-first context, validated source citations, evidence panels, and reasoning/status events
 - **Bank-aware analytics**: banks are treated as a distinct analytical class, not forced into industrial-company ratios
 - **Fallback-first backend**: provider instability, missing values, and schema quirks are handled in the backend instead of leaking directly into the UI
 - **Agent-friendly repo**: phased planning, ops notes, AGENTS guidance, and docs make handoff to other coding agents much easier
@@ -183,7 +180,7 @@ pnpm run gate:no502     # Widget health probe (5 repeats, 10s timeout)
 - maintainer docs hub: `docs/README.md`
 - deployment and operations: `docs/DEPLOYMENT_AND_OPERATIONS.md`
 - auto update strategy: `docs/AUTO_UPDATE_STRATEGY.md`
-- appwrite rollout: `docs/APPWRITE_VNSTOCK_ROLLOUT.md`
+- database schema: `docs/DATABASE_SCHEMA.md`
 - read-only MCP server: `docs/VNIBB_MCP_READONLY.md`
 - development journal: `docs/DEVELOPMENT_JOURNAL.md`
 - project-level overview docs: `../docs/README.md`
@@ -221,7 +218,7 @@ VNIBB is a monorepo with a frontend, a backend, and a dedicated read-only MCP si
 │     Port: 8000                │   │   Port: 8001                  │
 │                               │   │                               │
 │  Middleware → Routes →        │   │  Curated tools/resources      │
-│    Services → Providers       │   │  for Appwrite-backed reads    │
+│    Services → Providers       │   │  for database-backed reads    │
 │                               │   │                               │
 └───────────────┬───────────────┘   └───────────────┬───────────────┘
                 │                                   │
@@ -229,7 +226,7 @@ VNIBB is a monorepo with a frontend, a backend, and a dedicated read-only MCP si
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         External Services                           │
-│   Appwrite (primary) · PostgreSQL (fallback) · Redis · VNStock      │
+│   Self-hosted database stack (system of record + cache) · VNStock   │
 │   Scrapers / Provider fallbacks                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -248,7 +245,7 @@ apps/web/src/
 │   ├── DashboardContext   # Widget layout state
 │   ├── SymbolContext      # Current stock symbol
 │   ├── ThemeContext       # Light/dark mode
-│   ├── AuthContext        # Appwrite/Supabase auth
+│   ├── AuthContext        # Auth/session state
 │   └── ...
 ├── hooks/                # Custom hooks (usePeriodState, useWebSocket, etc.)
 ├── lib/
@@ -283,7 +280,7 @@ Widget (tsx)
 - `fetchAPI<T>()` - Central fetch wrapper with:
   - Configurable timeout (default 30s)
   - Automatic query parameter handling
-  - Authorization token management (Appwrite JWT or Supabase)
+  - Authorization token management (database-stack session token)
   - Structured error handling (`APIError`, `RateLimitError`)
 
 ### TanStack Query Pattern
@@ -315,7 +312,7 @@ FastAPI application with middleware stack (outer to inner):
 10. RateLimitMiddleware    # Rate limiting (120 req/min)
 ```
 
-**Lifespan Events**: Startup validation → Redis connect → Scheduler start → WebSocket broadcaster → vnstock pre-init
+**Lifespan Events**: Startup validation → cache connect → Scheduler start → WebSocket broadcaster → vnstock pre-init
 
 ### Backend Directory Structure
 
@@ -345,7 +342,7 @@ apps/api/vnibb/
 ├── core/
 │   ├── config.py          # Pydantic Settings, env validation
 │   ├── database.py       # SQLAlchemy async engine
-│   ├── cache.py           # Redis + memory fallback, @cached decorator
+│   ├── cache.py           # Cache tier + memory fallback, @cached decorator
 │   ├── auth.py            # JWT validation
 │   ├── exceptions.py      # VniBBException hierarchy
 │   ├── rate_limiter.py    # Slowapi configuration
@@ -398,7 +395,7 @@ apps/api/vnibb/
    ▼
 4. SERVICE LAYER
    │
-   ├─► Check Redis Cache
+   ├─► Check Cache Tier
    │    ├─ HIT → Return cached data
    │    └─ MISS → Continue
    │
@@ -412,7 +409,7 @@ apps/api/vnibb/
         │    ├─ SUCCESS → Cache + Return
         │    └─ FAIL → Continue
         │
-        └─► Tertiary: Appwrite Storage
+        └─► Tertiary: Database Stack
              ├─ SUCCESS → Return
              └─ FAIL → Return stale cache or DataNotFoundError
    │
@@ -429,8 +426,8 @@ apps/api/vnibb/
 
 | Backend | Use Case | TTL |
 |---------|----------|-----|
-| **Redis** | Primary cache | 30s - 24h |
-| **Memory** | Fallback when Redis unavailable | Same as Redis |
+| **Cache tier** | Primary cache | 30s - 24h |
+| **Memory** | Fallback when the cache tier is unavailable | Same as cache tier |
 
 ### Cache Key Patterns
 
@@ -457,7 +454,7 @@ v:n:<hash>     # news
 Request
    │
    ▼
-1. Check Redis Cache
+1. Check Cache Tier
    │
    ▼
 2. Try Primary Provider (VNStock)
@@ -468,7 +465,7 @@ Request
    │   └─ cophieu68 historical scraper
    │
    ▼
-4. Try Appwrite Storage
+4. Try Database Stack
    │   └─ Price data archival
    │
    ▼
@@ -483,12 +480,12 @@ Request
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        External Sources                           │
-│   VNStock API ──batch sync──> Appwrite ──serve──> FastAPI ──> UI │
+│   VNStock API ──batch sync──> Database ──serve──> FastAPI ──> UI │
 │                                      └────serve────> vnibb-mcp   │
-│   VniAgent server reads: UI ─> FastAPI ─> vnibb-mcp ─> Appwrite  │
+│   VniAgent server reads: UI ─> FastAPI ─> vnibb-mcp ─> Database  │
 └──────────────────────────────────────────────────────────────────┘
 
-Appwrite Collections (26 total):
+Database Collections (26 total):
 ├── stocks, stock_prices, stock_indices
 ├── income_statements, balance_sheets, cash_flows, financial_ratios
 ├── foreign_trading, order_flow_daily, orderbook_snapshots
@@ -498,7 +495,7 @@ Appwrite Collections (26 total):
 ├── user_dashboards, dashboard_widgets, system_dashboard_templates
 └── intraday_trades, derivative_prices
 
-Redis Cache: Session, rate limits, API response cache (TTL: 30s - 24h)
+Cache Tier: Session, rate limits, API response cache (TTL: 30s - 24h)
 ```
 
 ## VniAgent MCP Path
@@ -510,7 +507,7 @@ VniAgent UI
   -> POST /api/v1/copilot/chat/stream
   -> apps/api runtime context assembly
   -> vnibb-mcp (when VNIBB_MCP_URL is configured)
-  -> Appwrite curated read tools
+  -> database curated read tools
   -> source-validated answer + SSE events back to UI
 ```
 
@@ -519,16 +516,16 @@ Current MCP-backed VniAgent reads:
 - `get_market_snapshot`
 - `get_symbol_snapshot`
 
-If `vnibb-mcp` is unavailable, the backend falls back to direct Appwrite/Postgres context assembly.
+If `vnibb-mcp` is unavailable, the backend falls back to direct database-stack context assembly.
 
 ## Database Schema
 
-VNIBB uses **Appwrite** as its primary data store with 26 collections.
+VNIBB uses a self-hosted database stack as its system of record with 26 collections.
 
-![Appwrite Collections and Database Schema](docs/VniBB_DataSchema.png)
+![Collections and Database Schema](docs/VniBB_DataSchema.png)
 
 For detailed schema with all attributes and relationships, see:
-- [Appwrite Schema Reference](docs/APPWRITE_SCHEMA.md)
+- [Database Schema Reference](docs/DATABASE_SCHEMA.md)
 
 ### Core Collections
 
@@ -571,7 +568,7 @@ user_dashboards (1) ── (*) dashboard_widgets
 ### Data Sync Flow
 
 ```
-VNStock API ──batch sync──> Appwrite Collections
+VNStock API ──batch sync──> Database Collections
                               │
                               ├── stocks
                               ├── stock_prices

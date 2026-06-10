@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Docker and Docker Compose v2+
-- PostgreSQL database (or use Supabase)
+- Access to the self-hosted database stack
 - Domain with SSL certificate (for production)
 - Node.js 20+ (for local development)
 - Python 3.11+ (for local development)
@@ -18,7 +18,7 @@ DATABASE_URL=postgresql+asyncpg://user:password@host:5432/vnibb
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-service-role-key
 
-# Redis (optional, for caching)
+# Cache tier (optional, for caching)
 REDIS_URL=redis://localhost:6379/0
 
 # VNStock Premium (optional)
@@ -38,7 +38,7 @@ DEBUG=false
 # API
 NEXT_PUBLIC_API_URL=https://api.yourdomain.com
 
-# Supabase Auth
+# Auth
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
@@ -131,7 +131,7 @@ The backend exposes Prometheus metrics at `/metrics` (when enabled).
 
 1. **Database connection failed**
    - Check DATABASE_URL format
-   - Verify PostgreSQL is running
+   - Verify the database stack is running
    - Check network connectivity
 
 2. **VNStock API errors**
@@ -155,7 +155,7 @@ The backend exposes Prometheus metrics at `/metrics` (when enabled).
 - [ ] Enable rate limiting
 - [ ] Configure CORS properly
 - [ ] Use environment variables for secrets
-- [ ] Enable Supabase RLS policies
+- [ ] Enable database-stack row-level access policies
 - [ ] Regular security updates
 
 ## Scaling
@@ -163,7 +163,7 @@ The backend exposes Prometheus metrics at `/metrics` (when enabled).
 ### Horizontal Scaling
 
 - Use load balancer for multiple API instances
-- Configure Redis for session sharing
+- Configure the cache tier for session sharing
 - Use CDN for static assets
 
 ### Database Scaling

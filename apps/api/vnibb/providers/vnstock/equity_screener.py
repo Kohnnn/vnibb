@@ -318,6 +318,50 @@ class ScreenerData(BaseModel):
     )
 
     # ==========================================================================
+    # FUNDAMENTAL SCREENER (computed valuation layer)
+    # ==========================================================================
+    intrinsic_value: Optional[float] = Field(
+        None,
+        alias="intrinsicValue",
+        description=(
+            "Intrinsic value per share (VND); "
+            "model-derived reference estimate, not investment advice"
+        ),
+    )
+    margin_of_safety: Optional[float] = Field(
+        None,
+        alias="marginOfSafety",
+        description="Margin of safety vs intrinsic value (%), clamped to [-100, 100]",
+    )
+    moat: Optional[str] = Field(
+        None,
+        description=(
+            "Moat label (wide/narrow/none/eroding); "
+            "model-derived reference estimate, not investment advice"
+        ),
+    )
+    dividend_years: Optional[int] = Field(
+        None,
+        alias="dividendYears",
+        description="Consecutive most-recent years with dividends paid",
+    )
+    fcf_positive: Optional[bool] = Field(
+        None,
+        alias="fcfPositive",
+        description="Whether latest-year free cash flow is positive",
+    )
+    valuation_method: Optional[str] = Field(
+        None,
+        alias="valuationMethod",
+        description="Valuation model used for intrinsic value (dcf/rim)",
+    )
+    fundamental_as_of: Optional[str] = Field(
+        None,
+        alias="fundamentalAsOf",
+        description="Snapshot date (YYYY-MM-DD) of the fundamental valuation data",
+    )
+
+    # ==========================================================================
     # TIMESTAMP
     # ==========================================================================
     year: Optional[int] = Field(None, description="Fiscal year of the data")

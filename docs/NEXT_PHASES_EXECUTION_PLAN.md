@@ -19,8 +19,8 @@ Selected priorities:
 
 ## Architecture Guardrail
 
-- Appwrite remains the intended full VNIBB market-data corpus.
-- Supabase/Postgres is the constrained write-side bridge during quota pressure, not the permanent replacement for the full corpus.
+- The database stack is the intended full VNIBB market-data corpus.
+- The database stack also owns auth and durable runtime writes as the single system of record.
 - VniAgent stays VNIBB database-first.
 - This phase set does not include new artifact creation work.
 
@@ -28,17 +28,17 @@ Selected priorities:
 
 Goal:
 
-- make the Appwrite-primary / Supabase-write-bridge model explicit across docs, settings copy, and AI/runtime surfaces
+- make the single self-hosted database stack model explicit across docs, settings copy, and AI/runtime surfaces
 
 Deliverables:
 
-- clean up docs that incorrectly imply Supabase/Postgres permanently replaced Appwrite as the full primary data store
+- clean up docs that incorrectly imply multiple competing primary data stores
 - reinforce `VNIBB database` wording in AI and product settings
-- add an architecture reference that explains the temporary quota bridge cleanly
+- add an architecture reference that explains the database stack cleanly
 
 Key areas:
 
-- `docs/APPWRITE_PRIMARY_SUPABASE_WRITE_BRIDGE.md`
+- `docs/DATABASE_SCHEMA.md`
 - `docs/DEPLOYMENT_AND_OPERATIONS.md`
 - `docs/VNIBB_MCP_DEPLOYMENT.md`
 - `apps/web/src/components/settings/SettingsModal.tsx`
@@ -264,7 +264,7 @@ Primary targets:
 - broader AI artifact work
 - richer autonomous AI mutation flows
 - deeper derivatives expansion before discovery foundations improve
-- architectural churn that pretends Supabase should replace the full Appwrite corpus
+- architectural churn that pretends a secondary store should replace the full database stack corpus
 
 ## Validation Rhythm
 

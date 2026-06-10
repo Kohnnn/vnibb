@@ -34,7 +34,7 @@ These pieces are already in place:
 
 - OpenRouter-backed active copilot path
 - browser-local BYOK and OpenAI-compatible provider mode
-- VNIBB database-first context with Postgres fallback
+- VNIBB database-first context with database-stack fallback
 - structured output validation
 - validated source catalog and evidence panels
 - reasoning/status SSE events

@@ -38,7 +38,7 @@ If you need a blocking response:
 curl -X POST "http://localhost:8000/api/v1/data/sync/cleanup?async_mode=false&include_prices=true"
 ```
 
-## Partitioning guidance (Postgres)
+## Partitioning guidance (durable storage)
 
 Partitioning is recommended for the largest time-series tables. This reduces
 index bloat and improves retention deletes.
@@ -86,5 +86,5 @@ ALTER TABLE intraday_trades_new RENAME TO intraday_trades;
 - For large tables, copy data in batches to avoid long locks.
 - After moving data, run `ANALYZE` to refresh planner stats.
 
-For Supabase, apply partitioning via migrations in a maintenance window. Avoid
+For the durable storage tier, apply partitioning via migrations in a maintenance window. Avoid
 long-running transactions in production.

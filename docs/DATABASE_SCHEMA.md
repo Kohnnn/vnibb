@@ -1,34 +1,33 @@
-# Appwrite Database Schema
+# Database Schema
 
-**Endpoint:** https://sgp.cloud.appwrite.io/v1  
-**Database ID:** 69a9c70d0026c7d08f51  
+**Persistence:** self-hosted database stack (private network access)
 **Total Collections:** 26
 
 ---
 
-## Education Program Limits
+## Capacity And Limits
 
-VNIBB runs on the **Appwrite Education Program** which provides the following limits:
+VNIBB persistence runs on a self-hosted database stack. Capacity is governed by the host's provisioned resources rather than a managed-plan quota.
 
-| Resource | Limit | Notes |
-|----------|-------|-------|
-| **Bandwidth** | 2 TB/month | Outbound data transfer |
-| **Storage** | 150 GB | Total document storage |
-| **Executions** | 3.5 M/month | Function/API executions |
-| **Monthly Active Users** | 200 K | Authenticated users |
+| Resource | Guidance | Notes |
+|----------|----------|-------|
+| **Bandwidth** | Bounded by host network | Outbound data transfer |
+| **Storage** | Bounded by host disk | Total document storage |
+| **Throughput** | Bounded by host CPU/IO | Read/write operations |
+| **Users** | Bounded by host resources | Authenticated users |
 
 ### Operational Considerations
 
 - **Bandwidth budget**: At ~26 collections with ~5-10 attributes each, document reads are lean. Heavy bandwidth consumers are `stock_prices` (historical OHLCV) and `screener_snapshots` (pre-calculated metrics).
-- **Storage headroom**: 150GB accommodates ~2-3 years of daily stock prices for ~1700 symbols plus financial statements, news, and market data.
-- **Execution budget**: 3.5M executions/month ≈ 116K/day or ~1.3K/minute. Backend uses batching and caching to stay well within limits.
-- **MAU ceiling**: 200K monthly active users provides substantial headroom for a research tool. User dashboards and auth sessions are the primary auth consumers.
+- **Storage headroom**: provision disk to accommodate ~2-3 years of daily stock prices for ~1700 symbols plus financial statements, news, and market data.
+- **Throughput budget**: backend uses batching and caching to keep operation volume well within host capacity.
+- **User ceiling**: scales with host resources; user dashboards and auth sessions are the primary auth consumers.
 
-If limits are approached:
+If capacity is approached:
 1. Enable stricter cache TTLs for read-heavy endpoints
 2. Reduce `stock_prices` history depth for older data
 3. Archive `screener_snapshots` to cold storage quarterly
-4. Consider Appwrite Scale plan for production at higher scale
+4. Provision additional host resources for higher scale
 
 ---
 
@@ -795,7 +794,7 @@ flowchart LR
         Scrapers[Web Scrapers]
     end
     
-    subgraph Appwrite Collections
+    subgraph Database Collections
         stocks[stocks]
         stock_prices[stock_prices]
         financials[financial_ratios<br/>income_statements<br/>balance_sheets<br/>cash_flows]

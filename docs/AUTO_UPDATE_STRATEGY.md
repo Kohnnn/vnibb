@@ -81,7 +81,7 @@ Default batch sizes:
 
 - `price_board` batch fetches for `foreign_trading`
 - listing metadata calls such as `all_symbols`, `symbols_by_exchange`, and `symbols_by_industries`
-- deriving screeners and rankings from SQL/Appwrite instead of refetching everything live
+- deriving screeners and rankings from the database stack instead of refetching everything live
 
 ### Poor bundling paths
 
@@ -107,11 +107,11 @@ Those should therefore be scheduled outside trading hours or on smaller symbol s
 - `intraday_sync` is no longer a placeholder; it now runs a limited market-hours slice against priority symbols
 - `supplemental_company_sync` runs at `10:30 UTC` / `5:30 PM VNT`
 
-## Appwrite mirroring behavior
+## Mirroring behavior
 
-This section describes the intended Appwrite projection behavior when Appwrite writes are available.
+This section describes the intended projection behavior when database-stack mirroring writes are available.
 
-For the current month, Appwrite writes are disabled because the org is returning `limit_databases_writes_exceeded`. The scheduler should update SQL/Supabase first and treat Appwrite mirroring as paused until quota is available again.
+For the current month, mirroring writes are disabled because the org is returning `limit_databases_writes_exceeded`. The scheduler should update the primary durable storage first and treat mirroring as paused until quota is available again.
 
 Current scheduled mirroring rules:
 
@@ -171,7 +171,7 @@ CACHE_CHUNK_SIZE=200
 Notes:
 
 - `VNSTOCK_CALLS_PER_MINUTE=100` is the practical operating target, even though the provider hard cap is higher.
-- `STORE_INTRADAY_TRADES=false` keeps the runtime from exploding Appwrite/SQL write volume unless you explicitly want full raw intraday storage.
+- `STORE_INTRADAY_TRADES=false` keeps the runtime from exploding database write volume unless you explicitly want full raw intraday storage.
 - The live scheduler and the legacy intraday limiter should match at `60` to avoid confusion.
 
 ## Implementation summary
@@ -181,17 +181,17 @@ The backend now follows this philosophy:
 - fast-moving market data during trading hours on a limited priority universe
 - post-close daily market refreshes for price, index, screener, and financial freshness
 - rotating supplemental vnstock updates for slower-changing company datasets off trading hours
-- optional Appwrite mirroring for the tables that power legacy runtime reads when write quota is available
+- optional database-stack mirroring for the tables that power legacy runtime reads when write quota is available
 
 This is the safest way to get materially better freshness without treating every vnstock dataset like a real-time feed.
 
 ## Next-month fallback plan
 
-If Appwrite quota resets cleanly next month, re-enable Appwrite writes in a controlled sequence:
+If write quota resets cleanly next month, re-enable mirroring writes in a controlled sequence:
 
-1. keep `Postgres/Supabase` as the primary durable store
-2. use `DATA_BACKEND=hybrid` so runtime reads can fall back to Appwrite while writes stay on SQL
+1. keep the database stack as the primary durable store
+2. use `DATA_BACKEND=hybrid` so runtime reads can fall back to the mirror while writes stay on the primary store
 3. enable `APPWRITE_WRITE_ENABLED=true` only during controlled off-peak windows
 4. backfill the highest-value collections first instead of turning on all live mirroring at once
-5. verify read paths against Appwrite freshness before expanding the projection scope
-6. if Appwrite shows quota pressure again, switch writes back off immediately without changing the primary source of truth
+5. verify read paths against mirror freshness before expanding the projection scope
+6. if quota pressure returns, switch writes back off immediately without changing the primary source of truth

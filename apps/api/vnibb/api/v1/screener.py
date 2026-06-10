@@ -31,6 +31,7 @@ from vnibb.providers.vnstock.equity_screener import (
 )
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError, ProviderRateLimitError
 from vnibb.services.cache_manager import CacheManager
+from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.screener_filter_service import ScreenerFilterService
 from vnibb.api.v1.schemas import StandardResponse, MetaData
 from vnibb.core.retry import vnstock_cb
@@ -1069,6 +1070,118 @@ def _apply_exchange_and_industry_filters(
     return filtered
 
 
+# Mongo `market_fundamental_screener` doc keys -> ScreenerData attribute names.
+_FUNDAMENTAL_DOC_FIELD_MAP = {
+    "intrinsicValue": "intrinsic_value",
+    "marginOfSafety": "margin_of_safety",
+    "moat": "moat",
+    "dividendYears": "dividend_years",
+    "fcfPositive": "fcf_positive",
+    "valuationMethod": "valuation_method",
+    "snapshotDate": "fundamental_as_of",
+}
+
+
+async def _merge_fundamental_snapshots(rows: List[ScreenerData]) -> List[ScreenerData]:
+    """Best-effort merge of latest fundamental-screener snapshots onto rows.
+
+    Reads the latest snapshot per symbol from Mongo
+    (`market_fundamental_screener`). Mongo disabled, missing collection, or
+    any failure leaves the rows unchanged (fields stay null).
+    """
+
+    if not rows:
+        return rows
+    try:
+        svc = get_mongo_market_data_service()
+        if not svc.enabled:
+            return rows
+        docs = await svc.get_latest_fundamental_snapshots(
+            [row.symbol for row in rows if row.symbol]
+        )
+        if not docs:
+            return rows
+        for row in rows:
+            doc = docs.get((row.symbol or "").upper())
+            if not isinstance(doc, dict):
+                continue
+            for doc_key, attr in _FUNDAMENTAL_DOC_FIELD_MAP.items():
+                value = doc.get(doc_key)
+                if value is not None:
+                    setattr(row, attr, value)
+        return rows
+    except Exception as e:
+        logger.warning(f"Fundamental snapshot merge failed: {e}")
+        return rows
+
+
+def _apply_fundamental_filters(
+    rows: List[ScreenerData],
+    moat: Optional[str],
+    margin_of_safety_min: Optional[float],
+    margin_of_safety_max: Optional[float],
+    dividend_years_min: Optional[int],
+    fcf_positive: Optional[bool],
+) -> List[ScreenerData]:
+    """Filter rows by fundamental-screener fields.
+
+    Each set parameter keeps only rows whose corresponding field is non-null
+    and passes the check. With no parameters set, rows are returned unchanged.
+    """
+
+    if moat is not None:
+        allowed = {part.strip().lower() for part in moat.split(",") if part.strip()}
+        if allowed:
+            rows = [row for row in rows if row.moat is not None and row.moat in allowed]
+    if margin_of_safety_min is not None:
+        rows = [
+            row
+            for row in rows
+            if row.margin_of_safety is not None and row.margin_of_safety >= margin_of_safety_min
+        ]
+    if margin_of_safety_max is not None:
+        rows = [
+            row
+            for row in rows
+            if row.margin_of_safety is not None and row.margin_of_safety <= margin_of_safety_max
+        ]
+    if dividend_years_min is not None:
+        rows = [
+            row
+            for row in rows
+            if row.dividend_years is not None and row.dividend_years >= dividend_years_min
+        ]
+    if fcf_positive is not None:
+        rows = [
+            row
+            for row in rows
+            if row.fcf_positive is not None and row.fcf_positive == fcf_positive
+        ]
+    return rows
+
+
+async def _finalize_fundamental_rows(
+    rows: List[ScreenerData],
+    *,
+    moat: Optional[str],
+    margin_of_safety_min: Optional[float],
+    margin_of_safety_max: Optional[float],
+    dividend_years_min: Optional[int],
+    fcf_positive: Optional[bool],
+) -> List[ScreenerData]:
+    """Shared last step before every screener response: merge then filter."""
+
+    rows = await _merge_fundamental_snapshots(rows)
+    return _apply_fundamental_filters(
+        rows,
+        moat=moat,
+        margin_of_safety_min=margin_of_safety_min,
+        margin_of_safety_max=margin_of_safety_max,
+        dividend_years_min=dividend_years_min,
+        fcf_positive=fcf_positive,
+    )
+
+
 async def _prepare_cached_screener_rows(
     snapshots: List[object],
     db: AsyncSession,
@@ -1213,11 +1326,35 @@ async def get_screener(
     market_cap_min: Optional[float] = Query(None),
     market_cap_max: Optional[float] = Query(None),
     volume_min: Optional[int] = Query(None),
+    moat: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated moat labels (wide,narrow,none,eroding); "
+            "model-derived reference estimate, not investment advice"
+        ),
+    ),
+    margin_of_safety_min: Optional[float] = Query(None),
+    margin_of_safety_max: Optional[float] = Query(None),
+    dividend_years_min: Optional[int] = Query(None),
+    fcf_positive: Optional[bool] = Query(None),
     sort_by: Optional[str] = Query(None),
     sort_order: str = Query(default="desc", pattern=r"^(asc|desc)$"),
     db: AsyncSession = Depends(get_db),
 ) -> StandardResponse[List[ScreenerData]]:
     cache_manager = CacheManager(db)
+
+    async def _respond(rows: List[ScreenerData]) -> StandardResponse[List[ScreenerData]]:
+        """Single funnel for every row-emitting return path: merge fundamental
+        snapshots, apply fundamental filters, then build the response."""
+        rows = await _finalize_fundamental_rows(
+            rows,
+            moat=moat,
+            margin_of_safety_min=margin_of_safety_min,
+            margin_of_safety_max=margin_of_safety_max,
+            dividend_years_min=dividend_years_min,
+            fcf_positive=fcf_positive,
+        )
+        return StandardResponse(data=rows, meta=_build_screener_meta(rows))
 
     if use_cache and not refresh:
         try:
@@ -1261,7 +1398,7 @@ async def get_screener(
                         refresh_key,
                         lambda: _refresh_screener_cache(refresh_params),
                     )
-                return StandardResponse(data=data, meta=_build_screener_meta(data))
+                return await _respond(data)
 
             if source:
                 fallback_cache = await cache_manager.get_screener_data(
@@ -1291,7 +1428,7 @@ async def get_screener(
                         sort_by=sort_by,
                         sort_order=sort_order,
                     )
-                    return StandardResponse(data=data, meta=_build_screener_meta(data))
+                    return await _respond(data)
         except Exception as e:
             logger.warning(f"Cache lookup failed: {e}")
 
@@ -1329,7 +1466,7 @@ async def get_screener(
         data = await _hydrate_screener_rows(data, db)
 
         await cache_manager.store_screener_data(data=[d.model_dump() for d in data], source=source)
-        return StandardResponse(data=data, meta=_build_screener_meta(data))
+        return await _respond(data)
 
     except (ProviderTimeoutError, ProviderError, ProviderRateLimitError) as e:
         if use_cache:
@@ -1360,7 +1497,7 @@ async def get_screener(
                     sort_by=sort_by,
                     sort_order=sort_order,
                 )
-                return StandardResponse(data=data, meta=_build_screener_meta(data))
+                return await _respond(data)
 
         # Final fallback: return empty results with user-friendly message
         # This prevents 502 errors and provides better UX

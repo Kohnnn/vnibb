@@ -7,12 +7,10 @@ The current operational picture reflected in recent project context is:
 - frontend deployed on Vercel
 - backend deployed on OCI
 - read-only VNIBB MCP companion deployed alongside the backend on OCI for VniAgent and remote clients
-- Appwrite-backed VNIBB market corpus remaining the intended primary research dataset, with Supabase/Postgres handling quota-constrained durable writes and auth this month
-- Supabase auth serving as the active auth provider this month
-- Appwrite writes temporarily constrained by `limit_databases_writes_exceeded` for selected runtime paths, which is why Supabase/Postgres is carrying the current write bridge
-- Redis used for cache and resilience behavior
+- a self-hosted database stack holding the VNIBB market corpus, durable app/runtime state, auth, and cache/resilience behavior
+- the database stack is privately hosted and reachable from the backend over a private network; it is not exposed publicly
 
-This is a temporary earnings-season operating mode for the current month. Appwrite remains the strategic full-market store; the temporary bridge is about constrained write continuity, not about redefining the long-term market-data owner.
+The database stack is the single system of record for VNIBB persistence. It is self-hosted and portable, so it can be relocated to other infrastructure in the future without changing the application contract.
 
 ## Why operations became a major project theme
 
@@ -34,7 +32,7 @@ At a high level, production looks like:
 2. OCI hosts the backend runtime and the dedicated `vnibb-mcp` sidecar
 3. the backend exposes HTTP and WebSocket surfaces
 4. the `vnibb-mcp` sidecar exposes the read-only MCP HTTP surface for VniAgent and remote clients
-5. Appwrite-backed market corpus, Supabase/Postgres write/auth bridge, and cache services back persistence and runtime state
+5. the self-hosted database stack backs persistence, runtime state, auth, and cache
 6. upstream market providers feed the service layer
 
 ```text
@@ -47,8 +45,7 @@ VniAgent server context path
   -> apps/api
   -> VNIBB_MCP_URL
   -> vnibb-mcp
-  -> Appwrite-backed VNIBB corpus primary
-  -> Supabase/Postgres write-side bridge where quota-constrained runtime paths need it
+  -> self-hosted database stack (market corpus + app/runtime state)
 ```
 
 ## Backend Tech Stack
@@ -81,12 +78,9 @@ VniAgent server context path
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Primary Store** | Appwrite | Document DB, auth, 26 collections |
-| **SQL Fallback** | PostgreSQL 16 (Supabase) | Seeding, population scripts |
+| **Persistence** | Self-hosted database stack | System of record: market corpus, app/runtime state, auth, and cache |
 | **Async DB** | SQLAlchemy 2.0+ / asyncpg | Async ORM with connection pooling |
 | **Migrations** | Alembic 1.13+ | Schema migrations |
-| **Cache** | Redis 5.0+ | Multi-tier cache (Redis + memory fallback) |
-| **Sync Driver** | psycopg2-binary | PostgreSQL sync operations |
 
 ### HTTP & Networking
 
@@ -140,7 +134,7 @@ VniAgent server context path
 | **State/Fetch** | TanStack Query 5 | Server state management |
 | **Charts** | Recharts 3.6 / lightweight-charts 4.2 | Financial charts |
 | **Grid Layout** | react-grid-layout 2.2 | Dashboard widget layout |
-| **Auth** | @supabase/ssr + Appwrite | Session management |
+| **Auth** | Database-stack session management | Session management |
 | **Icons** | lucide-react | Icon library |
 | **Animations** | framer-motion 12 | UI animations |
 | **Package Manager** | pnpm 9.15 | Monorepo package management |
@@ -197,20 +191,16 @@ The complete data pipeline from raw provider data to widget display:
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          STORAGE LAYER                                      │
 │                                                                              │
-│  ┌─────────────────────────┐   ┌─────────────────────┐   ┌─────────────────┐ │
-│  │      Appwrite           │   │   PostgreSQL         │   │     Redis       │ │
-│  │   (Primary Store)       │   │   (Fallback/Seed)   │   │   (Cache)       │ │
-│  │                         │   │                     │   │                 │ │
-│  │  • 26 Collections       │   │  • stocks            │   │  • API cache    │ │
-│  │  • stocks               │   │  • stock_prices      │   │  • Session      │ │
-│  │  • stock_prices         │   │  • financial_*      │   │  • Rate limits  │ │
-│  │  • financial_*         │   │  • foreign_trading   │   │  • WebSocket    │ │
-│  │  • company_*           │   │  • ...               │   │    state        │ │
-│  │  • market_*            │   │                     │   │                 │ │
-│  │                         │   │                     │   │                 │ │
-│  │  TTL: 30s - 24h        │   │  TTL: Permanent     │   │  TTL: 30s-24h   │ │
-│  │  publicRead permission │   │  Private             │   │  Auto-fallback  │ │
-│  └─────────────────────────┘   └─────────────────────┘   └─────────────────┘ │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │                  Self-hosted database stack                              │ │
+│  │                  (system of record + cache)                              │ │
+│  │                                                                           │ │
+│  │  • market corpus: stocks, stock_prices, financial_*, company_*, market_* │ │
+│  │  • app/runtime state + auth                                              │ │
+│  │  • cache tier (TTL-aware, with in-process memory fallback)               │ │
+│  │                                                                           │ │
+│  │  Private network access only — not exposed publicly                      │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -240,7 +230,7 @@ The complete data pipeline from raw provider data to widget display:
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
 │  │                     FALLBACK RESOLUTION CHAIN                            │ │
 │  │                                                                           │ │
-│  │    1. Redis Cache (TTL-aware, returns immediately if hit)                │ │
+│  │    1. Cache tier (TTL-aware, returns immediately if hit)                 │ │
 │  │         │                                                               │ │
 │  │         ▼ (miss)                                                        │ │
 │  │    2. VNStock API (primary provider)                                    │ │
@@ -249,16 +239,13 @@ The complete data pipeline from raw provider data to widget display:
 │  │    3. Scraper Fallback (cafef/cophieu68)                                │ │
 │  │         │                                                               │ │
 │  │         ▼ (fail)                                                        │ │
-│  │    4. Appwrite (persisted document store)                                │ │
+│  │    4. Database stack (persisted system of record)                       │ │
 │  │         │                                                               │ │
 │  │         ▼ (fail)                                                        │ │
-│  │    5. PostgreSQL (Supabase seed source)                                  │ │
-│  │         │                                                               │ │
-│  │         ▼ (fail)                                                        │ │
-│  │    6. Stale Cache (if available)                                        │ │
+│  │    5. Stale Cache (if available)                                        │ │
 │  │         │                                                               │ │
 │  │         ▼ (all fail)                                                    │ │
-│  │    7. DataNotFoundError → 404 response                                  │ │
+│  │    6. DataNotFoundError → 404 response                                  │ │
 │  │                                                                           │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -326,21 +313,21 @@ The complete data pipeline from raw provider data to widget display:
 
 ### Widget → Data Mapping
 
-| Widget | API Endpoint | Appwrite Collection | Data Flow |
+| Widget | API Endpoint | Collection | Data Flow |
 |--------|-------------|---------------------|-----------|
-| `FinancialRatiosWidget` | `GET /equity/{symbol}/ratios` | `financial_ratios` | Appwrite → API → Widget |
-| `IncomeStatementWidget` | `GET /equity/{symbol}/income-statement` | `income_statements` | Appwrite → API → Widget |
-| `BalanceSheetWidget` | `GET /equity/{symbol}/balance-sheet` | `balance_sheets` | Appwrite → API → Widget |
-| `CashFlowWidget` | `GET /equity/{symbol}/cash-flow` | `cash_flows` | Appwrite → API → Widget |
-| `PriceChartWidget` | `GET /equity/{symbol}/historical` | `stock_prices` | Appwrite → API → Widget |
-| `ScreenerWidget` | `GET /screener` | `screener_snapshots` | Appwrite → API → Widget |
-| `MarketOverviewWidget` | `GET /market/indices` | `stock_indices` | Appwrite → API → Widget |
-| `ForeignTradingWidget` | `GET /equity/{symbol}/foreign-trading` | `foreign_trading` | Appwrite → API → Widget |
-| `CompanyNewsWidget` | `GET /equity/{symbol}/news` | `company_news` | Appwrite → API → Widget |
-| `OrderBookWidget` | `GET /market/orderbook/{symbol}` | `orderbook_snapshots` | Appwrite → API → Widget |
-| `DividendWidget` | `GET /equity/{symbol}/dividends` | `dividends` | Appwrite → API → Widget |
-| `InsiderDealsWidget` | `GET /equity/{symbol}/insider-deals` | `insider_deals` | Appwrite → API → Widget |
-| `SectorPerformanceWidget` | `GET /market/sector-performance` | `sector_performance` | Appwrite → API → Widget |
+| `FinancialRatiosWidget` | `GET /equity/{symbol}/ratios` | `financial_ratios` | Database → API → Widget |
+| `IncomeStatementWidget` | `GET /equity/{symbol}/income-statement` | `income_statements` | Database → API → Widget |
+| `BalanceSheetWidget` | `GET /equity/{symbol}/balance-sheet` | `balance_sheets` | Database → API → Widget |
+| `CashFlowWidget` | `GET /equity/{symbol}/cash-flow` | `cash_flows` | Database → API → Widget |
+| `PriceChartWidget` | `GET /equity/{symbol}/historical` | `stock_prices` | Database → API → Widget |
+| `ScreenerWidget` | `GET /screener` | `screener_snapshots` | Database → API → Widget |
+| `MarketOverviewWidget` | `GET /market/indices` | `stock_indices` | Database → API → Widget |
+| `ForeignTradingWidget` | `GET /equity/{symbol}/foreign-trading` | `foreign_trading` | Database → API → Widget |
+| `CompanyNewsWidget` | `GET /equity/{symbol}/news` | `company_news` | Database → API → Widget |
+| `OrderBookWidget` | `GET /market/orderbook/{symbol}` | `orderbook_snapshots` | Database → API → Widget |
+| `DividendWidget` | `GET /equity/{symbol}/dividends` | `dividends` | Database → API → Widget |
+| `InsiderDealsWidget` | `GET /equity/{symbol}/insider-deals` | `insider_deals` | Database → API → Widget |
+| `SectorPerformanceWidget` | `GET /market/sector-performance` | `sector_performance` | Database → API → Widget |
 
 ## Important operational lessons already learned
 
@@ -368,7 +355,7 @@ A broken WebSocket path, bad CORS config, stale env setup, or over-eager health 
 
 The project's history includes:
 
-- early Zeabur and Supabase deployment troubleshooting
+- early hosting and database deployment troubleshooting
 - security and runtime hardening
 - OCI adoption with staged mitigation planning
 - migration toward a more controlled backend environment
@@ -488,18 +475,18 @@ SKIP_WEBSOCKET_STARTUP=false
 - `SKIP_SCHEDULER_STARTUP=false`
 - `SKIP_WEBSOCKET_STARTUP=false`
 
-### Appwrite during quota pressure
+### Database stack writes
 
-During an Appwrite write freeze, keep Appwrite configured only for legacy reads or controlled off-peak backfills.
+Keep durable writes pointed at the self-hosted database stack. Env keys below are literal runtime config consumed by the backend; their names are retained for code compatibility even though the underlying store is the consolidated database stack.
 
-- runtime writes should stay disabled with `APPWRITE_WRITE_ENABLED=false`
-- durable state should live in `Postgres/Supabase`
-- dashboards should remain local-first with SQL durable save
+- runtime writes are gated by `APPWRITE_WRITE_ENABLED` (keep `false` unless deliberately backfilling)
+- durable state lives in the database stack
+- dashboards remain local-first with a durable save path
 - verify deploys with `bash scripts/oracle/runtime_verify.sh` before treating a rollout as successful
 
 ### Why `CACHE_BACKEND=auto` is acceptable
 
-In this backend, `auto` resolves to Redis when `REDIS_URL` is configured, and falls back to memory only if Redis is unavailable.
+In this backend, `auto` resolves to the configured cache tier when a cache URL is set, and falls back to in-process memory only if the cache tier is unavailable.
 
 That makes it a reasonable production default when the goal is graceful degradation instead of hard failure.
 
@@ -513,14 +500,14 @@ That makes it a reasonable production default when the goal is graceful degradat
   - keep runtime install disabled after the environment is bootstrapped
 - `STORE_INTRADAY_TRADES=false`
   - recommended unless full raw intraday retention is a deliberate requirement
-  - avoids unnecessary write amplification in SQL and Appwrite pipelines
+  - avoids unnecessary write amplification in the persistence pipelines
 
 ### Memory cache fallback settings
 
 - `MEMORY_CACHE_MAX_ENTRIES=200`
 - `MEMORY_CACHE_MAX_ENTRY_BYTES=1048576`
 
-These only matter when the in-process fallback cache is used. The 1MB entry cap allows Mongo-backed microstructure payloads to cache when Redis is unavailable while still bounding memory use.
+These only matter when the in-process fallback cache is used. The 1MB entry cap allows microstructure payloads to cache when the cache tier is unavailable while still bounding memory use.
 
 ### Startup tuning settings
 

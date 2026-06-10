@@ -5,13 +5,13 @@
 - `/ready` remains non-200 after cutover
 - Sustained 5xx increase
 - Websocket instability
-- Broken Appwrite auth/session flow
+- Broken auth/session flow
 - Unacceptable latency regression
 
 ## Rollback Steps
 
-1. Point the stable hostname back to the Zeabur origin.
-2. Confirm Zeabur health endpoints:
+1. Point the stable hostname back to the previous managed host origin.
+2. Confirm the previous managed host health endpoints:
    - `/live`
    - `/ready`
    - `/health/`

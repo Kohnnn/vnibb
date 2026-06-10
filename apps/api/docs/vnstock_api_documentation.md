@@ -335,7 +335,7 @@ Recommended paths in VNIBB:
 
 - Keep `VNSTOCK_SOURCE` on `KBS` (recommended), `VCI`, or `DNSE`.
 - Do not configure `TCBS`; it is removed in the newer upstream runtime line used by VNIBB.
-- For migration/backfill workloads, run the Appwrite migration orchestrator after source sync completion.
+- For migration/backfill workloads, run the database-stack migration orchestrator after source sync completion.
 
 ---
 

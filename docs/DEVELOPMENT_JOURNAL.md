@@ -372,7 +372,7 @@ The next stage should continue in the same spirit:
 
 ## 19. Auto-update maturity: from scheduled placeholders to an actual operating model
 
-One of the more important operational realizations came later, after the database and Appwrite work became more serious: having sync methods is not the same thing as having a real automatic update strategy.
+One of the more important operational realizations came later, after the database and corpus work became more serious: having sync methods is not the same thing as having a real automatic update strategy.
 
 The backend already had scheduled jobs, but the coverage was uneven.
 
@@ -409,7 +409,7 @@ That led to a more disciplined model:
 - market-sensitive data during trading hours on a smaller priority universe
 - end-of-day and after-close refreshes for price, index, and trading datasets
 - rotating off-hours updates for slower-changing company-level surfaces
-- Appwrite mirroring for the tables the runtime actually depends on
+- database mirroring for the tables the runtime actually depends on
 
 This was an important conceptual shift. The system stopped being a pile of sync methods and became closer to a real operating policy.
 
@@ -417,42 +417,42 @@ The implementation work reflected that shift in a few concrete ways:
 
 - the intraday scheduler was upgraded from a placeholder into a limited market-hours refresh job
 - a nightly supplemental vnstock job was added for company-level datasets that were not previously on the automatic path
-- scheduled jobs were tightened so they also mirror the relevant runtime tables into Appwrite instead of only updating SQL
+- scheduled jobs were tightened so they also mirror the relevant runtime tables into the database stack instead of only updating SQL
 - rate-budget thinking became part of the product architecture, not just an afterthought
 
 That matters because freshness is not only an infrastructure concern. In a research product, freshness shapes trust.
 
-Users do not care whether a stale number came from a scheduler omission, an Appwrite mirror gap, or a provider budget decision. They only experience it as a product that feels current or a product that feels behind.
+Users do not care whether a stale number came from a scheduler omission, a database mirror gap, or a provider budget decision. They only experience it as a product that feels current or a product that feels behind.
 
 This phase was therefore less glamorous than new widget work, but strategically important. It moved VNIBB closer to behaving like an operations-aware market platform rather than a collection of sync utilities with a UI attached.
 
-## 20. Appwrite quota pressure forced a more honest runtime split
+## 20. Capacity pressure forced a more honest runtime split
 
-Another useful operational lesson arrived when Appwrite writes became the limiting factor instead of vnstock calls or frontend bugs.
+Another useful operational lesson arrived when durable writes became the limiting factor instead of vnstock calls or frontend bugs.
 
 That kind of pressure is clarifying because it reveals which parts of the system are truly essential and which parts were still carrying migration-era assumptions.
 
 The most important realization was simple:
 
-- Appwrite had become too expensive to treat as the live write target for everything
-- but VNIBB did not actually need Appwrite to keep the product working day to day
+- the legacy split-store had become too expensive to treat as the live write target for everything
+- but VNIBB did not actually need that legacy arrangement to keep the product working day to day
 
 The codebase already had most of the ingredients for a better emergency posture:
 
-- Supabase/Postgres already held the durable market-data tables
-- Redis already handled hot cache responsibilities
+- the database stack already held the durable market-data tables
+- the cache tier already handled hot cache responsibilities
 - the dashboard UI already saved locally in the browser
-- and Supabase auth was already available for production login
+- and the auth provider was already available for production login
 
 What was missing was not a new platform. It was a cleaner statement of system ownership.
 
 The mitigation that followed was intentionally conservative:
 
-- keep `Supabase` as the auth provider
-- make `Postgres/Supabase` the durable primary source for runtime data
+- keep the auth provider unchanged
+- make the database stack the durable primary source for runtime data
 - keep dashboards local-first so the UI never blocks on cloud writes
 - reconcile new local dashboards into SQL after save instead of requiring them to start life with a remote ID
-- freeze Appwrite writes and treat Appwrite as a legacy read fallback or future projection target only
+- freeze legacy secondary-store writes and treat that store as a read fallback or future projection target only
 
 That change mattered for more than just cost control.
 
@@ -463,7 +463,7 @@ It also led to a more sensible startup rule for dashboard hydration:
 - if a browser already has custom local dashboards, preserve them
 - if a browser is effectively fresh and only contains the built-in system dashboards, pull the durable dashboards from SQL
 
-This was a better fit for the actual product than an Appwrite-first runtime.
+This was a better fit for the actual product than a split-store runtime.
 
 During earnings season, the system does not need architectural purity. It needs dependable behavior under pressure.
 
@@ -472,6 +472,6 @@ The resulting operating model is clearer:
 - browser state for immediate dashboard resilience
 - SQL for durable user state and market data
 - vnstock for freshness and gap-fill
-- Appwrite only where it still provides value without being allowed to block the month
+- the database stack as the single durable system of record without being allowed to block the month
 
 That is a healthier split because it matches the economics of the tools instead of pretending all persistence layers should be treated equally.

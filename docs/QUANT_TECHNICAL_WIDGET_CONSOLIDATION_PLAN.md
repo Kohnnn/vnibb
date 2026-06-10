@@ -4,15 +4,15 @@ Date: 2026-05-13
 
 ## Goal
 
-Consolidate VNIBB's existing technical and quant widget surface into clear analyst workflows, then ship the first Mongo-backed microstructure widgets without breaking existing user dashboards, admin-managed system dashboards, widget settings, or stored widget configs.
+Consolidate VNIBB's existing technical and quant widget surface into clear analyst workflows, then ship the first database-backed microstructure widgets without breaking existing user dashboards, admin-managed system dashboards, widget settings, or stored widget configs.
 
 ## Compatibility Rules
 
 - Do not rename or remove existing widget IDs.
 - Add new widget IDs only; existing dashboards must keep rendering unchanged.
 - Do not change widget config semantics for existing widgets.
-- Do not write VNIBB-native dashboard, widget, user, session, or preference state to MongoDB.
-- Use MongoDB only for shared raw/derived market data such as `market_intraday_trades`.
+- Do not write VNIBB-native dashboard, widget, user, session, or preference state to the database stack's shared market-data tier.
+- Use the database stack only for shared raw/derived market data such as `market_intraday_trades`.
 - Keep system dashboard changes additive. Admins still control draft/publish through existing global template flows.
 - Label proxy data honestly: current footprint and CVD are `match_type_proxy`, not true bid/ask aggressor classification.
 
@@ -55,7 +55,7 @@ Regime, rotation, and seasonality:
 - `hurst_market_structure`
 - `relative_rotation`
 - `correlation_matrix`
-- `seasonality_heatmap` keeps one widget ID and now supports monthly, weekly, daily/weekday, and hourly modes. Monthly, weekly, and daily use adjusted historical prices; hourly uses Mongo intraday trades.
+- `seasonality_heatmap` keeps one widget ID and now supports monthly, weekly, daily/weekday, and hourly modes. Monthly, weekly, and daily use adjusted historical prices; hourly uses database-backed intraday trades.
 - `rsi_seasonal`
 - `market_breadth`
 - `sector_rotation_radar`
@@ -79,7 +79,7 @@ Synthesis and factor stack:
 
 ## First Shipping Slice
 
-Ship two additive widgets backed by the existing `/api/v1/microstructure/{symbol}` endpoint and typed Mongo `market_intraday_trades` data.
+Ship two additive widgets backed by the existing `/api/v1/microstructure/{symbol}` endpoint and typed database-backed `market_intraday_trades` data.
 
 Status: shipped on 2026-05-13.
 
@@ -91,7 +91,7 @@ New widget IDs:
 Backend work:
 
 - Add `features` query parameter to `/api/v1/microstructure/{symbol}`.
-- Load only needed Mongo inputs when features are specified.
+- Load only needed database-stack inputs when features are specified.
 - Existing behavior with no `features` remains unchanged.
 
 Frontend work:
@@ -131,7 +131,7 @@ Medium priority:
 
 Defer:
 
-- `liquidity_heatmap` until MongoDB has time-stamped Level 2/depth snapshots.
+- `liquidity_heatmap` until the database stack has time-stamped Level 2/depth snapshots.
 - Real `gamma_exposure` until options open interest and strikes are available.
 
 ## Template Direction

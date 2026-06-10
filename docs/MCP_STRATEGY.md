@@ -9,7 +9,7 @@ The goal is not "AI for everything". The goal is to give agents safe, structured
 - normalized Vietnam-market data from the FastAPI backend
 - dashboard and widget workflows in the frontend
 - cached and fallback-aware provider logic
-- Appwrite and Postgres operational tooling already present in the repo
+- the database stack and operational tooling already present in the repo
 
 ## Why MCP fits VNIBB
 
@@ -18,7 +18,7 @@ VNIBB already has several pieces that map well to MCP:
 - a typed backend with stable route contracts
 - a widget-based research workspace where actions are composable
 - an AI Copilot direction already present in the product
-- existing Appwrite MCP launch scripts in `vnibb/scripts/appwrite/`
+- existing database-stack MCP launch scripts in `vnibb/scripts/appwrite/`
 - a fallback-first backend that is better for agents than raw upstream provider access
 
 This means VNIBB should usually expose MCP over VNIBB services, not over raw `vnstock` calls.
@@ -123,10 +123,10 @@ Admin-only MCP tools could include:
 Example prompts:
 
 - "Why is the screener stale today?"
-- "Check whether Appwrite is lagging behind Postgres for financial ratios."
+- "Check whether the database stack is lagging behind durable storage for financial ratios."
 - "Backfill price history for the VN30 names that failed today."
 
-This fits the repo especially well because Appwrite MCP tooling already exists.
+This fits the repo especially well because database-stack MCP tooling already exists.
 
 ### 5. External IDE and Agent Access
 
@@ -290,7 +290,7 @@ Split responsibilities:
 
 - public research tools call FastAPI routes
 - admin tools call service internals or scripts
-- Appwrite-specific tools stay separate where needed
+- database-stack-specific tools stay separate where needed
 
 Pros:
 
@@ -335,7 +335,7 @@ This is where VNIBB becomes more than a read-only market MCP.
 
 ### Phase 3. Admin and data ops MCP
 
-Expose guarded tools for sync status, freshness, backfill, and Appwrite checks.
+Expose guarded tools for sync status, freshness, backfill, and database-stack checks.
 
 These should require stronger auth and ideally a separate admin server or permission layer.
 

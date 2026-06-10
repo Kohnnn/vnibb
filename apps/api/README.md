@@ -24,8 +24,8 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
 
 - **50+ API Endpoints** - Stocks, financials, news, sectors
 - **Real-time Data** - vnstock Golden Sponsor integration
-- **Database** - PostgreSQL with SQLAlchemy ORM
-- **Caching** - Redis for performance
+- **Database** - Self-hosted database stack (system of record)
+- **Caching** - Cache tier for performance
 - **Docs** - Auto-generated Swagger/OpenAPI
 
 ---
@@ -34,9 +34,9 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
 
 - **Framework:** FastAPI 0.110
 - **Language:** Python 3.12
-- **Database:** Appwrite (primary) / PostgreSQL (fallback)
+- **Database:** Self-hosted database stack
 - **ORM:** SQLAlchemy 2.0 (async)
-- **Cache:** Redis (Upstash)
+- **Cache:** Cache tier with in-process memory fallback
 - **Data:** vnstock post-3.4.2 / 3.5.x runtime line (KBS-first, TCBS removed)
 
 ---
@@ -69,7 +69,7 @@ vnibb/
 
 ### Prerequisites
 - Python 3.12+
-- PostgreSQL or Appwrite account
+- Access to the self-hosted database stack
 
 ### Installation
 
@@ -110,13 +110,13 @@ Follow [docs/oracle_runbook.md](../../docs/oracle_runbook.md) for the Oracle VM 
 
 ```env
 DATABASE_URL=postgresql+asyncpg://...
-CACHE_BACKEND=auto  # auto|redis|memory|appwrite
-DATA_BACKEND=hybrid  # postgres primary; Appwrite read fallback only when configured
-SUPABASE_JWT_SECRET=your-supabase-jwt-secret
+CACHE_BACKEND=auto  # auto|cache-tier|memory
+DATA_BACKEND=hybrid  # system of record + read fallback when configured
+SUPABASE_JWT_SECRET=your-jwt-secret
 ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
-APPWRITE_WRITE_ENABLED=false  # keep Appwrite writes frozen unless running a controlled backfill
+APPWRITE_WRITE_ENABLED=false  # keep document-store writes frozen unless running a controlled backfill
 APPWRITE_POPULATE_MAX_ROWS=1000
-REDIS_URL=redis://localhost:6379/0
+REDIS_URL=redis://localhost:6379/0  # cache-tier connection
 VNSTOCK_API_KEY=vnstock_xxx
 VNSTOCK_RUNTIME_INSTALL=0  # Keep disabled; use Dockerfile.premium for premium builds
 VNSTOCK_EXTRA_INDEX_URL=https://vnstocks.com/api/simple  # Optional premium index for vnii bootstrap
@@ -132,25 +132,25 @@ ENABLE_AI_SENTIMENT_ANALYSIS=0  # keep market news sentiment paused for stabilit
 # OPENROUTER_SITE_URL=https://your-app.example.com
 # OPENROUTER_APP_NAME=VNIBB
 
-# Appwrite primary runtime datastore
-# APPWRITE_ENDPOINT=https://cloud.appwrite.io/v1
-# APPWRITE_PROJECT_ID=your-appwrite-project-id
-# APPWRITE_API_KEY=your-appwrite-server-api-key
-# APPWRITE_DATABASE_ID=your-appwrite-database-id
+# Database-stack connection variables (names retained for code compatibility):
+# APPWRITE_ENDPOINT=...
+# APPWRITE_PROJECT_ID=...
+# APPWRITE_API_KEY=...
+# APPWRITE_DATABASE_ID=...
 # Optional alias names used by MCP helper scripts:
-# APPWRITE_NAME=your-appwrite-project-id
-# APPWRITE_SECRET=your-appwrite-server-api-key
+# APPWRITE_NAME=...
+# APPWRITE_SECRET=...
 ```
 
 If `OPENROUTER_API_KEY` is not set, the copilot falls back to a configuration warning until you add the key or use a browser-local OpenRouter key in Settings.
 
 Set `ENABLE_AI_SENTIMENT_ANALYSIS=0` to pause news sentiment processing entirely; crawled articles will be marked neutral so the news feed still works without AI load.
 
-Appwrite is now the expected primary runtime backend. Keep `DATABASE_URL` configured so Postgres/Supabase can act as the fallback source and Appwrite population bridge.
+The self-hosted database stack is the expected primary runtime backend. Keep `DATABASE_URL` configured so the SQL path can act as a fallback/population source.
 
 ### Read-only MCP companion
 
-This backend now includes a dedicated read-only MCP server for Appwrite-backed VNIBB access.
+This backend now includes a dedicated read-only MCP server for database-backed VNIBB access.
 
 Local stdio usage:
 
@@ -170,7 +170,7 @@ Key env values:
 - `VNIBB_MCP_URL=http://127.0.0.1:8001/mcp` for local API-to-MCP calls, or `http://mcp:8001/mcp` on OCI
 - `VNIBB_MCP_SHARED_BEARER_TOKEN=<shared secret for remote deployments>`
 
-When `VNIBB_MCP_URL` is configured, VniAgent runtime context reads use the MCP companion for selected Appwrite-backed reads instead of direct Appwrite access.
+When `VNIBB_MCP_URL` is configured, VniAgent runtime context reads use the MCP companion for selected database-backed reads instead of direct database access.
 
 Canonical implementation notes live in `../../docs/VNIBB_MCP_READONLY.md`.
 

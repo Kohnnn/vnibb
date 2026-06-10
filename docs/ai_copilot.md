@@ -12,8 +12,8 @@ The active copilot flow is:
 
 1. Frontend sends widget-aware chat context to `POST /api/v1/copilot/chat/stream`
 2. Backend builds VNIBB market context and prefers the dedicated `vnibb-mcp` read path when `VNIBB_MCP_URL` is configured
-3. `vnibb-mcp` serves curated Appwrite-backed reads for selected VniAgent context requests
-4. If MCP is unavailable, backend falls back to direct Appwrite/Postgres context assembly
+3. `vnibb-mcp` serves curated database-backed reads for selected VniAgent context requests
+4. If MCP is unavailable, backend falls back to direct database-stack context assembly
 5. Backend sends a context-aware prompt to the configured provider
 6. Model answers naturally in Markdown
 7. Backend validates any cited source IDs against `source_catalog`
@@ -40,8 +40,8 @@ The active copilot flow is:
 VniAgent sidebar / widget copilot
   -> POST /api/v1/copilot/chat/stream
   -> AIContextService in apps/api
-  -> vnibb-mcp via VNIBB_MCP_URL for selected Appwrite-backed reads
-  -> Appwrite
+  -> vnibb-mcp via VNIBB_MCP_URL for selected database-backed reads
+  -> the database stack
   -> validated source_catalog + runtime context
   -> model provider
   -> SSE response back to VniAgent UI
@@ -109,7 +109,7 @@ Browser widget data remains lower-priority than backend data.
 - OpenRouter free-model detection and admin runtime status checks
 - backend prompt library service with default and shared prompt support
 - shared prompt versioning and history
-- VNIBB MCP-first context assembly for selected Appwrite-backed reads, with direct Appwrite/Postgres fallback, for:
+- VNIBB MCP-first context assembly for selected database-backed reads, with direct database-stack fallback, for:
   - stock profile
   - prices
   - ratios
@@ -175,8 +175,8 @@ Current stability note:
 - prompt starters are trimmed down to the strongest few per context
 - document attach is now behind a secondary tools menu in the sidebar composer
 - the sidebar header now makes the active symbol, tab, widget context, provider, mode, model, and VNIBB database-first stance visible at a glance
-- when `VNIBB_MCP_URL` is configured, selected server-side VniAgent runtime reads now flow through the dedicated read-only VNIBB MCP instead of hitting Appwrite directly
-- if the MCP companion is unavailable, the backend falls back to direct Appwrite/Postgres context reads so chat does not hard-fail on transport issues
+- when `VNIBB_MCP_URL` is configured, selected server-side VniAgent runtime reads now flow through the dedicated read-only VNIBB MCP instead of hitting the database stack directly
+- if the MCP companion is unavailable, the backend falls back to direct database-stack context reads so chat does not hard-fail on transport issues
 
 ## What We Explicitly Did Not Copy
 
