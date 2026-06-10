@@ -18,6 +18,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useDirectionColors } from '@/hooks/useDirectionColors'
 
 interface RSISeasonalWidgetProps {
@@ -62,6 +64,7 @@ export function RSISeasonalWidget({ symbol }: RSISeasonalWidgetProps) {
   }))
   const hasData = rows.some((row) => row.rsi > 0)
   const currentRsi = Number(metric?.current_rsi ?? 0)
+  const quantWarning = extractQuantWarning(data, 'rsi_seasonal')
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view RSI seasonality" icon={<Signal size={18} />} />
@@ -99,6 +102,7 @@ export function RSISeasonalWidget({ symbol }: RSISeasonalWidgetProps) {
         <WidgetEmpty message="No RSI seasonal data" icon={<Signal size={18} />} />
       ) : (
         <>
+          <QuantWarningBanner warning={quantWarning} className="mb-2" />
           <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
             <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest mb-1">Current RSI</div>
             <div className={`text-lg font-semibold ${rsiClass(currentRsi)}`}>{currentRsi.toFixed(2)}</div>

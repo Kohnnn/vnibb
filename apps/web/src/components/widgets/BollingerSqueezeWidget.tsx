@@ -18,6 +18,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 
 interface BollingerSqueezeWidgetProps {
   symbol: string
@@ -60,6 +62,7 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
     }))
   const hasData = bbWidth > 0 || widthSeries.length > 0
   const bbPctProgress = Math.max(0, Math.min(100, bbPct * 100))
+  const quantWarning = extractQuantWarning(data, 'bollinger')
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Bollinger squeeze" icon={<Minimize2 size={18} />} />
@@ -97,6 +100,7 @@ export function BollingerSqueezeWidget({ symbol }: BollingerSqueezeWidgetProps) 
         <WidgetEmpty message="No Bollinger data" icon={<Minimize2 size={18} />} />
       ) : (
         <>
+          <QuantWarningBanner warning={quantWarning} className="mb-2" />
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Current BB%</div>

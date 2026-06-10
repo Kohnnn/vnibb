@@ -19,6 +19,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface ParkinsonVolatilityWidgetProps {
@@ -80,6 +82,7 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
 
   const hasData = rows.length > 30
   const currentRegime = metric?.current_regime || 'normal'
+  const quantWarning = extractQuantWarning(data, 'parkinson_volatility')
   const maxVol = Math.max(...rows.map((row) => Math.max(row.parkinson, row.closeVol)), 20)
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
@@ -128,6 +131,7 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
         <WidgetEmpty message={backendError || 'No volatility data'} icon={<Activity size={18} />} size="compact" />
       ) : (
         <>
+          <QuantWarningBanner warning={quantWarning} className="mb-2" />
           <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Park 30D</div>

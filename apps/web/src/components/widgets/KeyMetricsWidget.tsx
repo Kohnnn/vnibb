@@ -13,6 +13,8 @@ import { RateLimitAlert } from '@/components/ui/RateLimitAlert';
 import { RateLimitError } from '@/lib/api';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner';
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface KeyMetricsWidgetProps {
@@ -141,6 +143,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         const value = benchmarkRisk?.current_beta_63d;
         return typeof value === 'number' && Number.isFinite(value) ? value : null;
     })();
+    const quantWarning = extractQuantWarning(quantMetrics, 'benchmark_risk');
     const derivedMarketCap =
         toNumber(profile?.data?.outstanding_shares) && toNumber(quote?.price)
             ? (toNumber(profile?.data?.outstanding_shares) || 0) * (toNumber(quote?.price) || 0)
@@ -379,6 +382,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
 
                             {activeCategory === 'market' && (
                                 <div className="space-y-2">
+                                    <QuantWarningBanner warning={quantWarning} className="mb-2" />
                                     <MetricRow label="Market Cap" value={formatUnitValue(mergedStock?.market_cap, unitConfig)} source={metricMap.marketCap.source} />
                                     <MetricRow label="Dividend Yield" value={formatDividendYield(mergedStock?.dividend_yield)} source={metricMap.dividendYield.source} />
                                     <MetricRow label="Beta" value={formatRatio(mergedStock?.beta)} source={metricMap.beta.source} />

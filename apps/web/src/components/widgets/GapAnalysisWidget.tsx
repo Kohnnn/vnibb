@@ -9,6 +9,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useDirectionColors } from '@/hooks/useDirectionColors'
 
 interface GapAnalysisWidgetProps {
@@ -53,6 +55,7 @@ export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
   }))
   const maxAbs = Math.max(...monthRows.map((row) => Math.abs(row.value)), 1)
   const hasData = topGaps.length > 0
+  const quantWarning = extractQuantWarning(data, 'gap_stats')
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view gap analysis" icon={<ArrowUpDown size={18} />} />
@@ -90,6 +93,7 @@ export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
         <WidgetEmpty message="No gap data" icon={<ArrowUpDown size={18} />} />
       ) : (
         <>
+          <QuantWarningBanner warning={quantWarning} className="mb-2" />
           <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Up</div>

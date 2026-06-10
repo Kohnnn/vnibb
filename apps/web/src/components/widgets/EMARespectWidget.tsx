@@ -7,6 +7,8 @@ import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface EMARespectWidgetProps {
@@ -62,6 +64,7 @@ export function EMARespectWidget({ symbol }: EMARespectWidgetProps) {
 
   const rows = metric?.ema_levels || []
   const hasData = rows.length > 0
+  const quantWarning = extractQuantWarning(data, 'ema_respect')
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   if (!upperSymbol) {
@@ -109,6 +112,7 @@ export function EMARespectWidget({ symbol }: EMARespectWidgetProps) {
         <WidgetEmpty message={backendError || 'No EMA interaction data'} icon={<Rows3 size={18} />} size="compact" />
       ) : (
         <>
+          <QuantWarningBanner warning={quantWarning} className="mb-2" />
           <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Best Support</div>

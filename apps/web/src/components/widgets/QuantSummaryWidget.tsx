@@ -17,6 +17,8 @@ import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { useQuantRegime } from '@/hooks/useQuantRegime'
 import { useQuantMetrics } from '@/lib/queries'
@@ -167,6 +169,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
   const isLoading = (quantQuery.isLoading || regime.isLoading) && !hasData
   const isFetching = quantQuery.isFetching || regime.isFetching
   const error = quantQuery.error || regime.error
+  const quantWarning = extractQuantWarning(quantQuery.data)
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading, { timeoutMs: 10_000 })
 
   const exportRows = [
@@ -255,6 +258,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
           <WidgetEmpty message="Quant summary is not available yet" icon={<Gauge size={18} />} />
         ) : (
           <div className="flex h-full flex-col gap-3">
+            <QuantWarningBanner warning={quantWarning} />
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-6">
               <div className="flex min-h-[180px] flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Momentum</div>

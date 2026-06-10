@@ -9,6 +9,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface SortinoMonthlyWidgetProps {
@@ -73,6 +75,7 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
     1
   )
   const hasData = rows.some((row) => row.sortino !== null || row.sharpe !== null)
+  const quantWarning = extractQuantWarning(data, 'sortino')
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   useEffect(() => {
@@ -133,11 +136,7 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
         <WidgetEmpty message="Insufficient historical data for the selected period" icon={<BarChart3 size={18} />} />
       ) : (
         <>
-          {data?.data?.warning ? (
-            <div className="mb-2 rounded-md border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-[10px] text-blue-200">
-              {data.data.warning}
-            </div>
-          ) : null}
+          <QuantWarningBanner warning={quantWarning} className="mb-2" />
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Best Months</div>

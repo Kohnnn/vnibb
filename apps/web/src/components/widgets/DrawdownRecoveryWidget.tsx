@@ -19,6 +19,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 
 interface DrawdownRecoveryWidgetProps {
   symbol: string
@@ -74,6 +76,7 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
   }))
   const episodes = metric?.episodes || []
   const hasData = series.length > 30
+  const quantWarning = extractQuantWarning(data, 'drawdown_recovery')
 
   // C1: overlay corporate-action markers (dividends/splits/rights) on the
   // date-indexed underwater curve, reusing the shared chart-event-marker logic.
@@ -121,6 +124,7 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
         <WidgetEmpty message={backendError || 'No drawdown profile available'} icon={<ShieldAlert size={18} />} />
       ) : (
         <>
+          <QuantWarningBanner warning={quantWarning} className="mb-2" />
           <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Current DD</div>

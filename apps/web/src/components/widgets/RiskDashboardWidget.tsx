@@ -8,6 +8,8 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner';
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers';
 import { Sparkline } from '@/components/ui/Sparkline';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useHistoricalPrices, useQuantMetrics } from '@/lib/queries';
@@ -230,7 +232,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
   const hasData = Boolean(drawdown || parkinson || sortino || hurst !== null);
   const isLoading = (quantQuery.isLoading || historyQuery.isLoading) && !hasData;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading, { timeoutMs: 10_000 });
-  const warningMessage = quantQuery.data?.data?.warning || null;
+  const quantWarning = extractQuantWarning(quantQuery.data);
   const latestDataDate = quantQuery.data?.data?.last_data_date ?? historyQuery.data?.data?.at(-1)?.time ?? null;
 
   if (!upperSymbol) {
@@ -318,11 +320,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
           <WidgetEmpty message="Risk metrics not available yet" icon={<ShieldAlert size={18} />} />
         ) : (
           <div className="flex h-full flex-col gap-3">
-            {warningMessage ? (
-              <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90">
-                {warningMessage}
-              </div>
-            ) : null}
+            <QuantWarningBanner warning={quantWarning} className="mb-2" />
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-6">
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 xl:col-span-2">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Composite Risk Score</div>

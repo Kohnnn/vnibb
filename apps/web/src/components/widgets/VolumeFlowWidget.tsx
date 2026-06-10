@@ -20,6 +20,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
+import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { useDirectionColors } from '@/hooks/useDirectionColors'
 
@@ -78,6 +80,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
     }))
   const maxAbs = Math.max(...monthRows.map((row) => Math.abs(row.value)), 1)
   const hasData = monthRows.some((row) => row.value !== 0)
+  const quantWarning = extractQuantWarning(data, 'volume_delta')
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   useEffect(() => {
@@ -140,6 +143,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
         />
       ) : (
         <>
+          <QuantWarningBanner warning={quantWarning} className="mb-2" />
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Cumulative</div>
