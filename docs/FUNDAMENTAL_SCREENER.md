@@ -10,11 +10,28 @@ Compute valuation + quality fields (intrinsic value, margin of safety, moat, div
 
 | # | Deliverable | Owner | Status |
 |---|-------------|-------|--------|
-| 1 | Valuation engine `apps/api/vnibb/services/fundamental_valuation.py` + unit tests | Agent A | pending |
-| 2 | Backfill script `apps/api/scripts/build_fundamental_screener.py` | Agent B | pending |
-| 3 | Endpoint extension `apps/api/vnibb/api/v1/screener.py` + `ScreenerData` fields | Agent C | pending |
-| 4 | VN30 backfill run + end-to-end verification | main | pending |
-| 5 | ruff + pytest gate | main | pending |
+| 1 | Valuation engine `apps/api/vnibb/services/fundamental_valuation.py` + unit tests | Agent A | done — 41 unit tests passing |
+| 2 | Backfill script `apps/api/scripts/build_fundamental_screener.py` | Agent B | done — ruff clean, idempotent upserts |
+| 3 | Endpoint extension `apps/api/vnibb/api/v1/screener.py` + `ScreenerData` fields | Agent C | done — 16 endpoint tests passing, all return paths merge+filter |
+| 4 | VN30 backfill run + end-to-end verification | main | done — full universe backfilled (see below) |
+| 5 | ruff + pytest gate | main | done — 57 focused tests green, `py_compile` OK; new engine/script/test files ruff-clean. `screener.py`/`equity_screener.py` retain `UP045/UP006` annotation lints matching existing file style (repo-wide pre-existing; ruff is not in `ci:gate`) |
+
+### Backfill results (snapshotDate 2026-06-10)
+
+- 1,566 symbols (all with `finance.income_statement` in the corpus), 0 failures.
+- Coverage: intrinsicValue 53% (833), moat 96% (1,508), marginOfSafety 49% (773). IV gaps are mostly non-financials with negative/zero average FCF (e.g. HPG, VIC — heavy capex) where DCF correctly abstains.
+- E2E verified live: merge attaches all 7 fields; filters `moat=wide,narrow&dividend_years_min=3&fcf_positive=true` on a 10-symbol sample returned VNM/FPT/GAS as expected.
+
+### Implementation notes discovered during integration (vs original contract)
+
+- Real dataset names have NO `.year` suffix: annual vs quarterly rows share dataset `finance.income_statement` etc. and are split by the `datasetVariant` field (`finance.income_statement.year` / `.quarter`). `get_raw_dataset_records` gained an optional `variant=` filter for this.
+- `market_prices_eod` closes are in thousand VND (VNM 58.4 = 58,400 VND) while statements are VND; loader multiplies close by `EOD_PRICE_MULTIPLIER = 1000`.
+- Bank statements use different keys: equity = `viii_capital_and_funds`, no `revenue` (loader falls back to `net_interest_income`), liabilities = `liabilities`. Non-financial VAS sheets carry equity in `owners_equity` and liabilities under the Vietnamese section label `C. NỢ PHẢI TRẢ`.
+- `finance.ratio` year rows store pe/pb/ps/ev_ebitda as strings and dividend_yield as a fraction; engine coerces and normalizes.
+
+### Refresh
+
+Re-run anytime (idempotent): `python apps/api/scripts/build_fundamental_screener.py --symbols-group ALL` from `vnibb/`. For the full universe prefer chunks of ~400 symbols (each ~8 min). Phase-4 scheduling alongside `mongo_eod_sync` remains optional/open.
 
 ## Mongo collection: `market_fundamental_screener`
 
