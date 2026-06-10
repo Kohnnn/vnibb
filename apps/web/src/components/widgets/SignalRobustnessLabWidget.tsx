@@ -7,6 +7,7 @@ import type { ScreenerData } from '@/types/screener'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
 
 interface SignalRobustnessLabWidgetProps {
   symbol?: string
@@ -249,6 +250,32 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
       </p>
 
       <WidgetMeta className="px-1 pt-1" isFetching={isFetching} sourceLabel="Screener snapshot" align="right" />
+
+      <QuantRunHistoryPanel
+        widget="signal_robustness_lab"
+        headlineKey="edge_1m_pct"
+        headlineLabel="1M edge %"
+        buildRun={() =>
+          hasData
+            ? {
+                name: `${signalLabel} ${comparator === 'gte' ? '≥' : '≤'} ${threshold} · ${new Date().toLocaleDateString()}`,
+                config: { signalKey, comparator, threshold },
+                summary: {
+                  universe: evaluation.universeCount,
+                  pass: evaluation.passCount,
+                  pass_rate_pct: evaluation.passRate,
+                  edge_1m_pct: evaluation.returnReads.find((r) => r.label === '1M')?.edge ?? null,
+                  edge_3m_pct: evaluation.returnReads.find((r) => r.label === '3M')?.edge ?? null,
+                },
+              }
+            : null
+        }
+        onApply={(config) => {
+          if (typeof config.signalKey === 'string') setSignalKey(config.signalKey as SignalKey)
+          if (config.comparator === 'gte' || config.comparator === 'lte') setComparator(config.comparator)
+          if (typeof config.threshold === 'number') setThreshold(config.threshold)
+        }}
+      />
     </div>
   )
 }

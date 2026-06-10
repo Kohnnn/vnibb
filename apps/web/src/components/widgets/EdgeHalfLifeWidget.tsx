@@ -19,6 +19,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
 
 interface EdgeHalfLifeWidgetProps {
   symbol: string
@@ -187,6 +188,32 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
             isFetching={isFetching && hasData}
             note={`${period} adjusted history`}
             align="right"
+          />
+
+          <QuantRunHistoryPanel
+            widget="edge_half_life"
+            headlineKey="current_rolling_sharpe"
+            headlineLabel="Current rolling Sharpe"
+            buildRun={() =>
+              hasData
+                ? {
+                    name: `${upperSymbol} ${window}D ${period} · ${new Date().toLocaleDateString()}`,
+                    config: { symbol: upperSymbol, period, window },
+                    summary: {
+                      current_rolling_sharpe: stats.current,
+                      peak_rolling_sharpe: stats.peak,
+                      decay_from_peak_pct: stats.decayFromPeakPct,
+                      days_since_peak: stats.daysSincePeak,
+                    },
+                  }
+                : null
+            }
+            onApply={(config) => {
+              if (typeof config.period === 'string') setPeriod(config.period as QuantPeriodOption)
+              if (typeof config.window === 'number' && WINDOW_OPTIONS.includes(config.window as SharpeWindow)) {
+                setWindow(config.window as SharpeWindow)
+              }
+            }}
           />
         </>
       )}

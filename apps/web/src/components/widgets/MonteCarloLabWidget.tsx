@@ -8,6 +8,7 @@ import { dailyReturns, runDrawdownBootstrap, toDatedCloses } from '@/lib/quantLa
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
 
 interface MonteCarloLabWidgetProps {
   symbol: string
@@ -190,6 +191,33 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
         updatedAt={data?.meta?.last_data_date ?? dataUpdatedAt}
         isFetching={isFetching && hasData}
         align="right"
+      />
+
+      <QuantRunHistoryPanel
+        widget="monte_carlo_lab"
+        headlineKey="terminal_return_p50_pct"
+        headlineLabel="Median terminal return %"
+        buildRun={() =>
+          stats
+            ? {
+                name: `${upperSymbol} ${horizon}D ${period} · ${new Date().toLocaleDateString()}`,
+                config: { symbol: upperSymbol, period, horizon },
+                summary: {
+                  max_drawdown_p50_pct: stats.maxDrawdownPct.p50,
+                  max_drawdown_p95_pct: stats.maxDrawdownPct.p95,
+                  terminal_return_p50_pct: stats.terminalReturnPct.p50,
+                  terminal_return_p5_pct: stats.terminalReturnPct.p5,
+                  terminal_return_p95_pct: stats.terminalReturnPct.p95,
+                },
+              }
+            : null
+        }
+        onApply={(config) => {
+          if (typeof config.period === 'string') setPeriod(config.period as QuantPeriodOption)
+          if (typeof config.horizon === 'number' && HORIZON_OPTIONS.includes(config.horizon as Horizon)) {
+            setHorizon(config.horizon as Horizon)
+          }
+        }}
       />
     </div>
   )

@@ -19,6 +19,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
+import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
 
 interface PairLabWidgetProps {
   symbol: string
@@ -217,6 +218,33 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
             isFetching={isFetching && hasData}
             note={`${period} adjusted pair history`}
             align="right"
+          />
+
+          <QuantRunHistoryPanel
+            widget="pair_lab"
+            headlineKey="ar1_half_life_days"
+            headlineLabel="AR(1) half-life (days)"
+            buildRun={() =>
+              hasData && stats
+                ? {
+                    name: `${upperSymbol}/${effectivePair} ${period} · ${new Date().toLocaleDateString()}`,
+                    config: { symbol: upperSymbol, pairSymbol: effectivePair, period },
+                    summary: {
+                      rolling_correlation_63d: stats.currentCorrelation,
+                      spread_z_score: stats.currentSpreadZ,
+                      ar1_half_life_days: stats.halfLifeDays,
+                      aligned_days: stats.alignedDays,
+                    },
+                  }
+                : null
+            }
+            onApply={(config) => {
+              if (typeof config.period === 'string') setPeriod(config.period as QuantPeriodOption)
+              if (typeof config.pairSymbol === 'string') {
+                setPairInput(config.pairSymbol)
+                setPairSymbol(config.pairSymbol)
+              }
+            }}
           />
         </>
       )}
