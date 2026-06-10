@@ -102,6 +102,7 @@ export type WidgetType =
     | 'positioning_dashboard'
     | 'market_structure'
     | 'signal_robustness_lab'
+    | 'big_flow_monitor'
     | 'sector_performance'
     | 'market_movers_sectors'
     | 'sector_rotation_radar'

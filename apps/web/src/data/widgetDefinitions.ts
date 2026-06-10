@@ -923,6 +923,16 @@ export const widgetDefinitions: WidgetDefinition[] = [
         searchKeywords: ['signal', 'robustness', 'edge', 'rs rating', 'screen', 'cross-sectional', 'hit rate', 'backtest', 'validation']
     },
     {
+        type: 'big_flow_monitor',
+        name: 'Big Flow Monitor',
+        description: 'Market-wide block-trade tape with print-size threshold and foreign/proprietary scope filters',
+        category: 'ownership',
+        defaultConfig: {},
+        defaultLayout: { w: 6, h: 8, minW: 4, minH: 5 },
+        recommended: true,
+        searchKeywords: ['block trade', 'big flow', 'large orders', 'prints', 'tape', 'foreign', 'proprietary', 'smart money', 'institutional']
+    },
+    {
         type: 'similar_stocks',
         name: 'Similar Stocks',
         description: 'Find stocks similar to current symbol',

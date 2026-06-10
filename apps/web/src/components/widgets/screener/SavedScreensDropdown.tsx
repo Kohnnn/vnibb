@@ -71,6 +71,24 @@ const BUILT_IN_SCREENS: SavedScreen[] = [
     sortOrder: 'asc',
     isBuiltIn: true,
   },
+  {
+    id: 'dividend-payers',
+    name: 'Dividend Payers',
+    quickFilters: [{ id: 'dividend_yield', value: { gte: 4 }, displayValue: 'Yield ≥ 4%' }],
+    columns: ['ticker', 'price', 'dividend_yield', 'pe', 'roe', 'market_cap'],
+    sortField: 'dividend_yield',
+    sortOrder: 'desc',
+    isBuiltIn: true,
+  },
+  {
+    id: 'high-liquidity',
+    name: 'High Liquidity',
+    quickFilters: [{ id: 'market_cap', value: { gte: 10e12 }, displayValue: 'Large (>10T)' }],
+    columns: ['ticker', 'price', 'change_1d', 'volume', 'market_cap'],
+    sortField: 'volume',
+    sortOrder: 'desc',
+    isBuiltIn: true,
+  },
 ];
 
 interface SavedScreensDropdownProps {

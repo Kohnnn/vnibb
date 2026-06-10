@@ -11,8 +11,19 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { cn } from '@/lib/utils';
 import { formatShortDate } from '@/lib/format';
 import { getMarketState } from '@/lib/marketHours';
-import { memo, useEffect, useMemo } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
+
+type WindowOption = '1M' | '3M' | '6M' | '1Y';
+
+const WINDOW_OPTIONS: WindowOption[] = ['1M', '3M', '6M', '1Y'];
+
+const WINDOW_LIMITS: Record<WindowOption, number> = {
+    '1M': 22,
+    '3M': 66,
+    '6M': 132,
+    '1Y': 264,
+};
 
 interface ForeignTradingWidgetProps {
     id: string;
@@ -67,7 +78,8 @@ function getNetFlowClass(net: number): string {
 }
 
 function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: ForeignTradingWidgetProps) {
-    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useForeignTrading(symbol, { limit: 100 });
+    const [flowWindow, setFlowWindow] = useState<WindowOption>('3M');
+    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useForeignTrading(symbol, { limit: WINDOW_LIMITS[flowWindow] });
 
     const trades = useMemo(() => {
         const raw = data?.data || [];
@@ -257,11 +269,28 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
         >
             <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
                 <div className="px-3 py-2 border-b border-[var(--border-color)]/70 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
+                        {WINDOW_OPTIONS.map((option) => (
+                            <button
+                                key={option}
+                                type="button"
+                                onClick={() => setFlowWindow(option)}
+                                className={cn(
+                                    'rounded px-1.5 py-0.5 text-[10px] font-semibold',
+                                    flowWindow === option
+                                        ? 'bg-blue-600 text-white'
+                                        : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                                )}
+                            >
+                                {option}
+                            </button>
+                        ))}
+                    </div>
                     <WidgetMeta
                         updatedAt={data?.meta?.last_data_date || dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         health={healthState}
-                        note="Net position"
+                        note={`${flowWindow} net position`}
                         align="right"
                     />
                     {/* Co-located refresh button: makes the cached-snapshot recovery affordance discoverable next to the badge instead of relying on the toolbar icon. */}

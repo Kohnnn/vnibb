@@ -12,6 +12,7 @@ import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy
 import { addNotebookItem } from '@/lib/researchNotebook';
 import {
   getWorldNews,
+  getWorldNewsSources,
   type WorldNewsArticle,
   type WorldNewsCategory,
   type WorldNewsFailedFeed,
@@ -20,6 +21,13 @@ import {
 
 type RegionFilter = 'all' | WorldNewsRegion;
 type CategoryFilter = 'all' | WorldNewsCategory;
+type TierFilter = 'all' | 'tier1' | 'tier2';
+
+const TIER_FILTERS: Array<{ value: TierFilter; label: string }> = [
+  { value: 'all', label: 'All Sources' },
+  { value: 'tier1', label: 'Tier 1' },
+  { value: 'tier2', label: 'Tier 2+' },
+];
 
 const REGION_FILTERS: Array<{ value: RegionFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -132,6 +140,7 @@ function WorldNewsMonitorWidgetComponent({
 }) {
   const [region, setRegion] = useState<RegionFilter>(() => getInitialRegion(config));
   const [category, setCategory] = useState<CategoryFilter>(() => getInitialCategory(config));
+  const [tier, setTier] = useState<TierFilter>('all');
   const [customFeed, setCustomFeed] = useState<{ url: string; name: string } | null>(() => getInitialCustomFeed(config));
   const [customUrlInput, setCustomUrlInput] = useState(() => getInitialCustomFeed(config)?.url || '');
   const [customNameInput, setCustomNameInput] = useState(() => getInitialCustomFeed(config)?.name || '');
@@ -202,6 +211,27 @@ function WorldNewsMonitorWidgetComponent({
   });
 
   const articles = data?.articles || [];
+
+  // Tier filter is client-side: the feed endpoint has no tier param, but the
+  // source registry (cached 30 min) maps source_id -> tier. Articles from a
+  // custom feed have no registry entry and stay visible on every tier.
+  const sourcesQuery = useQuery({
+    queryKey: ['world-news-sources-registry'],
+    queryFn: ({ signal }) => getWorldNewsSources({ signal }),
+    staleTime: 30 * 60 * 1000,
+    enabled: tier !== 'all',
+  });
+  const tierBySourceId = new Map(
+    (sourcesQuery.data?.sources || []).map((source) => [source.id, source.tier]),
+  );
+  const visibleArticles = tier === 'all'
+    ? articles
+    : articles.filter((article) => {
+        const sourceTier = tierBySourceId.get(article.source_id);
+        if (sourceTier === undefined) return true;
+        return tier === 'tier1' ? sourceTier === 1 : sourceTier >= 2;
+      });
+
   const hasData = articles.length > 0;
   const isFallback = Boolean(error && hasData);
   const failedFeeds = data?.failed_feeds || [];
@@ -211,7 +241,7 @@ function WorldNewsMonitorWidgetComponent({
   const sourceNote = data
     ? `${data.source_count} sources / ${data.feed_count} live feeds${customFeed ? ' / custom RSS' : ''}${data.failed_feed_count ? ` / ${data.failed_feed_count} failed` : ''}`
     : 'Live RSS/Atom sources';
-  const exportRows = articles.map((article) => ({
+  const exportRows = visibleArticles.map((article) => ({
     ...article,
     tags: article.tags.join(', '),
   }));
@@ -287,6 +317,18 @@ function WorldNewsMonitorWidgetComponent({
               </button>
             ))}
           </div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {TIER_FILTERS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => setTier(item.value)}
+                className={chipClass(tier === item.value)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
 
           <form onSubmit={applyCustomFeed} className="mt-2 grid gap-1 md:grid-cols-[minmax(0,1fr)_130px_auto]">
             <input
@@ -357,9 +399,16 @@ function WorldNewsMonitorWidgetComponent({
               icon={<Newspaper size={18} />}
               action={{ label: 'Refresh', onClick: () => refetch() }}
             />
+          ) : visibleArticles.length === 0 ? (
+            <WidgetEmpty
+              message="No articles from the selected source tier."
+              detail="Switch to All Sources to see every live feed."
+              icon={<Newspaper size={18} />}
+              action={{ label: 'All Sources', onClick: () => setTier('all') }}
+            />
           ) : (
             <div className="divide-y divide-[var(--border-subtle)]">
-              {articles.map((article: WorldNewsArticle) => (
+              {visibleArticles.map((article: WorldNewsArticle) => (
                 <article key={article.id} className="p-3 transition-colors hover:bg-[var(--bg-tertiary)]/30">
                   <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
                     <span className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-200">
