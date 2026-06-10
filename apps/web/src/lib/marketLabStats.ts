@@ -38,9 +38,35 @@ export interface MarketLabStats {
   maxDrawdownPct: number | null
   // seasonality: average simple return % by calendar month (index 0 = Jan)
   monthlyAvgReturnPct: Array<number | null>
+  // market-structure diagnostics (descriptive; null when < 120 returns)
+  structure: MarketStructureStats | null
+}
+
+export interface VarianceRatioPoint {
+  q: number
+  vr: number | null
+  z: number | null
+}
+
+export interface RollingVolPoint {
+  date: string
+  volPct: number
+}
+
+export interface MarketStructureStats {
+  /** Lo-MacKinlay variance ratio with heteroskedasticity-robust z for q = 2, 5, 10. */
+  varianceRatio: VarianceRatioPoint[]
+  /** Autocorrelation of squared returns at lags 1..N (volatility clustering proxy). */
+  squaredReturnAcf: number[]
+  /** Rolling 21D annualized volatility over time. */
+  rollingVol: RollingVolPoint[]
+  rollingVolCurrentPct: number | null
+  rollingVolMedianPct: number | null
 }
 
 const TRADING_DAYS = 252
+const STRUCTURE_MIN_RETURNS = 120
+const ROLLING_VOL_WINDOW = 21
 
 function mean(values: number[]): number {
   if (!values.length) return 0
@@ -71,6 +97,110 @@ function percentile(sorted: number[], p: number): number | null {
 }
 
 /**
+ * Lo-MacKinlay variance ratio test on log returns.
+ *
+ * VR(q) = Var(q-period overlapping log returns) / (q * Var(1-period log returns)).
+ * Returns the ratio plus the heteroskedasticity-robust z-statistic (Lo-MacKinlay 1988).
+ * Requires >= STRUCTURE_MIN_RETURNS log returns; returns null otherwise.
+ */
+export function computeVarianceRatio(logReturns: number[], q: number): { vr: number; z: number } | null {
+  const n = logReturns.length
+  if (q < 2 || n < STRUCTURE_MIN_RETURNS || n < q + 1) return null
+
+  const mu = mean(logReturns)
+  // 1-period variance (unbiased, mean-adjusted).
+  let var1 = 0
+  for (const r of logReturns) var1 += (r - mu) ** 2
+  var1 /= n - 1
+  if (var1 <= 1e-18) return null
+
+  // q-period overlapping sums; Lo-MacKinlay bias correction m = q*(n-q+1)*(1-q/n).
+  const numObs = n - q + 1
+  const m = q * numObs * (1 - q / n)
+  if (m <= 0) return null
+  let varQ = 0
+  for (let i = 0; i <= n - q; i += 1) {
+    let s = 0
+    for (let j = 0; j < q; j += 1) s += logReturns[i + j] - mu
+    varQ += s * s
+  }
+  varQ /= m
+
+  const vr = varQ / var1
+  // Heteroskedasticity-robust z (Lo-MacKinlay 1988, theorem 2):
+  //   z*(q) = sqrt(N) * (VR - 1) / sqrt(theta),   N = number of 1-period returns
+  //   theta = sum_{j=1}^{q-1} [2(q-j)/q]^2 * delta(j)
+  //   delta(j) = N * sum_t d_t^2 d_{t-j}^2 / (sum_t d_t^2)^2,   d_t = r_t - mu
+  // The N factor keeps delta (and theta) O(1) so sqrt(N)*(VR-1)/sqrt(theta) -> N(0,1).
+  const d2 = logReturns.map((r) => (r - mu) ** 2)
+  const sumD2 = d2.reduce((acc, v) => acc + v, 0)
+  const denom = sumD2 * sumD2
+  let theta = 0
+  if (denom > 1e-30) {
+    for (let j = 1; j < q; j += 1) {
+      let deltaNum = 0
+      for (let t = j; t < n; t += 1) deltaNum += d2[t] * d2[t - j]
+      const delta = (deltaNum * n) / denom
+      const weight = (2 * (q - j)) / q
+      theta += weight * weight * delta
+    }
+  }
+  if (theta <= 1e-30) return { vr, z: 0 }
+  const z = (Math.sqrt(n) * (vr - 1)) / Math.sqrt(theta)
+  return { vr, z }
+}
+
+/** Autocorrelation of squared (demeaned) returns at lags 1..maxLag. */
+export function computeSquaredReturnAcf(returns: number[], maxLag: number): number[] {
+  if (returns.length < STRUCTURE_MIN_RETURNS) return []
+  const avg = mean(returns)
+  const sq = returns.map((r) => (r - avg) ** 2)
+  const sqMean = mean(sq)
+  let denom = 0
+  for (const v of sq) denom += (v - sqMean) ** 2
+  if (denom <= 1e-30) return Array.from({ length: maxLag }, () => 0)
+  const out: number[] = []
+  for (let lag = 1; lag <= maxLag; lag += 1) {
+    let num = 0
+    for (let t = lag; t < sq.length; t += 1) num += (sq[t] - sqMean) * (sq[t - lag] - sqMean)
+    out.push(num / denom)
+  }
+  return out
+}
+
+function computeMarketStructure(
+  simpleReturns: number[],
+  datedReturns: Array<{ date: string; r: number }>,
+): MarketStructureStats | null {
+  if (simpleReturns.length < STRUCTURE_MIN_RETURNS) return null
+  // Variance ratio works on log returns; derive from simple returns.
+  const logReturns = simpleReturns.map((r) => Math.log(1 + r)).filter((v) => Number.isFinite(v))
+
+  const varianceRatio: VarianceRatioPoint[] = [2, 5, 10].map((q) => {
+    const res = computeVarianceRatio(logReturns, q)
+    return { q, vr: res ? res.vr : null, z: res ? res.z : null }
+  })
+
+  const squaredReturnAcf = computeSquaredReturnAcf(simpleReturns, 10)
+
+  // Rolling 21D annualized volatility.
+  const rollingVol: RollingVolPoint[] = []
+  for (let i = ROLLING_VOL_WINDOW - 1; i < datedReturns.length; i += 1) {
+    const window = datedReturns.slice(i - ROLLING_VOL_WINDOW + 1, i + 1).map((p) => p.r)
+    const sd = stdDev(window)
+    rollingVol.push({ date: datedReturns[i].date, volPct: sd * Math.sqrt(TRADING_DAYS) * 100 })
+  }
+  const rollingVolCurrentPct = rollingVol.length ? rollingVol[rollingVol.length - 1].volPct : null
+  let rollingVolMedianPct: number | null = null
+  if (rollingVol.length) {
+    const sortedVol = rollingVol.map((p) => p.volPct).sort((a, b) => a - b)
+    rollingVolMedianPct = sortedVol[Math.floor(sortedVol.length / 2)]
+  }
+
+  return { varianceRatio, squaredReturnAcf, rollingVol, rollingVolCurrentPct, rollingVolMedianPct }
+}
+
+/**
  * Compute descriptive stats from a chronologically ascending list of bars.
  */
 export function computeMarketLabStats(symbol: string, bars: MarketLabBar[]): MarketLabStats | null {
@@ -80,6 +210,7 @@ export function computeMarketLabStats(symbol: string, bars: MarketLabBar[]): Mar
   if (clean.length < 3) return null
 
   const simpleReturns: number[] = []
+  const datedReturns: Array<{ date: string; r: number }> = []
   const monthlyBuckets: number[][] = Array.from({ length: 12 }, () => [])
   for (let i = 1; i < clean.length; i += 1) {
     const prev = clean[i - 1].close
@@ -87,6 +218,7 @@ export function computeMarketLabStats(symbol: string, bars: MarketLabBar[]): Mar
     if (prev <= 0) continue
     const r = curr / prev - 1
     simpleReturns.push(r)
+    datedReturns.push({ date: clean[i].time, r })
     const month = new Date(clean[i].time).getMonth()
     if (month >= 0 && month <= 11) monthlyBuckets[month].push(r)
   }
@@ -147,6 +279,7 @@ export function computeMarketLabStats(symbol: string, bars: MarketLabBar[]): Mar
     cvar95Pct: cvar95 !== null && cvar95 !== undefined ? cvar95 * 100 : null,
     maxDrawdownPct: maxDd * 100,
     monthlyAvgReturnPct: monthlyBuckets.map((bucket) => (bucket.length ? mean(bucket) * 100 : null)),
+    structure: computeMarketStructure(simpleReturns, datedReturns),
   }
 }
 

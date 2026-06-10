@@ -12,6 +12,7 @@ import {
   marketLabStatsToRows,
   MONTH_LABELS,
   type MarketLabBar,
+  type MarketStructureStats,
 } from '@/lib/marketLabStats'
 
 interface MarketLabWidgetProps {
@@ -156,6 +157,11 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
             })}
           </div>
         </div>
+
+        {/* Market-structure diagnostics */}
+        {stats!.structure && (
+          <StructureSection structure={stats!.structure} />
+        )}
       </div>
 
       <WidgetMeta
@@ -188,6 +194,117 @@ function Stat({
       <div className={`text-sm font-bold ${tone || 'text-[var(--text-primary)]'}`}>
         {value === null ? '—' : `${value.toFixed(digits)}${suffix || ''}`}
       </div>
+    </div>
+  )
+}
+
+function varianceRatioRead(vr: number | null, z: number | null): { text: string; tone: string } {
+  if (vr === null || z === null) return { text: 'n/a', tone: 'text-[var(--text-muted)]' }
+  if (Math.abs(z) < 1.96) return { text: 'random-walk-like', tone: 'text-[var(--text-secondary)]' }
+  if (vr > 1) return { text: 'trend-leaning', tone: 'text-emerald-400' }
+  return { text: 'mean-revert-leaning', tone: 'text-amber-400' }
+}
+
+function StructureSection({ structure }: { structure: MarketStructureStats }) {
+  const acfMax = Math.max(0.05, ...structure.squaredReturnAcf.map((v) => Math.abs(v)))
+  const volMax = Math.max(1, ...structure.rollingVol.map((p) => p.volPct))
+  const volMin = Math.min(...structure.rollingVol.map((p) => p.volPct), 0)
+  const volRange = Math.max(1e-6, volMax - volMin)
+  return (
+    <div className="mt-4 border-t border-[var(--border-subtle)] pt-3">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+          Market structure
+        </span>
+        <span className="text-[9px] text-[var(--text-muted)]">descriptive diagnostics · not a forecast</span>
+      </div>
+
+      {/* Variance ratio */}
+      <div className="mb-3">
+        <div className="mb-1 text-[10px] text-[var(--text-secondary)]">
+          Variance ratio (Lo-MacKinlay) — VR&lt;1 mean-reverting, VR&gt;1 trending, |z|&lt;1.96 indistinguishable from a random walk
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {structure.varianceRatio.map((p) => {
+            const read = varianceRatioRead(p.vr, p.z)
+            return (
+              <div
+                key={p.q}
+                className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-2 py-1.5"
+              >
+                <div className="text-[9px] uppercase tracking-wide text-[var(--text-muted)]">VR({p.q})</div>
+                <div className="text-sm font-bold text-[var(--text-primary)]">
+                  {p.vr === null ? '—' : p.vr.toFixed(2)}
+                </div>
+                <div className="text-[9px] text-[var(--text-muted)]">
+                  z {p.z === null ? '—' : p.z.toFixed(2)}
+                </div>
+                <div className={`text-[9px] ${read.tone}`}>{read.text}</div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Squared-return ACF (volatility clustering) */}
+      <div className="mb-3">
+        <div className="mb-1 text-[10px] text-[var(--text-secondary)]">
+          Squared-return autocorrelation (lags 1–10) — persistent positive bars = volatility clustering (calm/storm regimes)
+        </div>
+        <div className="flex items-end gap-1" style={{ height: 40 }}>
+          {structure.squaredReturnAcf.map((v, index) => {
+            const height = (Math.abs(v) / acfMax) * 32
+            return (
+              <div key={index} className="flex flex-1 flex-col items-center justify-end gap-0.5">
+                <div
+                  className={v >= 0 ? 'w-full rounded-sm bg-cyan-500/60' : 'w-full rounded-sm bg-red-500/60'}
+                  style={{ height: Math.max(2, height) }}
+                  title={`lag ${index + 1}: ${v.toFixed(3)}`}
+                />
+                <span className="text-[8px] text-[var(--text-muted)]">{index + 1}</span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Rolling 21D annualized volatility */}
+      {structure.rollingVol.length > 1 && (
+        <div>
+          <div className="mb-1 flex items-center justify-between text-[10px] text-[var(--text-secondary)]">
+            <span>Rolling 21D annualized volatility</span>
+            <span className="text-[var(--text-muted)]">
+              now {structure.rollingVolCurrentPct?.toFixed(1) ?? '—'}% · median{' '}
+              {structure.rollingVolMedianPct?.toFixed(1) ?? '—'}%
+            </span>
+          </div>
+          <svg viewBox="0 0 100 28" preserveAspectRatio="none" className="h-10 w-full" role="img" aria-label="Rolling volatility">
+            <polyline
+              fill="none"
+              stroke="rgba(56, 189, 248, 0.8)"
+              strokeWidth="0.8"
+              points={structure.rollingVol
+                .map((p, i) => {
+                  const x = (i / (structure.rollingVol.length - 1)) * 100
+                  const y = 28 - ((p.volPct - volMin) / volRange) * 26
+                  return `${x.toFixed(2)},${y.toFixed(2)}`
+                })
+                .join(' ')}
+            />
+            {structure.rollingVolMedianPct !== null && (
+              <line
+                x1="0"
+                x2="100"
+                y1={(28 - ((structure.rollingVolMedianPct - volMin) / volRange) * 26).toFixed(2)}
+                y2={(28 - ((structure.rollingVolMedianPct - volMin) / volRange) * 26).toFixed(2)}
+                stroke="rgba(148, 163, 184, 0.5)"
+                strokeWidth="0.4"
+                strokeDasharray="2 2"
+              />
+            )}
+          </svg>
+        </div>
+      )}
     </div>
   )
 }
