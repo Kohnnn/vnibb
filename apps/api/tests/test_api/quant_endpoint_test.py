@@ -627,3 +627,175 @@ async def test_smart_money_endpoint_survives_price_frame_loader_failure(
     assert payload["data"]["symbol"] == "VNM"
     assert payload["data"]["net_institutional"] == "neutral"
     assert payload["data"]["block_trades"] == []
+
+
+# ---------------------------------------------------------------------------
+# Wave 3: market-structure tests + pair diagnostics
+# ---------------------------------------------------------------------------
+
+import numpy as np  # noqa: E402
+
+
+def _rng(seed: int):
+    state = {"s": seed & 0xFFFFFFFF or 1}
+
+    def nxt():
+        state["s"] = (state["s"] * 1664525 + 1013904223) & 0xFFFFFFFF
+        return state["s"] / 4294967296.0
+
+    return nxt
+
+
+def _gauss(rng):
+    u1 = max(rng(), 1e-12)
+    u2 = rng()
+    return (-2.0 * np.log(u1)) ** 0.5 * np.cos(2.0 * np.pi * u2)
+
+
+def _frame_from_returns(returns: list[float]) -> pd.DataFrame:
+    price = 100.0
+    closes = [price]
+    for r in returns:
+        price *= 1.0 + r
+        closes.append(price)
+    dates = pd.date_range(end=pd.Timestamp.now(tz=None).normalize(), periods=len(closes), freq="B")
+    return pd.DataFrame(
+        {
+            "time": dates,
+            "open": closes,
+            "high": [c * 1.01 for c in closes],
+            "low": [c * 0.99 for c in closes],
+            "close": closes,
+            "volume": [1_000_000] * len(closes),
+        }
+    )
+
+
+def test_market_structure_insufficient_data_returns_nulls():
+    frame = _build_price_frame(rows=50)
+    result = quant._compute_market_structure_tests(frame)
+    assert result["hurst_rs"] is None
+    assert result["squared_return_acf"] == []
+    assert all(item["vr"] is None for item in result["variance_ratio"])
+    assert "Not a forecast" in result["note"]
+
+
+def test_market_structure_trend_series_has_vr_above_one():
+    rng = _rng(7)
+    r = [0.0]
+    for _ in range(399):
+        r.append(0.6 * r[-1] + 0.01 * _gauss(rng))
+    result = quant._compute_market_structure_tests(_frame_from_returns(r))
+    vr5 = next(item for item in result["variance_ratio"] if item["q"] == 5)
+    assert vr5["vr"] is not None and vr5["vr"] > 1
+    assert vr5["z"] is not None and vr5["z"] > 1.96
+    assert result["sample_returns"] >= 120
+
+
+def test_market_structure_mean_revert_series_has_vr_below_one():
+    rng = _rng(11)
+    r = [0.0]
+    for _ in range(399):
+        r.append(-0.6 * r[-1] + 0.01 * _gauss(rng))
+    result = quant._compute_market_structure_tests(_frame_from_returns(r))
+    vr2 = next(item for item in result["variance_ratio"] if item["q"] == 2)
+    assert vr2["vr"] is not None and vr2["vr"] < 1
+    assert vr2["z"] is not None and vr2["z"] < -1.96
+
+
+def test_market_structure_acf_positive_for_volatility_clustering():
+    rng = _rng(9)
+    sig2 = 0.0004
+    prev_shock = 0.0
+    r = []
+    for _ in range(1500):
+        sig2 = 0.00002 + 0.85 * sig2 + 0.1 * prev_shock * prev_shock
+        shock = (sig2**0.5) * _gauss(rng)
+        r.append(shock)
+        prev_shock = shock
+    result = quant._compute_market_structure_tests(_frame_from_returns(r))
+    acf = result["squared_return_acf"]
+    assert len(acf) == 10
+    assert acf[0] is not None and acf[0] > 0.05
+
+
+def test_pair_diagnostics_cointegrated_pair_has_negative_adf():
+    rng = _rng(21)
+    log_x = [4.0]
+    for _ in range(399):
+        log_x.append(log_x[-1] + 0.01 * _gauss(rng))
+    # y tracks x with stationary noise around it -> cointegrated.
+    closes_a = [float(np.exp(v)) for v in log_x]
+    closes_b = [float(np.exp(v + 0.02 * _gauss(rng))) for v in log_x]
+    dates = pd.date_range(end=pd.Timestamp.now(tz=None).normalize(), periods=len(closes_a), freq="B")
+    frame_a = pd.DataFrame({"time": dates, "close": closes_a, "open": closes_a, "high": closes_a, "low": closes_a, "volume": [1] * len(closes_a)})
+    frame_b = pd.DataFrame({"time": dates, "close": closes_b, "open": closes_b, "high": closes_b, "low": closes_b, "volume": [1] * len(closes_b)})
+    result = quant._compute_pair_diagnostics(frame_a, frame_b)
+    assert result["aligned_days"] >= 60
+    assert result["hedge_ratio_ols"] is not None
+    assert result["adf_tstat"] is not None and result["adf_tstat"] < 0
+    assert result["adf_critical_values"]["5%"] == -3.34
+
+
+def test_pair_diagnostics_insufficient_overlap():
+    dates = pd.date_range(end=pd.Timestamp.now(tz=None).normalize(), periods=10, freq="B")
+    frame = pd.DataFrame({"time": dates, "close": [100.0] * 10, "open": [100.0] * 10, "high": [100.0] * 10, "low": [100.0] * 10, "volume": [1] * 10})
+    result = quant._compute_pair_diagnostics(frame, frame.copy())
+    assert result["aligned_days"] == 10
+    assert result["hedge_ratio_ols"] is None
+
+
+@pytest.mark.asyncio
+async def test_market_structure_tests_endpoint(client, monkeypatch):
+    rng = _rng(3)
+    r = [0.0]
+    for _ in range(399):
+        r.append(0.5 * r[-1] + 0.01 * _gauss(rng))
+    frame = _frame_from_returns(r)
+
+    async def fake_load_price_frame(*_args, **_kwargs):
+        return frame
+
+    monkeypatch.setattr("vnibb.api.v1.quant._load_price_frame", fake_load_price_frame)
+
+    response = await client.get("/api/v1/quant/VNM/market-structure-tests")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["metric"] == "market_structure_tests"
+    assert len(payload["data"]["variance_ratio"]) == 3
+    assert payload["data"]["sample_returns"] >= 120
+
+
+@pytest.mark.asyncio
+async def test_pair_endpoint_rejects_identical_symbols(client):
+    response = await client.get("/api/v1/quant/VNM/pair/VNM")
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_pair_endpoint_returns_diagnostics(client, monkeypatch):
+    rng = _rng(31)
+    log_x = [4.0]
+    for _ in range(399):
+        log_x.append(log_x[-1] + 0.01 * _gauss(rng))
+    closes_a = [float(np.exp(v)) for v in log_x]
+    closes_b = [float(np.exp(v + 0.02 * _gauss(rng))) for v in log_x]
+    dates = pd.date_range(end=pd.Timestamp.now(tz=None).normalize(), periods=len(closes_a), freq="B")
+
+    async def fake_load_price_frame(db, symbol, start_date, end_date, source, adjustment_mode="raw"):
+        closes = closes_a if symbol == "AAA" else closes_b
+        return pd.DataFrame(
+            {"time": dates, "open": closes, "high": closes, "low": closes, "close": closes, "volume": [1] * len(closes)}
+        )
+
+    monkeypatch.setattr("vnibb.api.v1.quant._load_price_frame", fake_load_price_frame)
+
+    response = await client.get("/api/v1/quant/AAA/pair/BBB")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"]["metric"] == "pair_diagnostics"
+    assert payload["data"]["symbol"] == "AAA"
+    assert payload["data"]["pair_symbol"] == "BBB"
+    assert payload["data"]["aligned_days"] >= 60
+    assert payload["data"]["hedge_ratio_ols"] is not None
+

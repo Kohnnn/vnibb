@@ -55,6 +55,7 @@ SUPPORTED_METRICS = (
     "ema_respect",
     "drawdown_recovery",
     "benchmark_risk",
+    "market_structure_tests",
 )
 DEFAULT_METRICS = ",".join(SUPPORTED_METRICS)
 ALLOWED_QUANT_PERIODS = ("1M", "6M", "1Y", "3Y", "5Y", "ALL")
@@ -95,6 +96,10 @@ METRIC_ALIASES = {
     "benchmark-risk": "benchmark_risk",
     "risk_relative": "benchmark_risk",
     "relative-risk": "benchmark_risk",
+    "market_structure_tests": "market_structure_tests",
+    "market-structure-tests": "market_structure_tests",
+    "market_structure": "market_structure_tests",
+    "market-structure": "market_structure_tests",
 }
 MONTH_LABELS = {
     1: "Jan",
@@ -237,6 +242,7 @@ def _get_quant_calculators() -> Dict[str, Callable[[pd.DataFrame], Dict[str, Any
         "parkinson_volatility": _compute_parkinson_volatility,
         "ema_respect": _compute_ema_respect,
         "drawdown_recovery": _compute_drawdown_recovery,
+        "market_structure_tests": _compute_market_structure_tests,
     }
 
 
@@ -1775,6 +1781,310 @@ def _compute_parkinson_volatility(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Market-structure tests (variance ratio, squared-return ACF, R/S Hurst).
+# Descriptive diagnostics, numpy/pandas only. scipy is NOT a dependency.
+# ---------------------------------------------------------------------------
+
+MARKET_STRUCTURE_MIN_RETURNS = 120
+
+
+def _normal_sf(z: float) -> float:
+    """Upper-tail standard-normal survival function via math.erf (no scipy)."""
+    import math
+
+    return 0.5 * math.erfc(z / math.sqrt(2.0))
+
+
+def _variance_ratio(log_returns: np.ndarray, q: int) -> tuple[float | None, float | None]:
+    """Lo-MacKinlay variance ratio VR(q) with heteroskedasticity-robust z."""
+    n = int(log_returns.size)
+    if q < 2 or n < MARKET_STRUCTURE_MIN_RETURNS or n < q + 1:
+        return None, None
+
+    mu = float(np.mean(log_returns))
+    demeaned = log_returns - mu
+    var1 = float(np.sum(demeaned**2) / (n - 1))
+    if var1 <= 1e-18:
+        return None, None
+
+    m = q * (n - q + 1) * (1 - q / n)
+    if m <= 0:
+        return None, None
+    # Overlapping q-period sums of demeaned returns.
+    csum = np.cumsum(demeaned)
+    csum = np.concatenate(([0.0], csum))
+    q_sums = csum[q:] - csum[:-q]  # length n - q + 1
+    var_q = float(np.sum(q_sums**2) / m)
+
+    vr = var_q / var1
+    # Robust z: delta(j) = N * sum_t d_t^2 d_{t-j}^2 / (sum_t d_t^2)^2.
+    d2 = demeaned**2
+    denom = float(np.sum(d2)) ** 2
+    if denom <= 1e-30:
+        return _safe_float(vr, 4), 0.0
+    theta = 0.0
+    for j in range(1, q):
+        delta_num = float(np.sum(d2[j:] * d2[:-j]))
+        delta = (delta_num * n) / denom
+        weight = (2.0 * (q - j)) / q
+        theta += weight * weight * delta
+    if theta <= 1e-30:
+        return _safe_float(vr, 4), 0.0
+    z = (np.sqrt(n) * (vr - 1.0)) / np.sqrt(theta)
+    return _safe_float(vr, 4), _safe_float(z, 4)
+
+
+def _squared_return_acf(returns: np.ndarray, max_lag: int) -> list[float | None]:
+    if returns.size < MARKET_STRUCTURE_MIN_RETURNS:
+        return []
+    avg = float(np.mean(returns))
+    sq = (returns - avg) ** 2
+    sq_mean = float(np.mean(sq))
+    centered = sq - sq_mean
+    denom = float(np.sum(centered**2))
+    if denom <= 1e-30:
+        return [0.0] * max_lag
+    out: list[float | None] = []
+    for lag in range(1, max_lag + 1):
+        num = float(np.sum(centered[lag:] * centered[:-lag]))
+        out.append(_safe_float(num / denom, 4))
+    return out
+
+
+def _hurst_rs(series: np.ndarray) -> float | None:
+    """Rescaled-range (R/S) Hurst exponent estimate over log-spaced windows."""
+    n = int(series.size)
+    if n < MARKET_STRUCTURE_MIN_RETURNS:
+        return None
+    # Window sizes log-spaced between 10 and n/2.
+    max_window = n // 2
+    if max_window < 10:
+        return None
+    windows = np.unique(
+        np.floor(np.logspace(np.log10(10), np.log10(max_window), num=10)).astype(int)
+    )
+    log_n: list[float] = []
+    log_rs: list[float] = []
+    for w in windows:
+        if w < 8 or w > n:
+            continue
+        num_chunks = n // w
+        rs_values: list[float] = []
+        for c in range(num_chunks):
+            chunk = series[c * w : (c + 1) * w]
+            mean_chunk = float(np.mean(chunk))
+            deviations = np.cumsum(chunk - mean_chunk)
+            spread = float(np.max(deviations) - np.min(deviations))
+            std_chunk = float(np.std(chunk, ddof=0))
+            if std_chunk <= 1e-18:
+                continue
+            rs_values.append(spread / std_chunk)
+        if rs_values:
+            log_n.append(np.log(w))
+            log_rs.append(np.log(float(np.mean(rs_values))))
+    if len(log_n) < 3:
+        return None
+    slope = float(np.polyfit(np.array(log_n), np.array(log_rs), 1)[0])
+    return _safe_float(slope, 4)
+
+
+def _compute_market_structure_tests(frame: pd.DataFrame) -> Dict[str, Any]:
+    base_payload: Dict[str, Any] = {
+        "variance_ratio": [
+            {"q": q, "vr": None, "z": None, "p_value": None} for q in (2, 5, 10)
+        ],
+        "squared_return_acf": [],
+        "hurst_rs": None,
+        "sample_returns": 0,
+        "note": (
+            "Descriptive market-structure diagnostics. VR<1 leans mean-reverting, "
+            "VR>1 leans trending, |z|<1.96 is indistinguishable from a random walk. "
+            "Not a forecast."
+        ),
+    }
+    enriched = frame.copy()
+    enriched["close"] = pd.to_numeric(enriched["close"], errors="coerce")
+    closes = enriched["close"].dropna().to_numpy(dtype=float)
+    closes = closes[closes > 0]
+    if closes.size < MARKET_STRUCTURE_MIN_RETURNS + 1:
+        return base_payload
+
+    simple_returns = closes[1:] / closes[:-1] - 1.0
+    log_returns = np.log1p(simple_returns)
+    log_returns = log_returns[np.isfinite(log_returns)]
+    if log_returns.size < MARKET_STRUCTURE_MIN_RETURNS:
+        return base_payload
+
+    variance_ratio = []
+    for q in (2, 5, 10):
+        vr, z = _variance_ratio(log_returns, q)
+        p_value = _safe_float(2.0 * _normal_sf(abs(z)), 4) if z is not None else None
+        variance_ratio.append({"q": q, "vr": vr, "z": z, "p_value": p_value})
+
+    return {
+        "variance_ratio": variance_ratio,
+        "squared_return_acf": _squared_return_acf(simple_returns, 10),
+        "hurst_rs": _hurst_rs(log_returns),
+        "sample_returns": int(log_returns.size),
+        "note": base_payload["note"],
+    }
+
+
+# Engle-Granger step-2 ADF approximate critical values (cointegration residual,
+# constant only, large sample, MacKinnon). Labeled approximate downstream.
+ADF_COINTEGRATION_CRITICAL = {"1%": -3.90, "5%": -3.34, "10%": -3.04}
+
+
+def _adf_tstat_fixed_lag(residuals: np.ndarray, lag: int = 1) -> float | None:
+    """Augmented Dickey-Fuller t-stat on the lag coefficient, fixed augmentation.
+
+    Regress dy_t = gamma * y_{t-1} + sum_i delta_i * dy_{t-i} + e_t (no constant,
+    residuals are already mean-centred by construction) and return t(gamma).
+    Implemented with numpy.lstsq only.
+    """
+    y = np.asarray(residuals, dtype=float)
+    n = y.size
+    if n < 30:
+        return None
+    dy = np.diff(y)
+    # Build design: y_{t-1} and `lag` lags of dy.
+    start = lag
+    rows = dy.size - start
+    if rows < 20:
+        return None
+    target = dy[start:]
+    # y_{t-1} aligned to target index t: target[k] = dy[start+k], so y index = start+k.
+    y_lag1 = y[start : start + rows]
+    design_cols = [y_lag1]
+    for i in range(1, lag + 1):
+        design_cols.append(dy[start - i : start - i + rows])
+    design = np.column_stack(design_cols)
+    try:
+        beta, residual_ss, rank, _ = np.linalg.lstsq(design, target, rcond=None)
+    except np.linalg.LinAlgError:
+        return None
+    if rank < design.shape[1]:
+        return None
+    fitted = design @ beta
+    resid = target - fitted
+    dof = rows - design.shape[1]
+    if dof <= 0:
+        return None
+    sigma2 = float(np.sum(resid**2) / dof)
+    if sigma2 <= 1e-30:
+        return None
+    try:
+        xtx_inv = np.linalg.inv(design.T @ design)
+    except np.linalg.LinAlgError:
+        return None
+    se_gamma = float(np.sqrt(sigma2 * xtx_inv[0, 0]))
+    if se_gamma <= 1e-30:
+        return None
+    return _safe_float(float(beta[0]) / se_gamma, 4)
+
+
+def _compute_pair_diagnostics(frame_a: pd.DataFrame, frame_b: pd.DataFrame) -> Dict[str, Any]:
+    base_payload: Dict[str, Any] = {
+        "aligned_days": 0,
+        "hedge_ratio_ols": None,
+        "hedge_intercept": None,
+        "adf_tstat": None,
+        "adf_critical_values": ADF_COINTEGRATION_CRITICAL,
+        "adf_verdict": None,
+        "adf_caveat": (
+            "Approximate Engle-Granger step-2 ADF (fixed lag=1, MacKinnon 5% ≈ -3.34). "
+            "Indicative only — not a formal cointegration test."
+        ),
+        "half_life_days": None,
+        "rolling_correlation_63d": None,
+        "spread_z_score": None,
+        "note": "Descriptive pair diagnostics over the overlap window. Not a trading signal.",
+    }
+
+    def _prep(frame: pd.DataFrame) -> pd.DataFrame:
+        out = frame.copy()
+        out["time"] = pd.to_datetime(out["time"], errors="coerce")
+        out["close"] = pd.to_numeric(out["close"], errors="coerce")
+        out = out.dropna(subset=["time", "close"])
+        out = out[out["close"] > 0]
+        out["date"] = out["time"].dt.normalize()
+        return out[["date", "close"]].drop_duplicates(subset=["date"], keep="last")
+
+    a = _prep(frame_a).rename(columns={"close": "ca"})
+    b = _prep(frame_b).rename(columns={"close": "cb"})
+    merged = a.merge(b, on="date", how="inner").sort_values("date").reset_index(drop=True)
+    aligned = int(len(merged))
+    if aligned < 60:
+        base_payload["aligned_days"] = aligned
+        return base_payload
+
+    log_a = np.log(merged["ca"].to_numpy(dtype=float))
+    log_b = np.log(merged["cb"].to_numpy(dtype=float))
+
+    # OLS hedge ratio: log_a = intercept + beta * log_b + residual.
+    design = np.column_stack([np.ones_like(log_b), log_b])
+    beta_vec, _, rank, _ = np.linalg.lstsq(design, log_a, rcond=None)
+    if rank < 2:
+        base_payload["aligned_days"] = aligned
+        return base_payload
+    intercept = float(beta_vec[0])
+    hedge_ratio = float(beta_vec[1])
+    residuals = log_a - (intercept + hedge_ratio * log_b)
+
+    adf_tstat = _adf_tstat_fixed_lag(residuals, lag=1)
+    adf_verdict = None
+    if adf_tstat is not None:
+        if adf_tstat <= ADF_COINTEGRATION_CRITICAL["5%"]:
+            adf_verdict = "residual stationary at ~5% (approx)"
+        elif adf_tstat <= ADF_COINTEGRATION_CRITICAL["10%"]:
+            adf_verdict = "residual stationary at ~10% (approx)"
+        else:
+            adf_verdict = "no stationarity evidence (approx)"
+
+    # AR(1) half-life on demeaned residual: x_t = phi x_{t-1} + e.
+    x = residuals - float(np.mean(residuals))
+    half_life = None
+    if x.size > 2:
+        num = float(np.sum(x[1:] * x[:-1]))
+        den = float(np.sum(x[:-1] ** 2))
+        if den > 1e-18:
+            phi = num / den
+            if 0 < phi < 1:
+                half_life = _safe_float(np.log(0.5) / np.log(phi), 2)
+
+    # Rolling 63D correlation of returns.
+    ra = merged["ca"].pct_change()
+    rb = merged["cb"].pct_change()
+    rolling_corr = ra.rolling(63).corr(rb)
+    current_corr = (
+        _safe_float(rolling_corr.dropna().iloc[-1], 4)
+        if not rolling_corr.dropna().empty
+        else None
+    )
+
+    spread_std = float(np.std(residuals, ddof=1)) if residuals.size > 1 else 0.0
+    spread_z = (
+        _safe_float((residuals[-1] - float(np.mean(residuals))) / spread_std, 4)
+        if spread_std > 1e-18
+        else None
+    )
+
+    return {
+        "aligned_days": aligned,
+        "hedge_ratio_ols": _safe_float(hedge_ratio, 4),
+        "hedge_intercept": _safe_float(intercept, 4),
+        "adf_tstat": adf_tstat,
+        "adf_critical_values": ADF_COINTEGRATION_CRITICAL,
+        "adf_verdict": adf_verdict,
+        "adf_caveat": base_payload["adf_caveat"],
+        "half_life_days": half_life,
+        "rolling_correlation_63d": current_corr,
+        "spread_z_score": spread_z,
+        "note": base_payload["note"],
+    }
+
+
 def _support_strength_label(rate: float | None) -> str:
     if rate is None:
         return "insufficient"
@@ -2953,6 +3263,99 @@ async def get_gap_analysis_metric(
         source=source,
         adjustment_mode=adjustment_mode,
         db=db,
+    )
+
+
+@router.get("/{symbol}/market-structure-tests", response_model=StandardResponse[Dict[str, Any]])
+async def get_market_structure_tests_metric(
+    symbol: str,
+    period: str = Query(default="5Y"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    adjustment_mode: str = Query(default="adjusted", pattern=r"^(raw|adjusted)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _get_quant_metric_alias_response(
+        symbol=symbol,
+        metric_name="market-structure-tests",
+        period=period,
+        source=source,
+        adjustment_mode=adjustment_mode,
+        db=db,
+    )
+
+
+@router.get("/{symbol}/pair/{other}", response_model=StandardResponse[Dict[str, Any]])
+async def get_pair_diagnostics(
+    symbol: str,
+    other: str,
+    period: str = Query(default="3Y"),
+    source: str = Query(default=settings.vnstock_source, pattern=r"^(KBS|VCI|MSN|FMP)$"),
+    adjustment_mode: str = Query(default="adjusted", pattern=r"^(raw|adjusted)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pair cointegration diagnostics: OLS hedge ratio, approximate Engle-Granger ADF,
+    AR(1) spread half-life, rolling correlation. Descriptive — not a trading signal."""
+    symbol_upper = symbol.upper().strip()
+    other_upper = other.upper().strip()
+    if not symbol_upper or not other_upper:
+        raise HTTPException(status_code=400, detail="Both symbols are required")
+    if symbol_upper == other_upper:
+        raise HTTPException(status_code=400, detail="Pair symbols must differ")
+
+    period_upper = _normalize_quant_period(period)
+    end_date = date.today()
+    start_date = _resolve_start_date(period_upper, end_date)
+
+    frame_a, warning_a = await _load_quant_frame_with_warning(
+        db=db,
+        symbol=symbol_upper,
+        start_date=start_date,
+        end_date=end_date,
+        source=source,
+        period=period_upper,
+        adjustment_mode=adjustment_mode,
+    )
+    frame_b, warning_b = await _load_quant_frame_with_warning(
+        db=db,
+        symbol=other_upper,
+        start_date=start_date,
+        end_date=end_date,
+        source=source,
+        period=period_upper,
+        adjustment_mode=adjustment_mode,
+    )
+    last_data_timestamp = _resolve_frame_last_timestamp(frame_a)
+    warning = _merge_warnings(warning_a, warning_b)
+
+    payload = _compute_pair_diagnostics(frame_a, frame_b)
+    aligned = int(payload.get("aligned_days") or 0)
+
+    response_payload: Dict[str, Any] = {
+        "symbol": symbol_upper,
+        "pair_symbol": other_upper,
+        "period": period_upper,
+        "adjustment_mode": _normalize_adjustment_mode(adjustment_mode),
+        "metric": "pair_diagnostics",
+        "computed_at": last_data_timestamp or datetime.utcnow(),
+        "last_data_date": last_data_timestamp,
+    }
+    if warning:
+        response_payload["warning"] = warning
+    response_payload.update(payload)
+
+    error = None
+    if aligned < 60:
+        error = f"Insufficient overlap: expected at least 60 aligned sessions, got {aligned}."
+
+    return StandardResponse(
+        data=response_payload,
+        meta=MetaData(
+            count=1 if aligned >= 60 else 0,
+            symbol=symbol_upper,
+            data_points=aligned,
+            last_data_date=last_data_timestamp.isoformat() if last_data_timestamp else None,
+        ),
+        error=error,
     )
 
 
