@@ -1,12 +1,33 @@
 # Quant Remaining Work — Shipping Plan & Handoff
 
 Date: 2026-06-10
-Status: planned, not started
+Status: Waves 1-4 SHIPPED (see "Shipped status" below). Wave 5 remains parked.
 Prereq reading: `docs/QUANT_FIX_PASS_AND_NEW_WIDGETS_2026-06-10.md`, `docs/reverse-engineering/turtle-hub-crawl-2026-06-09/quant-tabs-deep-dive.md`
 
 This documents how to ship every item deferred from the 2026-06-10 quant pass. Items are ordered
 by dependency and risk. Waves 1-2 are frontend-only; Wave 3 introduces the first backend quant
 additions since the metric registry; Wave 4 is infrastructure.
+
+---
+
+## Shipped status (2026-06-10)
+
+| Wave | Commit | Notes |
+| --- | --- | --- |
+| 1 — Market Lab depth | `6e9562e` | VR(2/5/10) + robust z, squared-return ACF, rolling 21D vol strip in `marketLabStats.ts` + `MarketLabWidget.tsx`; tests `marketLabStructure.test.ts`. |
+| 2 — Run history + pinning | `fa3f2ac` | `quantRunHistory.ts` store + shared `QuantRunHistoryPanel.tsx` wired into Edge Half-Life, Pair Lab, Monte Carlo, Signal Robustness; tests `quantRunHistory.test.ts`. |
+| 3 backend — structure tests + pair endpoint | `2611f62` | `market_structure_tests` metric (VR, ACF, R/S Hurst) + `GET /quant/{symbol}/pair/{other}` (OLS hedge ratio, approx Engle-Granger ADF, AR(1) half-life); 9 new pytests. **Requires OCI deploy to reach production.** |
+| 3 frontend — backend Hurst + OLS pair mode | `321bbdf` | `usePairDiagnostics`/`useMarketStructureTests` (tolerate 404 via `not_deployed` sentinel), OLS toggle in Pair Lab, `useQuantRegime` prefers backend Hurst. Ships safely ahead of the OCI deploy. |
+| 4 — Signal Robustness v2 | `d944874` | `signalRobustness.ts` (contiguous-fold sign agreement + 200-iter permutation null), wired into the lab + run history; tests `signalRobustness.test.ts`. |
+
+**ACTION REQUIRED:** The Wave 3 backend (`market_structure_tests` + pair endpoint) only reaches
+production via the OCI deploy path (`docs/oracle_runbook.md`), not Vercel. Until that deploy runs,
+the frontend treats the new endpoints as `not_deployed` (empty state, no error). Run the OCI deploy
+to light them up.
+
+Note: `_get_quant_metric_alias_response` has a pre-existing latent bug (references `start_date`/
+`end_date` before assignment in the `benchmark_risk` branch) — unrelated to this work, only triggers
+on the benchmark-risk *alias* endpoint. Left untouched; fix separately.
 
 ---
 
