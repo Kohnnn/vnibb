@@ -12,7 +12,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { useHistoricalPrices } from '@/lib/queries'
+import { useHistoricalPrices, usePairDiagnostics } from '@/lib/queries'
+import type { PairDiagnosticsPayload } from '@/lib/api'
 import { QUANT_PERIOD_OPTIONS, getQuantPeriodStartDate, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { computePairStats, toDatedCloses } from '@/lib/quantLabMath'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
@@ -36,6 +37,7 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
   const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
   const [pairInput, setPairInput] = useState('')
   const [pairSymbol, setPairSymbol] = useState('')
+  const [hedgeMode, setHedgeMode] = useState<'one_to_one' | 'ols'>('one_to_one')
 
   const startDate = useMemo(() => getQuantPeriodStartDate(period), [period])
   const effectivePair = pairSymbol.toUpperCase()
@@ -52,6 +54,18 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
     adjustmentMode: 'adjusted',
     enabled: Boolean(effectivePair),
   })
+
+  // Backend cointegration diagnostics (OLS hedge ratio + approximate ADF).
+  // Only fetched when the user opts into OLS mode; tolerates a not-yet-deployed
+  // backend (404) via the `not_deployed` sentinel from usePairDiagnostics.
+  const backendQuery = usePairDiagnostics(upperSymbol, effectivePair, {
+    period,
+    adjustmentMode: 'adjusted',
+    enabled: hedgeMode === 'ols' && Boolean(upperSymbol) && Boolean(effectivePair),
+  })
+  const backendState = backendQuery.data
+  const backendPayload = backendState?.status === 'ok' ? backendState.payload : null
+  const backendNotDeployed = backendState?.status === 'not_deployed'
 
   const stats = useMemo(() => {
     if (!effectivePair) return null
@@ -147,6 +161,39 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
         </button>
       </form>
 
+      {effectivePair && (
+        <div className="mb-2 flex items-center gap-2 px-1">
+          <span className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Hedge</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setHedgeMode('one_to_one')}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${hedgeMode === 'one_to_one' ? 'bg-violet-600/30 text-violet-200' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+            >
+              1:1 (client)
+            </button>
+            <button
+              type="button"
+              onClick={() => setHedgeMode('ols')}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${hedgeMode === 'ols' ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+            >
+              OLS (backend)
+            </button>
+          </div>
+          {hedgeMode === 'ols' && backendQuery.isFetching && (
+            <span className="text-[10px] text-[var(--text-muted)]">loading…</span>
+          )}
+        </div>
+      )}
+
+      {effectivePair && hedgeMode === 'ols' && (
+        <PairBackendPanel
+          notDeployed={backendNotDeployed}
+          payload={backendPayload}
+          error={backendState?.status === 'ok' ? backendState.error : null}
+        />
+      )}
+
       {!effectivePair ? (
         <WidgetEmpty
           message="Enter a second symbol to compare"
@@ -227,19 +274,22 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
             buildRun={() =>
               hasData && stats
                 ? {
-                    name: `${upperSymbol}/${effectivePair} ${period} · ${new Date().toLocaleDateString()}`,
-                    config: { symbol: upperSymbol, pairSymbol: effectivePair, period },
+                    name: `${upperSymbol}/${effectivePair} ${period} ${hedgeMode === 'ols' ? 'OLS' : '1:1'} · ${new Date().toLocaleDateString()}`,
+                    config: { symbol: upperSymbol, pairSymbol: effectivePair, period, hedgeMode },
                     summary: {
                       rolling_correlation_63d: stats.currentCorrelation,
                       spread_z_score: stats.currentSpreadZ,
                       ar1_half_life_days: stats.halfLifeDays,
                       aligned_days: stats.alignedDays,
+                      ols_hedge_ratio: backendPayload?.hedge_ratio_ols ?? null,
+                      adf_tstat: backendPayload?.adf_tstat ?? null,
                     },
                   }
                 : null
             }
             onApply={(config) => {
               if (typeof config.period === 'string') setPeriod(config.period as QuantPeriodOption)
+              if (config.hedgeMode === 'ols' || config.hedgeMode === 'one_to_one') setHedgeMode(config.hedgeMode)
               if (typeof config.pairSymbol === 'string') {
                 setPairInput(config.pairSymbol)
                 setPairSymbol(config.pairSymbol)
@@ -248,6 +298,62 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
           />
         </>
       )}
+    </div>
+  )
+}
+
+function PairBackendPanel({
+  notDeployed,
+  payload,
+  error,
+}: {
+  notDeployed: boolean
+  payload: PairDiagnosticsPayload | null
+  error?: string | null
+}) {
+  if (notDeployed) {
+    return (
+      <div className="mx-1 mb-2 rounded border border-amber-500/25 bg-amber-500/5 px-2 py-1 text-[9px] leading-3 text-amber-200/90">
+        OLS hedge-ratio diagnostics aren&apos;t available yet — the backend endpoint hasn&apos;t been deployed.
+        Showing the client 1:1 spread below. Switch back to 1:1 to hide this notice.
+      </div>
+    )
+  }
+  if (error || !payload) {
+    return (
+      <div className="mx-1 mb-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-2 py-1 text-[9px] leading-3 text-[var(--text-muted)]">
+        {error || 'Computing OLS hedge ratio…'}
+      </div>
+    )
+  }
+  return (
+    <div className="mx-1 mb-2 rounded-md border border-blue-500/25 bg-blue-500/5 p-2">
+      <div className="mb-1 grid grid-cols-4 gap-2 text-[10px]">
+        <div>
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Hedge β</div>
+          <div className="font-mono text-blue-200">{fmt(payload.hedge_ratio_ols)}</div>
+        </div>
+        <div>
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">ADF t</div>
+          <div className="font-mono text-violet-200">{fmt(payload.adf_tstat)}</div>
+        </div>
+        <div>
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Half-life</div>
+          <div className="font-mono text-cyan-200">
+            {payload.half_life_days === null ? '—' : `${fmt(payload.half_life_days, 1)}d`}
+          </div>
+        </div>
+        <div>
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Corr 63D</div>
+          <div className="font-mono text-[var(--text-primary)]">{fmt(payload.rolling_correlation_63d)}</div>
+        </div>
+      </div>
+      {payload.adf_verdict && (
+        <div className="text-[9px] text-[var(--text-secondary)]">
+          {payload.adf_verdict} (5% crit ≈ {fmt(payload.adf_critical_values?.['5%'])})
+        </div>
+      )}
+      <div className="mt-0.5 text-[9px] leading-3 text-[var(--text-muted)]">{payload.adf_caveat}</div>
     </div>
   )
 }

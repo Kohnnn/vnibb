@@ -126,6 +126,10 @@ export const queryKeys = {
     smartMoneyFlow: (symbol: string) => ['smartMoneyFlow', symbol] as const,
     relativeRotation: (symbol: string, lookbackDays: number) =>
         ['relativeRotation', symbol, lookbackDays] as const,
+    marketStructureTests: (symbol: string, period: string, source: string, adjustmentMode: string) =>
+        ['marketStructureTests', symbol, period, source, adjustmentMode] as const,
+    pairDiagnostics: (symbol: string, other: string, period: string, source: string, adjustmentMode: string) =>
+        ['pairDiagnostics', symbol, other, period, source, adjustmentMode] as const,
 };
 
 // ============ Equity Queries ============
@@ -1410,6 +1414,80 @@ export function useMomentumProfile(
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         retry: 2,
+    });
+}
+
+export type PairDiagnosticsState =
+    | { status: 'ok'; payload: api.PairDiagnosticsPayload; error?: string | null }
+    | { status: 'not_deployed' };
+
+/**
+ * Backend pair diagnostics (OLS hedge ratio, approximate Engle-Granger ADF).
+ * Tolerates a 404/405 (backend not yet deployed to OCI) by returning a
+ * `not_deployed` sentinel instead of throwing, so the widget can fall back to
+ * its client-side 1:1 spread without surfacing an error.
+ */
+export function usePairDiagnostics(
+    symbol: string,
+    other: string,
+    options?: {
+        period?: api.QuantPeriod;
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        adjustmentMode?: 'raw' | 'adjusted';
+        enabled?: boolean;
+    }
+) {
+    const preferredSource = useVnstockSource();
+    const period = options?.period || '3Y';
+    const source = options?.source || preferredSource;
+    const adjustmentMode = options?.adjustmentMode || 'adjusted';
+    return useQuery<PairDiagnosticsState>({
+        queryKey: queryKeys.pairDiagnostics(symbol, other, period, source, adjustmentMode),
+        queryFn: async () => {
+            try {
+                const response = await api.getPairDiagnostics(symbol, other, { period, source, adjustmentMode });
+                return { status: 'ok', payload: response.data, error: response.error };
+            } catch (error) {
+                const status = (error as api.APIError)?.status;
+                if (status === 404 || status === 405) {
+                    return { status: 'not_deployed' };
+                }
+                throw error;
+            }
+        },
+        enabled: options?.enabled !== false && !!symbol && !!other && symbol !== other,
+        staleTime: 5 * 60 * 1000,
+        retry: 1,
+    });
+}
+
+export function useMarketStructureTests(
+    symbol: string,
+    options?: {
+        period?: api.QuantPeriod;
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP';
+        adjustmentMode?: 'raw' | 'adjusted';
+        enabled?: boolean;
+    }
+) {
+    const preferredSource = useVnstockSource();
+    const period = options?.period || '5Y';
+    const source = options?.source || preferredSource;
+    const adjustmentMode = options?.adjustmentMode || 'adjusted';
+    return useQuery({
+        queryKey: queryKeys.marketStructureTests(symbol, period, source, adjustmentMode),
+        queryFn: async () => {
+            try {
+                return await api.getMarketStructureTests(symbol, { period, source, adjustmentMode });
+            } catch (error) {
+                const status = (error as api.APIError)?.status;
+                if (status === 404 || status === 405) return null;
+                throw error;
+            }
+        },
+        enabled: options?.enabled !== false && !!symbol,
+        staleTime: 5 * 60 * 1000,
+        retry: 1,
     });
 }
 

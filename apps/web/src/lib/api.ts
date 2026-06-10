@@ -2317,6 +2317,99 @@ export interface RelativeRotationResponse {
     error?: string | null;
 }
 
+export interface MarketStructureVarianceRatio {
+    q: number
+    vr: number | null
+    z: number | null
+    p_value: number | null
+}
+
+export interface MarketStructureTestsPayload {
+    symbol: string
+    period: QuantPeriod
+    adjustment_mode?: 'raw' | 'adjusted'
+    metric?: string
+    computed_at: string
+    last_data_date?: string | null
+    variance_ratio: MarketStructureVarianceRatio[]
+    squared_return_acf: Array<number | null>
+    hurst_rs: number | null
+    sample_returns: number
+    note?: string
+    warning?: string | null
+}
+
+export interface MarketStructureTestsResponse {
+    data: MarketStructureTestsPayload
+    meta?: { count?: number }
+    error?: string | null
+}
+
+export interface PairDiagnosticsPayload {
+    symbol: string
+    pair_symbol: string
+    period: QuantPeriod
+    adjustment_mode?: 'raw' | 'adjusted'
+    metric?: string
+    computed_at: string
+    last_data_date?: string | null
+    aligned_days: number
+    hedge_ratio_ols: number | null
+    hedge_intercept: number | null
+    adf_tstat: number | null
+    adf_critical_values: Record<string, number>
+    adf_verdict: string | null
+    adf_caveat: string
+    half_life_days: number | null
+    rolling_correlation_63d: number | null
+    spread_z_score: number | null
+    note?: string
+    warning?: string | null
+}
+
+export interface PairDiagnosticsResponse {
+    data: PairDiagnosticsPayload
+    meta?: { count?: number }
+    error?: string | null
+}
+
+export async function getMarketStructureTests(
+    symbol: string,
+    options?: {
+        period?: QuantPeriod
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+        adjustmentMode?: 'raw' | 'adjusted'
+    }
+): Promise<MarketStructureTestsResponse> {
+    return fetchAPI<MarketStructureTestsResponse>(`/quant/${symbol}/market-structure-tests`, {
+        params: {
+            period: options?.period ?? '5Y',
+            source: options?.source,
+            adjustment_mode: options?.adjustmentMode ?? 'adjusted',
+        },
+        timeout: 30000,
+    })
+}
+
+export async function getPairDiagnostics(
+    symbol: string,
+    other: string,
+    options?: {
+        period?: QuantPeriod
+        source?: 'KBS' | 'VCI' | 'MSN' | 'FMP'
+        adjustmentMode?: 'raw' | 'adjusted'
+    }
+): Promise<PairDiagnosticsResponse> {
+    return fetchAPI<PairDiagnosticsResponse>(`/quant/${symbol}/pair/${other}`, {
+        params: {
+            period: options?.period ?? '3Y',
+            source: options?.source,
+            adjustment_mode: options?.adjustmentMode ?? 'adjusted',
+        },
+        timeout: 30000,
+    })
+}
+
 export async function getGammaExposure(
     symbol: string,
     options?: {

@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 
 import type { QuantPeriod } from '@/lib/api'
-import { useHistoricalPrices, useMomentumProfile, useQuantMetrics } from '@/lib/queries'
+import { useHistoricalPrices, useMarketStructureTests, useMomentumProfile, useQuantMetrics } from '@/lib/queries'
 import {
   buildQuantRegimeSummary,
   computeHurstFromPrices,
@@ -37,6 +37,14 @@ export function useQuantRegime(
     enabled,
   })
 
+  // Backend market-structure tests provide an authoritative R/S Hurst estimate.
+  // Tolerates a not-yet-deployed backend (hook returns null on 404); we then
+  // fall back to the client-side computation below.
+  const structureQuery = useMarketStructureTests(upperSymbol, {
+    period,
+    enabled,
+  })
+
   const historyQuery = useHistoricalPrices(upperSymbol, {
     startDate: quantPeriodToStartDate(period),
     adjustmentMode: 'adjusted',
@@ -53,7 +61,10 @@ export function useQuantRegime(
 
   const momentumPayload = momentumQuery.data?.data
   const volatilityMetric = volatilityQuery.data?.data?.metrics?.parkinson_volatility as ParkinsonMetric | undefined
-  const hurst = useMemo(() => computeHurstFromPrices(closes), [closes])
+  const clientHurst = useMemo(() => computeHurstFromPrices(closes), [closes])
+  const backendHurst = structureQuery.data?.data?.hurst_rs ?? null
+  // Prefer the backend R/S Hurst when available; client estimate is the fallback.
+  const hurst = backendHurst !== null && Number.isFinite(backendHurst) ? backendHurst : clientHurst
 
   const summary = useMemo(
     () =>
