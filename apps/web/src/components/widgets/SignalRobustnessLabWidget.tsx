@@ -8,6 +8,11 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
+import {
+  computeFoldStability,
+  computeNullBenchmark,
+  type UniversePoint,
+} from '@/lib/signalRobustness'
 
 interface SignalRobustnessLabWidgetProps {
   symbol?: string
@@ -84,6 +89,17 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
       passCount: passes.length,
       passRate: universe.length ? (passes.length / universe.length) * 100 : null,
       returnReads,
+      universePoints: universe
+        .map((r) => {
+          const v = num(r, signalKey)
+          const fwd = num(r, 'perf_1m')
+          if (v === null || fwd === null) return null
+          return {
+            pass: comparator === 'gte' ? v >= threshold : v <= threshold,
+            forward: fwd,
+          }
+        })
+        .filter((p): p is UniversePoint => p !== null),
       passes: passes
         .map((r) => ({
           symbol: r.ticker || r.symbol || '',
@@ -96,6 +112,15 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
         .slice(0, 30),
     }
   }, [rows, signalKey, comparator, threshold])
+
+  // v2 cross-sectional robustness: contiguous-fold sign agreement + permutation null.
+  const robustness = useMemo(() => {
+    const points = evaluation.universePoints
+    return {
+      foldStability: computeFoldStability(points, 4),
+      nullBenchmark: computeNullBenchmark(points, { iterations: 200, seed: 1337 }),
+    }
+  }, [evaluation.universePoints])
 
   const hasData = rows.length > 0
 
@@ -115,11 +140,15 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
         universe: evaluation.universeCount,
         pass: evaluation.passCount,
         pass_rate_pct: evaluation.passRate,
+        period_sign_agreement: robustness.foldStability.evaluableFolds
+          ? `${robustness.foldStability.signAgreement}/${robustness.foldStability.evaluableFolds}`
+          : null,
+        null_percentile: robustness.nullBenchmark.percentile,
       },
       return_reads: evaluation.returnReads,
       rows: evaluation.passes,
     })
-  }, [hasData, onDataChange, signalKey, comparator, threshold, evaluation, data?.meta?.last_data_date])
+  }, [hasData, onDataChange, signalKey, comparator, threshold, evaluation, robustness, data?.meta?.last_data_date])
 
   if (isLoading && !hasData) return <WidgetSkeleton />
   if (error && !hasData) return <WidgetError title="Failed to load screener universe" onRetry={() => refetch()} />
@@ -206,6 +235,78 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
         </div>
       </div>
 
+      {/* v2: cross-sectional robustness */}
+      <div className="mt-2 grid grid-cols-2 gap-2 px-1">
+        {/* Period stability */}
+        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 p-1.5">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              Period stability
+            </span>
+            <span className="text-[10px] font-bold text-cyan-300">
+              {robustness.foldStability.evaluableFolds > 0
+                ? `${robustness.foldStability.signAgreement}/${robustness.foldStability.evaluableFolds}`
+                : '—'}
+            </span>
+          </div>
+          <div className="flex items-end gap-1" style={{ height: 28 }}>
+            {robustness.foldStability.folds.map((fold) => {
+              const positive = (fold.edge ?? 0) >= 0
+              const height = fold.edge === null ? 2 : Math.min(24, Math.abs(fold.edge) * 2 + 3)
+              return (
+                <div key={fold.fold} className="flex flex-1 flex-col items-center justify-end gap-0.5">
+                  <div
+                    className={
+                      fold.edge === null
+                        ? 'w-full rounded-sm bg-[var(--border-subtle)]'
+                        : positive
+                          ? 'w-full rounded-sm bg-emerald-500/60'
+                          : 'w-full rounded-sm bg-red-500/60'
+                    }
+                    style={{ height }}
+                    title={fold.edge === null ? `Fold ${fold.fold}: n/a` : `Fold ${fold.fold}: ${fold.edge.toFixed(1)}% edge`}
+                  />
+                  <span className="text-[8px] text-[var(--text-muted)]">{fold.fold}</span>
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-0.5 text-[8px] leading-3 text-[var(--text-muted)]">
+            edge sign agrees in {robustness.foldStability.signAgreement} of{' '}
+            {robustness.foldStability.evaluableFolds} contiguous slices
+          </div>
+        </div>
+
+        {/* Null benchmark */}
+        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 p-1.5">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              Null benchmark
+            </span>
+            <span
+              className={`text-[10px] font-bold ${
+                robustness.nullBenchmark.percentile === null
+                  ? 'text-[var(--text-muted)]'
+                  : robustness.nullBenchmark.percentile >= 90
+                    ? 'text-emerald-300'
+                    : robustness.nullBenchmark.percentile <= 10
+                      ? 'text-red-300'
+                      : 'text-[var(--text-primary)]'
+              }`}
+            >
+              {robustness.nullBenchmark.percentile === null
+                ? '—'
+                : `${robustness.nullBenchmark.percentile.toFixed(0)}%`}
+            </span>
+          </div>
+          <div className="text-[8px] leading-3 text-[var(--text-muted)]">
+            {robustness.nullBenchmark.percentile === null
+              ? 'Need both passing and non-passing names to benchmark.'
+              : `real edge beats ${robustness.nullBenchmark.percentile.toFixed(0)}% of ${robustness.nullBenchmark.iterations} random selections of the same size`}
+          </div>
+        </div>
+      </div>
+
       {/* Passing names */}
       <div className="mt-2 flex-1 overflow-auto px-1">
         <table className="w-full text-[10px]">
@@ -246,7 +347,9 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
 
       <p className="px-1 pt-1 text-[9px] leading-3 text-[var(--text-muted)]">
         Descriptive cross-sectional read on the current screener snapshot, not a backtest or forward prediction.
-        Returns are realized trailing performance, not future returns.
+        Returns are realized trailing performance, not future returns. Period stability splits the universe into
+        contiguous slices; the null benchmark is a permutation test over the same snapshot — neither is a temporal
+        walk-forward.
       </p>
 
       <WidgetMeta className="px-1 pt-1" isFetching={isFetching} sourceLabel="Screener snapshot" align="right" />
@@ -266,6 +369,10 @@ export function SignalRobustnessLabWidget({ onSymbolClick, onDataChange }: Signa
                   pass_rate_pct: evaluation.passRate,
                   edge_1m_pct: evaluation.returnReads.find((r) => r.label === '1M')?.edge ?? null,
                   edge_3m_pct: evaluation.returnReads.find((r) => r.label === '3M')?.edge ?? null,
+                  period_sign_agreement: robustness.foldStability.evaluableFolds
+                    ? `${robustness.foldStability.signAgreement}/${robustness.foldStability.evaluableFolds}`
+                    : null,
+                  null_percentile: robustness.nullBenchmark.percentile,
                 },
               }
             : null

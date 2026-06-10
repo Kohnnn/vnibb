@@ -207,7 +207,7 @@ function percentile(sorted: number[], p: number): number {
 }
 
 /** Deterministic LCG so re-renders produce stable results per seed. */
-function makeRng(seed: number): () => number {
+export function makeRng(seed: number): () => number {
   let state = seed >>> 0 || 1
   return () => {
     state = (state * 1664525 + 1013904223) >>> 0
