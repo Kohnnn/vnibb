@@ -188,23 +188,127 @@ The anti-overfit centerpiece. Extends `SignalRobustnessLabWidget.tsx`.
 
 ## Wave 5 — Optional/parked (do NOT start without explicit approval)
 
-| Item | Why parked |
-| --- | --- |
-| Full GARCH fitting | Needs scipy/arch dependency decision + numeric review |
-| Backend parameter-sweep endpoints | Server cost; needs job queue + budget design |
-| Replay / paper-trade journal | Product scope beyond quant; needs its own design |
-| Portfolio optimization lab | Optimizer constraints need validation; separate spec |
-| Strategy code editor / backtest IDE | Explicitly deferred by reverse-engineering doc guidance |
+Each item below is parked but now fully specced so a future AI can scope and estimate before asking
+for the green light. Read "Codebase conventions for a future AI" (below) first — it captures the
+registration points, helpers, and gotchas this session learned the hard way.
+
+### 5.1 Full GARCH(1,1) volatility fitting
+- **Why parked:** needs a Python dependency decision (`arch` or hand-rolled MLE) + numeric review.
+  scipy is NOT a dependency (verified `apps/api/pyproject.toml`); do not add it just for this.
+- **Where:** backend metric, follows `_compute_parkinson_volatility` exactly.
+  - Add `garch_volatility` to `SUPPORTED_METRICS` + `METRIC_ALIASES` + `_get_quant_calculators`
+    in `apps/api/vnibb/api/v1/quant.py`, plus a `GET /quant/{symbol}/garch-volatility` alias
+    (declare it BEFORE the catch-all `@router.get("/{symbol}")`).
+  - `_compute_garch_volatility(frame) -> dict`: fit GARCH(1,1) on daily % returns. If you avoid the
+    `arch` dependency, implement a constrained MLE with numpy (maximize the Gaussian log-likelihood
+    over omega>0, alpha>=0, beta>=0, alpha+beta<1 via a bounded grid + local refine — no scipy).
+    Return: `omega`, `alpha`, `beta`, `persistence` (=alpha+beta), `current_conditional_vol_pct`
+    (annualized), `long_run_vol_pct`, and a `series` of conditional vol (tail 400). `_safe_float`
+    everything; return Nones + the standard insufficient-data path when `len(frame) < 250`.
+  - **Honesty rule:** label it "in-sample conditional volatility estimate, not a forecast path."
+    The existing client-side squared-return ACF (Wave 1) stays as the lightweight clustering read.
+- **Frontend:** new widget `garch_volatility` (4 registration points — see conventions). Surface
+  persistence prominently (near 1 = long memory). Use `QuantWarningBanner` + `extractQuantWarning`.
+- **Tests:** synthetic GARCH series (the fixture in `marketLabStructure.test.ts` /
+  `quant_endpoint_test.py` already generates one) should recover alpha+beta within a tolerance band;
+  iid series should fit alpha≈0. Assert persistence < 1.
+- **Decision needed from user:** add `arch` to `pyproject.toml` (simpler, heavier) vs hand-rolled MLE
+  (no dep, more code + review). Ask before starting.
+
+### 5.2 Backend parameter-sweep endpoints
+- **Why parked:** server cost + needs a job-queue/budget design. The Bollinger threshold sweep (E,
+  shipped 2026-06-10) and Signal Robustness folds (Wave 4) are the client-side substitutes; only
+  build this if a sweep genuinely needs server compute over full history.
+- **Spec when approved:** `POST /quant/{symbol}/sweep` taking a metric + a small bounded grid
+  (reject grids > N points server-side). Reuse `_load_quant_frame_with_warning`. Must be rate-limited
+  and cached (`@cached(ttl=...)`) — see the `get_quant_metrics` caching decorator. Return a result
+  matrix, not per-cell series. Needs a budget guard so one symbol can't fan out unbounded compute.
+- **Prereq design doc:** job-queue/budget model. Do not inline long compute in a request handler.
+
+### 5.3 Replay / paper-trade journal
+- **Why parked:** product scope beyond quant; needs its own design + likely durable storage.
+- **Spec sketch:** browser-local first (mirror `quantRunHistory.ts` / `researchNotebook.ts`): a
+  `paperTrades.ts` store of hypothetical entries/exits with provenance, then a journal widget. Keep
+  it descriptive ("recorded hypothetical", never "executed"). Durable/multi-device sharing needs a
+  backend table + the Appwrite-primary write bridge (`docs/APPWRITE_PRIMARY_SUPABASE_WRITE_BRIDGE.md`)
+  — Appwrite writes are frozen by default (`APPWRITE_WRITE_ENABLED=false`), so coordinate that first.
+
+### 5.4 Portfolio optimization lab
+- **Why parked:** optimizer constraints need validation; separate spec.
+- **Spec sketch:** start client-side with a long-only mean-variance frontier over a small basket
+  (reuse `useHistoricalPrices` per symbol, align on dates like `computePairStats`). numpy-free TS:
+  closed-form for 2-asset; for N-asset use a simple projected-gradient or analytic with a covariance
+  matrix built in TS. **Honesty rule:** "historical-covariance frontier, not an allocation
+  recommendation." No leverage, no shorting in v1. A backend optimizer is a later, separate wave.
+
+### 5.5 Strategy code editor / backtest IDE
+- **Why parked:** explicitly deferred by the reverse-engineering doc guidance. Largest scope + a
+  real security surface (arbitrary user code execution). Do NOT attempt a client eval of user code.
+  If ever built, it needs a sandboxed execution design reviewed for security first — out of scope
+  for an incremental quant wave.
 
 ---
 
-## Suggested commit sequence
+## Codebase conventions for a future AI (learned this session)
 
-1. `feat(market-lab): variance ratio, vol clustering, rolling vol regime` (Wave 1)
-2. `feat(quant): run history + pinning for lab widgets` (Wave 2)
-3. `feat(api/quant): market_structure_tests metric + pair diagnostics endpoint` (Wave 3 backend)
-4. `feat(quant): backend-powered structure tests + OLS pair mode` (Wave 3 frontend)
-5. `feat(quant): signal robustness v2 — period folds + null benchmark` (Wave 4)
+- **Shell:** repo uses a `rtk` wrapper for git/pnpm/pytest. Patterns that worked:
+  `rtk git -C vnibb <cmd>`, `rtk pnpm run ci:gate` (with `workdir=vnibb`),
+  `rtk pytest apps/api/tests/... ` (with `workdir=vnibb`). `git stash` through `-C vnibb` was flaky;
+  prefer `git show HEAD:path` to inspect the committed version of a file.
+- **Frontend math lives in `apps/web/src/lib/*.ts`** with a sibling Jest test in
+  `apps/web/src/lib/__tests__/*.test.ts`. jsdom provides `localStorage`. Seed all randomness with the
+  exported `makeRng` from `quantLabMath.ts` (LCG) for reproducible tests.
+- **Variance-ratio z-stat gotcha (already fixed, don't reintroduce):** the canonical Lo-MacKinlay z
+  is `sqrt(N)·(VR−1)/sqrt(theta)` where `delta(j) = N·Σ d_t² d_{t−j}² / (Σ d_t²)²`. The `N` factor
+  must appear in BOTH the numerator (`sqrt(N)`) and inside `delta`; dropping one deflates/inflates z
+  by a factor of N. See `computeVarianceRatio` in `marketLabStats.ts` and `_variance_ratio` in
+  `quant.py` — keep the two in sync.
+- **New backend `/quant` metric =** edit 4 spots in `apps/api/vnibb/api/v1/quant.py`:
+  `SUPPORTED_METRICS`, `METRIC_ALIASES`, `_get_quant_calculators`, and a `@router.get` alias declared
+  BEFORE the catch-all `@router.get("/{symbol}")`. FastAPI matches by segment count, so a 3-segment
+  route like `/{symbol}/pair/{other}` is safe next to `/{symbol}`. Always `_safe_float` outputs and
+  return the insufficient-data payload (Nones) below the min-rows threshold.
+- **No scipy.** For a normal CDF use `math.erfc`/`math.erf` (see `_normal_sf` in `quant.py`).
+- **New widget ID =** 4 registration points: `types/dashboard.ts` (`WidgetType`),
+  `WidgetRegistry.ts` (import + component + name + description), `lib/dashboardLayout.ts`,
+  `data/widgetDefinitions.ts`. Waves 1-4 only modified existing widgets; 5.1 would add a new ID.
+- **Frontend must tolerate a not-yet-deployed backend.** New endpoints return 404 until the OCI
+  deploy runs. Pattern: catch `APIError` with `status === 404 || 405` in the query fn and return a
+  sentinel (`null` or `{ status: 'not_deployed' }`), render an empty state, NOT an error. See
+  `usePairDiagnostics` / `useMarketStructureTests` in `apps/web/src/lib/queries.ts`.
+- **Run history:** reuse `quantRunHistory.ts` + the shared `QuantRunHistoryPanel.tsx`. Store
+  summaries only, never full series. Budget is 50 runs, prune oldest unpinned first.
 
-Each commit: ci:gate green first. Wave 3 backend commit additionally requires the backend pytest
-suite green and an OCI deploy before merging the Wave 3 frontend commit.
+---
+
+## Known follow-ups / tech debt (not blocking, fix when convenient)
+
+- **`_get_quant_metric_alias_response` latent bug** (`apps/api/vnibb/api/v1/quant.py`, ~lines
+  922-933): the `benchmark_risk` branch references `start_date`/`end_date` before they're assigned
+  (assignment happens ~10 lines later). ruff flags F821. Only triggers if someone calls the
+  `benchmark-risk` *alias* endpoint (the main `/{symbol}?metrics=benchmark_risk` path is fine). Move
+  the `period_upper`/`end_date`/`start_date` assignment above the benchmark block to fix. Pre-existing,
+  unrelated to Waves 1-4.
+- **ruff `Dict`→`dict` style nits across `quant.py`** (~95 UP006). Pre-existing whole-file style; the
+  backend gate is `py_compile` + pytest (per `AGENTS.md`), not ruff, so this is cosmetic. Don't mass-
+  rewrite in a feature commit — do it as a dedicated chore if desired.
+- **`quantLabMath.ts` has no direct unit test file yet.** Its functions are exercised indirectly via
+  the widgets and `marketLabStructure.test.ts` only covers the marketLab functions. Consider adding
+  `apps/web/src/lib/__tests__/quantLabMath.test.ts` (rolling Sharpe peak/decay, pair half-life,
+  drawdown bootstrap percentile ordering) if touching that file.
+
+---
+
+## Suggested commit sequence (Waves 1-4 — all SHIPPED, see "Shipped status")
+
+1. `feat(market-lab): variance ratio, vol clustering, rolling vol regime` (Wave 1) — `6e9562e`
+2. `feat(quant): run history + pinning for lab widgets` (Wave 2) — `fa3f2ac`
+3. `feat(api/quant): market_structure_tests metric + pair diagnostics endpoint` (Wave 3 backend) — `2611f62`
+4. `feat(quant): backend-powered structure tests + OLS pair mode` (Wave 3 frontend) — `321bbdf`
+5. `feat(quant): signal robustness v2 — period folds + null benchmark` (Wave 4) — `d944874`
+
+Each commit: ci:gate green first. **The Wave 3 backend (`2611f62`) still requires an OCI deploy**
+(`docs/oracle_runbook.md`) to reach production — Vercel only deploys the frontend. The Wave 3
+frontend (`321bbdf`) was intentionally written to ship safely ahead of that deploy (404 = empty
+state, not error), so there is no ordering hazard, but the new metric/endpoint stay dark until the
+OCI deploy runs.
