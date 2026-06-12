@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useScreenerData, useMetricsHistory, useFinancialRatios, useProfile, useStockQuote, useQuantMetrics } from '@/lib/queries';
 import { formatDividendYield, formatRatio, formatPercent, normalizeDividendYield } from '@/lib/formatters';
 import { formatUnitValue } from '@/lib/units';
@@ -15,6 +15,7 @@ import { Sparkline } from '@/components/ui/Sparkline';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner';
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 
 interface KeyMetricsWidgetProps {
@@ -233,6 +234,20 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
         history && (history.roe?.length || history.roa?.length || history.pe_ratio?.length || history.pb_ratio?.length)
     );
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/screener',
+                endpoint: `/screener/?symbol=${symbol}&limit=1`,
+                sourceLabel: 'Key metrics',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                extra: hasData ? { metrics: mergedStock } : undefined,
+            }),
+        );
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, mergedStock]);
 
     const highlightCards = activeCategory === 'valuation'
         ? [

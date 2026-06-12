@@ -1,6 +1,6 @@
 'use client'
 
-import type { ExportProvenance } from '@/lib/exportWidget'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 /**
  * Shared helpers for quant widgets (Phase 1 follow-up).
@@ -75,18 +75,15 @@ export function buildQuantRuntime(input: QuantRuntimeInput): Record<string, unkn
   const data = input.response?.data
   const lastDataDate = data?.last_data_date ?? null
   const adjustmentMode = input.adjustmentMode ?? data?.adjustment_mode ?? undefined
-  const provenance: Partial<ExportProvenance> = {
-    sourceLabel: input.sourceLabel ?? (input.derived ? 'Quant (derived)' : 'Quant metrics'),
+  return buildWidgetRuntime({
+    empty: input.empty,
+    compactHeight: input.compactHeight,
     apiGroup: input.apiGroup ?? '/quant',
     endpoint: input.endpoint,
-    adjustmentMode: adjustmentMode ?? undefined,
-    updatedAt: lastDataDate ?? undefined,
-  }
-  return {
-    __widgetRuntime: {
-      layoutHint: { empty: input.empty, compactHeight: input.compactHeight },
-      provenance,
-    },
-    ...(input.extra ?? {}),
-  }
+    sourceLabel: input.sourceLabel ?? (input.derived ? 'Quant (derived)' : 'Quant metrics'),
+    lastDataDate,
+    adjustmentMode,
+    derived: input.derived,
+    extra: input.extra,
+  })
 }

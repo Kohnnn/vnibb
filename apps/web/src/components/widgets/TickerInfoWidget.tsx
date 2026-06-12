@@ -12,6 +12,7 @@ import { useQuantRegime } from '@/hooks/useQuantRegime';
 import { TrendingUp, TrendingDown, Info, Activity } from 'lucide-react';
 import { formatCompactValueForUnit, formatNumber, formatPriceValueForUnit } from '@/lib/units';
 import { cn } from '@/lib/utils';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 function toPositiveNumber(value: unknown): number | null {
   const parsed = typeof value === 'number' ? value : Number(value)
@@ -114,12 +115,17 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
   }, [oneYearHistory?.data])
 
   useEffect(() => {
-    onDataChange?.({
-      quote,
-      profile: profileData,
-      screener: screenerRow,
-    })
-  }, [onDataChange, profileData, quote, screenerRow])
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasQuote,
+        apiGroup: '/equity',
+        endpoint: `/equity/quote?symbol=${symbol}`,
+        sourceLabel: 'Quote + profile',
+        lastDataDate: quoteUpdatedAt ?? profileUpdatedAt,
+        extra: { quote, profile: profileData, screener: screenerRow },
+      }),
+    )
+  }, [onDataChange, profileData, quote, screenerRow, hasQuote, symbol, quoteUpdatedAt, profileUpdatedAt])
 
   const handleRetry = () => {
     refetchQuote();

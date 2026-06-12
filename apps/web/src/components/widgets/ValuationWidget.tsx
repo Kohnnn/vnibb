@@ -6,6 +6,7 @@ import { formatRatio } from '@/lib/formatters';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import {
   BarChart,
   Bar,
@@ -33,10 +34,18 @@ export function ValuationWidget({ symbol, onDataChange }: ValuationWidgetProps) 
   const currentStock = stocks.find(s => s.ticker === symbol) || stocks[0];
 
   useEffect(() => {
-    if (peerData) {
-      onDataChange?.(peerData);
-    }
-  }, [peerData, onDataChange]);
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/screener',
+        endpoint: '/screener/?limit=10',
+        sourceLabel: 'Peer snapshot',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        extra: peerData ? { peers: peerData.data } : undefined,
+      }),
+    );
+  }, [peerData, hasData, isFallback, dataUpdatedAt, onDataChange]);
 
   if (isLoading && !hasData) return <WidgetSkeleton variant="chart" />;
   if (error && !hasData) return <WidgetError error={error as Error} onRetry={() => refetch()} />;
