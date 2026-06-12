@@ -80,7 +80,6 @@ const GLOBAL_WIDGETS = new Set<WidgetType>([
     'world_news_sources',
     'forex_rates',
     'commodities',
-    'economic_calendar',
     'tradingview_market_overview',
     'tradingview_market_data',
     'tradingview_ticker_tape',

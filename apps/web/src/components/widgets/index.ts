@@ -93,13 +93,11 @@ export { MomentumWidget } from './MomentumWidget';
 export { EarningsQualityWidget } from './EarningsQualityWidget';
 export { SmartMoneyWidget } from './SmartMoneyWidget';
 export { RelativeRotationWidget } from './RelativeRotationWidget';
-export { EconomicCalendarWidget } from './EconomicCalendarWidget';
 export { EventsCalendarWidget } from './EventsCalendarWidget';
 export { NewsCorporateActionsWidget } from './NewsCorporateActionsWidget';
 export { DividendLadderWidget } from './DividendLadderWidget';
 
 // === Analysis Widgets ===
-export { ComparisonWidget } from './ComparisonWidget';
 export { ComparisonAnalysisWidget } from './ComparisonAnalysisWidget';
 export { PeerComparisonWidget } from './PeerComparisonWidget';
 export { SimilarStocksWidget } from './SimilarStocksWidget';

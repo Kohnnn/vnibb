@@ -112,7 +112,6 @@ export type WidgetType =
     | 'market_breadth'
     | 'portfolio_tracker'
     | 'price_alerts'
-    | 'economic_calendar'
     | 'volume_analysis'
     | 'volume_profile'
     | 'obv_divergence'

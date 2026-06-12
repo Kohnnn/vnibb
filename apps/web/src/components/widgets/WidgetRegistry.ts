@@ -42,7 +42,6 @@ import { AICopilotWidget } from './AICopilotWidget';
 import { TopMoversWidget } from './TopMoversWidget';
 import { WorldIndicesWidget } from './WorldIndicesWidget';
 import { SectorPerformanceWidget } from './SectorPerformanceWidget';
-import { EconomicCalendarWidget } from './EconomicCalendarWidget';
 import { VolumeAnalysisWidget } from './VolumeAnalysisWidget';
 import { VolumeProfileWidget } from './VolumeProfileWidget';
 import { OBVDivergenceWidget } from './OBVDivergenceWidget';
@@ -441,7 +440,6 @@ export const widgetRegistry: Record<WidgetType, ComponentType<WidgetProps>> = {
     quick_stats: QuickStatsWidget as ComponentType<WidgetProps>,
 
     // Reference widgets
-    economic_calendar: EconomicCalendarWidget as ComponentType<WidgetProps>,
     forex_rates: ForexRatesWidget as ComponentType<WidgetProps>,
     commodities: CommoditiesWidget as ComponentType<WidgetProps>,
 
@@ -513,7 +511,6 @@ export const widgetNames: Record<WidgetType, string> = {
     market_breadth: 'Market Breadth',
     portfolio_tracker: 'Portfolio Tracker',
     price_alerts: 'Price Alerts',
-    economic_calendar: 'Economic Calendar',
     volume_analysis: 'Volume Analysis',
     volume_profile: 'Volume Profile',
     obv_divergence: 'OBV Divergence',
@@ -647,7 +644,6 @@ export const widgetDescriptions: Record<WidgetType, string> = {
     market_breadth: 'Advancers vs decliners by exchange',
     portfolio_tracker: 'Personal holdings P&L',
     price_alerts: 'Target price notifications',
-    economic_calendar: 'Macroeconomic events',
     volume_analysis: 'Historical volume distribution',
     volume_profile: 'POC/VAH/VAL volume profile by price range',
     obv_divergence: 'Price and OBV divergence scanner',

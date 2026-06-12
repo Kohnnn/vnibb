@@ -193,7 +193,6 @@ export const WIDGET_LAYOUT_BEHAVIORS: Record<WidgetType, LayoutBehavior> = {
   market_movers_sectors: { preferredW: 8, preferredH: 7, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
   portfolio_tracker: { preferredW: 6, preferredH: 8, minW: 4, minH: 6, orientation: 'vertical', expandPriority: 2 },
   price_alerts: { preferredW: 4, preferredH: 7, minW: 2, minH: 4, orientation: 'vertical', expandPriority: 2 },
-  economic_calendar: { preferredW: 5, preferredH: 7, minW: 3, minH: 4, orientation: 'vertical', expandPriority: 2 },
   dividend_ladder: { preferredW: 5, preferredH: 7, minW: 4, minH: 5, orientation: 'vertical', expandPriority: 2 },
   drawdown_deep_dive: { preferredW: 8, preferredH: 7, minW: 6, minH: 5, orientation: 'balanced', expandPriority: 2 },
   gamma_exposure: { preferredW: 6, preferredH: 6, minW: 4, minH: 5, orientation: 'balanced', expandPriority: 2 },

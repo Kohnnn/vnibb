@@ -1,5 +1,12 @@
 # VN100 EOD Backfill Plan
 
+> Update 2026-06-11: For full-universe + deeper-history backfill, prefer the
+> Vietcap pipeline (`VIETCAP_DATA_SOURCE.md`, `apps/api/scripts/vietcap/`).
+> Vietcap is now the PRIMARY source, is auth-free, off the vnstock quota, and
+> returns history back to each symbol's listing date (often pre-2015, beyond
+> the KBS floor this plan hit). The vnstock path below remains the daily-refresh
+> fallback. EOD `source` precedence is `vietcap` > `vnstock-data`.
+
 ## Goal
 
 Populate canonical end-of-day OHLCV history for the full VN100 universe so quant and backtesting widgets can run from local database data instead of repeated provider calls.

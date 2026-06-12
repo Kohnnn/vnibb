@@ -509,14 +509,6 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 4, h: 7, minW: 2, minH: 4 }
     },
     {
-        type: 'economic_calendar',
-        name: 'Economic Calendar',
-        description: 'Macro events and economic indicators',
-        category: 'calendar',
-        defaultConfig: {},
-        defaultLayout: { w: 5, h: 7, minW: 3, minH: 4 }
-    },
-    {
         type: 'derivatives_contracts_board',
         name: 'Derivatives Contracts',
         description: 'Available futures contracts with expiry schedule and quick filtering',
@@ -534,16 +526,6 @@ export const widgetDefinitions: WidgetDefinition[] = [
         defaultLayout: { w: 10, h: 8, minW: 6, minH: 6 },
         searchKeywords: ['derivatives', 'futures', 'history', 'price chart']
     },
-    {
-        type: 'dividend_ladder',
-        name: 'Dividend Ladder',
-        description: 'Upcoming dividend schedule and payments',
-        category: 'calendar',
-        defaultConfig: {},
-        defaultLayout: { w: 5, h: 7, minW: 4, minH: 5 }
-    },
-
-    // Technical Analysis
     {
         type: 'volume_analysis',
         name: 'Volume Analysis',
@@ -1315,6 +1297,9 @@ const LEGACY_WIDGET_TYPE_ALIASES = {
     financials: 'unified_financials',
     institutional_ownership: 'major_shareholders',
     database_browser: 'database_inspector',
+    // Retired the hardcoded/sample economic_calendar widget in favor of the live
+    // TradingView economic calendar embed. Saved dashboards auto-migrate.
+    economic_calendar: 'tradingview_economic_calendar',
 } as const;
 
 export function normalizeWidgetType(type: string | null | undefined): WidgetDefinition['type'] | null {

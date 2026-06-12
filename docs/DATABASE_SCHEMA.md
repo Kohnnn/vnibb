@@ -1,7 +1,16 @@
 # Database Schema
 
 **Persistence:** self-hosted database stack (private network access)
-**Total Collections:** 26
+**Total Collections:** 26 (Appwrite/app model) + Mongo `vnibb-market` market corpus
+
+> Two physical stores are described here:
+> 1. The **Appwrite/Supabase app model** — the 26 collections below that power the
+>    application (dashboards, screener, app-facing financials, etc.).
+> 2. The **MongoDB `vnibb-market` market corpus** on n6v — the canonical
+>    analytical/market datastore that runtime market reads (`/equity/historical`,
+>    quant, MCP) prefer. See the dedicated section
+>    "MongoDB Market Corpus (n6v)" near the end of this document and
+>    `VIETCAP_DATA_SOURCE.md` for the Vietcap-sourced collections.
 
 ---
 
@@ -785,7 +794,151 @@ Many-to-many relationships requiring junction tables:
 
 ---
 
+## MongoDB Market Corpus (n6v)
+
+Physical store: MongoDB database `vnibb-market` on n6v (`100.72.199.91:27017`).
+This is the canonical analytical/market corpus, separate from the Appwrite app
+model above. Runtime market reads (`/equity/historical`, quant endpoints, MCP
+`get_eod_price_history`) prefer this store.
+
+### Provenance / `source` convention
+
+Market rows carry a `source` field. Precedence is **`vietcap` > `vnstock-data`**.
+
+- `vietcap` — public Vietcap endpoints (primary). Prices are **raw VND**
+  (`priceUnit: "VND"`). Deeper history (back to listing date, often pre-2015).
+- `vnstock-data` — vnstock provider (fallback). Prices are **thousand VND**
+  (multiply by 1000 for parity with Vietcap).
+
+The EOD read path filters only on `(symbol, tradeDate)` and ignores `source`,
+so exactly one bar per trading day must exist. The Vietcap backfill enforces this
+by deleting overlapping `vnstock-data` bars whenever a `vietcap` bar exists for
+the same `(symbol, tradeDate)` (the `--reconcile` step). See
+`VIETCAP_DATA_SOURCE.md`.
+
+### `market_prices_eod`
+Canonical daily OHLCV for stocks, ETFs, and indices.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `symbol` | string | Ticker / index symbol |
+| `tradeDate` | datetime | Trading day, normalized to `07:00:00` |
+| `interval` | string | `1D` |
+| `source` | string | `vietcap` (primary) or `vnstock-data` (fallback) |
+| `sourceKey` | string | `{source}:{SYMBOL}:eod:{YYYY-MM-DD}` |
+| `open`/`high`/`low`/`close` | float | OHLC (raw VND for `vietcap`) |
+| `volume` | int | Volume |
+| `value` | float | Trade value (when available) |
+| `accumulatedVolume`/`accumulatedValue` | float | Session accumulators (vietcap) |
+| `priceUnit` | string | `VND` for vietcap rows |
+| `createdAt`/`updatedAt`/`syncedAt` | datetime | Provenance timestamps |
+| `schemaVersion` | int | `1` |
+
+**Indexes:** `idx_symbol_tradeDate_desc` (existing), `(symbol, tradeDate, source)`
+
+### `market_prices_cw` / `market_prices_derivatives` / `market_prices_bond`
+Same OHLCV shape as `market_prices_eod`, kept separate so the stock corpus stays
+clean. `cw` = covered warrants, `derivatives` = futures (`FU`), `bond` =
+bonds/debentures.
+
+**Indexes:** `(symbol, tradeDate, source)` unique
+
+### `market_vnstock_premium_records`
+Multi-dataset raw record store for fundamentals and company data.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `dataset` | string | e.g. `finance.income_statement`, `finance.balance_sheet`, `finance.cash_flow`, `finance.ratio`, `company.shareholder_structure` |
+| `datasetGroup` | string | `finance`, `company`, ... |
+| `section` | string | Statement section (financial statements) |
+| `symbol` | string | Ticker |
+| `source` | string | `vietcap` or `vnstock-data` |
+| `recordKey` | string | Stable per-period identity |
+| `period` | string | `FY2025`, `2025-Q1` |
+| `periodType` | string | `YEAR`, `QUARTER` |
+| `fiscalYear`/`fiscalQuarter` | int | Period decomposition |
+| `observedAt` | datetime | Period anchor |
+| `raw` | object | Raw provider document (coded fields like `isa20`, `bsa53`) |
+| `schemaVersion` | int | `1` |
+
+**Indexes:** `(dataset, symbol, recordKey)` unique
+
+### `market_financial_metric_map`
+Code->label dictionary for decoding `raw` financial fields.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `comTypeCode` | string | Company type (e.g. `IN`, `CT`, bank/securities/insurance) |
+| `section` | string | `INCOME_STATEMENT`, `BALANCE_SHEET`, `CASH_FLOW`, `NOTE` |
+| `source` | string | `vietcap` |
+| `labels` | object | `{ field: {field, name, level, parent, titleEn, titleVi, ...} }` |
+| `fieldCount` | int | Number of mapped fields |
+
+**Indexes:** `(comTypeCode, section, source)` unique
+
+### `market_company_profiles`
+Company master + analyst coverage (Vietcap `details` + `search-bar`).
+
+| Attribute | Type | Description |
+|---|---|---|
+| `symbol` | string | Ticker |
+| `source` | string | `vietcap` |
+| `details` | object | `currentPrice`, `marketCap`, `rating`, `targetPrice`, `sector`, `icbCodeLv2/4`, ownership %, `freeFloat`, profile HTML... |
+| `searchBar` | object | ICB hierarchy `icbLv1..4`, `inCu`, rating, target price |
+
+**Indexes:** `(symbol, source)` unique
+
+### `market_index_constituents`
+Index/group membership from `getByGroup`.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `group` | string | `VN30`, `VN100`, `HOSE`, `HNX30`, `ETF`, `CW`, `BOND`, `FU_INDEX`... |
+| `source` | string | `vietcap` |
+| `members` | string[] | Member symbols |
+| `memberCount` | int | Count |
+
+**Indexes:** `(group, source)` unique
+
+### `market_icb_sectors`
+ICB sector dictionary from `sectors/icb-codes`.
+
+| Attribute | Type | Description |
+|---|---|---|
+| `icbCode` | string | ICB code (`name` in source) |
+| `source` | string | `vietcap` |
+| `enSector`/`viSector` | string | Sector labels |
+| `icbLevel` | int | Hierarchy level (1-4) |
+| `marketCap` | float | Aggregate market cap (when present) |
+
+**Indexes:** `(icbCode, source)` unique
+
+### Future Appwrite mirror mapping
+
+When a controlled Appwrite mirror is re-enabled, project the Mongo corpus into
+the app model as follows:
+
+| Mongo (vnibb-market) | Appwrite/app collection |
+|---|---|
+| `market_prices_eod` | `stock_prices` |
+| `market_prices_derivatives` | `derivative_prices` |
+| `market_vnstock_premium_records` (`finance.income_statement`) | `income_statements` |
+| `market_vnstock_premium_records` (`finance.balance_sheet`) | `balance_sheets` |
+| `market_vnstock_premium_records` (`finance.cash_flow`) | `cash_flows` |
+| `market_vnstock_premium_records` (`finance.ratio`) | `financial_ratios` |
+| `market_vnstock_premium_records` (`company.shareholder_structure`) | `shareholders` |
+| `market_company_profiles` | `companies` / `stocks` |
+| `market_index_constituents` | `stock_indices` constituents |
+| `market_icb_sectors` | `market_sectors` |
+
+Field-level decode for financial statements requires joining
+`market_financial_metric_map` to translate coded fields (`isa20`, `bsa53`...)
+into the named columns the app collections expect.
+
+---
+
 ## Data Flow
+
 
 ```mermaid
 flowchart LR
