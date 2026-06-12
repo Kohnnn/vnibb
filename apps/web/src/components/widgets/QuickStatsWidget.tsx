@@ -2,20 +2,23 @@
 
 'use client';
 
+import { useEffect } from 'react';
 import { Activity, TrendingUp, TrendingDown, BarChart2, DollarSign } from 'lucide-react';
 import { useFinancialRatios, useHistoricalPrices, useStockQuote } from '@/lib/queries';
 import { latestByFinancialPeriod } from '@/lib/financialPeriods';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface QuickStatsWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
-export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
+export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps) {
     const pricesQuery = useHistoricalPrices(symbol, {
         startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     });
@@ -46,6 +49,23 @@ export function QuickStatsWidget({ symbol }: QuickStatsWidgetProps) {
 
     const hasData = Boolean(latest || latestQuote || latestRatio);
     const isFallback = Boolean(error && hasData);
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/equity',
+                endpoint: `/equity/historical?symbol=${symbol}`,
+                sourceLabel: '30-day window',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                derived: true,
+                extra: hasData
+                    ? { price: latestQuote?.price ?? latest?.close ?? null, pe: latestRatio?.pe ?? null }
+                    : undefined,
+            }),
+        );
+    }, [hasData, dataUpdatedAt, isFallback, symbol, latestQuote?.price, latest?.close, latestRatio?.pe, onDataChange]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view quick stats" />;

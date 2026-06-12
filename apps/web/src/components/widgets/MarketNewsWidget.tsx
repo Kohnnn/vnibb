@@ -7,6 +7,7 @@ import { ExternalLink, Clock, Newspaper } from 'lucide-react';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { API_BASE_URL } from '@/lib/api';
 import { formatTimestamp } from '@/lib/format';
 import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
@@ -83,7 +84,7 @@ interface MarketNewsFeed {
   mode: 'all' | 'related';
 }
 
-function MarketNewsWidgetComponent({ symbol, config }: { symbol?: string; config?: Record<string, unknown> }) {
+function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: string; config?: Record<string, unknown>; onDataChange?: (data: unknown) => void }) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const preferredMode: 'all' | 'related' = config?.mode === 'all' || config?.mode === 'related'
     ? (config.mode as 'all' | 'related')
@@ -157,6 +158,20 @@ function MarketNewsWidgetComponent({ symbol, config }: { symbol?: string; config
     () => articles.map((item: MarketNewsArticle) => ({ ...item, matchedSymbols: item.matchedSymbols.join(', ') })),
     [articles]
   );
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/news',
+        endpoint: '/news/feed',
+        sourceLabel: feedNote,
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        extra: { count: articles.length },
+      }),
+    );
+  }, [onDataChange, hasData, dataUpdatedAt, isFallback, feedNote, articles.length]);
 
   const widgetTitle = mode === 'related' && upperSymbol ? `${upperSymbol} Market News` : 'Global Market News';
 

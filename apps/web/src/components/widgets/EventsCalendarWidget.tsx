@@ -2,12 +2,13 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Calendar, DollarSign, Split, Users, RefreshCw } from 'lucide-react';
 import { useCompanyEvents } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { formatShortDate } from '@/lib/format';
 
@@ -15,6 +16,7 @@ interface EventsCalendarWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 const eventTypeIcons: Record<string, typeof Calendar> = {
@@ -58,7 +60,7 @@ function getEventTypeKeyFromEvent(event: {
     return getEventTypeKey(event.event_type || event.description);
 }
 
-export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
+export function EventsCalendarWidget({ symbol, onDataChange }: EventsCalendarWidgetProps) {
     const {
         data,
         isLoading,
@@ -88,6 +90,20 @@ export function EventsCalendarWidget({ symbol }: EventsCalendarWidgetProps) {
     const hasData = events.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/equity',
+                endpoint: `/equity/${symbol}/events`,
+                sourceLabel: 'Company events',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                extra: { count: events.length },
+            }),
+        );
+    }, [onDataChange, hasData, dataUpdatedAt, isFallback, events.length, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view events" icon={<Calendar size={18} />} />;

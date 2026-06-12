@@ -1,11 +1,13 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Activity, Minus, TrendingDown, TrendingUp } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useTrendingAnalysis, useMarketSentiment } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
@@ -13,6 +15,7 @@ import type { WidgetHealthState } from '@/lib/widgetHealth';
 interface MarketSentimentWidgetProps {
   id: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const sentimentConfig = {
@@ -40,7 +43,7 @@ function sentimentLabel(value: string | null | undefined) {
   return String(value || 'neutral').toLowerCase();
 }
 
-export function MarketSentimentWidget({ id, onRemove }: MarketSentimentWidgetProps) {
+export function MarketSentimentWidget({ id, onRemove, onDataChange }: MarketSentimentWidgetProps) {
   const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'market_sentiment' });
   const sentimentQuery = useMarketSentiment();
   const trendingQuery = useTrendingAnalysis();
@@ -70,6 +73,20 @@ export function MarketSentimentWidget({ id, onRemove }: MarketSentimentWidgetPro
     label: 'No ticker mentions',
     detail: 'The news feed loaded, but no listed ticker mentions were extracted from the latest articles.',
   };
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/news',
+        endpoint: '/news/sentiment',
+        sourceLabel: 'Market sentiment',
+        lastDataDate: updatedAt,
+        stale: Boolean(error && hasData),
+        extra: { articles: sentiment?.total_articles ?? 0, overall: sentiment?.overall },
+      }),
+    );
+  }, [onDataChange, hasData, updatedAt, error, sentiment?.total_articles, sentiment?.overall]);
 
   if (isLoading) {
     return <WidgetSkeleton lines={6} />;

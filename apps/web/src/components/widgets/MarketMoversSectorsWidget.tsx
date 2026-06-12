@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { LayoutGrid, TrendingUp } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -8,15 +8,17 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useSectorPerformance } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetGroupId } from '@/types/widget';
 
 interface MarketMoversSectorsWidgetProps {
   id: string;
   widgetGroup?: WidgetGroupId;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
-export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove }: MarketMoversSectorsWidgetProps) {
+export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataChange }: MarketMoversSectorsWidgetProps) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorPerformance();
   const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'market_movers_sectors' });
 
@@ -57,6 +59,20 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove }: MarketM
       .sort((a, b) => (a?.changePct ?? 0) - (b?.changePct ?? 0))
       .slice(0, 4);
   }, [sectors]);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/market',
+        endpoint: '/market/sector-performance',
+        sourceLabel: 'Sector performance',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        extra: hasData ? { sectorCount: sectors.length } : undefined,
+      }),
+    );
+  }, [hasData, dataUpdatedAt, isFallback, sectors.length, onDataChange]);
 
   return (
     <WidgetContainer

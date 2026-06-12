@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { TrendingUp } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -8,15 +8,17 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useSectorPerformance } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetGroupId } from '@/types/widget';
 
 interface SectorRotationRadarWidgetProps {
   id: string;
   widgetGroup?: WidgetGroupId;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
-export function SectorRotationRadarWidget({ id, widgetGroup, onRemove }: SectorRotationRadarWidgetProps) {
+export function SectorRotationRadarWidget({ id, widgetGroup, onRemove, onDataChange }: SectorRotationRadarWidgetProps) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorPerformance();
   const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'sector_rotation_radar' });
 
@@ -34,6 +36,20 @@ export function SectorRotationRadarWidget({ id, widgetGroup, onRemove }: SectorR
       .sort((a, b) => (a.changePct ?? 0) - (b.changePct ?? 0))
       .slice(0, 5);
   }, [sectors]);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/market',
+        endpoint: '/market/sector-performance',
+        sourceLabel: 'Rotation leaders & laggards',
+        lastDataDate: dataUpdatedAt,
+        stale: Boolean(error && hasData),
+        extra: hasData ? { sectorCount: sectors.length } : undefined,
+      }),
+    );
+  }, [hasData, dataUpdatedAt, error, sectors.length, onDataChange]);
 
   return (
     <WidgetContainer

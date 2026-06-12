@@ -7,6 +7,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import {
   getWorldNewsSources,
@@ -92,11 +93,13 @@ function WorldNewsSourcesWidgetComponent({
   config,
   onRemove,
   hideHeader,
+  onDataChange,
 }: {
   id: string;
   config?: Record<string, unknown>;
   onRemove?: () => void;
   hideHeader?: boolean;
+  onDataChange?: (data: unknown) => void;
 }) {
   const [region, setRegion] = useState<RegionFilter>(() => getInitialRegion(config));
   const [category, setCategory] = useState<CategoryFilter>(() => getInitialCategory(config));
@@ -168,6 +171,20 @@ function WorldNewsSourcesWidgetComponent({
     ...source,
     feed_urls: source.feed_urls.join(', '),
   }));
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/news',
+        endpoint: '/news/world/sources',
+        sourceLabel: 'World news source registry',
+        lastDataDate: dataUpdatedAt,
+        stale: Boolean(error && hasData),
+        extra: { count: sources.length },
+      }),
+    );
+  }, [onDataChange, hasData, dataUpdatedAt, error, sources.length]);
 
   return (
     <WidgetContainer

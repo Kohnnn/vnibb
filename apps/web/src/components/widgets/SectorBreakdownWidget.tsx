@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { LayoutGrid } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -9,11 +9,13 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useMarketHeatmap } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { cn } from '@/lib/utils';
 
 interface SectorBreakdownWidgetProps {
   id: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#22d3ee', '#ef4444', '#06b6d4', '#f97316', '#22c55e'];
@@ -26,7 +28,7 @@ const METRIC_OPTIONS = [
 
 type SectorMetric = (typeof METRIC_OPTIONS)[number]['id'];
 
-function SectorBreakdownWidgetComponent({ id, onRemove }: SectorBreakdownWidgetProps) {
+function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBreakdownWidgetProps) {
   const [topCount, setTopCount] = useState<(typeof TOP_OPTIONS)[number]>(10);
   const [metric, setMetric] = useState<SectorMetric>('share');
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMarketHeatmap({
@@ -87,6 +89,21 @@ function SectorBreakdownWidgetComponent({ id, onRemove }: SectorBreakdownWidgetP
 
   const hasData = chartData.length > 0;
   const isFallback = Boolean(error && hasData);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/market',
+        endpoint: '/market/heatmap?group_by=sector&exchange=HOSE&limit=300',
+        sourceLabel: 'Sector breakdown',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        derived: true,
+        extra: hasData ? { metric, sectorCount: sectors.length } : undefined,
+      }),
+    );
+  }, [hasData, dataUpdatedAt, isFallback, metric, sectors.length, onDataChange]);
 
   return (
     <WidgetContainer title="Market Sector Breakdown" onRefresh={() => refetch()} onClose={onRemove} isLoading={isLoading && !hasData}>

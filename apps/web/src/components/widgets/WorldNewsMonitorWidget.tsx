@@ -7,6 +7,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { addNotebookItem } from '@/lib/researchNotebook';
@@ -132,11 +133,13 @@ function WorldNewsMonitorWidgetComponent({
   config,
   onRemove,
   hideHeader,
+  onDataChange,
 }: {
   id: string;
   config?: Record<string, unknown>;
   onRemove?: () => void;
   hideHeader?: boolean;
+  onDataChange?: (data: unknown) => void;
 }) {
   const [region, setRegion] = useState<RegionFilter>(() => getInitialRegion(config));
   const [category, setCategory] = useState<CategoryFilter>(() => getInitialCategory(config));
@@ -245,6 +248,20 @@ function WorldNewsMonitorWidgetComponent({
     ...article,
     tags: article.tags.join(', '),
   }));
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/news',
+        endpoint: '/news/world',
+        sourceLabel: 'World news monitor',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        extra: { count: visibleArticles.length },
+      }),
+    );
+  }, [onDataChange, hasData, dataUpdatedAt, isFallback, visibleArticles.length]);
 
   function applyCustomFeed(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Activity } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -8,12 +8,14 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useMarketBreadth } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatNumber } from '@/lib/format';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface MarketBreadthWidgetProps {
   id: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 function formatPct(value: number | null | undefined): string {
@@ -21,7 +23,7 @@ function formatPct(value: number | null | undefined): string {
   return `${value.toFixed(1)}%`;
 }
 
-export function MarketBreadthWidget({ id, onRemove }: MarketBreadthWidgetProps) {
+export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadthWidgetProps) {
   const breadthQuery = useMarketBreadth();
   const rows = useMemo(() => breadthQuery.data?.data ?? [], [breadthQuery.data?.data]);
   const hasData = rows.length > 0;
@@ -41,6 +43,20 @@ export function MarketBreadthWidget({ id, onRemove }: MarketBreadthWidgetProps) 
         detail: 'Showing the last successful breadth snapshot while the refresh path is degraded.',
       }
     : undefined
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/market',
+        endpoint: '/market/breadth',
+        sourceLabel: 'A/D + trend breadth',
+        lastDataDate: updatedAt,
+        stale: Boolean(error && hasData),
+        extra: hasData ? { exchangeCount: rows.length } : undefined,
+      }),
+    );
+  }, [hasData, updatedAt, error, rows.length, onDataChange]);
 
   return (
     <WidgetContainer

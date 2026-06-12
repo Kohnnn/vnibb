@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { LayoutGrid } from 'lucide-react';
 import { useSectorPerformance } from '@/lib/queries';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -8,12 +8,14 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetGroupId } from '@/types/widget';
 
 interface SectorPerformanceWidgetProps {
     isEditing?: boolean;
     onRemove?: () => void;
     widgetGroup?: WidgetGroupId;
+    onDataChange?: (data: unknown) => void;
 }
 
 function getHeatmapColor(changePct: number): string {
@@ -27,7 +29,7 @@ function getHeatmapColor(changePct: number): string {
     return 'bg-red-600';
 }
 
-export function SectorPerformanceWidget({ onRemove, widgetGroup }: SectorPerformanceWidgetProps) {
+export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }: SectorPerformanceWidgetProps) {
     const [view, setView] = useState<'grid' | 'list'>('grid');
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSectorPerformance();
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'sector_performance' });
@@ -39,6 +41,20 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup }: SectorPerform
     const sortedSectors = useMemo(() => {
         return [...sectors].sort((a, b) => Math.abs((b.changePct ?? 0) - (a.changePct ?? 0)));
     }, [sectors]);
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/market',
+                endpoint: '/market/sector-performance',
+                sourceLabel: 'Sector snapshot',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                extra: hasData ? { sectorCount: sectors.length } : undefined,
+            }),
+        );
+    }, [hasData, dataUpdatedAt, isFallback, sectors.length, onDataChange]);
 
     const headerActions = (
         <div className="flex bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded text-[10px] mr-2">

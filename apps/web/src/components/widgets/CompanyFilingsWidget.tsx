@@ -2,11 +2,13 @@
 
 'use client';
 
+import { useEffect } from 'react';
 import { useCompanyEvents } from '@/lib/queries';
 import { Calendar, FileText } from 'lucide-react';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatShortDate } from '@/lib/format';
 import type { CompanyEventData } from '@/types/equity';
 
@@ -14,6 +16,7 @@ interface CompanyFilingsWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function getEventTypeColor(type: string): string {
@@ -55,7 +58,7 @@ function getEventDescription(event: CompanyEventData): string {
     return event.description || event.value || '-';
 }
 
-export function CompanyFilingsWidget({ symbol }: CompanyFilingsWidgetProps) {
+export function CompanyFilingsWidget({ symbol, onDataChange }: CompanyFilingsWidgetProps) {
     const {
         data,
         isLoading,
@@ -68,6 +71,20 @@ export function CompanyFilingsWidget({ symbol }: CompanyFilingsWidgetProps) {
     const events = data?.data || [];
     const hasData = events.length > 0;
     const isFallback = Boolean(error && hasData);
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/equity',
+                endpoint: `/equity/${symbol}/events`,
+                sourceLabel: 'Corporate events',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                extra: { count: events.length },
+            }),
+        );
+    }, [onDataChange, hasData, dataUpdatedAt, isFallback, events.length, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view corporate events" icon={<FileText size={18} />} />;

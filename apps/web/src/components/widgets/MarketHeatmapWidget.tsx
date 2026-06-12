@@ -1,7 +1,7 @@
 // Market Heatmap Widget - Treemap visualization of market sectors with D3
 'use client';
 
-import { useState, useMemo, useRef, memo } from 'react';
+import { useState, useMemo, useRef, useEffect, memo } from 'react';
 import { ChevronLeft, Download, LayoutGrid } from 'lucide-react';
 import { hierarchy, treemap } from 'd3-hierarchy';
 import html2canvas from 'html2canvas';
@@ -9,6 +9,7 @@ import { logClientError } from '@/lib/clientLogger';
 import { useUnit } from '@/contexts/UnitContext';
 import { useMarketHeatmap } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { SectorGroup } from '@/lib/api';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -22,6 +23,7 @@ interface MarketHeatmapWidgetProps {
     id: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function clampLabelSize(width: number, height: number): number {
@@ -58,7 +60,7 @@ function buildTreemapLayout(data: unknown, width: number, height: number) {
     return layout(root);
 }
 
-function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmapWidgetProps) {
+function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }: MarketHeatmapWidgetProps) {
     const [groupBy, setGroupBy] = useState<'sector' | 'industry'>('sector');
     const [exchange, setExchange] = useState<'HOSE' | 'HNX' | 'UPCOM' | 'ALL'>('HOSE');
     const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
@@ -172,6 +174,20 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove }: MarketHeatmap
 
     const hasData = Boolean(treemapData && data?.sectors?.length);
     const isFallback = Boolean(error && hasData);
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/market',
+                endpoint: `/market/heatmap?group_by=${groupBy}&exchange=${exchange}&limit=500`,
+                sourceLabel: 'Market heatmap',
+                lastDataDate: data?.updated_at || dataUpdatedAt,
+                stale: isFallback,
+                extra: hasData ? { groupBy, exchange, groupCount: data?.sectors?.length ?? 0 } : undefined,
+            }),
+        );
+    }, [hasData, data?.updated_at, dataUpdatedAt, isFallback, groupBy, exchange, data?.sectors?.length, onDataChange]);
 
     return (
         <WidgetContainer

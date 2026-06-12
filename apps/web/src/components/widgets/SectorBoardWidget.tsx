@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, LayoutGrid } from 'lucide-react';
 
 import { useUnit } from '@/contexts/UnitContext';
@@ -10,12 +10,14 @@ import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useSectorBoard } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatNumber, formatPriceValueForUnit } from '@/lib/units';
 import { cn } from '@/lib/utils';
 
 interface SectorBoardWidgetProps {
   id: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const SORT_OPTIONS = [
@@ -48,7 +50,7 @@ function colorClass(color: string) {
   }
 }
 
-function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
+function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardWidgetProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sortBy, setSortBy] = useState<'volume' | 'market_cap' | 'change_pct'>('volume');
   const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'sector_board' });
@@ -73,6 +75,19 @@ function SectorBoardWidgetComponent({ id, onRemove }: SectorBoardWidgetProps) {
   const weakestSector = useMemo(() => {
     return sectors.length ? [...sectors].sort((left, right) => left.change_pct - right.change_pct)[0] : null;
   }, [sectors]);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/market',
+        endpoint: `/market/sector-board?sort_by=${sortBy}&limit_per_sector=12`,
+        sourceLabel: 'Sector board',
+        lastDataDate: data?.updated_at || dataUpdatedAt,
+        extra: hasData ? { sortBy, sectorCount: sectors.length } : undefined,
+      }),
+    );
+  }, [hasData, data?.updated_at, dataUpdatedAt, sortBy, sectors.length, onDataChange]);
 
   const scroll = (direction: 'left' | 'right') => {
     scrollRef.current?.scrollBy({

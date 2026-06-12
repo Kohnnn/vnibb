@@ -11,6 +11,7 @@ import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetGroupId } from '@/types/widget';
 
 const STORAGE_KEY = 'vnibb-watchlist-v1';
@@ -41,6 +42,7 @@ interface WatchlistWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     widgetGroup?: WidgetGroupId;
+    onDataChange?: (data: unknown) => void;
 }
 
 function hasOwnConfigKey(config: Record<string, unknown> | undefined, key: string): boolean {
@@ -96,7 +98,7 @@ function parseWatchlistSort(config: Record<string, unknown> | undefined): SortCo
     };
 }
 
-function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup }: WatchlistWidgetProps & { onRemove?: () => void }) {
+function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup, onDataChange }: WatchlistWidgetProps & { onRemove?: () => void }) {
     const { updateWidget } = useDashboard();
     const widgetLocation = useDashboardWidget(id);
     const persistedSymbols = useMemo(() => parseWatchlistSymbols(config), [config]);
@@ -202,6 +204,20 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
     const hasSymbols = symbols.length > 0;
     const connectionNote = hasSymbols ? (isConnected ? 'Live feed' : 'Disconnected') : 'Add symbols to begin';
     const showCached = hasSymbols && !isConnected;
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasSymbols,
+                apiGroup: '/ws',
+                endpoint: '/api/v1/ws/prices',
+                sourceLabel: 'WebSocket',
+                lastDataDate: lastTick,
+                stale: showCached,
+                extra: hasSymbols ? { symbolCount: symbols.length } : undefined,
+            }),
+        );
+    }, [hasSymbols, lastTick, showCached, symbols.length, onDataChange]);
 
     const handleAddSymbol = useCallback(() => {
         if (!newSymbol.trim()) return;

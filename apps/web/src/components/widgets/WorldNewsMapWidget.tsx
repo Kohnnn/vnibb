@@ -7,6 +7,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import {
@@ -242,11 +243,13 @@ function WorldNewsMapWidgetComponent({
   config,
   onRemove,
   hideHeader,
+  onDataChange,
 }: {
   id: string;
   config?: Record<string, unknown>;
   onRemove?: () => void;
   hideHeader?: boolean;
+  onDataChange?: (data: unknown) => void;
 }) {
   const [region, setRegion] = useState<RegionFilter>(() => getInitialRegion(config));
   const [category, setCategory] = useState<CategoryFilter>(() => getInitialCategory(config));
@@ -320,6 +323,20 @@ function WorldNewsMapWidgetComponent({
     top_sources: bucket.top_sources.join(', '),
     latest_articles: bucket.latest_articles.map((article) => article.url).join(', '),
   }));
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/news',
+        endpoint: '/news/world/map',
+        sourceLabel: 'World news map',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        extra: { count: buckets.length, articles: data?.total_articles || 0 },
+      }),
+    );
+  }, [onDataChange, hasData, dataUpdatedAt, isFallback, buckets.length, data?.total_articles]);
 
   useEffect(() => {
     const nextBuckets = data?.buckets || [];

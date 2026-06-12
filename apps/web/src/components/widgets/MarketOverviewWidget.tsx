@@ -1,17 +1,20 @@
 'use client';
 
+import { useEffect } from 'react';
 import { TrendingDown, TrendingUp, Activity } from 'lucide-react';
 import { useMarketOverview } from '@/lib/queries';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
 import { getMarketState } from '@/lib/marketHours';
 
 interface MarketOverviewWidgetProps {
   isEditing?: boolean;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 function formatValue(value: number | null | undefined): string {
@@ -36,7 +39,7 @@ function toFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
+export function MarketOverviewWidget({ onRemove, onDataChange }: MarketOverviewWidgetProps) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMarketOverview();
   const indices = data?.data || [];
   const hasData = indices.length > 0;
@@ -61,6 +64,20 @@ export function MarketOverviewWidget({ onRemove }: MarketOverviewWidgetProps) {
     }
     return baseLabel;
   })();
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/market',
+        endpoint: '/market/indices',
+        sourceLabel,
+        lastDataDate: sourceUpdatedAt,
+        stale: isFallback,
+        extra: hasData ? { indexCount: indices.length } : undefined,
+      }),
+    );
+  }, [hasData, sourceUpdatedAt, isFallback, sourceLabel, indices.length, onDataChange]);
 
   return (
     <WidgetContainer

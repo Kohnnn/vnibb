@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowUpDown, CalendarClock, Search, Sparkles } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useEarningsSeason } from '@/lib/queries';
 import { formatCompact } from '@/lib/format';
 import { formatNumber, formatPercent } from '@/lib/units';
@@ -19,6 +20,7 @@ interface EarningsSeasonMonitorWidgetProps {
   symbol?: string;
   widgetGroup?: WidgetGroupId;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const EXCHANGES = ['ALL', 'HOSE', 'HNX', 'UPCOM'] as const;
@@ -35,7 +37,7 @@ function signalTone(signal: string): string {
   return 'text-rose-300 border-rose-500/20 bg-rose-500/10';
 }
 
-export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove }: EarningsSeasonMonitorWidgetProps) {
+export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataChange }: EarningsSeasonMonitorWidgetProps) {
   const [exchange, setExchange] = useState<ExchangeFilter>('ALL');
   const [signalFilter, setSignalFilter] = useState<SignalFilter>('ALL');
   const [sortMode, setSortMode] = useState<SortMode>('newest');
@@ -73,6 +75,20 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove }: Earni
     const highConviction = filteredRows.filter((row) => row.signal === 'High Conviction').length;
     return { positiveRevenue, positiveEarnings, highConviction };
   }, [filteredRows]);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/market',
+        endpoint: '/market/earnings-season',
+        sourceLabel: 'Earnings season',
+        lastDataDate: data?.updated_at || dataUpdatedAt,
+        stale: Boolean(error && hasData),
+        extra: { count: filteredRows.length },
+      }),
+    );
+  }, [onDataChange, hasData, data?.updated_at, dataUpdatedAt, error, filteredRows.length]);
 
   return (
     <WidgetContainer

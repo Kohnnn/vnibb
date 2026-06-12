@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import {
   CartesianGrid,
   ReferenceLine,
@@ -21,6 +21,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { useIndustryBubble } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatNumber, formatPercent } from '@/lib/units';
 import { cn } from '@/lib/utils';
 
@@ -28,6 +29,7 @@ interface IndustryBubbleWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const AXIS_OPTIONS = [
@@ -94,7 +96,7 @@ function BubbleShape(props: any) {
   );
 }
 
-function IndustryBubbleWidgetComponent({ id, symbol, onRemove }: IndustryBubbleWidgetProps) {
+function IndustryBubbleWidgetComponent({ id, symbol, onRemove, onDataChange }: IndustryBubbleWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const [xMetric, setXMetric] = useState('pb_ratio');
   const [yMetric, setYMetric] = useState('pe_ratio');
@@ -115,6 +117,19 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove }: IndustryBubbleW
 
   const legendItems = useMemo(() => points.slice().sort((a, b) => Number(b.is_reference) - Number(a.is_reference)), [points]);
   const referencePoint = useMemo(() => points.find((point) => point.is_reference) || null, [points]);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/market',
+        endpoint: `/market/industry-bubble?symbol=${upperSymbol}&x_metric=${xMetric}&y_metric=${yMetric}&size_metric=${sizeMetric}&top_n=${topN}`,
+        sourceLabel: 'Industry bubble',
+        lastDataDate: data?.updated_at || dataUpdatedAt,
+        extra: hasData ? { symbol: upperSymbol, sector: data?.sector, count: points.length } : undefined,
+      }),
+    );
+  }, [hasData, data?.updated_at, dataUpdatedAt, data?.sector, upperSymbol, xMetric, yMetric, sizeMetric, topN, points.length, onDataChange]);
 
   return (
     <WidgetContainer

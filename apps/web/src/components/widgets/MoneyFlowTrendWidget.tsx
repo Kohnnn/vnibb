@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import {
   Legend,
   ReferenceArea,
@@ -20,6 +20,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useMoneyFlowTrend } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatNumber } from '@/lib/units';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +28,7 @@ interface MoneyFlowTrendWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 type Timeframe = 'short' | 'medium' | 'long';
@@ -95,7 +97,7 @@ function getRankingValue(stock: any, metric: RankingMetric): number {
   }
 }
 
-function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendWidgetProps) {
+function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: MoneyFlowTrendWidgetProps) {
   const [timeframe, setTimeframe] = useState<Timeframe>('medium');
   const [topCount, setTopCount] = useState<TopCount>(10);
   const [rankingMetric, setRankingMetric] = useState<RankingMetric>('composite');
@@ -172,6 +174,19 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove }: MoneyFlowTrendW
       [ticker]: current[ticker] === false,
     }));
   };
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/market',
+        endpoint: `/market/money-flow-trend?symbol=${upperSymbol}&timeframe=${timeframe}&trail_length=8`,
+        sourceLabel: 'Money flow trend',
+        lastDataDate: data?.updated_at || dataUpdatedAt,
+        extra: hasData ? { symbol: upperSymbol, timeframe, count: stocks.length } : undefined,
+      }),
+    );
+  }, [hasData, data?.updated_at, dataUpdatedAt, upperSymbol, timeframe, stocks.length, onDataChange]);
 
   return (
     <WidgetContainer

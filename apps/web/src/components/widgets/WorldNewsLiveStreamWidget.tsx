@@ -7,6 +7,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
 import { getAdaptiveRefetchInterval } from '@/lib/pollingPolicy';
 import {
@@ -81,11 +82,13 @@ function WorldNewsLiveStreamWidgetComponent({
   config,
   onRemove,
   hideHeader,
+  onDataChange,
 }: {
   id: string;
   config?: Record<string, unknown>;
   onRemove?: () => void;
   hideHeader?: boolean;
+  onDataChange?: (data: unknown) => void;
 }) {
   const [region, setRegion] = useState<RegionFilter>(() => getInitialRegion(config));
   const [category, setCategory] = useState<CategoryFilter>(() => getInitialCategory(config));
@@ -136,6 +139,20 @@ function WorldNewsLiveStreamWidgetComponent({
     tags: article.tags.join(', '),
   }));
   const latestArticle = articles[0];
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/news',
+        endpoint: '/news/world',
+        sourceLabel: 'World news live stream',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        extra: { count: articles.length },
+      }),
+    );
+  }, [onDataChange, hasData, dataUpdatedAt, isFallback, articles.length]);
 
   return (
     <WidgetContainer

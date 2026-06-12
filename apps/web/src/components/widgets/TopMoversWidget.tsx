@@ -11,12 +11,14 @@ import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import type { WidgetGroupId } from '@/types/widget';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface TopMoversWidgetProps {
   isEditing?: boolean;
   onRemove?: () => void;
   onSymbolClick?: (symbol: string) => void;
   widgetGroup?: WidgetGroupId;
+  onDataChange?: (data: unknown) => void;
 }
 
 type ViewMode = 'gainer' | 'loser';
@@ -26,6 +28,7 @@ export function TopMoversWidget({
   onSymbolClick,
   widgetGroup,
   lastRefresh,
+  onDataChange,
 }: TopMoversWidgetProps & { lastRefresh?: number }) {
   const [mode, setMode] = useState<ViewMode>('gainer');
   const {
@@ -64,6 +67,20 @@ export function TopMoversWidget({
     onSymbolClick?.(symbol);
     setLinkedSymbol(symbol);
   };
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/market',
+        endpoint: `/market/top-movers?type=${mode}&index=VNINDEX&limit=10`,
+        sourceLabel: mode === 'gainer' ? 'Top gainers' : 'Top losers',
+        lastDataDate: sourceUpdatedAt,
+        stale: isFallback || isLastSession,
+        extra: hasData ? { mode, count: stocks.length } : undefined,
+      }),
+    );
+  }, [hasData, sourceUpdatedAt, isFallback, isLastSession, mode, stocks.length, onDataChange]);
 
   const toNumber = (value: unknown): number | null => {
     if (typeof value === 'number' && Number.isFinite(value)) {

@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
     ExternalLink,
     Newspaper,
@@ -21,6 +21,7 @@ import { formatTimestamp } from '@/lib/format';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
@@ -51,6 +52,7 @@ interface NewsFeedWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 // Sentiment badge component
@@ -98,7 +100,7 @@ function formatPublishedTime(dateStr: string | null | undefined): string {
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 
-export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetProps) {
+export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: NewsFeedWidgetProps) {
     const [expandedId, setExpandedId] = useState<number | string | null>(null);
     const [sourceFilter, setSourceFilter] = useState<string>('');
     const [sentimentFilter, setSentimentFilter] = useState<string>('');
@@ -158,6 +160,20 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove }: NewsFeedWidgetPr
     const hasData = newsItems.length > 0;
     const isFallback = Boolean(error && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+
+    useEffect(() => {
+        onDataChange?.(
+            buildWidgetRuntime({
+                empty: !hasData,
+                apiGroup: '/news',
+                endpoint: '/news/feed',
+                sourceLabel: symbol ? `${symbol} related feed` : 'Market feed',
+                lastDataDate: dataUpdatedAt,
+                stale: isFallback,
+                extra: { count: newsItems.length },
+            }),
+        );
+    }, [onDataChange, hasData, dataUpdatedAt, isFallback, newsItems.length, symbol]);
 
     // Filter by search query
     const filteredNews = newsItems.filter(item =>

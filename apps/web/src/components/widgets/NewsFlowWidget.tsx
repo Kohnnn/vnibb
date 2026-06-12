@@ -6,6 +6,7 @@ import { API_BASE_URL } from '@/lib/api';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { NewsFilterBar } from './news/NewsFilterBar';
 import { NewsCard } from './news/NewsCard';
@@ -16,9 +17,10 @@ interface NewsFlowWidgetProps {
   symbol?: string;
   initialSymbols?: string[];
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
-function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove }: NewsFlowWidgetProps) {
+function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataChange }: NewsFlowWidgetProps) {
   const [filters, setFilters] = useState({
     symbols: initialSymbols || (symbol ? [symbol] : []),
     sentiment: null as string | null,
@@ -69,6 +71,20 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove }: NewsF
   const allNews = data?.pages.flatMap((p: any) => p.items) || [];
   const hasData = allNews.length > 0;
   const isFallback = Boolean(error && hasData);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/news',
+        endpoint: '/news/flow',
+        sourceLabel: filters.symbols.length ? 'Ticker feed' : 'Market feed',
+        lastDataDate: dataUpdatedAt,
+        stale: isFallback,
+        extra: { count: allNews.length },
+      }),
+    );
+  }, [onDataChange, hasData, dataUpdatedAt, isFallback, allNews.length, filters.symbols.length]);
 
   return (
     <WidgetContainer

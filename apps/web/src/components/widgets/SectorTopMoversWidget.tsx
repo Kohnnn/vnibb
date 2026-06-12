@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState, useRef, useMemo } from 'react';
+import { memo, useState, useRef, useMemo, useEffect } from 'react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -8,6 +8,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChevronLeft, ChevronRight, Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetGroupId } from '@/types/widget';
 import { useSectorTopMovers, useSectorsCatalog } from '@/lib/queries';
 
@@ -34,9 +35,10 @@ interface SectorTopMoversWidgetProps {
   id: string;
   onRemove?: () => void;
   widgetGroup?: WidgetGroupId;
+  onDataChange?: (data: unknown) => void;
 }
 
-function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTopMoversWidgetProps) {
+function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup, onDataChange }: SectorTopMoversWidgetProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewType, setViewType] = useState<'gainers' | 'losers'>('gainers');
   const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'sector_top_movers' });
@@ -98,6 +100,20 @@ function SectorTopMoversWidgetComponent({ id, onRemove, widgetGroup }: SectorTop
       return total + symbols;
     }, 0);
   }, [sectorsCatalog]);
+
+  useEffect(() => {
+    onDataChange?.(
+      buildWidgetRuntime({
+        empty: !hasData,
+        apiGroup: '/sectors',
+        endpoint: `/sectors/top-movers?type=${viewType}&limit=5`,
+        sourceLabel: viewType === 'gainers' ? 'Top gainers by sector' : 'Top losers by sector',
+        lastDataDate: updatedAt,
+        stale: isFallback,
+        extra: hasData ? { viewType, sectorCount: sectors.length } : undefined,
+      }),
+    );
+  }, [hasData, updatedAt, isFallback, viewType, sectors.length, onDataChange]);
 
   return (
     <WidgetContainer
