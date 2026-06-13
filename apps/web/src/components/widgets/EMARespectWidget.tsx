@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Rows3 } from 'lucide-react'
 import { useQuantMetrics } from '@/lib/queries'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
@@ -13,6 +14,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface EMARespectWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 type EmaLevel = {
@@ -42,7 +44,7 @@ function pct(value: number | null | undefined): string {
   return `${Number(value).toFixed(1)}%`
 }
 
-export function EMARespectWidget({ symbol }: EMARespectWidgetProps) {
+export function EMARespectWidget({ symbol, onDataChange }: EMARespectWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
 
@@ -66,6 +68,20 @@ export function EMARespectWidget({ symbol }: EMARespectWidgetProps) {
   const hasData = rows.length > 0
   const quantWarning = extractQuantWarning(data, 'ema_respect')
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}?period=${period}&metrics=ema_respect&adjustment_mode=adjusted`,
+      sourceLabel: 'vnstock',
+      lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at,
+      adjustmentMode: data?.data?.adjustment_mode ?? 'adjusted',
+      derived: true,
+      stale: Boolean(error && hasData),
+      extra: { period },
+    }))
+  }, [data?.data?.adjustment_mode, data?.data?.computed_at, data?.data?.last_data_date, error, hasData, onDataChange, period, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view EMA respect" icon={<Rows3 size={18} />} />

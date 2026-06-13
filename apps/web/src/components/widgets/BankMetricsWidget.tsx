@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import { Building2, Landmark, ShieldCheck, TrendingUp } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -8,6 +8,7 @@ import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useFinancialRatios } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
 import { formatNumber, formatPercent } from '@/lib/units';
 
@@ -16,6 +17,7 @@ interface BankMetricsWidgetProps {
   symbol: string;
   isEditing?: boolean;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const BANK_METRIC_LABELS: Record<string, string> = {
@@ -69,7 +71,7 @@ function formatMetricValue(metricKey: string, value: number | null | undefined) 
   return formatNumber(value, { decimals: 2 });
 }
 
-function BankMetricsWidgetComponent({ id, symbol, onRemove }: BankMetricsWidgetProps) {
+function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: BankMetricsWidgetProps) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFinancialRatios(symbol, {
     period: 'FY',
   });
@@ -152,6 +154,18 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove }: BankMetricsWidgetP
   const note = latest?.casa_ratio == null
     ? 'Annual bank analytics | CASA pending provider split'
     : 'Annual bank analytics';
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasBankData,
+      apiGroup: '/equity',
+      endpoint: `/equity/${symbol}/ratios?period=FY`,
+      sourceLabel: 'vnstock',
+      lastDataDate: latest?.period,
+      stale: Boolean(error && hasBankData),
+      extra: { periods: ratios.length },
+    }));
+  }, [error, hasBankData, latest?.period, onDataChange, ratios.length, symbol]);
 
   return (
     <WidgetContainer

@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useProfile, useDividends, useInsiderDeals, useScreenerData } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -16,6 +18,7 @@ interface TickerProfileWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function formatDividendType(type: string | null | undefined): string {
@@ -76,7 +79,7 @@ function formatMarketCapCompact(value: number | null | undefined): string {
     return `VND ${formatLargeNumber(value, { decimals: 2 })}`
 }
 
-export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
+export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useProfile(symbol);
     const {
         data: dividendsData,
@@ -108,6 +111,22 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
     const updatedAt = [dataUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
         .filter(Boolean)
         .sort((a, b) => Number(b) - Number(a))[0];
+    const showDividendsSection = dividendsLoading || Boolean(dividendsError) || dividends.length > 0;
+    const showInsiderDealsSection = insiderLoading || Boolean(insiderError) || insiderDeals.length > 0;
+    // TODO V200+: wire in CAFEF/vietstock dividend scraper.
+    const showCorporateActions = showDividendsSection || showInsiderDealsSection;
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/equity',
+            endpoint: `/equity/${symbol}/profile`,
+            sourceLabel: 'vnstock',
+            lastDataDate: dataUpdatedAt,
+            stale: isFallback,
+            extra: { sections: showCorporateActions ? 3 : 1 },
+        }));
+    }, [dataUpdatedAt, hasData, isFallback, onDataChange, showCorporateActions, symbol]);
 
     if (timedOut && isLoading && !hasData) {
         return (
@@ -145,11 +164,6 @@ export function TickerProfileWidget({ symbol }: TickerProfileWidgetProps) {
         (typeof profileData.market_cap === 'number' && Number.isFinite(profileData.market_cap)
             ? profileData.market_cap
             : null);
-    const showDividendsSection = dividendsLoading || Boolean(dividendsError) || dividends.length > 0;
-    const showInsiderDealsSection = insiderLoading || Boolean(insiderError) || insiderDeals.length > 0;
-    // TODO V200+: wire in CAFEF/vietstock dividend scraper.
-    const showCorporateActions = showDividendsSection || showInsiderDealsSection;
-
     const companyName = cleanText(profileData.company_name) || symbol
     const shortName = cleanText(profileData.short_name)
     // Fall back to the screener's ICB industry if the profile's industry is

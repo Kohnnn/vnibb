@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, ChartArea, ChartLine, Sigma } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useFinancialRatios, useProfile, useScreenerData } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { latestByFinancialPeriod } from '@/lib/financialPeriods';
 import {
   TradingViewAdvancedChart,
@@ -42,6 +43,7 @@ interface PriceChartWidgetProps {
   timeframe?: string;
   config?: Record<string, unknown>;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 interface SnapshotMetric {
@@ -66,7 +68,7 @@ function normalizeChartTimeframe(value: string | undefined): AdvancedChartTimefr
     : '1Y';
 }
 
-export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onRemove }: PriceChartWidgetProps) {
+export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onRemove, onDataChange }: PriceChartWidgetProps) {
   const { data: profileData } = useProfile(symbol, !!symbol);
   const {
     data: screenerData,
@@ -116,6 +118,18 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onRemov
   );
 
   const featureChips = useMemo(() => ['Live data', 'Volume', 'Crosshair', 'Fast symbol switching'], []);
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !symbol,
+      apiGroup: '/tradingview/external',
+      endpoint: `/tradingview/external/${symbol}?timeframe=${selectedTimeframe}`,
+      sourceLabel: exchange || 'TradingView',
+      derived: true,
+      stale: Boolean(metricsError && hasMetrics),
+      extra: { timeframe: selectedTimeframe },
+    }));
+  }, [exchange, hasMetrics, metricsError, onDataChange, selectedTimeframe, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view the chart" />;

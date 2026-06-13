@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { BadgeDollarSign } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useDividends } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
 import { formatPercent, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
@@ -15,6 +16,7 @@ interface DividendLadderWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 interface DividendEvent {
@@ -50,7 +52,7 @@ function formatDividendType(type: string | null | undefined): string {
   return 'Other'
 }
 
-export function DividendLadderWidget({ id, symbol, onRemove }: DividendLadderWidgetProps) {
+export function DividendLadderWidget({ id, symbol, onRemove, onDataChange }: DividendLadderWidgetProps) {
   const {
     data,
     isLoading,
@@ -114,6 +116,18 @@ export function DividendLadderWidget({ id, symbol, onRemove }: DividendLadderWid
 
   const displayEvents = upcoming.length > 0 ? upcoming : events;
   const hasData = displayEvents.length > 0;
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/equity',
+      endpoint: `/equity/${symbol}/dividends`,
+      sourceLabel: 'vnstock',
+      lastDataDate: displayEvents[0]?.date,
+      stale: Boolean(error && hasData),
+      extra: { events: displayEvents.length },
+    }));
+  }, [displayEvents, error, hasData, onDataChange, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view dividends" />;

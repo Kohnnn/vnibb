@@ -2,8 +2,10 @@
 
 'use client';
 
+import { useEffect } from 'react';
 import { SplitSquareVertical } from 'lucide-react';
 import { useCompanyEvents } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -12,6 +14,7 @@ interface StockSplitsWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function parseSplitRatio(value?: string): { from: string; to: string } {
@@ -27,7 +30,7 @@ function formatDate(value?: string): string {
     return value;
 }
 
-export function StockSplitsWidget({ symbol }: StockSplitsWidgetProps) {
+export function StockSplitsWidget({ symbol, onDataChange }: StockSplitsWidgetProps) {
     const {
         data,
         isLoading,
@@ -54,6 +57,20 @@ export function StockSplitsWidget({ symbol }: StockSplitsWidgetProps) {
         }) || [];
 
     const hasData = splitRows.length > 0;
+    const lastSplitDate = splitRows[0]?.effective_date || splitRows[0]?.event_date || splitRows[0]?.record_date || splitRows[0]?.ex_date;
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/equity',
+            endpoint: `/equity/${symbol}/events?limit=50`,
+            sourceLabel: 'vnstock',
+            lastDataDate: lastSplitDate,
+            derived: true,
+            stale: Boolean(error && hasData),
+            extra: { splits: splitRows.length },
+        }));
+    }, [error, hasData, lastSplitDate, onDataChange, splitRows.length, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view splits" icon={<SplitSquareVertical size={18} />} />;

@@ -1,7 +1,9 @@
 'use client';
 
 import { BarChart3 } from 'lucide-react';
+import { useEffect } from 'react';
 import { useAnalystEstimates } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -10,6 +12,7 @@ interface AnalystEstimatesWidgetProps {
   symbol: string;
   isEditing?: boolean;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 type EstimateRow = {
@@ -29,7 +32,7 @@ function formatEstimate(value: number | null | undefined): string {
   });
 }
 
-export function AnalystEstimatesWidget({ symbol }: AnalystEstimatesWidgetProps) {
+export function AnalystEstimatesWidget({ symbol, onDataChange }: AnalystEstimatesWidgetProps) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useAnalystEstimates(
     symbol,
     Boolean(symbol)
@@ -38,6 +41,17 @@ export function AnalystEstimatesWidget({ symbol }: AnalystEstimatesWidgetProps) 
   const payload = data?.data;
   const rows = (payload?.data ?? []) as EstimateRow[];
   const hasRows = rows.length > 0;
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasRows,
+      apiGroup: '/equity',
+      endpoint: `/equity/${symbol}/estimates`,
+      sourceLabel: payload?.source || 'vnstock',
+      stale: Boolean(error && hasRows),
+      extra: { rows: rows.length },
+    }));
+  }, [error, hasRows, onDataChange, payload?.source, rows.length, symbol]);
 
   if (!symbol) {
     return (

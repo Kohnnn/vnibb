@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import { CalendarClock, FileText, Newspaper, Sparkles } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -9,6 +9,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useUnit } from '@/contexts/UnitContext';
 import { useCashFlow, useCompanyEvents, useCompanyNews, useEarningsQuality, useIncomeStatement } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatDate, formatRelativeTime } from '@/lib/format';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, formatNumber, formatPercent } from '@/lib/units';
@@ -18,6 +19,7 @@ interface EarningsReleaseRecapWidgetProps {
     symbol: string;
     hideHeader?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function yoyChange(current: number | null | undefined, previous: number | null | undefined): number | null {
@@ -36,7 +38,7 @@ function normalizeQuarterPeriod(period: string | undefined): string | null {
     return yearMatch ? yearMatch[1] : label;
 }
 
-function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove }: EarningsReleaseRecapWidgetProps) {
+function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove, onDataChange }: EarningsReleaseRecapWidgetProps) {
     const { config: unitConfig } = useUnit();
     const incomeQuery = useIncomeStatement(symbol, { period: 'quarter', limit: 8, enabled: Boolean(symbol) });
     const cashFlowQuery = useCashFlow(symbol, { period: 'quarter', limit: 8, enabled: Boolean(symbol) });
@@ -211,6 +213,19 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove 
         eventsQuery.dataUpdatedAt,
         earningsQualityQuery.dataUpdatedAt
     );
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/equity',
+            endpoint: `/equity/${symbol}/income-statement?period=quarter&limit=8`,
+            sourceLabel: 'vnstock',
+            lastDataDate: latestIncome?.period ?? latestCash?.period,
+            derived: true,
+            stale: Boolean(combinedError && hasData),
+            extra: { feeds: 5 },
+        }));
+    }, [combinedError, hasData, latestCash?.period, latestIncome?.period, onDataChange, symbol]);
 
     return (
         <WidgetContainer

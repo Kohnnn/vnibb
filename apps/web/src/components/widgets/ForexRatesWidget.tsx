@@ -1,7 +1,9 @@
 'use client';
 
+import { useEffect } from 'react';
 import { DollarSign } from 'lucide-react';
 import { useForexRates } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
@@ -11,12 +13,27 @@ function formatRate(value: number | null | undefined): string {
     return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
-export function ForexRatesWidget() {
+interface ForexRatesWidgetProps {
+    onDataChange?: (data: unknown) => void;
+}
+
+export function ForexRatesWidget({ onDataChange }: ForexRatesWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useForexRates();
 
     const rows = data?.data || [];
     const hasData = rows.length > 0;
     const isFallback = Boolean(data?.error);
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/market',
+            endpoint: '/market/forex-rates?limit=12',
+            sourceLabel: data?.source || 'vnstock',
+            stale: isFallback,
+            extra: { rows: rows.length },
+        }));
+    }, [data?.source, hasData, isFallback, onDataChange, rows.length]);
 
     return (
         <div className="h-full flex flex-col">

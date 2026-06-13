@@ -1,7 +1,9 @@
 'use client'
 
+import { useEffect } from 'react'
 import { ShieldCheck } from 'lucide-react'
 import { useEarningsQuality } from '@/lib/queries'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -10,6 +12,7 @@ interface EarningsQualityWidgetProps {
   symbol: string
   isEditing?: boolean
   onRemove?: () => void
+  onDataChange?: (data: unknown) => void
 }
 
 function pct(value: number | null | undefined): string {
@@ -35,7 +38,7 @@ function gradeTone(grade: string): string {
   return 'text-[var(--text-primary)]'
 }
 
-export function EarningsQualityWidget({ symbol }: EarningsQualityWidgetProps) {
+export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useEarningsQuality(
@@ -45,6 +48,19 @@ export function EarningsQualityWidget({ symbol }: EarningsQualityWidgetProps) {
 
   const payload = data?.data
   const hasData = Boolean(payload)
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}/earnings-quality`,
+      sourceLabel: 'vnstock',
+      lastDataDate: payload?.computed_at ?? dataUpdatedAt,
+      derived: true,
+      stale: Boolean(error && hasData),
+      extra: { grade: payload?.grade || 'N/A' },
+    }))
+  }, [dataUpdatedAt, error, hasData, onDataChange, payload?.computed_at, payload?.grade, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view earnings quality" icon={<ShieldCheck size={18} />} />
