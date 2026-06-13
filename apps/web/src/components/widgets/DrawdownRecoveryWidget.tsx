@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import {
   Area,
@@ -21,9 +21,11 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface DrawdownRecoveryWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 type UnderwaterPoint = {
@@ -46,7 +48,7 @@ function formatPct(value: number | null | undefined): string {
   return `${Number(value).toFixed(1)}%`
 }
 
-export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) {
+export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecoveryWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
 
@@ -77,6 +79,22 @@ export function DrawdownRecoveryWidget({ symbol }: DrawdownRecoveryWidgetProps) 
   const episodes = metric?.episodes || []
   const hasData = series.length > 30
   const quantWarning = extractQuantWarning(data, 'drawdown_recovery')
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}?period=${period}&metrics=drawdown_recovery`,
+      sourceLabel: 'Drawdown recovery',
+      lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+      adjustmentMode: data?.data?.adjustment_mode,
+      extra: {
+        points: series.length,
+        episodes: episodes.length,
+        currentDrawdownPct: metric?.current_drawdown_pct ?? null,
+      },
+    }))
+  }, [data?.data?.adjustment_mode, data?.data?.computed_at, data?.data?.last_data_date, dataUpdatedAt, episodes.length, hasData, metric?.current_drawdown_pct, onDataChange, period, series.length, upperSymbol])
 
   // C1: overlay corporate-action markers (dividends/splits/rights) on the
   // date-indexed underwater curve, reusing the shared chart-event-marker logic.

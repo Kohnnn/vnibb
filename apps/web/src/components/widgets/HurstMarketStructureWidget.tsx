@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Sigma } from 'lucide-react'
 import { useHistoricalPrices } from '@/lib/queries'
 import type { OHLCData } from '@/lib/chartUtils'
@@ -9,9 +9,11 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface HurstMarketStructureWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 function formatNumber(value: number, digits = 3): string {
@@ -105,7 +107,7 @@ function classifyHurst(hurst: number | null): { label: string; className: string
   return { label: 'Random Walk', className: 'text-cyan-300', note: 'Range/event edge preferred' }
 }
 
-export function HurstMarketStructureWidget({ symbol }: HurstMarketStructureWidgetProps) {
+export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarketStructureWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
 
@@ -150,6 +152,23 @@ export function HurstMarketStructureWidget({ symbol }: HurstMarketStructureWidge
 
     return output.reverse()
   }, [candles, closes])
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/equity',
+      endpoint: `/equity/historical?symbol=${upperSymbol}&start_date=${getQuantPeriodStartDate(period)}`,
+      sourceLabel: 'Historical prices',
+      lastDataDate: candles.at(-1)?.time ?? dataUpdatedAt,
+      adjustmentMode: 'adjusted',
+      derived: true,
+      extra: {
+        candles: candles.length,
+        hurst,
+        lag1,
+      },
+    }))
+  }, [candles, candles.length, dataUpdatedAt, hasData, hurst, lag1, onDataChange, period, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to inspect market structure" icon={<Sigma size={18} />} />

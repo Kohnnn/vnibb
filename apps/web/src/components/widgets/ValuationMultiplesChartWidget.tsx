@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart3 } from 'lucide-react';
 import {
   CartesianGrid,
@@ -19,11 +19,13 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { formatFinancialPeriodLabel } from '@/lib/financialPeriods';
 import { cn } from '@/lib/utils';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface ValuationMultiplesChartWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const SERIES = [
@@ -34,7 +36,7 @@ const SERIES = [
   { key: 'ev_sales', label: 'EV/Sales', color: '#e11d48' },
 ];
 
-export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: ValuationMultiplesChartWidgetProps) {
+export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChange }: ValuationMultiplesChartWidgetProps) {
   const [visibleSeries, setVisibleSeries] = useState<Record<string, boolean>>({})
   // C3: viewport pinning — default to the most recent window so current valuation
   // context is visible first, while preserving access to full history.
@@ -78,6 +80,21 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove }: Valuatio
   );
 
   const activeSeries = SERIES.filter((series) => visibleSeries[series.key] !== false)
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/equity',
+      endpoint: `/equity/${symbol}/ratios/history?ratios=pe,pb,ps,ev_ebitda,ev_sales&period=year&limit=60`,
+      sourceLabel: 'Ratio history',
+      lastDataDate: rows.at(-1)?.period ?? dataUpdatedAt,
+      extra: {
+        periods: rows.length,
+        visibleSeries: activeSeries.length,
+        focusRecent,
+      },
+    }));
+  }, [activeSeries.length, dataUpdatedAt, focusRecent, hasData, onDataChange, rows, rows.length, symbol]);
 
   const toggleSeries = (key: string) => {
     setVisibleSeries((current) => ({

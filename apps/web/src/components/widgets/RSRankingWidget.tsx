@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TrendingUp, Zap, RefreshCw } from 'lucide-react';
 import { useRSLeaders, useRSLaggards, useRSGainers } from '@/lib/queries';
 import { Badge } from '@/components/ui/badge';
@@ -13,11 +13,13 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface RSRankingWidgetProps {
     isEditing?: boolean;
     onRemove?: () => void;
     widgetGroup?: WidgetGroupId;
+    onDataChange?: (data: unknown) => void;
 }
 
 type TabType = 'leaders' | 'laggards' | 'gainers';
@@ -38,7 +40,7 @@ function getRSBg(rating: number): string {
     return 'bg-red-500/20';
 }
 
-export function RSRankingWidget({ widgetGroup }: RSRankingWidgetProps) {
+export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetProps) {
     const [activeTab, setActiveTab] = useState<TabType>('leaders');
     const [limit] = useState(50);
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'rs_ranking' });
@@ -65,6 +67,26 @@ export function RSRankingWidget({ widgetGroup }: RSRankingWidgetProps) {
 
     const hasData = activeItems.length > 0;
     const isFallback = Boolean(activeQuery.error && hasData);
+
+    useEffect(() => {
+        const endpoint = activeTab === 'leaders'
+            ? `/rs/leaders?limit=${limit}`
+            : activeTab === 'laggards'
+                ? `/rs/laggards?limit=${limit}`
+                : `/rs/gainers?limit=${limit}&lookback_days=7`;
+
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/rs',
+            endpoint,
+            sourceLabel: `RS ${activeTab}`,
+            lastDataDate: activeQuery.dataUpdatedAt,
+            extra: {
+                count: activeItems.length,
+                limit,
+            },
+        }));
+    }, [activeItems.length, activeQuery.dataUpdatedAt, activeTab, hasData, limit, onDataChange]);
 
     const handleRefresh = () => {
         activeQuery.refetch();

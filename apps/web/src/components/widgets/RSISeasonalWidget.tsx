@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Signal } from 'lucide-react'
 import {
   Bar,
@@ -21,9 +21,11 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useDirectionColors } from '@/hooks/useDirectionColors'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface RSISeasonalWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -34,7 +36,7 @@ function rsiClass(rsi: number): string {
   return 'text-amber-300'
 }
 
-export function RSISeasonalWidget({ symbol }: RSISeasonalWidgetProps) {
+export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const dirColors = useDirectionColors()
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
@@ -65,6 +67,21 @@ export function RSISeasonalWidget({ symbol }: RSISeasonalWidgetProps) {
   const hasData = rows.some((row) => row.rsi > 0)
   const currentRsi = Number(metric?.current_rsi ?? 0)
   const quantWarning = extractQuantWarning(data, 'rsi_seasonal')
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}?period=${period}&metrics=rsi_seasonal`,
+      sourceLabel: 'RSI seasonality',
+      lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+      adjustmentMode: data?.data?.adjustment_mode,
+      extra: {
+        months: rows.length,
+        currentRsi,
+      },
+    }))
+  }, [currentRsi, data?.data?.adjustment_mode, data?.data?.computed_at, data?.data?.last_data_date, dataUpdatedAt, hasData, onDataChange, period, rows.length, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view RSI seasonality" icon={<Signal size={18} />} />

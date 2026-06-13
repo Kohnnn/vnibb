@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Orbit } from 'lucide-react'
 import { CartesianGrid, ReferenceArea, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
@@ -10,11 +10,13 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { Sparkline } from '@/components/ui/Sparkline'
 import type { WidgetHealthState } from '@/lib/widgetHealth'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface RelativeRotationWidgetProps {
   symbol: string
   isEditing?: boolean
   onRemove?: () => void
+  onDataChange?: (data: unknown) => void
 }
 
 function quadrantTone(quadrant: string): string {
@@ -118,7 +120,7 @@ function RotationCoverageEmpty({
   )
 }
 
-export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) {
+export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotationWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useRelativeRotation(upperSymbol, {
@@ -191,6 +193,22 @@ export function RelativeRotationWidget({ symbol }: RelativeRotationWidgetProps) 
         detail: coverageDetail,
       }
     : undefined
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}/relative-rotation?lookback_days=260`,
+      sourceLabel: 'Relative rotation',
+      lastDataDate: dataUpdatedAt,
+      derived: true,
+      extra: {
+        universe: universePoints.length,
+        trail: trailPoints.length,
+        quadrant: selected?.quadrant ?? null,
+      },
+    }))
+  }, [dataUpdatedAt, hasData, onDataChange, selected?.quadrant, trailPoints.length, universePoints.length, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view relative rotation" icon={<Orbit size={18} />} />

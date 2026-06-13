@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Activity } from 'lucide-react'
 import {
   Area,
@@ -22,9 +22,11 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface ParkinsonVolatilityWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 type Regime = 'low' | 'normal' | 'high' | 'extreme'
@@ -51,7 +53,7 @@ function regimeBand(regime: string): string {
   return 'from-slate-900/20 to-slate-700/8'
 }
 
-export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetProps) {
+export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVolatilityWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
 
@@ -85,6 +87,22 @@ export function ParkinsonVolatilityWidget({ symbol }: ParkinsonVolatilityWidgetP
   const quantWarning = extractQuantWarning(data, 'parkinson_volatility')
   const maxVol = Math.max(...rows.map((row) => Math.max(row.parkinson, row.closeVol)), 20)
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}?period=${period}&metrics=parkinson_volatility`,
+      sourceLabel: 'Parkinson volatility',
+      lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+      adjustmentMode: data?.data?.adjustment_mode,
+      extra: {
+        points: rows.length,
+        currentRegime,
+        parkinson30dPct: metric?.current_parkinson_vol_30d_pct ?? null,
+      },
+    }))
+  }, [currentRegime, data?.data?.adjustment_mode, data?.data?.computed_at, data?.data?.last_data_date, dataUpdatedAt, hasData, metric?.current_parkinson_vol_30d_pct, onDataChange, period, rows.length, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view Parkinson volatility" icon={<Activity size={18} />} />

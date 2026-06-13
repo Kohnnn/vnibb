@@ -2,8 +2,10 @@
 
 'use client';
 
+import { useEffect } from 'react';
 import { Building } from 'lucide-react';
 import { useSubsidiaries } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -12,6 +14,7 @@ interface SubsidiariesWidgetProps {
     symbol: string;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 function formatCapital(value: number | null | undefined): string {
@@ -27,12 +30,23 @@ function formatPct(pct: number | null | undefined): string {
     return `${pct.toFixed(1)}%`;
 }
 
-export function SubsidiariesWidget({ symbol }: SubsidiariesWidgetProps) {
+export function SubsidiariesWidget({ symbol, onDataChange }: SubsidiariesWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSubsidiaries(symbol, !!symbol);
 
     const subsidiaries = data?.data || [];
     const hasData = subsidiaries.length > 0;
     const isFallback = Boolean(error && hasData);
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasData,
+            apiGroup: '/equity',
+            endpoint: `/api/v1/equity/${symbol}/subsidiaries`,
+            sourceLabel: 'Subsidiaries',
+            stale: isFallback,
+            extra: { subsidiaryCount: subsidiaries.length },
+        }));
+    }, [hasData, isFallback, onDataChange, subsidiaries.length, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view subsidiaries" icon={<Building size={18} />} />;

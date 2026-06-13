@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Gauge } from 'lucide-react'
 import {
   PolarAngleAxis,
@@ -23,6 +23,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { useQuantRegime } from '@/hooks/useQuantRegime'
 import { useQuantMetrics } from '@/lib/queries'
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import {
   average,
   scoreDrawdown,
@@ -36,6 +37,7 @@ interface QuantSummaryWidgetProps {
   id: string
   symbol: string
   onRemove?: () => void
+  onDataChange?: (data: unknown) => void
 }
 
 type SeasonalityMetric = {
@@ -121,7 +123,7 @@ function averageSortino(metric: SortinoMetric | undefined): number | null {
   )
 }
 
-export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetProps) {
+export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: QuantSummaryWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
 
@@ -181,6 +183,23 @@ export function QuantSummaryWidget({ id, symbol, onRemove }: QuantSummaryWidgetP
   const error = quantQuery.error || regime.error
   const quantWarning = extractQuantWarning(quantQuery.data)
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading, { timeoutMs: 10_000 })
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}?period=${period}&metrics=seasonality,volume_delta,sortino,ema_respect,drawdown_recovery,benchmark_risk,calmar`,
+      sourceLabel: 'Quant summary',
+      lastDataDate: quantQuery.data?.data?.last_data_date ?? quantQuery.data?.data?.computed_at ?? regime.updatedAt,
+      adjustmentMode: quantQuery.data?.data?.adjustment_mode,
+      derived: true,
+      extra: {
+        compositeRiskScore,
+        regime: regime.regimeLabel,
+        metrics: Object.keys(metrics).length,
+      },
+    }))
+  }, [compositeRiskScore, hasData, metrics, onDataChange, period, quantQuery.data?.data?.adjustment_mode, quantQuery.data?.data?.computed_at, quantQuery.data?.data?.last_data_date, regime.regimeLabel, regime.updatedAt, upperSymbol])
 
   const exportRows = [
     {

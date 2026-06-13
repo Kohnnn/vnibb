@@ -7,15 +7,17 @@ import { Settings, Save, Bell, Mail, Volume2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAlertSettings, updateAlertSettings } from '@/lib/api';
 import type { AlertSettings } from '@/types/insider';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 
 interface AlertSettingsPanelProps {
   userId?: number;
+  onDataChange?: (data: unknown) => void;
 }
 
-export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
+export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPanelProps) {
   const queryClient = useQueryClient();
 
   const {
@@ -77,6 +79,20 @@ export function AlertSettingsPanel({ userId = 1 }: AlertSettingsPanelProps) {
       }
     }
   };
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !settings,
+      apiGroup: '/alerts',
+      endpoint: `/api/v1/alerts/settings/${userId}`,
+      sourceLabel: 'Alert preferences',
+      stale: Boolean(error && settings),
+      extra: {
+        browserNotifications: Boolean(settings?.enable_browser_notifications),
+        emailNotifications: Boolean(settings?.enable_email_notifications),
+      },
+    }));
+  }, [error, onDataChange, settings, userId]);
 
   if (isLoading && !settings) {
     return <WidgetSkeleton lines={6} />;

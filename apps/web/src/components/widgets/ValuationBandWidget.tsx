@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AreaChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Sigma } from 'lucide-react';
 
@@ -13,11 +13,13 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useRatioHistory } from '@/lib/queries';
 import { formatFinancialPeriodLabel } from '@/lib/financialPeriods';
 import type { RatioHistoryResponse } from '@/types/equity';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface ValuationBandWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 const METRIC_OPTIONS = [
@@ -45,7 +47,7 @@ function formatMetric(value: number | null | undefined): string {
   return value.toFixed(2);
 }
 
-export function ValuationBandWidget({ id, symbol, onRemove }: ValuationBandWidgetProps) {
+export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: ValuationBandWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const [metric, setMetric] = useState<(typeof METRIC_OPTIONS)[number]['key']>('pe');
 
@@ -93,6 +95,23 @@ export function ValuationBandWidget({ id, symbol, onRemove }: ValuationBandWidge
   }, [rows, metric, mean, sigma1Lower, sigma1Upper, sigma2Lower, sigma2Upper]);
 
   const hasData = seriesValues.length >= 3;
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/equity',
+      endpoint: `/equity/${upperSymbol}/ratios/history?ratios=pe,pb,ps,ev_ebitda,ev_sales&period=year&limit=60`,
+      sourceLabel: 'Ratio history',
+      lastDataDate: rows.at(-1)?.period ?? dataUpdatedAt,
+      derived: true,
+      extra: {
+        periods: rows.length,
+        metric,
+        current,
+        percentile,
+      },
+    }));
+  }, [current, dataUpdatedAt, hasData, metric, onDataChange, percentile, rows, rows.length, upperSymbol]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view valuation bands" icon={<Sigma size={18} />} />;

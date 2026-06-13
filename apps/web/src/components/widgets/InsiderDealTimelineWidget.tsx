@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { UserRound } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useInsiderDeals } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatTimestamp } from '@/lib/format';
 import { formatNumber, formatVND } from '@/lib/formatters';
 
@@ -14,9 +15,10 @@ interface InsiderDealTimelineWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
-export function InsiderDealTimelineWidget({ id, symbol, onRemove }: InsiderDealTimelineWidgetProps) {
+export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }: InsiderDealTimelineWidgetProps) {
   const {
     data,
     isLoading,
@@ -42,6 +44,20 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove }: InsiderDealT
       netValue: buyValue - sellValue,
     };
   }, [deals]);
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/insider',
+      endpoint: `/api/v1/insider/deals/${symbol}`,
+      sourceLabel: 'Latest insider filings',
+      stale: Boolean(error && hasData),
+      extra: {
+        dealCount: deals.length,
+        netValue: summary.netValue,
+      },
+    }));
+  }, [deals.length, error, hasData, onDataChange, summary.netValue, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view insider activity" />;

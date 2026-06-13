@@ -1,20 +1,23 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Users } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useShareholders } from '@/lib/queries';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatNumber } from '@/lib/formatters';
 
 interface OwnershipChangesWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
-export function OwnershipChangesWidget({ id, symbol, onRemove }: OwnershipChangesWidgetProps) {
+export function OwnershipChangesWidget({ id, symbol, onRemove, onDataChange }: OwnershipChangesWidgetProps) {
   const {
     data,
     isLoading,
@@ -42,6 +45,17 @@ export function OwnershipChangesWidget({ id, symbol, onRemove }: OwnershipChange
   }
 
   const hasData = holders.length > 0;
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/equity',
+      endpoint: `/api/v1/equity/${symbol}/shareholders`,
+      sourceLabel: 'Latest ownership snapshot',
+      stale: Boolean(error && hasData),
+      extra: { holderCount: holders.length },
+    }));
+  }, [error, hasData, holders.length, onDataChange, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view ownership" />;

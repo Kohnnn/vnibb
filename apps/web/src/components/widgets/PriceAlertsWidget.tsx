@@ -7,6 +7,7 @@ import { Bell, Plus, X, ArrowUp, ArrowDown, Check, Percent, BellOff, BellRing, T
 import { useQueryClient } from '@tanstack/react-query';
 import { config } from '@/lib/config';
 import { formatTimestamp } from '@/lib/format';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { logClientError, logClientWarn } from '@/lib/clientLogger';
@@ -36,6 +37,7 @@ interface PriceAlertsWidgetProps {
     config?: Record<string, unknown>;
     isEditing?: boolean;
     onRemove?: () => void;
+    onDataChange?: (data: unknown) => void;
 }
 
 // ============ Constants ============
@@ -178,7 +180,7 @@ function formatThreshold(alert: PriceAlert): string {
 
 // ============ Component ============
 
-export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetConfig }: PriceAlertsWidgetProps) {
+export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetConfig, onDataChange }: PriceAlertsWidgetProps) {
     const { updateWidget } = useDashboard();
     const widgetLocation = useDashboardWidget(id);
     const queryClient = useQueryClient();
@@ -399,6 +401,20 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
     const activeAlerts = alerts.filter(a => a.isActive && !a.triggeredAt);
     const triggeredAlerts = alerts.filter(a => a.triggeredAt);
     const inactiveAlerts = alerts.filter(a => !a.isActive && !a.triggeredAt);
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: alerts.length === 0,
+            apiGroup: '/alerts',
+            endpoint: '/api/v1/alerts/price',
+            sourceLabel: wsConnected ? 'Live stream' : 'Polling',
+            extra: {
+                alertCount: alerts.length,
+                activeCount: activeAlerts.length,
+                triggeredCount: triggeredAlerts.length,
+            },
+        }));
+    }, [activeAlerts.length, alerts.length, onDataChange, triggeredAlerts.length, wsConnected]);
 
     return (
         <div className="h-full flex flex-col">

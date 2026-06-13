@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowUpDown } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useQuantMetrics } from '@/lib/queries'
@@ -12,9 +12,11 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useDirectionColors } from '@/hooks/useDirectionColors'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface GapAnalysisWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -27,7 +29,7 @@ type GapRow = {
   next_day_return_pct: number | null
 }
 
-export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
+export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const dirColors = useDirectionColors()
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
@@ -56,6 +58,21 @@ export function GapAnalysisWidget({ symbol }: GapAnalysisWidgetProps) {
   const maxAbs = Math.max(...monthRows.map((row) => Math.abs(row.value)), 1)
   const hasData = topGaps.length > 0
   const quantWarning = extractQuantWarning(data, 'gap_stats')
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}?period=${period}&metrics=gap_stats`,
+      sourceLabel: 'Gap stats',
+      lastDataDate: data?.data?.last_data_date ?? data?.data?.computed_at ?? dataUpdatedAt,
+      adjustmentMode: data?.data?.adjustment_mode,
+      extra: {
+        gaps: topGaps.length,
+        fillRatePct: metric?.gap_fill_rate_pct ?? null,
+      },
+    }))
+  }, [data?.data?.adjustment_mode, data?.data?.computed_at, data?.data?.last_data_date, dataUpdatedAt, hasData, metric?.gap_fill_rate_pct, onDataChange, period, topGaps.length, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view gap analysis" icon={<ArrowUpDown size={18} />} />

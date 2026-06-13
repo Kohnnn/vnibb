@@ -1,17 +1,19 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Atom } from 'lucide-react'
 import { useGammaExposure } from '@/lib/queries'
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface GammaExposureWidgetProps {
   symbol: string
   isEditing?: boolean
   onRemove?: () => void
+  onDataChange?: (data: unknown) => void
 }
 
 function estimateGammaRegime(zScore: number): { label: string; tone: string } {
@@ -21,7 +23,7 @@ function estimateGammaRegime(zScore: number): { label: string; tone: string } {
   return { label: 'Balanced', tone: 'text-cyan-400' }
 }
 
-export function GammaExposureWidget({ symbol }: GammaExposureWidgetProps) {
+export function GammaExposureWidget({ symbol, onDataChange }: GammaExposureWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
 
@@ -48,6 +50,24 @@ export function GammaExposureWidget({ symbol }: GammaExposureWidgetProps) {
               : 'text-cyan-400',
       }
     : estimateGammaRegime(Number.isFinite(zScore) ? zScore : 0)
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}/gamma-exposure?period=${period}`,
+      sourceLabel: 'Gamma exposure proxy',
+      lastDataDate: payload?.last_data_date ?? payload?.computed_at ?? dataUpdatedAt,
+      adjustmentMode: payload?.adjustment_mode,
+      derived: true,
+      extra: {
+        vol30,
+        zScore,
+        netGamma,
+        regime: regime.label,
+      },
+    }))
+  }, [dataUpdatedAt, hasData, netGamma, onDataChange, payload?.adjustment_mode, payload?.computed_at, payload?.last_data_date, period, regime.label, upperSymbol, vol30, zScore])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view gamma exposure proxy" icon={<Atom size={18} />} />

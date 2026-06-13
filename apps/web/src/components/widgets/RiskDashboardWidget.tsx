@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -16,11 +16,13 @@ import { useHistoricalPrices, useQuantMetrics } from '@/lib/queries';
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods';
 import { cn } from '@/lib/utils';
 import type { OHLCData } from '@/lib/chartUtils';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface RiskDashboardWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 interface BenchmarkRiskMetric {
@@ -142,7 +144,7 @@ function describeRiskBenchmark(score: number): string {
   return `Significantly below VN market typical (${RISK_BENCHMARK.marketTypicalLow}–${RISK_BENCHMARK.marketTypicalHigh})`;
 }
 
-export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidgetProps) {
+export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: RiskDashboardWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
   const [period, setPeriod] = useState<QuantPeriodOption>('1Y');
 
@@ -234,6 +236,23 @@ export function RiskDashboardWidget({ id, symbol, onRemove }: RiskDashboardWidge
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading, { timeoutMs: 10_000 });
   const quantWarning = extractQuantWarning(quantQuery.data);
   const latestDataDate = quantQuery.data?.data?.last_data_date ?? historyQuery.data?.data?.at(-1)?.time ?? null;
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}?period=${period}&metrics=drawdown_recovery,parkinson_volatility,sortino,benchmark_risk`,
+      sourceLabel: 'Risk dashboard',
+      lastDataDate: latestDataDate ?? quantQuery.data?.data?.computed_at ?? historyQuery.dataUpdatedAt,
+      adjustmentMode: quantQuery.data?.data?.adjustment_mode,
+      derived: true,
+      extra: {
+        riskScore,
+        riskLabel: scoreLabel.label,
+        pricePoints: priceSeries.length,
+      },
+    }));
+  }, [hasData, historyQuery.dataUpdatedAt, latestDataDate, onDataChange, period, priceSeries.length, quantQuery.data?.data?.adjustment_mode, quantQuery.data?.data?.computed_at, riskScore, scoreLabel.label, upperSymbol]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to inspect risk" icon={<ShieldAlert size={18} />} />;

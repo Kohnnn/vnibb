@@ -7,11 +7,13 @@ import { Bell, X, TrendingUp, TrendingDown, Users, AlertCircle } from 'lucide-re
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getInsiderAlerts, markAlertRead } from '@/lib/api';
 import type { InsiderAlert, AlertType, AlertSeverity } from '@/types/insider';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { formatTimestamp } from '@/lib/format';
 
 interface AlertNotificationPanelProps {
   userId?: number;
+  onDataChange?: (data: unknown) => void;
 }
 
 function getAlertIcon(type: AlertType) {
@@ -46,7 +48,7 @@ function formatTime(dateStr: string): string {
   return formatTimestamp(dateStr);
 }
 
-export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelProps) {
+export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotificationPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(true);
   const queryClient = useQueryClient();
@@ -67,6 +69,19 @@ export function AlertNotificationPanel({ userId = 1 }: AlertNotificationPanelPro
   });
 
   const unreadCount = alerts.filter((a) => !a.read).length;
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: alerts.length === 0,
+      apiGroup: '/alerts',
+      endpoint: '/api/v1/alerts/insider',
+      sourceLabel: 'Insider alerts',
+      extra: {
+        alertCount: alerts.length,
+        unreadCount,
+      },
+    }));
+  }, [alerts.length, onDataChange, unreadCount]);
 
   // Request browser notification permission
   useEffect(() => {

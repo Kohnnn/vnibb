@@ -10,6 +10,7 @@ import {
 import { usePortfolio, type Position } from '@/lib/hooks/usePortfolio';
 import { usePortfolioPrices } from '@/lib/hooks/usePortfolioPrices';
 import { formatVND, formatPercent } from '@/lib/formatters';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
@@ -24,6 +25,7 @@ interface PortfolioTrackerWidgetProps {
     onRemove?: () => void;
     onSymbolClick?: (symbol: string) => void;
     widgetGroup?: WidgetGroupId;
+    onDataChange?: (data: unknown) => void;
 }
 
 interface PositionWithPL extends Position {
@@ -301,6 +303,7 @@ function AllocationChart({
 export function PortfolioTrackerWidget({
     onSymbolClick,
     widgetGroup,
+    onDataChange,
 }: PortfolioTrackerWidgetProps) {
     const { setLinkedSymbol } = useWidgetSymbolLink(widgetGroup, { widgetType: 'portfolio_tracker' });
     const {
@@ -378,6 +381,21 @@ export function PortfolioTrackerWidget({
 
         return { totalValue, totalCost, totalPL, totalPLPct, todayChange };
     }, [enrichedPositions]);
+
+    useEffect(() => {
+        onDataChange?.(buildWidgetRuntime({
+            empty: positions.length === 0,
+            apiGroup: '/equity',
+            endpoint: '/api/v1/market/quotes/batch',
+            sourceLabel: 'Local portfolio',
+            derived: true,
+            extra: {
+                positionCount: positions.length,
+                symbolCount: symbols.length,
+                totalValue: totals.totalValue,
+            },
+        }));
+    }, [onDataChange, positions.length, symbols.length, totals.totalValue]);
 
     // Record value snapshot when prices update
     useEffect(() => {

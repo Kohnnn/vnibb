@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CalendarDays } from 'lucide-react'
 import { useSeasonalityMatrix } from '@/lib/queries'
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
@@ -9,9 +9,11 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface SeasonalitySpiralHeatmapWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 type SpiralGranularity = Extract<SeasonalityGranularity, 'daily' | 'weekly'>
@@ -191,7 +193,7 @@ function formatTooltip(cell: SpiralCell, granularity: SpiralGranularity): string
   return `${formatDDMM(cell.date)}/${cell.year}: ${value}`
 }
 
-export function SeasonalitySpiralHeatmapWidget({ symbol }: SeasonalitySpiralHeatmapWidgetProps) {
+export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: SeasonalitySpiralHeatmapWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('5Y')
   const [granularity, setGranularity] = useState<SpiralGranularity>('weekly')
@@ -206,6 +208,21 @@ export function SeasonalitySpiralHeatmapWidget({ symbol }: SeasonalitySpiralHeat
   const hasData = rows.length > 0
   const isFallback = Boolean(error && hasData)
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/quant/${upperSymbol}/seasonality-matrix?period=${period}&granularity=${granularity}`,
+      sourceLabel: 'Seasonality matrix',
+      lastDataDate: payload?.last_data_date ?? dataUpdatedAt,
+      adjustmentMode: payload?.adjustment_mode,
+      extra: {
+        rows: rows.length,
+        granularity,
+      },
+    }))
+  }, [dataUpdatedAt, granularity, hasData, onDataChange, payload?.adjustment_mode, payload?.last_data_date, period, rows.length, upperSymbol])
 
   const granularityConfig = useMemo(
     () => SPIRAL_GRANULARITY_OPTIONS.find((option) => option.value === granularity)!,

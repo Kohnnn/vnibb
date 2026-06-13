@@ -1,7 +1,9 @@
 'use client'
 
+import { useEffect } from 'react'
 import { Landmark } from 'lucide-react'
 import { useSmartMoneyFlow } from '@/lib/queries'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
@@ -10,6 +12,7 @@ interface SmartMoneyWidgetProps {
   symbol: string
   isEditing?: boolean
   onRemove?: () => void
+  onDataChange?: (data: unknown) => void
 }
 
 function formatBillions(value: number): string {
@@ -33,7 +36,7 @@ function smartMoneyLabel(value: string, score: number): string {
   return 'Mixed Flow'
 }
 
-export function SmartMoneyWidget({ symbol }: SmartMoneyWidgetProps) {
+export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
 
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useSmartMoneyFlow(
@@ -45,6 +48,21 @@ export function SmartMoneyWidget({ symbol }: SmartMoneyWidgetProps) {
   const flowScore = payload?.flow_score ?? 0
   const blockTrades = payload?.block_trades ?? []
   const hasData = Boolean(payload)
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/quant',
+      endpoint: `/api/v1/quant/${upperSymbol}/smart-money-flow`,
+      sourceLabel: 'Foreign + block signals',
+      derived: true,
+      stale: Boolean(error && hasData),
+      extra: {
+        flowScore,
+        blockTradeCount: blockTrades.length,
+      },
+    }))
+  }, [blockTrades.length, error, flowScore, hasData, onDataChange, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view smart money flow" icon={<Landmark size={18} />} />

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { ShieldCheck, ShieldX, Users } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -8,6 +9,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useForeignTrading, useInsiderSentiment, useShareholders } from '@/lib/queries';
 import { buildOwnershipSummary } from '@/lib/ownershipAnalytics';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatNumber } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
@@ -15,6 +17,7 @@ interface OwnershipRatingSummaryWidgetProps {
   id: string;
   symbol: string;
   onRemove?: () => void;
+  onDataChange?: (data: unknown) => void;
 }
 
 function formatPct(value: number | null | undefined) {
@@ -30,7 +33,7 @@ function formatCompact(value: number | null | undefined) {
   return formatNumber(value, { decimals: 0 })
 }
 
-export function OwnershipRatingSummaryWidget({ id, symbol, onRemove }: OwnershipRatingSummaryWidgetProps) {
+export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChange }: OwnershipRatingSummaryWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const shareholdersQuery = useShareholders(upperSymbol, Boolean(upperSymbol))
   const foreignQuery = useForeignTrading(upperSymbol, { limit: 20, enabled: Boolean(upperSymbol) })
@@ -60,6 +63,22 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove }: Ownership
           detail: `${availableSources} of 3 ownership inputs are available: shareholders, foreign flow, and insider sentiment.`,
         }
       : undefined
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/equity',
+      endpoint: `/api/v1/equity/${upperSymbol}/ownership-summary`,
+      sourceLabel: 'Shareholders + foreign flow + insider sentiment',
+      derived: true,
+      stale: Boolean(error && hasData),
+      extra: {
+        holderCount: summary.holderCount,
+        score: summary.score,
+        availableSources,
+      },
+    }))
+  }, [availableSources, error, hasData, onDataChange, summary.holderCount, summary.score, upperSymbol])
 
   const refresh = () => {
     void shareholdersQuery.refetch()

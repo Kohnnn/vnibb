@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { useHistoricalPrices } from '@/lib/queries'
 import type { OHLCData } from '@/lib/chartUtils'
@@ -9,9 +9,11 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
 interface DrawdownDeepDiveWidgetProps {
   symbol: string
+  onDataChange?: (data: unknown) => void
 }
 
 interface DrawdownPoint {
@@ -111,7 +113,7 @@ function averageRecoveryDays(episodes: DrawdownEpisode[]): number {
   return total / recovered.length
 }
 
-export function DrawdownDeepDiveWidget({ symbol }: DrawdownDeepDiveWidgetProps) {
+export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiveWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const [period, setPeriod] = useState<QuantPeriodOption>('3Y')
 
@@ -137,6 +139,24 @@ export function DrawdownDeepDiveWidget({ symbol }: DrawdownDeepDiveWidgetProps) 
   const activeEpisode = episodes[episodes.length - 1]
   const recent = drawdown.slice(-22)
   const magnitude = Math.abs(Math.min(...recent.map((point) => point.drawdownPct), -1))
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/equity',
+      endpoint: `/equity/historical?symbol=${upperSymbol}&start_date=${getQuantPeriodStartDate(period)}`,
+      sourceLabel: 'Historical prices',
+      lastDataDate: candles.at(-1)?.time ?? dataUpdatedAt,
+      adjustmentMode: 'adjusted',
+      derived: true,
+      extra: {
+        points: drawdown.length,
+        episodes: episodes.length,
+        currentDrawdownPct: currentDrawdown,
+        maxDrawdownPct: maxDrawdown,
+      },
+    }))
+  }, [candles, candles.length, currentDrawdown, dataUpdatedAt, drawdown.length, episodes.length, hasData, maxDrawdown, onDataChange, period, upperSymbol])
 
   if (!upperSymbol) {
     return (

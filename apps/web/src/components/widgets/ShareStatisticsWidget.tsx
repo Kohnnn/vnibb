@@ -2,8 +2,10 @@
 
 'use client'
 
+import { useEffect } from 'react'
 import { useFinancialRatios, useProfile, useScreenerData, useStockQuote } from '@/lib/queries'
 import { latestByFinancialPeriod } from '@/lib/financialPeriods'
+import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import { formatDividendYield, formatNumber, formatPercent, formatVND, normalizeDividendYield } from '@/lib/formatters'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
@@ -16,6 +18,7 @@ interface ShareStatisticsWidgetProps {
   hideHeader?: boolean
   isEditing?: boolean
   onRemove?: () => void
+  onDataChange?: (data: unknown) => void
 }
 
 interface StatRowProps {
@@ -60,7 +63,7 @@ function StatRow({ label, value, source }: StatRowProps) {
   )
 }
 
-export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove }: ShareStatisticsWidgetProps) {
+export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onDataChange }: ShareStatisticsWidgetProps) {
   const {
     data: screenerData,
     isLoading: screenerLoading,
@@ -167,6 +170,20 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove }: Shar
   const isFetching = screenerFetching || profileFetching || quoteFetching || ratiosFetching
   const error = screenerError || profileError || quoteError || ratiosError
   const isFallback = Boolean(error && hasData)
+
+  useEffect(() => {
+    onDataChange?.(buildWidgetRuntime({
+      empty: !hasData,
+      apiGroup: '/equity',
+      endpoint: '/api/v1/market/screener',
+      sourceLabel: 'Screener + profile + ratios',
+      stale: Boolean(error && hasData),
+      extra: {
+        hasMarketCap: marketCap.value !== null,
+        hasVolume: volume.value !== null,
+      },
+    }))
+  }, [error, hasData, marketCap.value, onDataChange, volume.value])
 
   const handleRefresh = () => {
     refetchScreener()
