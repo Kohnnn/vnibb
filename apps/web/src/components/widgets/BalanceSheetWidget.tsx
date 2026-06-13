@@ -245,6 +245,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
             rows={tableRows}
             sortable
             showTrend={false}
+            maxYears={tableColumns.length || 1}
             initialScrollPosition="end"
             storageKey={`balance:${id}:${symbol}:${period}`}
             footerNote={unitNote}

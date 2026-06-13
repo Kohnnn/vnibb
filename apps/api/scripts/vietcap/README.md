@@ -10,6 +10,8 @@ Full data contract and rollout guide: `vnibb/docs/VIETCAP_DATA_SOURCE.md`.
 - `vietcap_client.py` — polite read-only HTTP client (1 req/s, backoff, breaker).
 - `vietcap_writers.py` — Mongo upsert writers + source reconciliation.
 - `backfill_vietcap.py` — CLI orchestrator. Dry-run by default; `--apply` writes.
+- `maintain_vietcap_corpus.py` — ops repair pass that rescales legacy vnstock
+  tail rows and re-runs overlap reconciliation when needed.
 
 ## Quick start
 
@@ -49,7 +51,9 @@ python backfill_vietcap.py --datasets indices,icb --apply --ensure-indexes
 ## Rules
 
 - Always pair OHLC `--apply` with `--reconcile` (reads ignore `source`; one bar/day).
-- Prices are stored raw VND; legacy vnstock rows are thousand-VND.
+- Prices are stored raw VND. The scheduled Mongo EOD writer now converts new
+  vnstock fallback rows from thousand-VND to raw VND and skips rows where a
+  Vietcap bar already exists.
 - Requires `MONGODB_URL` (+ `MONGODB_DATABASE`, default `vnibb-market`) in the
   workspace `.env`. Take a `mongodump` backup before large applies.
 - Idempotent: reruns upsert, safe to resume by symbol slice.

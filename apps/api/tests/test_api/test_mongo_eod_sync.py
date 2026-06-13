@@ -11,12 +11,12 @@ from datetime import date, datetime
 import pandas as pd
 import pytest
 
-from vnibb.services import mongo_eod_sync
 from vnibb.api.v1.market import (
     _coerce_to_date,
     _expected_latest_trading_day,
     _freshest_snapshot_date,
 )
+from vnibb.services import mongo_eod_sync
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +156,7 @@ async def test_bulk_upsert_eod_prices_builds_idempotent_ops(monkeypatch):
         captured["ops"] = ops
 
     fake_coll.bulk_write.side_effect = fake_bulk_write
+    fake_coll.find.return_value = []
     monkeypatch.setattr(svc, "_get_collection", lambda name: fake_coll)
     monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
 
@@ -170,9 +171,9 @@ async def test_bulk_upsert_eod_prices_builds_idempotent_ops(monkeypatch):
     ops = captured["ops"]
     assert len(ops) == 2
     first = ops[0]
-    # Idempotency key matches the read/backfill source AND the corpus's 07:00:00
-    # tradeDate convention so a refresh overwrites in place instead of inserting a
-    # duplicate bar for the same trading day.
+    # Idempotency key matches the vnstock fallback source AND the corpus's
+    # 07:00:00 tradeDate convention. Prices are converted from vnstock's
+    # thousand-VND convention to the corpus's raw-VND convention.
     assert first.filter == {
         "symbol": "VCI",
         "tradeDate": datetime(2026, 6, 5, 7, 0, 0),
@@ -182,10 +183,55 @@ async def test_bulk_upsert_eod_prices_builds_idempotent_ops(monkeypatch):
     doc = first.update["$set"]
     assert doc["symbol"] == "VCI"
     assert doc["tradeDate"] == datetime(2026, 6, 5, 7, 0, 0)
-    assert doc["close"] == 1.5
+    assert doc["close"] == 1500.0
+    assert doc["open"] == 1000.0
     assert doc["value"] == 150.0
     assert doc["interval"] == "1D"
     assert doc["source"] == "vnstock-data"
+    assert doc["priceUnit"] == "VND"
+    assert doc["rescaledFromThousandVnd"] is True
+
+
+@pytest.mark.asyncio
+async def test_bulk_upsert_eod_prices_skips_existing_vietcap_dates(monkeypatch):
+    import sys
+    import types
+    from unittest.mock import MagicMock
+
+    captured = {}
+
+    class FakeUpdateOne:
+        def __init__(self, flt, update, upsert=False):
+            self.filter = flt
+            self.update = update
+            self.upsert = upsert
+
+    fake_pymongo = types.ModuleType("pymongo")
+    fake_pymongo.UpdateOne = FakeUpdateOne
+    monkeypatch.setitem(sys.modules, "pymongo", fake_pymongo)
+
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    svc = MongoMarketDataService()
+    fake_coll = MagicMock()
+    fake_coll.find.return_value = [{"tradeDate": datetime(2026, 6, 5, 7, 0, 0)}]
+
+    def fake_bulk_write(ops, ordered=False):
+        captured["ops"] = ops
+
+    fake_coll.bulk_write.side_effect = fake_bulk_write
+    monkeypatch.setattr(svc, "_get_collection", lambda name: fake_coll)
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+
+    rows = [
+        {"tradeDate": datetime(2026, 6, 5), "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5},
+        {"tradeDate": datetime(2026, 6, 6), "open": 1.5, "high": 2.5, "low": 1.0, "close": 2.0},
+    ]
+
+    written = await svc.bulk_upsert_eod_prices("vci", rows)
+    assert written == 1
+    assert len(captured["ops"]) == 1
+    assert captured["ops"][0].filter["tradeDate"] == datetime(2026, 6, 6, 7, 0, 0)
 
 
 @pytest.mark.asyncio

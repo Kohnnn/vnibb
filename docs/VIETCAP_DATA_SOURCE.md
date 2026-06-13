@@ -190,6 +190,44 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 docker exec vnibb-mongo mongodump --uri="$MongoDumpUri" --archive --gzip > "C:\vnibb-mongo\backup\vnibb-market-$stamp.archive.gz"
 ```
 
+## Ongoing maintenance
+
+As of 2026-06-13, the scheduled Mongo EOD writer
+(`MongoMarketDataService.bulk_upsert_eod_prices`) is Vietcap-aware:
+
+1. It skips any vnstock daily bar where a `vietcap` row already exists for the
+   same `(symbol, tradeDate)`, preventing duplicate bars.
+2. It converts vnstock's thousand-VND OHLC values to raw VND before writing and
+   marks rows with `priceUnit: "VND"` and `rescaledFromThousandVnd: true`.
+
+The standalone maintenance pass remains as an ops repair tool after manual
+imports, interrupted backfills, or older scheduler runs:
+
+```bash
+python apps/api/scripts/vietcap/maintain_vietcap_corpus.py --apply
+```
+
+It does two idempotent things:
+
+1. Rescales any `vnstock-data` rows still in thousand-VND to raw VND
+   (×1000, marked `rescaledFromThousandVnd: true`, `priceUnit: "VND"`). Rows
+   already carrying `priceUnit: "VND"` are skipped, so it never double-scales.
+2. Reconciles overlaps: for any `(symbol, tradeDate)` with a `vietcap` bar, it
+   deletes the duplicate non-`vietcap` bar (archived first).
+
+It should normally report zero pending changes after the fixed scheduler has
+been deployed.
+
+## Rollback
+
+Deletions are reversible. The reconcile and cleanup steps archive the exact
+deleted documents (with original `_id`) into:
+
+- `market_prices_eod_reconcile_archive` (reconcile overrides)
+- `market_prices_eod_cleanup_archive` (close<=0 cleanup)
+
+Re-insert from an archive to restore.
+
 ## Relationship to other stacks
 
 - MongoDB `vnibb-market` (n6v) is the canonical analytical/market corpus and the

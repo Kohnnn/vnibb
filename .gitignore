@@ -125,3 +125,4 @@ output/playwright/*.png
 # pnpm-only workspace: forbid npm/yarn lockfiles
 package-lock.json
 yarn.lock
+docs/VIETCAP_DATA_SOURCE.md

@@ -314,6 +314,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
             rows={tableRows}
             sortable
             showTrend={false}
+            maxYears={tableColumns.length || 1}
             initialScrollPosition="end"
             storageKey={`cash-flow:${id}:${symbol}:${period}`}
             footerNote={unitNote}

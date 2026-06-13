@@ -20,8 +20,8 @@ class FakeMongoMarketDataService:
         self.rows = rows
         self.requests = []
 
-    async def get_raw_dataset_records(self, symbol, *, dataset, limit):
-        self.requests.append({"symbol": symbol, "dataset": dataset, "limit": limit})
+    async def get_raw_dataset_records(self, symbol, *, dataset, variant=None, limit):
+        self.requests.append({"symbol": symbol, "dataset": dataset, "variant": variant, "limit": limit})
         return self.rows
 
     async def get_eod_prices(self, symbol, *, lookback_days, limit):
@@ -123,6 +123,7 @@ async def test_load_mongo_financial_statement_rows_transforms_raw_records(monkey
     assert rows[-1].revenue == pytest.approx(1200.0)
     assert rows[-1].net_income == pytest.approx(180.0)
     assert fake_service.requests[0]["dataset"] == "finance.income_statement"
+    assert fake_service.requests[0]["variant"] == "finance.income_statement.year"
 
 
 @pytest.mark.asyncio
@@ -142,6 +143,7 @@ async def test_load_mongo_financial_ratio_rows_transforms_and_filters_raw_record
     assert rows[-1].pe == pytest.approx(9.2)
     assert rows[-1].pb == pytest.approx(1.4)
     assert fake_service.requests[0]["dataset"] == "finance.ratio"
+    assert fake_service.requests[0]["variant"] == "finance.ratio.quarter"
 
 
 @pytest.mark.asyncio

@@ -414,6 +414,7 @@ async def _load_mongo_financial_statement_rows(
     raw_records = await service.get_raw_dataset_records(
         symbol,
         dataset=dataset,
+        variant=_financial_dataset_variant(dataset, requested_period),
         limit=max(limit * 4, 80),
     )
     raw_rows = [row.get("raw") for row in raw_records if isinstance(row.get("raw"), dict)]
@@ -454,6 +455,7 @@ async def _load_mongo_financial_ratio_rows(
     raw_records = await service.get_raw_dataset_records(
         symbol,
         dataset="finance.ratio",
+        variant=_financial_dataset_variant("finance.ratio", requested_period),
         limit=max(limit * 4, 120),
     )
     raw_rows = [row.get("raw") for row in raw_records if isinstance(row.get("raw"), dict)]
@@ -557,6 +559,12 @@ def _build_ttm_financial_statement_rows(
 
     payload["raw_data"] = latest.raw_data
     return [FinancialStatementData.model_validate(payload)]
+
+
+def _financial_dataset_variant(dataset: str, period: str) -> str:
+    normalized_period = str(period or "year").strip().upper()
+    suffix = "quarter" if normalized_period in {"QUARTER", "Q", "Q1", "Q2", "Q3", "Q4", "TTM"} else "year"
+    return f"{dataset}.{suffix}"
 
 
 def _build_ratio_ttm_rows(rows: List[FinancialRatioData]) -> List[FinancialRatioData]:
@@ -6538,7 +6546,7 @@ async def get_rating(symbol: str):
 
 @router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
 @router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
-@cached(ttl=86400, key_prefix="ratios_v3")
+@cached(ttl=86400, key_prefix="ratios_v4")
 async def get_financial_ratios(
     symbol: str,
     period: Literal["year", "quarter", "Q", "FY", "Q1", "Q2", "Q3", "Q4", "TTM"] = "year",
@@ -6842,7 +6850,7 @@ async def get_metrics_history(
 @router.get(
     "/{symbol}/income-statement", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=86400, key_prefix="income_statement_v3")
+@cached(ttl=86400, key_prefix="income_statement_v4")
 async def get_income_statement(
     symbol: str,
     period: Literal[
@@ -6927,7 +6935,7 @@ async def get_income_statement(
 @router.get(
     "/{symbol}/balance-sheet", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=86400, key_prefix="balance_sheet_v3")
+@cached(ttl=86400, key_prefix="balance_sheet_v4")
 async def get_balance_sheet(
     symbol: str,
     period: Literal[
@@ -6983,7 +6991,7 @@ async def get_balance_sheet(
 
 
 @router.get("/{symbol}/cash-flow", response_model=StandardResponse[List[FinancialStatementData]])
-@cached(ttl=86400, key_prefix="cash_flow_v3")
+@cached(ttl=86400, key_prefix="cash_flow_v4")
 async def get_cash_flow(
     symbol: str,
     period: Literal[

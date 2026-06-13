@@ -523,15 +523,14 @@ class MongoMarketDataService:
     ) -> int:
         """Upsert normalized EOD OHLCV rows into ``market_prices_eod``.
 
-        The write is keyed on ``(symbol, tradeDate, source)`` to stay idempotent.
-        It deliberately reuses the existing backfill ``source`` value
-        (``vnstock-data``) so a daily refresh overwrites the matching bar in
-        place instead of creating a parallel document — the read methods filter
-        only on ``symbol``/``tradeDate``, so a divergent source would surface as
-        duplicate bars. Rows must already be normalized dicts carrying
-        ``tradeDate`` (a naive ``datetime``) plus OHLCV fields; ``value`` is
-        persisted when present so reads that project it stay populated. Returns
-        the number of upsert operations issued.
+        The scheduled vnstock path is a fallback behind the Vietcap-primary
+        corpus. Runtime reads filter only on ``symbol``/``tradeDate`` and ignore
+        ``source``, so this writer must never create a vnstock row for a day that
+        already has a Vietcap bar. vnstock prices also arrive in thousand VND;
+        the corpus now uses raw VND, so OHLC values are multiplied by 1000 before
+        persisting and marked with ``priceUnit='VND'``. Rows must already be
+        normalized dicts carrying ``tradeDate`` (a naive ``datetime``) plus OHLCV
+        fields. Returns the number of upsert operations issued.
         """
 
         symbol_upper = symbol.upper()
@@ -543,7 +542,7 @@ class MongoMarketDataService:
 
             coll = self._get_collection("market_prices_eod")
             synced_at = datetime.now(UTC).replace(tzinfo=None)
-            ops: list[Any] = []
+            normalized_rows: list[dict[str, Any]] = []
             for raw in rows:
                 trade_date = raw.get("tradeDate")
                 if not isinstance(trade_date, datetime):
@@ -562,6 +561,40 @@ class MongoMarketDataService:
                     # An EOD bar without a close is unusable downstream; skip it
                     # rather than overwrite a good prior value with a null.
                     continue
+                normalized_rows.append({**raw, "tradeDate": trade_date})
+
+            if not normalized_rows:
+                return 0
+
+            vietcap_dates = {
+                doc.get("tradeDate")
+                for doc in coll.find(
+                    {
+                        "symbol": symbol_upper,
+                        "source": "vietcap",
+                        "tradeDate": {"$in": [row["tradeDate"] for row in normalized_rows]},
+                    },
+                    {"_id": 0, "tradeDate": 1},
+                )
+                if doc.get("tradeDate") is not None
+            }
+
+            def _scale_price(value: Any) -> float | None:
+                if value is None:
+                    return None
+                try:
+                    return float(value) * 1000
+                except (TypeError, ValueError):
+                    return None
+
+            ops: list[Any] = []
+            for raw in normalized_rows:
+                trade_date = raw["tradeDate"]
+                if trade_date in vietcap_dates:
+                    # Vietcap is primary. Do not create a duplicate vnstock-data
+                    # bar for a date already covered by Vietcap.
+                    continue
+
                 doc = {
                     "symbol": symbol_upper,
                     "tradeDate": trade_date,
@@ -571,12 +604,14 @@ class MongoMarketDataService:
                         f"vnstock-data:{symbol_upper}:eod:"
                         f"{trade_date.date().isoformat()}"
                     ),
-                    "open": raw.get("open"),
-                    "high": raw.get("high"),
-                    "low": raw.get("low"),
-                    "close": close_value,
+                    "open": _scale_price(raw.get("open")),
+                    "high": _scale_price(raw.get("high")),
+                    "low": _scale_price(raw.get("low")),
+                    "close": _scale_price(raw.get("close")),
                     "volume": raw.get("volume"),
                     "value": raw.get("value"),
+                    "priceUnit": "VND",
+                    "rescaledFromThousandVnd": True,
                     "updatedAt": synced_at,
                     "syncedAt": synced_at,
                     "schemaVersion": 1,
